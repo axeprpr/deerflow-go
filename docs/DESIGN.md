@@ -559,3 +559,83 @@ data: {"usage":{"input_tokens":...,"output_tokens":...}}
 - [Landlock LSM](https://www.kernel.org/doc/html/latest/security/landlock.html)
 - [Agent Client Protocol](https://github.com/bytedance/deer-flow/tree/main/protocol)
 - [LangGraph Architecture](https://langchain-ai.github.io/langgraph/concepts/)
+
+---
+
+## 13. 多层隔离架构
+
+### 13.1 三层隔离模型
+
+按代码可信度从低到高分配隔离层级：
+
+```
+Layer 1: gVisor（进程级沙箱）
+└── 用途：跑 agent 生成的用户代码（Shell、Bash 命令）
+└── 资源：CPU 限制、内存限制、文件系统只读/可写分区
+└── 工具：google/gvisor runsc
+
+Layer 2: Pod（容器级隔离）
+└── 用途：独立会话环境，跨会话隔离
+└── 资源：独立网络命名空间、进程命名空间
+└── 工具：Kubernetes Pod 或 Docker
+
+Layer 3: VM（虚拟机隔离）
+└── 用途：跑完全不可信的外部代码
+└── 资源：独立内核、完全隔离
+└── 工具：预热 VM 池（QEMU/Libvirt）
+```
+
+### 13.2 VM Pool 架构（推荐）
+
+在已有物理机上部署：
+
+```
+物理机池（r.axe3.cn、f.axe3.cn）
+    ├── 预启动 3-5 个 VM
+    ├── 每个 VM 运行 gVisor ready
+    └── 每会话分配一个 VM
+
+对话结束 → VM 归还池 → 重置 → 等待下一个
+```
+
+### 13.3 Kubernetes 部署
+
+```
+┌─────────────────────────────────────┐
+│  K8s Cluster                        │
+│                                     │
+│  Deployment: deerflow-go API Server │
+│  Service: LoadBalancer               │
+│                                     │
+│  DaemonSet: gVisor runsc            │
+│  └── 每节点预装 runsc               │
+│                                     │
+│  Pod per Session:                   │
+│  └── Landlock/Bubblewrap           │
+│  └── 或 gVisor runsc               │
+│                                     │
+│  （重度隔离场景）                    │
+│  └── VM Pod（KubeVirt）             │
+└─────────────────────────────────────┘
+```
+
+## 14. ACP 协议（规划中）
+
+### 14.1 定位
+
+ACP 用于将外部 Agent（Claude Code、Codex 等）作为子进程接入 deerflow-go 的执行管道。
+
+### 14.2 协议格式
+
+```
+主进程（deerflow-go）
+    └── spawn: Claude Code / Codex
+              └── stdin: JSON-RPC 命令
+              └── stdout: JSON-RPC 响应
+```
+
+### 14.3 依赖
+
+- 主协议：`agentclientprotocol/agent-client-protocol`
+- Go SDK：`coder/acp-go-sdk`（生态成熟后接入）
+- 优先级：Phase 4 之后
