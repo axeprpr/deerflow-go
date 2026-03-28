@@ -1,6 +1,6 @@
 GO := PATH=/usr/local/go/bin:$$PATH go
 
-.PHONY: tidy build test run docker
+.PHONY: tidy build test run docker checkpoint-test checkpoint-migrate
 
 tidy:
 	$(GO) mod tidy
@@ -10,6 +10,12 @@ build: tidy
 
 test:
 	$(GO) test ./...
+
+checkpoint-test:
+	$(GO) test ./pkg/checkpoint/... -v
+
+checkpoint-migrate:
+	$(GO) run ./cmd/checkpoint migrate
 
 run:
 	$(GO) run ./cmd/agent serve
