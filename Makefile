@@ -1,2 +1,18 @@
-agent:
-	PATH=/usr/local/go/bin:$$PATH go fmt ./pkg/agent/... && PATH=/usr/local/go/bin:$$PATH go build ./pkg/agent/... && echo 'agent OK'
+GO := PATH=/usr/local/go/bin:$$PATH go
+
+.PHONY: tidy build test run docker
+
+tidy:
+	$(GO) mod tidy
+
+build: tidy
+	$(GO) build ./...
+
+test:
+	$(GO) test ./...
+
+run:
+	$(GO) run ./cmd/agent serve
+
+docker:
+	docker build -t deerflow-go:local .

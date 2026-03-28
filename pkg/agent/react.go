@@ -2,8 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -14,13 +12,15 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/sandbox"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
+	"github.com/cloudwego/eino/adk"
+	einoSchema "github.com/cloudwego/eino/schema"
 )
 
 const defaultMaxTurns = 8
 
 var messageSeq uint64
 
-// Agent runs a ReAct-style loop over an LLM and tool registry.
+// Agent runs our custom ReAct loop while delegating model streaming and tool schemas to Eino.
 type Agent struct {
 	llm      llm.LLMProvider
 	tools    *tools.Registry
@@ -39,11 +39,10 @@ func New(cfg AgentConfig) *Agent {
 	if registry == nil {
 		registry = tools.NewRegistry()
 	}
-	sb := cfg.Sandbox
 	return &Agent{
 		llm:      cfg.LLMProvider,
 		tools:    registry,
-		sandbox:  sb,
+		sandbox:  cfg.Sandbox,
 		model:    resolveModel(cfg.Model),
 		maxTurns: maxTurns,
 		events:   make(chan AgentEvent, 128),
@@ -54,26 +53,24 @@ func (a *Agent) Events() <-chan AgentEvent {
 	return a.events
 }
 
+func (a *Agent) EinoAgent() adk.Agent {
+	return &einoAgentAdapter{agent: a}
+}
+
 func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Message) (*RunResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if a == nil || a.llm == nil {
-		return nil, errors.New("agent llm provider is required")
+		return nil, fmt.Errorf("agent llm provider is required")
 	}
 
 	runMessages := append([]models.Message(nil), messages...)
 	usage := &Usage{}
-	var finalOutput string
 
 	defer close(a.events)
 
 	for turn := 0; turn < a.maxTurns; turn++ {
-		if err := ctx.Err(); err != nil {
-			a.emit(AgentEvent{Type: AgentEventError, SessionID: sessionID, Err: err.Error()})
-			return nil, err
-		}
-
 		req := llm.ChatRequest{
 			Model:        a.model,
 			Messages:     runMessages,
@@ -87,10 +84,12 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			return nil, err
 		}
 
-		var textBuilder strings.Builder
-		var toolCalls []models.ToolCall
-		var streamUsage *llm.Usage
-		var stopReason string
+		var (
+			textBuilder strings.Builder
+			toolCalls   []models.ToolCall
+			streamUsage *llm.Usage
+			stopReason  string
+		)
 
 		for chunk := range stream {
 			if chunk.Err != nil {
@@ -99,11 +98,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			}
 			if chunk.Delta != "" {
 				textBuilder.WriteString(chunk.Delta)
-				a.emit(AgentEvent{
-					Type:      AgentEventTextChunk,
-					SessionID: sessionID,
-					Text:      chunk.Delta,
-				})
+				a.emit(AgentEvent{Type: AgentEventTextChunk, SessionID: sessionID, Text: chunk.Delta})
 			}
 			if len(chunk.ToolCalls) > 0 {
 				toolCalls = mergeToolCalls(toolCalls, chunk.ToolCalls)
@@ -142,16 +137,15 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 		}
 
 		if len(toolCalls) == 0 {
-			finalOutput = assistantMessage.Content
 			a.emit(AgentEvent{
 				Type:      AgentEventEnd,
 				SessionID: sessionID,
-				Text:      finalOutput,
+				Text:      assistantMessage.Content,
 				Usage:     cloneUsage(usage),
 			})
 			return &RunResult{
 				Messages:    runMessages,
-				FinalOutput: finalOutput,
+				FinalOutput: assistantMessage.Content,
 				Usage:       usage,
 			}, nil
 		}
@@ -170,15 +164,14 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 				}
 			}
 
-			resultMessage := models.Message{
+			runMessages = append(runMessages, models.Message{
 				ID:         newMessageID("tool"),
 				SessionID:  sessionID,
 				Role:       models.RoleTool,
-				Content:    result.Content,
+				Content:    toolMessageContent(result),
 				ToolResult: &result,
 				CreatedAt:  time.Now().UTC(),
-			}
-			runMessages = append(runMessages, resultMessage)
+			})
 			a.emit(AgentEvent{Type: AgentEventToolResult, SessionID: sessionID, Result: &result})
 
 			if err := ctx.Err(); err != nil {
@@ -193,17 +186,13 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 	return nil, err
 }
 
-func (a *Agent) BuildSystemPrompt(ctx context.Context, sessionID string) string {
-	var sections []string
-	sections = append(sections,
+func (a *Agent) BuildSystemPrompt(_ context.Context, _ string) string {
+	sections := []string{
 		"You are a ReAct-style agent. Think step by step, call tools when necessary, and stop when you have a complete answer.",
-	)
-
-	toolDescriptions := a.tools.Descriptions()
-	if strings.TrimSpace(toolDescriptions) != "" {
+	}
+	if toolDescriptions := a.tools.Descriptions(); strings.TrimSpace(toolDescriptions) != "" {
 		sections = append(sections, "Available Tools:\n"+toolDescriptions)
 	}
-
 	return strings.Join(sections, "\n\n")
 }
 
@@ -273,13 +262,70 @@ func cloneUsage(src *Usage) *Usage {
 	return &out
 }
 
-func formatToolSchema(schema map[string]any) string {
-	if len(schema) == 0 {
-		return ""
+func toolMessageContent(result models.ToolResult) string {
+	if result.Error != "" {
+		return result.Error
 	}
-	raw, err := json.MarshalIndent(schema, "", "  ")
-	if err != nil {
-		return ""
+	return result.Content
+}
+
+type einoAgentAdapter struct {
+	agent *Agent
+}
+
+func (a *einoAgentAdapter) Name(context.Context) string {
+	return "react"
+}
+
+func (a *einoAgentAdapter) Description(context.Context) string {
+	return "Custom ReAct agent that uses Eino chat-model and tool-calling primitives."
+}
+
+func (a *einoAgentAdapter) Run(ctx context.Context, input *adk.AgentInput, _ ...adk.AgentRunOption) *adk.AsyncIterator[*adk.AgentEvent] {
+	iter, gen := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
+
+	go func() {
+		defer gen.Close()
+
+		sessionID := fmt.Sprintf("adk-%d", time.Now().UTC().UnixNano())
+		messages := make([]models.Message, 0, len(input.Messages))
+		for i, msg := range input.Messages {
+			if msg == nil {
+				continue
+			}
+			messages = append(messages, models.Message{
+				ID:        fmt.Sprintf("adk_%d", i),
+				SessionID: sessionID,
+				Role:      fromEinoRole(msg.Role),
+				Content:   msg.Content,
+				CreatedAt: time.Now().UTC(),
+			})
+		}
+
+		result, err := a.agent.Run(ctx, sessionID, messages)
+		if err != nil {
+			gen.Send(&adk.AgentEvent{AgentName: a.Name(ctx), Err: err})
+			return
+		}
+
+		gen.Send(adk.EventFromMessage(&einoSchema.Message{
+			Role:    einoSchema.Assistant,
+			Content: result.FinalOutput,
+		}, nil, einoSchema.Assistant, ""))
+	}()
+
+	return iter
+}
+
+func fromEinoRole(role einoSchema.RoleType) models.Role {
+	switch role {
+	case einoSchema.User:
+		return models.RoleHuman
+	case einoSchema.System:
+		return models.RoleSystem
+	case einoSchema.Tool:
+		return models.RoleTool
+	default:
+		return models.RoleAI
 	}
-	return string(raw)
 }

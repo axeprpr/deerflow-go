@@ -16,12 +16,13 @@ type LLMProvider interface {
 
 // ChatRequest is the provider-agnostic request payload.
 type ChatRequest struct {
-	Model        string           `json:"model"`
-	Messages     []models.Message `json:"messages"`
-	Tools        []models.Tool    `json:"tools,omitempty"`
-	Temperature  *float64         `json:"temperature,omitempty"`
-	MaxTokens    *int             `json:"max_tokens,omitempty"`
-	SystemPrompt string           `json:"system_prompt,omitempty"`
+	Model        string            `json:"model"`
+	Messages     []models.Message  `json:"messages"`
+	Tools        []models.Tool     `json:"tools,omitempty"`
+	Temperature  *float64          `json:"temperature,omitempty"`
+	MaxTokens    *int              `json:"max_tokens,omitempty"`
+	SystemPrompt string            `json:"system_prompt,omitempty"`
+	OnChunk      func(StreamChunk) `json:"-"`
 }
 
 // ChatResponse is the normalized provider response.
