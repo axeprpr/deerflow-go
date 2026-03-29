@@ -18,9 +18,9 @@ import (
 type config struct {
 	Port              string `env:"GATEWAY_PORT" envDefault:":8080"`
 	DatabaseURL       string `env:"DATABASE_URL" envDefault:""`
-	OpenAIAPIKey      string `env:"openai_api_key"`
+	OpenAIAPIKey      string `env:"OPENAI_API_KEY"`
 	AnthropicAPIKey   string `env:"ANTHROPIC_API_KEY"`
-	SiliconFlowAPIKey string `env:"siliconflow_api_key"`
+	SiliconFlowAPIKey string `env:"SILICONFLOW_API_KEY"`
 	DefaultModel      string `env:"DEFAULT_MODEL" envDefault:"openai/gpt-4o"`
 }
 
@@ -67,13 +67,13 @@ func main() {
 
 func applyEnv(cfg config) {
 	if cfg.OpenAIAPIKey != "" {
-		_ = os.Setenv("openai_api_key", cfg.OpenAIAPIKey)
+		_ = os.Setenv("OPENAI_API_KEY", cfg.OpenAIAPIKey)
 	}
 	if cfg.AnthropicAPIKey != "" {
 		_ = os.Setenv("ANTHROPIC_API_KEY", cfg.AnthropicAPIKey)
 	}
 	if cfg.SiliconFlowAPIKey != "" {
-		_ = os.Setenv("siliconflow_api_key", cfg.SiliconFlowAPIKey)
+		_ = os.Setenv("SILICONFLOW_API_KEY", cfg.SiliconFlowAPIKey)
 	}
 
 	_, modelName := splitConfiguredModel(cfg.DefaultModel)
