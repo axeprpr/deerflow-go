@@ -5,13 +5,22 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/google/uuid"
 
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
+
+type runConfig struct {
+	ModelName       string
+	ReasoningEffort string
+	Temperature     *float64
+	MaxTokens       *int
+}
 
 func (s *Server) handleRunsStream(w http.ResponseWriter, r *http.Request) {
 	s.handleStreamRequest(w, r, "")
@@ -88,19 +97,31 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		"thread_id": threadID,
 	})
 
+	runCfg := parseRunConfig(req.Config)
+	runAgent := s.newAgent(agent.AgentConfig{
+		Model:           firstNonEmpty(runCfg.ModelName, s.defaultModel),
+		ReasoningEffort: runCfg.ReasoningEffort,
+		Temperature:     runCfg.Temperature,
+		MaxTokens:       runCfg.MaxTokens,
+	})
+
 	ctx := r.Context()
-	result, err := s.agent.Run(ctx, threadID, deerMessages)
+	eventsDone := make(chan struct{})
+	go func() {
+		defer close(eventsDone)
+		for evt := range runAgent.Events() {
+			s.forwardAgentEvent(w, flusher, run, evt)
+		}
+	}()
+
+	result, err := runAgent.Run(ctx, threadID, deerMessages)
+	<-eventsDone
 	if err != nil {
 		run.Status = "error"
 		run.Error = err.Error()
 		run.UpdatedAt = time.Now().UTC()
 		s.saveRun(run)
 		s.markThreadStatus(threadID, "error")
-		s.recordAndSendEvent(w, flusher, run, "error", map[string]any{
-			"error":   "RunError",
-			"name":    "RunError",
-			"message": err.Error(),
-		})
 		return
 	}
 
@@ -115,6 +136,10 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		},
 	})
 	s.recordAndSendEvent(w, flusher, run, "values", state.Values)
+	s.recordAndSendEvent(w, flusher, run, "end", map[string]any{
+		"run_id": runID,
+		"usage":  result.Usage,
+	})
 
 	run.Status = "success"
 	run.UpdatedAt = time.Now().UTC()
@@ -295,7 +320,7 @@ func (s *Server) saveSession(threadID string, messages []models.Message) {
 	defer s.sessionsMu.Unlock()
 
 	if session, exists := s.sessions[threadID]; exists {
-		session.Messages = append(session.Messages, messages...)
+		session.Messages = append([]models.Message(nil), messages...)
 		session.Status = "idle"
 		session.UpdatedAt = time.Now().UTC()
 	} else {
@@ -308,4 +333,156 @@ func (s *Server) saveSession(threadID string, messages []models.Message) {
 			UpdatedAt: time.Now().UTC(),
 		}
 	}
+}
+
+func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, run *Run, evt agent.AgentEvent) {
+	switch evt.Type {
+	case agent.AgentEventChunk:
+		chunkData := map[string]any{
+			"run_id":    run.RunID,
+			"thread_id": run.ThreadID,
+			"type":      "ai",
+			"role":      "assistant",
+			"delta":     evt.Text,
+			"content":   evt.Text,
+		}
+		s.recordAndSendEvent(w, flusher, run, "chunk", chunkData)
+		s.recordAndSendEvent(w, flusher, run, "messages-tuple", Message{
+			Type:    "ai",
+			Role:    "assistant",
+			Content: evt.Text,
+		})
+	case agent.AgentEventToolCall:
+		if evt.ToolEvent == nil {
+			return
+		}
+		s.recordAndSendEvent(w, flusher, run, "tool_call", evt.ToolEvent)
+	case agent.AgentEventToolCallStart:
+		if evt.ToolEvent == nil {
+			return
+		}
+		s.recordAndSendEvent(w, flusher, run, "tool_call_start", evt.ToolEvent)
+	case agent.AgentEventToolCallEnd:
+		if evt.ToolEvent == nil {
+			return
+		}
+		s.recordAndSendEvent(w, flusher, run, "tool_call_end", evt.ToolEvent)
+		s.recordAndSendEvent(w, flusher, run, "messages-tuple", Message{
+			Type:       "tool",
+			Role:       "tool",
+			Name:       evt.ToolEvent.Name,
+			Content:    evt.ToolEvent.ResultPreview,
+			ToolCallID: evt.ToolEvent.ID,
+			Data: map[string]any{
+				"status":         evt.ToolEvent.Status,
+				"arguments":      evt.ToolEvent.Arguments,
+				"arguments_text": evt.ToolEvent.ArgumentsText,
+				"error":          evt.ToolEvent.Error,
+			},
+		})
+	case agent.AgentEventError:
+		errData := map[string]any{
+			"error":   "RunError",
+			"name":    "RunError",
+			"message": evt.Err,
+		}
+		if evt.Error != nil {
+			errData["code"] = evt.Error.Code
+			errData["suggestion"] = evt.Error.Suggestion
+			errData["retryable"] = evt.Error.Retryable
+		}
+		s.recordAndSendEvent(w, flusher, run, "error", errData)
+	}
+}
+
+func parseRunConfig(raw map[string]any) runConfig {
+	if len(raw) == 0 {
+		return runConfig{}
+	}
+
+	configurable, _ := raw["configurable"].(map[string]any)
+	cfg := runConfig{
+		ModelName:       firstNonEmpty(stringFromAny(raw["model_name"]), stringFromAny(raw["model"]), stringFromAny(configurable["model_name"]), stringFromAny(configurable["model"])),
+		ReasoningEffort: firstNonEmpty(stringFromAny(raw["reasoning_effort"]), stringFromAny(configurable["reasoning_effort"])),
+		Temperature:     floatPointerFromAny(firstNonNil(raw["temperature"], configurable["temperature"])),
+		MaxTokens:       intPointerFromAny(firstNonNil(raw["max_tokens"], configurable["max_tokens"])),
+	}
+	return cfg
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func firstNonNil(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func stringFromAny(v any) string {
+	switch value := v.(type) {
+	case string:
+		return strings.TrimSpace(value)
+	default:
+		return ""
+	}
+}
+
+func floatPointerFromAny(v any) *float64 {
+	switch value := v.(type) {
+	case float64:
+		out := value
+		return &out
+	case float32:
+		out := float64(value)
+		return &out
+	case int:
+		out := float64(value)
+		return &out
+	case int64:
+		out := float64(value)
+		return &out
+	case json.Number:
+		if parsed, err := value.Float64(); err == nil {
+			return &parsed
+		}
+	case string:
+		if parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil {
+			return &parsed
+		}
+	}
+	return nil
+}
+
+func intPointerFromAny(v any) *int {
+	switch value := v.(type) {
+	case int:
+		out := value
+		return &out
+	case int64:
+		out := int(value)
+		return &out
+	case float64:
+		out := int(value)
+		return &out
+	case json.Number:
+		if parsed, err := value.Int64(); err == nil {
+			out := int(parsed)
+			return &out
+		}
+	case string:
+		if parsed, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
+			return &parsed
+		}
+	}
+	return nil
 }

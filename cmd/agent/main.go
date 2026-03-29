@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -49,10 +50,15 @@ type app struct {
 }
 
 type runRequest struct {
-	SessionID string `json:"session_id"`
-	UserID    string `json:"user_id"`
-	Message   string `json:"message"`
-	Model     string `json:"model"`
+	SessionID       string         `json:"session_id"`
+	UserID          string         `json:"user_id"`
+	Message         string         `json:"message"`
+	Model           string         `json:"model"`
+	ModelName       string         `json:"model_name"`
+	ReasoningEffort string         `json:"reasoning_effort"`
+	Temperature     *float64       `json:"temperature"`
+	MaxTokens       *int           `json:"max_tokens"`
+	Config          map[string]any `json:"config,omitempty"`
 }
 
 type runResponse struct {
@@ -235,10 +241,29 @@ func (a *app) handleRun(w http.ResponseWriter, r *http.Request) {
 	req.SessionID = strings.TrimSpace(req.SessionID)
 	req.UserID = defaultUserID(req.UserID)
 	req.Message = strings.TrimSpace(req.Message)
-	req.Model = strings.TrimSpace(req.Model)
+	req.Model = strings.TrimSpace(firstNonEmpty(req.Model, req.ModelName))
+	if cfg := parseRunConfig(req.Config); cfg.ModelName != "" || cfg.ReasoningEffort != "" || cfg.Temperature != nil || cfg.MaxTokens != nil {
+		if req.Model == "" {
+			req.Model = cfg.ModelName
+		}
+		if req.ReasoningEffort == "" {
+			req.ReasoningEffort = cfg.ReasoningEffort
+		}
+		if req.Temperature == nil {
+			req.Temperature = cfg.Temperature
+		}
+		if req.MaxTokens == nil {
+			req.MaxTokens = cfg.MaxTokens
+		}
+	}
+	req.ReasoningEffort = strings.TrimSpace(req.ReasoningEffort)
 
 	if req.SessionID == "" || req.Message == "" {
-		http.Error(w, "session_id and message are required", http.StatusBadRequest)
+		writeStructuredError(w, http.StatusBadRequest, agent.AgentError{
+			Code:       "invalid_request",
+			Message:    "session_id and message are required",
+			Suggestion: "Provide both session_id and message in the request body.",
+		})
 		return
 	}
 
@@ -253,7 +278,12 @@ func (a *app) handleRun(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, r.Context().Err()) {
 			status = http.StatusRequestTimeout
 		}
-		http.Error(w, err.Error(), status)
+		writeStructuredError(w, status, agent.AgentError{
+			Code:       "run_error",
+			Message:    err.Error(),
+			Suggestion: suggestionForError(err),
+			Retryable:  !errors.Is(err, r.Context().Err()),
+		})
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -279,11 +309,14 @@ func (a *app) run(ctx context.Context, req runRequest) (runResponse, error) {
 	})
 
 	runAgent := agent.New(agent.AgentConfig{
-		LLMProvider: a.llmProvider,
-		Tools:       a.tools,
-		Sandbox:     a.sandbox,
-		MaxTurns:    a.cfg.MaxTurns,
-		Model:       modelName,
+		LLMProvider:     a.llmProvider,
+		Tools:           a.tools,
+		Sandbox:         a.sandbox,
+		MaxTurns:        a.cfg.MaxTurns,
+		Model:           modelName,
+		ReasoningEffort: req.ReasoningEffort,
+		Temperature:     req.Temperature,
+		MaxTokens:       req.MaxTokens,
 	})
 
 	result, err := runAgent.Run(ctx, req.SessionID, history)
@@ -338,11 +371,14 @@ func (a *app) streamRun(w http.ResponseWriter, r *http.Request, req runRequest) 
 	})
 
 	runAgent := agent.New(agent.AgentConfig{
-		LLMProvider: a.llmProvider,
-		Tools:       a.tools,
-		Sandbox:     a.sandbox,
-		MaxTurns:    a.cfg.MaxTurns,
-		Model:       modelName,
+		LLMProvider:     a.llmProvider,
+		Tools:           a.tools,
+		Sandbox:         a.sandbox,
+		MaxTurns:        a.cfg.MaxTurns,
+		Model:           modelName,
+		ReasoningEffort: req.ReasoningEffort,
+		Temperature:     req.Temperature,
+		MaxTokens:       req.MaxTokens,
 	})
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -353,7 +389,7 @@ func (a *app) streamRun(w http.ResponseWriter, r *http.Request, req runRequest) 
 	go func() {
 		defer close(done)
 		for evt := range runAgent.Events() {
-			writeSSE(w, "event", evt)
+			writeSSE(w, string(evt.Type), ssePayload(evt))
 			flusher.Flush()
 		}
 	}()
@@ -361,8 +397,6 @@ func (a *app) streamRun(w http.ResponseWriter, r *http.Request, req runRequest) 
 	result, err := runAgent.Run(r.Context(), req.SessionID, history)
 	<-done
 	if err != nil {
-		writeSSE(w, "error", map[string]string{"error": err.Error()})
-		flusher.Flush()
 		return
 	}
 
@@ -443,6 +477,12 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
+func writeStructuredError(w http.ResponseWriter, status int, err agent.AgentError) {
+	writeJSON(w, status, map[string]any{
+		"error": err,
+	})
+}
+
 func writeSSE(w http.ResponseWriter, event string, value any) {
 	data, _ := json.Marshal(value)
 	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
@@ -469,4 +509,137 @@ func firstCreatedAt(messages []models.Message) time.Time {
 		return time.Now().UTC()
 	}
 	return messages[0].CreatedAt
+}
+
+func ssePayload(evt agent.AgentEvent) any {
+	switch evt.Type {
+	case agent.AgentEventChunk, agent.AgentEventTextChunk:
+		return map[string]any{
+			"session_id": evt.SessionID,
+			"delta":      evt.Text,
+			"content":    evt.Text,
+		}
+	case agent.AgentEventToolCall, agent.AgentEventToolCallStart, agent.AgentEventToolCallEnd:
+		if evt.ToolEvent != nil {
+			return evt.ToolEvent
+		}
+	case agent.AgentEventToolResult:
+		if evt.ToolEvent != nil {
+			return evt.ToolEvent
+		}
+		if evt.Result != nil {
+			return evt.Result
+		}
+	case agent.AgentEventError:
+		if evt.Error != nil {
+			return evt.Error
+		}
+	}
+	return evt
+}
+
+func suggestionForError(err error) string {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "Retry the run if the cancellation was unintended."
+	case errors.Is(err, context.DeadlineExceeded):
+		return "Retry with a longer timeout or reduce max_tokens."
+	default:
+		return "Inspect prior stream events for the failing model or tool call."
+	}
+}
+
+func parseRunConfig(raw map[string]any) parsedRunConfig {
+	if len(raw) == 0 {
+		return parsedRunConfig{}
+	}
+	configurable, _ := raw["configurable"].(map[string]any)
+	return parsedRunConfig{
+		ModelName:       firstNonEmpty(stringFromAny(raw["model_name"]), stringFromAny(raw["model"]), stringFromAny(configurable["model_name"]), stringFromAny(configurable["model"])),
+		ReasoningEffort: firstNonEmpty(stringFromAny(raw["reasoning_effort"]), stringFromAny(configurable["reasoning_effort"])),
+		Temperature:     floatPointerFromAny(firstNonNil(raw["temperature"], configurable["temperature"])),
+		MaxTokens:       intPointerFromAny(firstNonNil(raw["max_tokens"], configurable["max_tokens"])),
+	}
+}
+
+type parsedRunConfig struct {
+	ModelName       string
+	ReasoningEffort string
+	Temperature     *float64
+	MaxTokens       *int
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func firstNonNil(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func stringFromAny(v any) string {
+	if value, ok := v.(string); ok {
+		return strings.TrimSpace(value)
+	}
+	return ""
+}
+
+func floatPointerFromAny(v any) *float64 {
+	switch value := v.(type) {
+	case float64:
+		out := value
+		return &out
+	case float32:
+		out := float64(value)
+		return &out
+	case int:
+		out := float64(value)
+		return &out
+	case int64:
+		out := float64(value)
+		return &out
+	case json.Number:
+		if parsed, err := value.Float64(); err == nil {
+			return &parsed
+		}
+	case string:
+		if parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil {
+			return &parsed
+		}
+	}
+	return nil
+}
+
+func intPointerFromAny(v any) *int {
+	switch value := v.(type) {
+	case int:
+		out := value
+		return &out
+	case int64:
+		out := int(value)
+		return &out
+	case float64:
+		out := int(value)
+		return &out
+	case json.Number:
+		if parsed, err := value.Int64(); err == nil {
+			out := int(parsed)
+			return &out
+		}
+	case string:
+		if parsed, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
+			return &parsed
+		}
+	}
+	return nil
 }

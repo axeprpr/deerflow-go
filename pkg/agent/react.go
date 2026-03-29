@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -22,12 +24,15 @@ var messageSeq uint64
 
 // Agent runs our custom ReAct loop while delegating model streaming and tool schemas to Eino.
 type Agent struct {
-	llm      llm.LLMProvider
-	tools    *tools.Registry
-	sandbox  *sandbox.Sandbox
-	model    string
-	maxTurns int
-	events   chan AgentEvent
+	llm             llm.LLMProvider
+	tools           *tools.Registry
+	sandbox         *sandbox.Sandbox
+	model           string
+	reasoningEffort string
+	temperature     *float64
+	maxTokens       *int
+	maxTurns        int
+	events          chan AgentEvent
 }
 
 func New(cfg AgentConfig) *Agent {
@@ -40,12 +45,15 @@ func New(cfg AgentConfig) *Agent {
 		registry = tools.NewRegistry()
 	}
 	return &Agent{
-		llm:      cfg.LLMProvider,
-		tools:    registry,
-		sandbox:  cfg.Sandbox,
-		model:    resolveModel(cfg.Model),
-		maxTurns: maxTurns,
-		events:   make(chan AgentEvent, 128),
+		llm:             cfg.LLMProvider,
+		tools:           registry,
+		sandbox:         cfg.Sandbox,
+		model:           resolveModel(cfg.Model),
+		reasoningEffort: strings.TrimSpace(cfg.ReasoningEffort),
+		temperature:     cfg.Temperature,
+		maxTokens:       cfg.MaxTokens,
+		maxTurns:        maxTurns,
+		events:          make(chan AgentEvent, 128),
 	}
 }
 
@@ -72,15 +80,18 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 
 	for turn := 0; turn < a.maxTurns; turn++ {
 		req := llm.ChatRequest{
-			Model:        a.model,
-			Messages:     runMessages,
-			Tools:        a.tools.List(),
-			SystemPrompt: a.BuildSystemPrompt(ctx, sessionID),
+			Model:           a.model,
+			Messages:        runMessages,
+			Tools:           a.tools.List(),
+			ReasoningEffort: a.reasoningEffort,
+			Temperature:     a.temperature,
+			MaxTokens:       a.maxTokens,
+			SystemPrompt:    a.BuildSystemPrompt(ctx, sessionID),
 		}
 
 		stream, err := a.llm.Stream(ctx, req)
 		if err != nil {
-			a.emit(AgentEvent{Type: AgentEventError, SessionID: sessionID, Err: err.Error()})
+			a.emit(AgentEvent{Type: AgentEventError, SessionID: sessionID, Err: err.Error(), Error: newAgentError(err)})
 			return nil, err
 		}
 
@@ -93,11 +104,12 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 
 		for chunk := range stream {
 			if chunk.Err != nil {
-				a.emit(AgentEvent{Type: AgentEventError, SessionID: sessionID, Err: chunk.Err.Error()})
+				a.emit(AgentEvent{Type: AgentEventError, SessionID: sessionID, Err: chunk.Err.Error(), Error: newAgentError(chunk.Err)})
 				return nil, chunk.Err
 			}
 			if chunk.Delta != "" {
 				textBuilder.WriteString(chunk.Delta)
+				a.emit(AgentEvent{Type: AgentEventChunk, SessionID: sessionID, Text: chunk.Delta})
 				a.emit(AgentEvent{Type: AgentEventTextChunk, SessionID: sessionID, Text: chunk.Delta})
 			}
 			if len(chunk.ToolCalls) > 0 {
@@ -151,8 +163,24 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 		}
 
 		for _, call := range toolCalls {
-			a.emit(AgentEvent{Type: AgentEventToolCall, SessionID: sessionID, ToolCall: &call})
+			a.emit(AgentEvent{
+				Type:      AgentEventToolCall,
+				SessionID: sessionID,
+				ToolCall:  &call,
+				ToolEvent: newToolCallEvent(call, nil),
+			})
+			startedAt := time.Now().UTC()
+			runningCall := call
+			runningCall.Status = models.CallStatusRunning
+			runningCall.StartedAt = startedAt
+			a.emit(AgentEvent{
+				Type:      AgentEventToolCallStart,
+				SessionID: sessionID,
+				ToolCall:  &runningCall,
+				ToolEvent: newToolCallEvent(runningCall, nil),
+			})
 
+			toolStarted := time.Now().UTC()
 			result, err := a.tools.Execute(tools.WithSandbox(ctx, a.sandbox), call)
 			if err != nil {
 				result = models.ToolResult{
@@ -163,6 +191,10 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 					CompletedAt: time.Now().UTC(),
 				}
 			}
+			result.Duration = time.Since(toolStarted)
+			if result.CompletedAt.IsZero() {
+				result.CompletedAt = time.Now().UTC()
+			}
 
 			runMessages = append(runMessages, models.Message{
 				ID:         newMessageID("tool"),
@@ -172,17 +204,32 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 				ToolResult: &result,
 				CreatedAt:  time.Now().UTC(),
 			})
-			a.emit(AgentEvent{Type: AgentEventToolResult, SessionID: sessionID, Result: &result})
+			a.emit(AgentEvent{
+				Type:      AgentEventToolResult,
+				SessionID: sessionID,
+				Result:    &result,
+				ToolEvent: newToolEventFromResult(call, result),
+			})
+			completedCall := runningCall
+			completedCall.Status = result.Status
+			completedCall.CompletedAt = result.CompletedAt
+			a.emit(AgentEvent{
+				Type:      AgentEventToolCallEnd,
+				SessionID: sessionID,
+				ToolCall:  &completedCall,
+				Result:    &result,
+				ToolEvent: newToolEventFromResult(completedCall, result),
+			})
 
 			if err := ctx.Err(); err != nil {
-				a.emit(AgentEvent{Type: AgentEventError, SessionID: sessionID, Err: err.Error()})
+				a.emit(AgentEvent{Type: AgentEventError, SessionID: sessionID, Err: err.Error(), Error: newAgentError(err)})
 				return nil, err
 			}
 		}
 	}
 
 	err := fmt.Errorf("agent exceeded max turns (%d)", a.maxTurns)
-	a.emit(AgentEvent{Type: AgentEventError, SessionID: sessionID, Err: err.Error()})
+	a.emit(AgentEvent{Type: AgentEventError, SessionID: sessionID, Err: err.Error(), Error: newAgentError(err)})
 	return nil, err
 }
 
@@ -267,6 +314,127 @@ func toolMessageContent(result models.ToolResult) string {
 		return result.Error
 	}
 	return result.Content
+}
+
+func newToolCallEvent(call models.ToolCall, result *models.ToolResult) *ToolCallEvent {
+	event := &ToolCallEvent{
+		ID:            call.ID,
+		Name:          call.Name,
+		Arguments:     cloneArguments(call.Arguments),
+		ArgumentsText: formatToolArguments(call.Arguments),
+		Status:        call.Status,
+		RequestedAt:   formatEventTime(call.RequestedAt),
+		StartedAt:     formatEventTime(call.StartedAt),
+		CompletedAt:   formatEventTime(call.CompletedAt),
+	}
+	if result != nil {
+		event.Result = cloneToolResult(result)
+		event.ResultPreview = toolResultPreview(*result)
+		event.Error = result.Error
+		event.DurationMS = result.Duration.Milliseconds()
+		if event.Status == "" {
+			event.Status = result.Status
+		}
+		if event.CompletedAt == "" {
+			event.CompletedAt = formatEventTime(result.CompletedAt)
+		}
+	}
+	return event
+}
+
+func newToolEventFromResult(call models.ToolCall, result models.ToolResult) *ToolCallEvent {
+	return newToolCallEvent(call, &result)
+}
+
+func cloneArguments(args map[string]any) map[string]any {
+	if len(args) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(args))
+	for k, v := range args {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneToolResult(result *models.ToolResult) *models.ToolResult {
+	if result == nil {
+		return nil
+	}
+	copyResult := *result
+	if len(result.Data) > 0 {
+		copyResult.Data = make(map[string]any, len(result.Data))
+		for k, v := range result.Data {
+			copyResult.Data[k] = v
+		}
+	}
+	return &copyResult
+}
+
+func formatToolArguments(args map[string]any) string {
+	if len(args) == 0 {
+		return ""
+	}
+	raw, err := json.MarshalIndent(args, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+func toolResultPreview(result models.ToolResult) string {
+	content := strings.TrimSpace(result.Content)
+	if content == "" {
+		content = strings.TrimSpace(result.Error)
+	}
+	if content == "" && len(result.Data) > 0 {
+		raw, err := json.Marshal(result.Data)
+		if err == nil {
+			content = string(raw)
+		}
+	}
+	content = strings.ReplaceAll(content, "\n", " ")
+	if len(content) > 240 {
+		return content[:240] + "..."
+	}
+	return content
+}
+
+func formatEventTime(ts time.Time) string {
+	if ts.IsZero() {
+		return ""
+	}
+	return ts.UTC().Format(time.RFC3339Nano)
+}
+
+func newAgentError(err error) *AgentError {
+	if err == nil {
+		return nil
+	}
+	agentErr := &AgentError{
+		Message: err.Error(),
+	}
+	switch {
+	case errors.Is(err, context.Canceled):
+		agentErr.Code = "context_canceled"
+		agentErr.Suggestion = "Retry the run if the cancellation was unintended."
+		agentErr.Retryable = true
+	case errors.Is(err, context.DeadlineExceeded):
+		agentErr.Code = "deadline_exceeded"
+		agentErr.Suggestion = "Retry with a longer timeout or lower max_tokens."
+		agentErr.Retryable = true
+	case strings.Contains(strings.ToLower(err.Error()), "max turns"):
+		agentErr.Code = "max_turns_exceeded"
+		agentErr.Suggestion = "Increase max turns or simplify the request."
+	case strings.Contains(strings.ToLower(err.Error()), "api key"):
+		agentErr.Code = "provider_auth"
+		agentErr.Suggestion = "Verify the provider credentials and base URL."
+	default:
+		agentErr.Code = "run_error"
+		agentErr.Suggestion = "Retry the run or inspect the previous tool and model events."
+		agentErr.Retryable = true
+	}
+	return agentErr
 }
 
 type einoAgentAdapter struct {

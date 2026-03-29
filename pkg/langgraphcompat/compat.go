@@ -19,14 +19,17 @@ import (
 // Implements the endpoints expected by @langchain/langgraph-sdk
 
 type Server struct {
-	httpServer *http.Server
-	logger     *log.Logger
-	agent      *agent.Agent
-	store      *checkpoint.PostgresStore
-	sessions   map[string]*Session
-	sessionsMu sync.RWMutex
-	runs       map[string]*Run
-	runsMu     sync.RWMutex
+	httpServer   *http.Server
+	logger       *log.Logger
+	llmProvider  llm.LLMProvider
+	tools        *tools.Registry
+	defaultModel string
+	maxTurns     int
+	store        *checkpoint.PostgresStore
+	sessions     map[string]*Session
+	sessionsMu   sync.RWMutex
+	runs         map[string]*Run
+	runsMu       sync.RWMutex
 }
 
 type Session struct {
@@ -109,14 +112,6 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		registry.Register(tool)
 	}
 
-	// Create agent
-	a := agent.New(agent.AgentConfig{
-		LLMProvider: provider,
-		Tools:       registry,
-		MaxTurns:    8,
-		Model:       defaultModel,
-	})
-
 	// Create checkpoint store
 	var store *checkpoint.PostgresStore
 	if dbURL != "" {
@@ -128,11 +123,14 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 	}
 
 	s := &Server{
-		logger:   logger,
-		agent:    a,
-		store:    store,
-		sessions: make(map[string]*Session),
-		runs:     make(map[string]*Run),
+		logger:       logger,
+		llmProvider:  provider,
+		tools:        registry,
+		defaultModel: defaultModel,
+		maxTurns:     8,
+		store:        store,
+		sessions:     make(map[string]*Session),
+		runs:         make(map[string]*Run),
 	}
 
 	mux := http.NewServeMux()
@@ -144,6 +142,19 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 	}
 
 	return s, nil
+}
+
+func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
+	return agent.New(agent.AgentConfig{
+		LLMProvider:     s.llmProvider,
+		Tools:           s.tools,
+		MaxTurns:        s.maxTurns,
+		Model:           cfg.Model,
+		ReasoningEffort: cfg.ReasoningEffort,
+		Temperature:     cfg.Temperature,
+		MaxTokens:       cfg.MaxTokens,
+		Sandbox:         cfg.Sandbox,
+	})
 }
 
 func (s *Server) registerRoutes(mux *http.ServeMux) {

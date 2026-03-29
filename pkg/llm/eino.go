@@ -164,6 +164,9 @@ func (p *EinoProvider) prepareRequest(req ChatRequest) ([]*einoSchema.Message, [
 	if req.Model != "" {
 		opts = append(opts, einoModel.WithModel(req.Model))
 	}
+	if effort := strings.TrimSpace(req.ReasoningEffort); effort != "" {
+		opts = append(opts, einoOpenAI.WithReasoningEffort(einoOpenAI.ReasoningEffortLevel(effort)))
+	}
 	if req.Temperature != nil {
 		v := float32(*req.Temperature)
 		opts = append(opts, einoModel.WithTemperature(v))
