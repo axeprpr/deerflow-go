@@ -25,6 +25,8 @@ func newCompatTestServer(t *testing.T) (*Server, *httptest.Server) {
 		startedAt: time.Now().UTC(),
 		skills:    defaultGatewaySkills(),
 		mcpConfig: defaultGatewayMCPConfig(),
+		agents:    map[string]gatewayAgent{},
+		memory:    defaultGatewayMemory(),
 	}
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
@@ -228,6 +230,15 @@ func TestModelsSkillsMCPConfigEndpoints(t *testing.T) {
 	if putMCPResp.StatusCode != http.StatusOK {
 		t.Fatalf("mcp put status=%d", putMCPResp.StatusCode)
 	}
+
+	modelGetResp, err := http.Get(ts.URL + "/api/models/qwen/Qwen3.5-9B")
+	if err != nil {
+		t.Fatalf("model get request: %v", err)
+	}
+	defer modelGetResp.Body.Close()
+	if modelGetResp.StatusCode != http.StatusOK {
+		t.Fatalf("model get status=%d", modelGetResp.StatusCode)
+	}
 }
 
 func TestSkillInstallFromArchive(t *testing.T) {
@@ -273,6 +284,74 @@ func TestSkillInstallFromArchive(t *testing.T) {
 	target := filepath.Join(s.dataRoot, "skills", "custom", "demo-skill", "SKILL.md")
 	if _, err := os.Stat(target); err != nil {
 		t.Fatalf("expected installed skill file: %v", err)
+	}
+}
+
+func TestAgentsAndMemoryEndpoints(t *testing.T) {
+	_, ts := newCompatTestServer(t)
+
+	createBody := `{"name":"my-agent","description":"a","model":"qwen/Qwen3.5-9B","tool_groups":["file"],"soul":"hello"}`
+	createResp, err := http.Post(ts.URL+"/api/agents", "application/json", strings.NewReader(createBody))
+	if err != nil {
+		t.Fatalf("create agent request: %v", err)
+	}
+	defer createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create agent status=%d", createResp.StatusCode)
+	}
+
+	listResp, err := http.Get(ts.URL + "/api/agents")
+	if err != nil {
+		t.Fatalf("list agents request: %v", err)
+	}
+	defer listResp.Body.Close()
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("list agents status=%d", listResp.StatusCode)
+	}
+
+	getResp, err := http.Get(ts.URL + "/api/agents/my-agent")
+	if err != nil {
+		t.Fatalf("get agent request: %v", err)
+	}
+	defer getResp.Body.Close()
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("get agent status=%d", getResp.StatusCode)
+	}
+
+	checkResp, err := http.Get(ts.URL + "/api/agents/check?name=my-agent")
+	if err != nil {
+		t.Fatalf("check agent request: %v", err)
+	}
+	defer checkResp.Body.Close()
+	if checkResp.StatusCode != http.StatusOK {
+		t.Fatalf("check agent status=%d", checkResp.StatusCode)
+	}
+
+	memResp, err := http.Get(ts.URL + "/api/memory")
+	if err != nil {
+		t.Fatalf("memory request: %v", err)
+	}
+	defer memResp.Body.Close()
+	if memResp.StatusCode != http.StatusOK {
+		t.Fatalf("memory status=%d", memResp.StatusCode)
+	}
+
+	memCfgResp, err := http.Get(ts.URL + "/api/memory/config")
+	if err != nil {
+		t.Fatalf("memory config request: %v", err)
+	}
+	defer memCfgResp.Body.Close()
+	if memCfgResp.StatusCode != http.StatusOK {
+		t.Fatalf("memory config status=%d", memCfgResp.StatusCode)
+	}
+
+	chResp, err := http.Get(ts.URL + "/api/channels")
+	if err != nil {
+		t.Fatalf("channels request: %v", err)
+	}
+	defer chResp.Body.Close()
+	if chResp.StatusCode != http.StatusOK {
+		t.Fatalf("channels status=%d", chResp.StatusCode)
 	}
 }
 

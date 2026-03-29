@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -47,19 +48,83 @@ type gatewayMCPConfig struct {
 }
 
 type gatewayPersistedState struct {
-	Skills    map[string]gatewaySkill `json:"skills"`
-	MCPConfig gatewayMCPConfig        `json:"mcp_config"`
+	Skills      map[string]gatewaySkill `json:"skills"`
+	MCPConfig   gatewayMCPConfig        `json:"mcp_config"`
+	Agents      map[string]gatewayAgent `json:"agents,omitempty"`
+	UserProfile string                  `json:"user_profile,omitempty"`
+	Memory      gatewayMemoryResponse   `json:"memory"`
 }
 
 const maxSkillArchiveSize int64 = 512 << 20
 
 var skillInstallSeq uint64
+var agentNameRE = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
+
+type gatewayAgent struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Model       *string  `json:"model"`
+	ToolGroups  []string `json:"tool_groups"`
+	Soul        string   `json:"soul,omitempty"`
+}
+
+type memorySection struct {
+	Summary   string `json:"summary"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+type memoryUser struct {
+	WorkContext     memorySection `json:"workContext"`
+	PersonalContext memorySection `json:"personalContext"`
+	TopOfMind       memorySection `json:"topOfMind"`
+}
+
+type memoryHistory struct {
+	RecentMonths       memorySection `json:"recentMonths"`
+	EarlierContext     memorySection `json:"earlierContext"`
+	LongTermBackground memorySection `json:"longTermBackground"`
+}
+
+type memoryFact struct {
+	ID         string  `json:"id"`
+	Content    string  `json:"content"`
+	Category   string  `json:"category"`
+	Confidence float64 `json:"confidence"`
+	CreatedAt  string  `json:"createdAt"`
+	Source     string  `json:"source"`
+}
+
+type gatewayMemoryResponse struct {
+	Version     string        `json:"version"`
+	LastUpdated string        `json:"lastUpdated"`
+	User        memoryUser    `json:"user"`
+	History     memoryHistory `json:"history"`
+	Facts       []memoryFact  `json:"facts"`
+}
 
 func (s *Server) registerGatewayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/models", s.handleModelsList)
+	mux.HandleFunc("GET /api/models/{model_name...}", s.handleModelGet)
 	mux.HandleFunc("GET /api/skills", s.handleSkillsList)
+	mux.HandleFunc("GET /api/skills/{skill_name}", s.handleSkillGet)
 	mux.HandleFunc("PUT /api/skills/{skill_name}", s.handleSkillSetEnabled)
 	mux.HandleFunc("POST /api/skills/install", s.handleSkillInstall)
+	mux.HandleFunc("GET /api/agents", s.handleAgentsList)
+	mux.HandleFunc("POST /api/agents", s.handleAgentCreate)
+	mux.HandleFunc("GET /api/agents/check", s.handleAgentCheck)
+	mux.HandleFunc("GET /api/agents/{name}", s.handleAgentGet)
+	mux.HandleFunc("PUT /api/agents/{name}", s.handleAgentUpdate)
+	mux.HandleFunc("DELETE /api/agents/{name}", s.handleAgentDelete)
+	mux.HandleFunc("GET /api/user-profile", s.handleUserProfileGet)
+	mux.HandleFunc("PUT /api/user-profile", s.handleUserProfilePut)
+	mux.HandleFunc("GET /api/memory", s.handleMemoryGet)
+	mux.HandleFunc("POST /api/memory/reload", s.handleMemoryReload)
+	mux.HandleFunc("DELETE /api/memory", s.handleMemoryClear)
+	mux.HandleFunc("DELETE /api/memory/facts/{fact_id}", s.handleMemoryFactDelete)
+	mux.HandleFunc("GET /api/memory/config", s.handleMemoryConfigGet)
+	mux.HandleFunc("GET /api/memory/status", s.handleMemoryStatusGet)
+	mux.HandleFunc("GET /api/channels", s.handleChannelsGet)
+	mux.HandleFunc("POST /api/channels/{name}/restart", s.handleChannelRestart)
 	mux.HandleFunc("GET /api/mcp/config", s.handleMCPConfigGet)
 	mux.HandleFunc("PUT /api/mcp/config", s.handleMCPConfigPut)
 	mux.HandleFunc("DELETE /api/threads/{thread_id}", s.handleGatewayThreadDelete)
@@ -89,6 +154,27 @@ func (s *Server) handleModelsList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"models": models})
 }
 
+func (s *Server) handleModelGet(w http.ResponseWriter, r *http.Request) {
+	modelName := strings.TrimSpace(r.PathValue("model_name"))
+	model := strings.TrimSpace(s.defaultModel)
+	if model == "" {
+		model = "qwen/Qwen3.5-9B"
+	}
+	if modelName == "" || modelName != model {
+		writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Model '%s' not found", modelName)})
+		return
+	}
+	writeJSON(w, http.StatusOK, gatewayModel{
+		ID:                      "default",
+		Name:                    model,
+		Model:                   model,
+		DisplayName:             model,
+		Description:             "Default model configured by deerflow-go",
+		SupportsThinking:        true,
+		SupportsReasoningEffort: true,
+	})
+}
+
 func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
 	s.uiStateMu.RLock()
 	defer s.uiStateMu.RUnlock()
@@ -100,6 +186,18 @@ func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
 		return skills[i].Name < skills[j].Name
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"skills": skills})
+}
+
+func (s *Server) handleSkillGet(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.PathValue("skill_name"))
+	s.uiStateMu.RLock()
+	skill, ok := s.skills[name]
+	s.uiStateMu.RUnlock()
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Skill '%s' not found", name)})
+		return
+	}
+	writeJSON(w, http.StatusOK, skill)
 }
 
 func (s *Server) handleSkillSetEnabled(w http.ResponseWriter, r *http.Request) {
@@ -198,6 +296,270 @@ func (s *Server) handleMCPConfigPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, req)
+}
+
+func (s *Server) handleAgentsList(w http.ResponseWriter, r *http.Request) {
+	s.uiStateMu.RLock()
+	agents := make([]gatewayAgent, 0, len(s.getAgentsLocked()))
+	for _, a := range s.getAgentsLocked() {
+		out := a
+		out.Soul = ""
+		agents = append(agents, out)
+	}
+	s.uiStateMu.RUnlock()
+	sort.Slice(agents, func(i, j int) bool { return agents[i].Name < agents[j].Name })
+	writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
+}
+
+func (s *Server) handleAgentCheck(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	if !agentNameRE.MatchString(name) {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": "Invalid agent name"})
+		return
+	}
+	normalized := strings.ToLower(name)
+	s.uiStateMu.RLock()
+	_, exists := s.getAgentsLocked()[normalized]
+	s.uiStateMu.RUnlock()
+	writeJSON(w, http.StatusOK, map[string]any{"available": !exists, "name": normalized})
+}
+
+func (s *Server) handleAgentGet(w http.ResponseWriter, r *http.Request) {
+	name, ok := normalizeAgentName(r.PathValue("name"))
+	if !ok {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": "Invalid agent name"})
+		return
+	}
+	s.uiStateMu.RLock()
+	agent, exists := s.getAgentsLocked()[name]
+	s.uiStateMu.RUnlock()
+	if !exists {
+		writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Agent '%s' not found", name)})
+		return
+	}
+	writeJSON(w, http.StatusOK, agent)
+}
+
+func (s *Server) handleAgentCreate(w http.ResponseWriter, r *http.Request) {
+	var req gatewayAgent
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid request body"})
+		return
+	}
+	name, ok := normalizeAgentName(req.Name)
+	if !ok {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": "Invalid agent name"})
+		return
+	}
+
+	s.uiStateMu.Lock()
+	agents := s.getAgentsLocked()
+	if _, exists := agents[name]; exists {
+		s.uiStateMu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]any{"detail": fmt.Sprintf("Agent '%s' already exists", name)})
+		return
+	}
+	req.Name = name
+	agents[name] = req
+	s.uiStateMu.Unlock()
+	if err := s.persistGatewayState(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
+		return
+	}
+	writeJSON(w, http.StatusCreated, req)
+}
+
+func (s *Server) handleAgentUpdate(w http.ResponseWriter, r *http.Request) {
+	name, ok := normalizeAgentName(r.PathValue("name"))
+	if !ok {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": "Invalid agent name"})
+		return
+	}
+	var req struct {
+		Description *string   `json:"description"`
+		Model       **string  `json:"model"`
+		ToolGroups  *[]string `json:"tool_groups"`
+		Soul        *string   `json:"soul"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid request body"})
+		return
+	}
+
+	s.uiStateMu.Lock()
+	agents := s.getAgentsLocked()
+	agent, exists := agents[name]
+	if !exists {
+		s.uiStateMu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Agent '%s' not found", name)})
+		return
+	}
+	if req.Description != nil {
+		agent.Description = *req.Description
+	}
+	if req.Model != nil {
+		agent.Model = *req.Model
+	}
+	if req.ToolGroups != nil {
+		agent.ToolGroups = *req.ToolGroups
+	}
+	if req.Soul != nil {
+		agent.Soul = *req.Soul
+	}
+	agents[name] = agent
+	s.uiStateMu.Unlock()
+	if err := s.persistGatewayState(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
+		return
+	}
+	writeJSON(w, http.StatusOK, agent)
+}
+
+func (s *Server) handleAgentDelete(w http.ResponseWriter, r *http.Request) {
+	name, ok := normalizeAgentName(r.PathValue("name"))
+	if !ok {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": "Invalid agent name"})
+		return
+	}
+	s.uiStateMu.Lock()
+	agents := s.getAgentsLocked()
+	if _, exists := agents[name]; !exists {
+		s.uiStateMu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Agent '%s' not found", name)})
+		return
+	}
+	delete(agents, name)
+	s.uiStateMu.Unlock()
+	if err := s.persistGatewayState(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleUserProfileGet(w http.ResponseWriter, r *http.Request) {
+	s.uiStateMu.RLock()
+	content := s.getUserProfileLocked()
+	s.uiStateMu.RUnlock()
+	if strings.TrimSpace(content) == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"content": nil})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"content": content})
+}
+
+func (s *Server) handleUserProfilePut(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid request body"})
+		return
+	}
+	s.uiStateMu.Lock()
+	s.setUserProfileLocked(req.Content)
+	s.uiStateMu.Unlock()
+	if err := s.persistGatewayState(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"content": nullableString(req.Content)})
+}
+
+func (s *Server) handleMemoryGet(w http.ResponseWriter, r *http.Request) {
+	s.uiStateMu.RLock()
+	m := s.getMemoryLocked()
+	s.uiStateMu.RUnlock()
+	writeJSON(w, http.StatusOK, m)
+}
+
+func (s *Server) handleMemoryReload(w http.ResponseWriter, r *http.Request) {
+	s.handleMemoryGet(w, r)
+}
+
+func (s *Server) handleMemoryClear(w http.ResponseWriter, r *http.Request) {
+	s.uiStateMu.Lock()
+	s.setMemoryLocked(defaultGatewayMemory())
+	s.uiStateMu.Unlock()
+	if err := s.persistGatewayState(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
+		return
+	}
+	s.handleMemoryGet(w, r)
+}
+
+func (s *Server) handleMemoryFactDelete(w http.ResponseWriter, r *http.Request) {
+	factID := strings.TrimSpace(r.PathValue("fact_id"))
+	s.uiStateMu.Lock()
+	mem := s.getMemoryLocked()
+	newFacts := make([]memoryFact, 0, len(mem.Facts))
+	found := false
+	for _, fact := range mem.Facts {
+		if fact.ID == factID {
+			found = true
+			continue
+		}
+		newFacts = append(newFacts, fact)
+	}
+	if !found {
+		s.uiStateMu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Memory fact '%s' not found", factID)})
+		return
+	}
+	mem.Facts = newFacts
+	mem.LastUpdated = time.Now().UTC().Format(time.RFC3339)
+	s.setMemoryLocked(mem)
+	s.uiStateMu.Unlock()
+	if err := s.persistGatewayState(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
+		return
+	}
+	writeJSON(w, http.StatusOK, mem)
+}
+
+func (s *Server) handleMemoryConfigGet(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled":                   true,
+		"storage_path":              filepath.Join(s.dataRoot, "memory.json"),
+		"debounce_seconds":          30,
+		"max_facts":                 100,
+		"fact_confidence_threshold": 0.7,
+		"injection_enabled":         true,
+		"max_injection_tokens":      2000,
+	})
+}
+
+func (s *Server) handleMemoryStatusGet(w http.ResponseWriter, r *http.Request) {
+	s.uiStateMu.RLock()
+	mem := s.getMemoryLocked()
+	s.uiStateMu.RUnlock()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"config": map[string]any{
+			"enabled":                   true,
+			"storage_path":              filepath.Join(s.dataRoot, "memory.json"),
+			"debounce_seconds":          30,
+			"max_facts":                 100,
+			"fact_confidence_threshold": 0.7,
+			"injection_enabled":         true,
+			"max_injection_tokens":      2000,
+		},
+		"data": mem,
+	})
+}
+
+func (s *Server) handleChannelsGet(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"service_running": false,
+		"channels":        map[string]any{},
+	})
+}
+
+func (s *Server) handleChannelRestart(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.PathValue("name"))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success": false,
+		"message": fmt.Sprintf("Channel %s is not running in deerflow-go", name),
+	})
 }
 
 func (s *Server) handleGatewayThreadDelete(w http.ResponseWriter, r *http.Request) {
@@ -761,14 +1123,24 @@ func (s *Server) loadGatewayState() error {
 	if state.MCPConfig.MCPServers != nil {
 		s.mcpConfig = state.MCPConfig
 	}
+	if state.Agents != nil {
+		s.setAgentsLocked(state.Agents)
+	}
+	s.setUserProfileLocked(state.UserProfile)
+	if state.Memory.Version != "" {
+		s.setMemoryLocked(state.Memory)
+	}
 	return nil
 }
 
 func (s *Server) persistGatewayState() error {
 	s.uiStateMu.RLock()
 	state := gatewayPersistedState{
-		Skills:    s.skills,
-		MCPConfig: s.mcpConfig,
+		Skills:      s.skills,
+		MCPConfig:   s.mcpConfig,
+		Agents:      s.getAgentsLocked(),
+		UserProfile: s.getUserProfileLocked(),
+		Memory:      s.getMemoryLocked(),
 	}
 	s.uiStateMu.RUnlock()
 	data, err := json.MarshalIndent(state, "", "  ")
@@ -806,4 +1178,69 @@ func defaultGatewayMCPConfig() gatewayMCPConfig {
 			},
 		},
 	}
+}
+
+func defaultGatewayMemory() gatewayMemoryResponse {
+	now := time.Now().UTC().Format(time.RFC3339)
+	empty := memorySection{Summary: "", UpdatedAt: ""}
+	return gatewayMemoryResponse{
+		Version:     "1.0",
+		LastUpdated: now,
+		User: memoryUser{
+			WorkContext:     empty,
+			PersonalContext: empty,
+			TopOfMind:       empty,
+		},
+		History: memoryHistory{
+			RecentMonths:       empty,
+			EarlierContext:     empty,
+			LongTermBackground: empty,
+		},
+		Facts: []memoryFact{},
+	}
+}
+
+func normalizeAgentName(name string) (string, bool) {
+	name = strings.TrimSpace(name)
+	if !agentNameRE.MatchString(name) {
+		return "", false
+	}
+	return strings.ToLower(name), true
+}
+
+func nullableString(v string) any {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	return v
+}
+
+func (s *Server) getAgentsLocked() map[string]gatewayAgent {
+	if s.agents == nil {
+		s.agents = map[string]gatewayAgent{}
+	}
+	return s.agents
+}
+
+func (s *Server) setAgentsLocked(agents map[string]gatewayAgent) {
+	s.agents = agents
+}
+
+func (s *Server) getUserProfileLocked() string {
+	return s.userProfile
+}
+
+func (s *Server) setUserProfileLocked(content string) {
+	s.userProfile = content
+}
+
+func (s *Server) getMemoryLocked() gatewayMemoryResponse {
+	if s.memory.Version == "" {
+		return defaultGatewayMemory()
+	}
+	return s.memory
+}
+
+func (s *Server) setMemoryLocked(memory gatewayMemoryResponse) {
+	s.memory = memory
 }

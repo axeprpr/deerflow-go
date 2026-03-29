@@ -46,6 +46,9 @@ type Server struct {
 	uiStateMu    sync.RWMutex
 	skills       map[string]gatewaySkill
 	mcpConfig    gatewayMCPConfig
+	agents       map[string]gatewayAgent
+	userProfile  string
+	memory       gatewayMemoryResponse
 }
 
 type HealthStatus struct {
@@ -184,6 +187,8 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		dataRoot:     dataRootAbs,
 		skills:       defaultGatewaySkills(),
 		mcpConfig:    defaultGatewayMCPConfig(),
+		agents:       map[string]gatewayAgent{},
+		memory:       defaultGatewayMemory(),
 	}
 	if err := s.loadGatewayState(); err != nil {
 		logger.Printf("Warning: failed to load gateway state: %v", err)
