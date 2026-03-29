@@ -2,8 +2,8 @@ package langgraphcompat
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,106 +12,52 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
-// handleThreadGet handles GET /threads/{thread_id}
 func (s *Server) handleThreadGet(w http.ResponseWriter, r *http.Request) {
-	threadID := extractThreadID(r)
+	threadID := r.PathValue("thread_id")
 	if threadID == "" {
-		http.Error(w, "Thread ID required", http.StatusBadRequest)
+		http.Error(w, "thread ID required", http.StatusBadRequest)
 		return
 	}
 
 	s.sessionsMu.RLock()
 	session, exists := s.sessions[threadID]
 	s.sessionsMu.RUnlock()
-
 	if !exists {
-		http.Error(w, "Thread not found", http.StatusNotFound)
+		http.Error(w, "thread not found", http.StatusNotFound)
 		return
 	}
 
-	values := map[string]any{
-		"messages": s.messagesToLangChain(session.Messages),
-		"title":     session.Metadata["title"],
-	}
-
-	response := map[string]any{
-		"thread_id":   threadID,
-		"created_at":   session.CreatedAt.Unix(),
-		"updated_at":   session.UpdatedAt.Unix(),
-		"values":       values,
-		"metadata":     session.Metadata,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	writeJSON(w, http.StatusOK, s.threadResponse(session))
 }
 
-// handleThreadCreate handles POST /threads
 func (s *Server) handleThreadCreate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	threadID := uuid.New().String()
-	metadata := make(map[string]any)
-
-	// Try to parse body for metadata
+	var req map[string]any
 	if r.Body != nil {
-		body, _ := io.ReadAll(r.Body)
-		r.Body.Close()
-
-		if len(body) > 0 {
-			var req map[string]any
-			if json.Unmarshal(body, &req) == nil {
-				if m, ok := req["metadata"].(map[string]any); ok {
-					metadata = m
-				}
-			}
-		}
+		defer r.Body.Close()
+		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 
-	s.sessionsMu.Lock()
-	s.sessions[threadID] = &Session{
-		ThreadID:  threadID,
-		Messages:  []models.Message{},
-		Metadata:  metadata,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+	threadID, _ := req["thread_id"].(string)
+	if threadID == "" {
+		threadID = uuid.New().String()
 	}
-	s.sessionsMu.Unlock()
+	metadata, _ := req["metadata"].(map[string]any)
 
-	response := map[string]any{
-		"thread_id":   threadID,
-		"created_at":   time.Now().Unix(),
-		"updated_at":   time.Now().Unix(),
-		"values":       map[string]any{},
-		"metadata":     metadata,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(response)
+	session := s.ensureSession(threadID, metadata)
+	writeJSON(w, http.StatusCreated, s.threadResponse(session))
 }
 
-// handleThreadUpdate handles PUT /threads/{thread_id}
 func (s *Server) handleThreadUpdate(w http.ResponseWriter, r *http.Request) {
-	threadID := extractThreadID(r)
+	threadID := r.PathValue("thread_id")
 	if threadID == "" {
-		http.Error(w, "Thread ID required", http.StatusBadRequest)
+		http.Error(w, "thread ID required", http.StatusBadRequest)
 		return
 	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "Failed to read body", http.StatusBadRequest)
-		return
-	}
-	defer r.Body.Close()
 
 	var req map[string]any
-	if err := json.Unmarshal(body, &req); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+	defer r.Body.Close()
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
 
@@ -120,38 +66,24 @@ func (s *Server) handleThreadUpdate(w http.ResponseWriter, r *http.Request) {
 
 	session, exists := s.sessions[threadID]
 	if !exists {
-		http.Error(w, "Thread not found", http.StatusNotFound)
+		http.Error(w, "thread not found", http.StatusNotFound)
 		return
 	}
 
-	// Update values
-	if values, ok := req["values"].(map[string]any); ok {
-		if title, ok := values["title"].(string); ok {
-			session.Metadata["title"] = title
-		}
-	}
-
-	// Update metadata
 	if metadata, ok := req["metadata"].(map[string]any); ok {
 		for k, v := range metadata {
 			session.Metadata[k] = v
 		}
 	}
+	session.UpdatedAt = time.Now().UTC()
 
-	session.UpdatedAt = time.Now()
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
-		"thread_id":   threadID,
-		"updated_at":   session.UpdatedAt.Unix(),
-	})
+	writeJSON(w, http.StatusOK, s.threadResponse(session))
 }
 
-// handleThreadDelete handles DELETE /threads/{thread_id}
 func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
-	threadID := extractThreadID(r)
+	threadID := r.PathValue("thread_id")
 	if threadID == "" {
-		http.Error(w, "Thread ID required", http.StatusBadRequest)
+		http.Error(w, "thread ID required", http.StatusBadRequest)
 		return
 	}
 
@@ -162,71 +94,200 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleThreadHistory handles GET /threads/{thread_id}/history
-func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
-	threadID := extractThreadID(r)
-	if threadID == "" {
-		http.Error(w, "Thread ID required", http.StatusBadRequest)
-		return
+func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Limit     int    `json:"limit"`
+		Offset    int    `json:"offset"`
+		SortBy    string `json:"sort_by"`
+		SortOrder string `json:"sort_order"`
+	}
+	if r.Body != nil {
+		defer r.Body.Close()
+		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 
-	s.sessionsMu.RLock()
-	session, exists := s.sessions[threadID]
-	s.sessionsMu.RUnlock()
-
-	if !exists {
-		http.Error(w, "Thread not found", http.StatusNotFound)
-		return
+	if req.Limit <= 0 {
+		req.Limit = 10
+	}
+	if req.SortBy == "" {
+		req.SortBy = "updated_at"
+	}
+	if req.SortOrder == "" {
+		req.SortOrder = "desc"
 	}
 
-	messages := s.messagesToLangChain(session.Messages)
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(messages)
-}
-
-// handleThreadList handles GET /threads
-func (s *Server) handleThreadList(w http.ResponseWriter, r *http.Request) {
 	s.sessionsMu.RLock()
 	threads := make([]map[string]any, 0, len(s.sessions))
-
 	for _, session := range s.sessions {
-		threads = append(threads, map[string]any{
-			"thread_id":   session.ThreadID,
-			"created_at":   session.CreatedAt.Unix(),
-			"updated_at":   session.UpdatedAt.Unix(),
-			"values": map[string]any{
-				"title": session.Metadata["title"],
-			},
-			"metadata": session.Metadata,
-		})
+		threads = append(threads, s.threadResponse(session))
 	}
 	s.sessionsMu.RUnlock()
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(threads)
+	sort.Slice(threads, func(i, j int) bool {
+		left := threads[i]
+		right := threads[j]
+		var less bool
+		switch req.SortBy {
+		case "created_at":
+			less = left["created_at"].(string) < right["created_at"].(string)
+		case "thread_id":
+			less = left["thread_id"].(string) < right["thread_id"].(string)
+		default:
+			less = left["updated_at"].(string) < right["updated_at"].(string)
+		}
+		if strings.EqualFold(req.SortOrder, "asc") {
+			return less
+		}
+		return !less
+	})
+
+	start := req.Offset
+	if start > len(threads) {
+		start = len(threads)
+	}
+	end := start + req.Limit
+	if end > len(threads) {
+		end = len(threads)
+	}
+
+	writeJSON(w, http.StatusOK, threads[start:end])
 }
 
-// handleRunGet handles GET /runs/{run_id}
+func (s *Server) handleThreadStateGet(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	if threadID == "" {
+		http.Error(w, "thread ID required", http.StatusBadRequest)
+		return
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		http.Error(w, "thread not found", http.StatusNotFound)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, state)
+}
+
+func (s *Server) handleThreadStatePost(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	if threadID == "" {
+		http.Error(w, "thread ID required", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Values map[string]any `json:"values"`
+	}
+	defer r.Body.Close()
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	s.sessionsMu.Lock()
+	session, exists := s.sessions[threadID]
+	if !exists {
+		s.sessionsMu.Unlock()
+		http.Error(w, "thread not found", http.StatusNotFound)
+		return
+	}
+
+	if title, ok := req.Values["title"].(string); ok {
+		session.Metadata["title"] = title
+	}
+	session.UpdatedAt = time.Now().UTC()
+	s.sessionsMu.Unlock()
+
+	writeJSON(w, http.StatusOK, s.getThreadState(threadID))
+}
+
+func (s *Server) handleThreadStatePatch(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	if threadID == "" {
+		http.Error(w, "thread ID required", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Metadata map[string]any `json:"metadata"`
+	}
+	defer r.Body.Close()
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	s.sessionsMu.Lock()
+	session, exists := s.sessions[threadID]
+	if !exists {
+		s.sessionsMu.Unlock()
+		http.Error(w, "thread not found", http.StatusNotFound)
+		return
+	}
+	for k, v := range req.Metadata {
+		session.Metadata[k] = v
+	}
+	session.UpdatedAt = time.Now().UTC()
+	s.sessionsMu.Unlock()
+
+	writeJSON(w, http.StatusOK, s.getThreadState(threadID))
+}
+
+func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	if threadID == "" {
+		http.Error(w, "thread ID required", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Limit int `json:"limit"`
+	}
+	if r.Body != nil {
+		defer r.Body.Close()
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		http.Error(w, "thread not found", http.StatusNotFound)
+		return
+	}
+
+	history := []ThreadState{*state}
+	if req.Limit == 0 || req.Limit > len(history) {
+		req.Limit = len(history)
+	}
+	writeJSON(w, http.StatusOK, history[:req.Limit])
+}
+
 func (s *Server) handleRunGet(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
-		"run_id": "placeholder",
-		"status": "completed",
+	runID := r.PathValue("run_id")
+	run := s.getRun(runID)
+	if run == nil {
+		http.Error(w, "run not found", http.StatusNotFound)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"run_id":       run.RunID,
+		"thread_id":    run.ThreadID,
+		"assistant_id": run.AssistantID,
+		"status":       run.Status,
+		"created_at":   run.CreatedAt.Format(time.RFC3339Nano),
+		"updated_at":   run.UpdatedAt.Format(time.RFC3339Nano),
 	})
 }
 
-// handleHealth handles GET /health
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "ok",
 	})
 }
 
 func (s *Server) messagesToLangChain(messages []models.Message) []Message {
 	result := make([]Message, 0, len(messages))
-
 	for _, msg := range messages {
 		msgType := "human"
 		role := "human"
@@ -235,9 +296,6 @@ func (s *Server) messagesToLangChain(messages []models.Message) []Message {
 		case models.RoleAI:
 			msgType = "ai"
 			role = "assistant"
-		case models.RoleHuman:
-			msgType = "human"
-			role = "human"
 		case models.RoleSystem:
 			msgType = "system"
 			role = "system"
@@ -253,20 +311,153 @@ func (s *Server) messagesToLangChain(messages []models.Message) []Message {
 			Content: msg.Content,
 		})
 	}
-
 	return result
 }
 
-func extractThreadID(r *http.Request) string {
-	// Extract thread_id from path /threads/{thread_id}
-	path := r.URL.Path
-	if strings.HasPrefix(path, "/threads/") {
-		id := strings.TrimPrefix(path, "/threads/")
-		// Remove /history, /state, etc.
-		if idx := strings.Index(id, "/"); idx > 0 {
-			id = id[:idx]
-		}
-		return id
+func (s *Server) threadResponse(session *Session) map[string]any {
+	return map[string]any{
+		"thread_id":  session.ThreadID,
+		"created_at": session.CreatedAt.Format(time.RFC3339Nano),
+		"updated_at": session.UpdatedAt.Format(time.RFC3339Nano),
+		"metadata":   session.Metadata,
+		"status":     session.Status,
+		"config": map[string]any{
+			"configurable": map[string]any{},
+		},
+		"values": map[string]any{
+			"title": session.Metadata["title"],
+		},
 	}
-	return ""
+}
+
+func (s *Server) getThreadState(threadID string) *ThreadState {
+	s.sessionsMu.RLock()
+	session, exists := s.sessions[threadID]
+	s.sessionsMu.RUnlock()
+	if !exists {
+		return nil
+	}
+
+	values := map[string]any{
+		"messages":  s.messagesToLangChain(session.Messages),
+		"title":     stringValue(session.Metadata["title"]),
+		"artifacts": []string{},
+	}
+
+	return &ThreadState{
+		CheckpointID: uuid.New().String(),
+		Values:       values,
+		Next:         []string{},
+		Tasks:        []any{},
+		Metadata: map[string]any{
+			"thread_id": threadID,
+			"step":      0,
+		},
+		CreatedAt: session.UpdatedAt.Format(time.RFC3339Nano),
+	}
+}
+
+func (s *Server) ensureSession(threadID string, metadata map[string]any) *Session {
+	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+
+	if session, exists := s.sessions[threadID]; exists {
+		if metadata != nil {
+			for k, v := range metadata {
+				session.Metadata[k] = v
+			}
+		}
+		return session
+	}
+
+	if metadata == nil {
+		metadata = make(map[string]any)
+	}
+	now := time.Now().UTC()
+	session := &Session{
+		ThreadID:  threadID,
+		Messages:  []models.Message{},
+		Metadata:  metadata,
+		Status:    "idle",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	s.sessions[threadID] = session
+	return session
+}
+
+func (s *Server) markThreadStatus(threadID string, status string) {
+	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+	if session, exists := s.sessions[threadID]; exists {
+		session.Status = status
+		session.UpdatedAt = time.Now().UTC()
+	}
+}
+
+func (s *Server) saveRun(run *Run) {
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
+	copyRun := *run
+	copyRun.Events = append([]StreamEvent(nil), run.Events...)
+	s.runs[run.RunID] = &copyRun
+}
+
+func (s *Server) appendRunEvent(runID string, event StreamEvent) {
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
+	if run, exists := s.runs[runID]; exists {
+		run.Events = append(run.Events, event)
+		run.UpdatedAt = time.Now().UTC()
+	}
+}
+
+func (s *Server) nextRunEventIndex(runID string) int {
+	s.runsMu.RLock()
+	defer s.runsMu.RUnlock()
+	if run, exists := s.runs[runID]; exists {
+		return len(run.Events) + 1
+	}
+	return 1
+}
+
+func (s *Server) getRun(runID string) *Run {
+	s.runsMu.RLock()
+	defer s.runsMu.RUnlock()
+	run, exists := s.runs[runID]
+	if !exists {
+		return nil
+	}
+	copyRun := *run
+	copyRun.Events = append([]StreamEvent(nil), run.Events...)
+	return &copyRun
+}
+
+func (s *Server) getLatestRunForThread(threadID string) *Run {
+	s.runsMu.RLock()
+	defer s.runsMu.RUnlock()
+
+	var latest *Run
+	for _, run := range s.runs {
+		if run.ThreadID != threadID {
+			continue
+		}
+		if latest == nil || run.CreatedAt.After(latest.CreatedAt) {
+			copyRun := *run
+			copyRun.Events = append([]StreamEvent(nil), run.Events...)
+			latest = &copyRun
+		}
+	}
+	return latest
+}
+
+func stringValue(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
 }

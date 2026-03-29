@@ -25,20 +25,43 @@ type Server struct {
 	store      *checkpoint.PostgresStore
 	sessions   map[string]*Session
 	sessionsMu sync.RWMutex
+	runs       map[string]*Run
+	runsMu     sync.RWMutex
 }
 
 type Session struct {
 	ThreadID  string
 	Messages  []models.Message
 	Metadata  map[string]any
+	Status    string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
 
+type ThreadState struct {
+	CheckpointID string         `json:"checkpoint_id,omitempty"`
+	Values       map[string]any `json:"values"`
+	Next         []string       `json:"next"`
+	Tasks        []any          `json:"tasks"`
+	Metadata     map[string]any `json:"metadata"`
+	CreatedAt    string         `json:"created_at,omitempty"`
+}
+
+type Run struct {
+	RunID       string
+	ThreadID    string
+	AssistantID string
+	Status      string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	Events      []StreamEvent
+	Error       string
+}
+
 // LangGraph API types
 type RunCreateRequest struct {
-	AssistantID string        `json:"assistant_id"`
-	ThreadID    string        `json:"thread_id,omitempty"`
+	AssistantID string         `json:"assistant_id"`
+	ThreadID    string         `json:"thread_id,omitempty"`
 	Input       map[string]any `json:"input,omitempty"`
 	Config      map[string]any `json:"config,omitempty"`
 }
@@ -65,10 +88,11 @@ type ToolCall struct {
 }
 
 type StreamEvent struct {
-	event    string
-	data     any
-	runID    string
-	threadID string
+	ID       string
+	Event    string
+	Data     any
+	RunID    string
+	ThreadID string
 }
 
 func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) {
@@ -108,6 +132,7 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		agent:    a,
 		store:    store,
 		sessions: make(map[string]*Session),
+		runs:     make(map[string]*Run),
 	}
 
 	mux := http.NewServeMux()
@@ -125,14 +150,21 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// LangGraph-compatible endpoints
 	mux.HandleFunc("POST /runs/stream", s.handleRunsStream)
 	mux.HandleFunc("GET /runs/{run_id}", s.handleRunGet)
+	mux.HandleFunc("GET /runs/{run_id}/stream", s.handleRunStream)
 
 	// Thread endpoints
 	mux.HandleFunc("GET /threads/{thread_id}", s.handleThreadGet)
 	mux.HandleFunc("POST /threads", s.handleThreadCreate)
-	mux.HandleFunc("PUT /threads/{thread_id}", s.handleThreadUpdate)
+	mux.HandleFunc("PATCH /threads/{thread_id}", s.handleThreadUpdate)
 	mux.HandleFunc("DELETE /threads/{thread_id}", s.handleThreadDelete)
-	mux.HandleFunc("GET /threads/{thread_id}/history", s.handleThreadHistory)
-	mux.HandleFunc("GET /threads", s.handleThreadList)
+	mux.HandleFunc("POST /threads/search", s.handleThreadSearch)
+	mux.HandleFunc("GET /threads/{thread_id}/state", s.handleThreadStateGet)
+	mux.HandleFunc("POST /threads/{thread_id}/state", s.handleThreadStatePost)
+	mux.HandleFunc("PATCH /threads/{thread_id}/state", s.handleThreadStatePatch)
+	mux.HandleFunc("POST /threads/{thread_id}/history", s.handleThreadHistory)
+	mux.HandleFunc("POST /threads/{thread_id}/runs/stream", s.handleThreadRunsStream)
+	mux.HandleFunc("GET /threads/{thread_id}/runs/{run_id}/stream", s.handleThreadRunStream)
+	mux.HandleFunc("GET /threads/{thread_id}/stream", s.handleThreadJoinStream)
 
 	// Health check
 	mux.HandleFunc("GET /health", s.handleHealth)

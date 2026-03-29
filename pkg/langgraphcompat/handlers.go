@@ -8,60 +8,132 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/google/uuid"
+
+	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
-// handleRunsStream handles POST /runs/stream
-// This is the main streaming endpoint that the frontend uses
 func (s *Server) handleRunsStream(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+	s.handleStreamRequest(w, r, "")
+}
 
+func (s *Server) handleThreadRunsStream(w http.ResponseWriter, r *http.Request) {
+	s.handleStreamRequest(w, r, r.PathValue("thread_id"))
+}
+
+func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, routeThreadID string) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to read body: %v", err), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("failed to read body: %v", err), http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
 
 	var req RunCreateRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
-		return
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &req); err != nil {
+			http.Error(w, fmt.Sprintf("invalid request: %v", err), http.StatusBadRequest)
+			return
+		}
 	}
 
-	// Get or create thread ID
-	threadID := req.ThreadID
+	threadID := routeThreadID
+	if threadID == "" {
+		threadID = req.ThreadID
+	}
 	if threadID == "" {
 		threadID = uuid.New().String()
 	}
 
-	// Get input messages from request
+	session := s.ensureSession(threadID, nil)
+	s.markThreadStatus(threadID, "busy")
+
 	input := req.Input
 	if input == nil {
 		input = make(map[string]any)
 	}
+	messages, _ := input["messages"].([]any)
+	newMessages := s.convertToMessages(threadID, messages)
 
-	// Extract messages from input
-	messages, ok := input["messages"].([]any)
-	if !ok {
-		messages = []any{}
-	}
-
-	// Convert to models.Message
-	deerMessages := s.convertToMessages(threadID, messages)
-
-	// Get existing session messages if thread exists
 	s.sessionsMu.RLock()
-	if session, exists := s.sessions[threadID]; exists {
-		deerMessages = append(session.Messages, deerMessages...)
-	}
+	existingMessages := append([]models.Message(nil), session.Messages...)
 	s.sessionsMu.RUnlock()
+	deerMessages := append(existingMessages, newMessages...)
 
-	// Set up SSE streaming
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	runID := uuid.New().String()
+	run := &Run{
+		RunID:       runID,
+		ThreadID:    threadID,
+		AssistantID: req.AssistantID,
+		Status:      "running",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.saveRun(run)
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.Header().Set("Content-Location", fmt.Sprintf("/threads/%s/runs/%s", threadID, runID))
+
+	s.recordAndSendEvent(w, flusher, run, "metadata", map[string]any{
+		"run_id":    runID,
+		"thread_id": threadID,
+	})
+
+	ctx := r.Context()
+	result, err := s.agent.Run(ctx, threadID, deerMessages)
+	if err != nil {
+		run.Status = "error"
+		run.Error = err.Error()
+		run.UpdatedAt = time.Now().UTC()
+		s.saveRun(run)
+		s.markThreadStatus(threadID, "error")
+		s.recordAndSendEvent(w, flusher, run, "error", map[string]any{
+			"error":   "RunError",
+			"name":    "RunError",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	s.saveSession(threadID, result.Messages)
+	state := s.getThreadState(threadID)
+
+	s.recordAndSendEvent(w, flusher, run, "updates", map[string]any{
+		"agent": map[string]any{
+			"messages":  state.Values["messages"],
+			"title":     state.Values["title"],
+			"artifacts": state.Values["artifacts"],
+		},
+	})
+	s.recordAndSendEvent(w, flusher, run, "values", state.Values)
+
+	run.Status = "success"
+	run.UpdatedAt = time.Now().UTC()
+	s.saveRun(run)
+	s.markThreadStatus(threadID, "idle")
+}
+
+func (s *Server) handleRunStream(w http.ResponseWriter, r *http.Request) {
+	s.streamRecordedRun(w, r, "", r.PathValue("run_id"))
+}
+
+func (s *Server) handleThreadRunStream(w http.ResponseWriter, r *http.Request) {
+	s.streamRecordedRun(w, r, r.PathValue("thread_id"), r.PathValue("run_id"))
+}
+
+func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	run := s.getLatestRunForThread(threadID)
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -69,71 +141,56 @@ func (s *Server) handleRunsStream(w http.ResponseWriter, r *http.Request) {
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
 		return
 	}
 
-	runID := uuid.New().String()
-
-	// Send thread creation event if new thread
-	if req.ThreadID == "" {
-		s.sendSSEEvent(w, flusher, "thread", map[string]any{
-			"thread_id": threadID,
-			"created_at": time.Now().Unix(),
-		})
-	}
-
-	// Send run creation event
-	s.sendSSEEvent(w, flusher, "metadata", map[string]any{
-		"run_id":    runID,
-		"thread_id": threadID,
-	})
-
-	// Run agent and stream events
-	ctx := r.Context()
-	result, err := s.agent.Run(ctx, threadID, deerMessages)
-
-	if err != nil {
-		s.sendSSEEvent(w, flusher, "error", map[string]any{
-			"error": err.Error(),
-		})
+	if run == nil {
+		fmt.Fprint(w, ": no active run\n\n")
+		flusher.Flush()
 		return
 	}
 
-	// Stream each message update
-	for _, msg := range result.Messages {
-		// Send human message
-		s.sendSSEEvent(w, flusher, "messages", map[string]any{
-			"data": []Message{
-				{
-					Type:    "human",
-					ID:      msg.ID,
-					Content: msg.Content,
-				},
-			},
-		})
-
-		// Send AI message
-		s.sendSSEEvent(w, flusher, "messages", map[string]any{
-			"data": []Message{
-				{
-					Type:    "ai",
-					ID:      msg.ID + "_ai",
-					Content: msg.Content,
-				},
-			},
-		})
+	for _, event := range run.Events {
+		if event.ID != "" {
+			fmt.Fprintf(w, "id: %s\n", event.ID)
+		}
+		jsonData, err := json.Marshal(event.Data)
+		if err != nil {
+			continue
+		}
+		fmt.Fprintf(w, "event: %s\n", event.Event)
+		fmt.Fprintf(w, "data: %s\n\n", jsonData)
 	}
-
-	// Save session
-	s.saveSession(threadID, result.Messages)
-
-	// Send completion event
-	s.sendSSEEvent(w, flusher, "done", map[string]any{
-		"run_id": runID,
-	})
-
 	flusher.Flush()
+}
+
+func (s *Server) streamRecordedRun(w http.ResponseWriter, r *http.Request, threadID string, runID string) {
+	run := s.getRun(runID)
+	if run == nil {
+		http.Error(w, "run not found", http.StatusNotFound)
+		return
+	}
+	if threadID != "" && run.ThreadID != threadID {
+		http.Error(w, "run not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.Header().Set("Content-Location", fmt.Sprintf("/threads/%s/runs/%s", run.ThreadID, run.RunID))
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	for _, event := range run.Events {
+		s.sendSSEEvent(w, flusher, event)
+	}
 }
 
 func (s *Server) convertToMessages(threadID string, input []any) []models.Message {
@@ -147,8 +204,11 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 		}
 
 		role, _ := msgMap["role"].(string)
-		content, _ := msgMap["content"].(string)
+		if role == "" {
+			role, _ = msgMap["type"].(string)
+		}
 
+		content := extractMessageContent(msgMap["content"])
 		if role == "" || content == "" {
 			continue
 		}
@@ -166,6 +226,29 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 	return messages
 }
 
+func extractMessageContent(raw any) string {
+	switch v := raw.(type) {
+	case string:
+		return v
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			part, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if partType, _ := part["type"].(string); partType == "text" {
+				if text, _ := part["text"].(string); text != "" {
+					parts = append(parts, text)
+				}
+			}
+		}
+		return strings.Join(parts, "\n")
+	default:
+		return ""
+	}
+}
+
 func (s *Server) convertRole(langchainRole string) models.Role {
 	switch strings.ToLower(langchainRole) {
 	case "human", "user":
@@ -181,15 +264,30 @@ func (s *Server) convertRole(langchainRole string) models.Role {
 	}
 }
 
-func (s *Server) sendSSEEvent(w http.ResponseWriter, flusher http.Flusher, event string, data map[string]any) {
-	jsonData, err := json.Marshal(data)
+func (s *Server) sendSSEEvent(w http.ResponseWriter, flusher http.Flusher, event StreamEvent) {
+	jsonData, err := json.Marshal(event.Data)
 	if err != nil {
 		return
 	}
 
-	fmt.Fprintf(w, "event: %s\n", event)
+	if event.ID != "" {
+		fmt.Fprintf(w, "id: %s\n", event.ID)
+	}
+	fmt.Fprintf(w, "event: %s\n", event.Event)
 	fmt.Fprintf(w, "data: %s\n\n", jsonData)
 	flusher.Flush()
+}
+
+func (s *Server) recordAndSendEvent(w http.ResponseWriter, flusher http.Flusher, run *Run, eventType string, data any) {
+	event := StreamEvent{
+		ID:       fmt.Sprintf("%s:%d", run.RunID, s.nextRunEventIndex(run.RunID)),
+		Event:    eventType,
+		Data:     data,
+		RunID:    run.RunID,
+		ThreadID: run.ThreadID,
+	}
+	s.appendRunEvent(run.RunID, event)
+	s.sendSSEEvent(w, flusher, event)
 }
 
 func (s *Server) saveSession(threadID string, messages []models.Message) {
@@ -198,14 +296,16 @@ func (s *Server) saveSession(threadID string, messages []models.Message) {
 
 	if session, exists := s.sessions[threadID]; exists {
 		session.Messages = append(session.Messages, messages...)
-		session.UpdatedAt = time.Now()
+		session.Status = "idle"
+		session.UpdatedAt = time.Now().UTC()
 	} else {
 		s.sessions[threadID] = &Session{
 			ThreadID:  threadID,
-			Messages:  messages,
+			Messages:  append([]models.Message(nil), messages...),
 			Metadata:  make(map[string]any),
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+			Status:    "idle",
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
 		}
 	}
 }
