@@ -312,6 +312,37 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleThreadClarificationCreate(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	if threadID == "" {
+		http.Error(w, "thread ID required", http.StatusBadRequest)
+		return
+	}
+	if s.getThreadState(threadID) == nil {
+		http.Error(w, "thread not found", http.StatusNotFound)
+		return
+	}
+	s.clarifyAPI.HandleCreate(w, r, threadID)
+}
+
+func (s *Server) handleThreadClarificationGet(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	if threadID == "" {
+		http.Error(w, "thread ID required", http.StatusBadRequest)
+		return
+	}
+	s.clarifyAPI.HandleGet(w, r, threadID, r.PathValue("id"))
+}
+
+func (s *Server) handleThreadClarificationResolve(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	if threadID == "" {
+		http.Error(w, "thread ID required", http.StatusBadRequest)
+		return
+	}
+	s.clarifyAPI.HandleResolve(w, r, threadID, r.PathValue("id"))
+}
+
 func (s *Server) messagesToLangChain(messages []models.Message) []Message {
 	result := make([]Message, 0, len(messages))
 	for _, msg := range messages {
@@ -348,7 +379,9 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 		"metadata":   session.Metadata,
 		"status":     session.Status,
 		"config": map[string]any{
-			"configurable": map[string]any{},
+			"configurable": map[string]any{
+				"agent_type": stringValue(session.Metadata["agent_type"]),
+			},
 		},
 		"values": map[string]any{
 			"title":     session.Metadata["title"],
@@ -419,6 +452,18 @@ func (s *Server) markThreadStatus(threadID string, status string) {
 	defer s.sessionsMu.Unlock()
 	if session, exists := s.sessions[threadID]; exists {
 		session.Status = status
+		session.UpdatedAt = time.Now().UTC()
+	}
+}
+
+func (s *Server) setThreadMetadata(threadID string, key string, value any) {
+	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+	if session, exists := s.sessions[threadID]; exists {
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]any)
+		}
+		session.Metadata[key] = value
 		session.UpdatedAt = time.Now().UTC()
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
+	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/google/uuid"
 
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -20,6 +21,7 @@ import (
 type runConfig struct {
 	ModelName       string
 	ReasoningEffort string
+	AgentType       agent.AgentType
 	Temperature     *float64
 	MaxTokens       *int
 }
@@ -103,8 +105,12 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	})
 
 	runCfg := parseRunConfig(req.Config)
+	if runCfg.AgentType != "" {
+		s.setThreadMetadata(threadID, "agent_type", string(runCfg.AgentType))
+	}
 	runAgent := s.newAgent(agent.AgentConfig{
 		PresentFiles:    session.PresentFiles,
+		AgentType:       runCfg.AgentType,
 		Model:           firstNonEmpty(runCfg.ModelName, s.defaultModel),
 		ReasoningEffort: runCfg.ReasoningEffort,
 		Temperature:     runCfg.Temperature,
@@ -113,6 +119,13 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 
 	ctx := subagent.WithEventSink(r.Context(), func(evt subagent.TaskEvent) {
 		s.forwardTaskEvent(w, flusher, run, evt)
+	})
+	ctx = clarification.WithThreadID(ctx, threadID)
+	ctx = clarification.WithEventSink(ctx, func(item *clarification.Clarification) {
+		if item == nil {
+			return
+		}
+		s.recordAndSendEvent(w, flusher, run, "clarification_request", item)
 	})
 	eventsDone := make(chan struct{})
 	go func() {
@@ -425,6 +438,7 @@ func parseRunConfig(raw map[string]any) runConfig {
 	cfg := runConfig{
 		ModelName:       firstNonEmpty(stringFromAny(raw["model_name"]), stringFromAny(raw["model"]), stringFromAny(configurable["model_name"]), stringFromAny(configurable["model"])),
 		ReasoningEffort: firstNonEmpty(stringFromAny(raw["reasoning_effort"]), stringFromAny(configurable["reasoning_effort"])),
+		AgentType:       agent.AgentType(firstNonEmpty(stringFromAny(raw["agent_type"]), stringFromAny(configurable["agent_type"]))),
 		Temperature:     floatPointerFromAny(firstNonNil(raw["temperature"], configurable["temperature"])),
 		MaxTokens:       intPointerFromAny(firstNonNil(raw["max_tokens"], configurable["max_tokens"])),
 	}

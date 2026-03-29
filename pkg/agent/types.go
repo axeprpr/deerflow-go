@@ -26,9 +26,11 @@ type AgentConfig struct {
 	LLMProvider     llm.LLMProvider
 	Tools           *tools.Registry
 	PresentFiles    *tools.PresentFileRegistry
+	AgentType       AgentType
 	MaxTurns        int
 	Model           string
 	ReasoningEffort string
+	SystemPrompt    string
 	Temperature     *float64
 	MaxTokens       *int
 	Sandbox         *sandbox.Sandbox

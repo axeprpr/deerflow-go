@@ -15,6 +15,7 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/checkpoint"
+	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	deerflowmcp "github.com/axeprpr/deerflow-go/pkg/mcp"
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -46,20 +47,22 @@ type app struct {
 	llmProvider  llm.LLMProvider
 	tools        *tools.Registry
 	sandbox      *sandbox.Sandbox
+	clarify      *clarification.Manager
 	store        sessionStore
 	subagentPool *subagent.Pool
 }
 
 type runRequest struct {
-	SessionID       string         `json:"session_id"`
-	UserID          string         `json:"user_id"`
-	Message         string         `json:"message"`
-	Model           string         `json:"model"`
-	ModelName       string         `json:"model_name"`
-	ReasoningEffort string         `json:"reasoning_effort"`
-	Temperature     *float64       `json:"temperature"`
-	MaxTokens       *int           `json:"max_tokens"`
-	Config          map[string]any `json:"config,omitempty"`
+	SessionID       string          `json:"session_id"`
+	UserID          string          `json:"user_id"`
+	Message         string          `json:"message"`
+	Model           string          `json:"model"`
+	ModelName       string          `json:"model_name"`
+	ReasoningEffort string          `json:"reasoning_effort"`
+	AgentType       agent.AgentType `json:"agent_type,omitempty"`
+	Temperature     *float64        `json:"temperature"`
+	MaxTokens       *int            `json:"max_tokens"`
+	Config          map[string]any  `json:"config,omitempty"`
 }
 
 type runResponse struct {
@@ -176,7 +179,9 @@ func newApp(ctx context.Context, cfg config) (*app, func(), error) {
 	}
 
 	registry := tools.NewRegistry()
+	clarifyManager := clarification.NewManager(32)
 	registerBuiltins(registry)
+	mustRegister(registry, clarification.AskClarificationTool(clarifyManager))
 
 	var cleanupFns []func()
 	if strings.TrimSpace(cfg.MCPServerCommand) != "" {
@@ -219,6 +224,7 @@ func newApp(ctx context.Context, cfg config) (*app, func(), error) {
 		llmProvider:  provider,
 		tools:        registry,
 		sandbox:      sb,
+		clarify:      clarifyManager,
 		store:        store,
 		subagentPool: subagentPool,
 	}, cleanup, nil
@@ -243,7 +249,7 @@ func (a *app) handleRun(w http.ResponseWriter, r *http.Request) {
 	req.UserID = defaultUserID(req.UserID)
 	req.Message = strings.TrimSpace(req.Message)
 	req.Model = strings.TrimSpace(firstNonEmpty(req.Model, req.ModelName))
-	if cfg := parseRunConfig(req.Config); cfg.ModelName != "" || cfg.ReasoningEffort != "" || cfg.Temperature != nil || cfg.MaxTokens != nil {
+	if cfg := parseRunConfig(req.Config); cfg.ModelName != "" || cfg.ReasoningEffort != "" || cfg.AgentType != "" || cfg.Temperature != nil || cfg.MaxTokens != nil {
 		if req.Model == "" {
 			req.Model = cfg.ModelName
 		}
@@ -255,6 +261,9 @@ func (a *app) handleRun(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.MaxTokens == nil {
 			req.MaxTokens = cfg.MaxTokens
+		}
+		if req.AgentType == "" {
+			req.AgentType = cfg.AgentType
 		}
 	}
 	req.ReasoningEffort = strings.TrimSpace(req.ReasoningEffort)
@@ -314,6 +323,7 @@ func (a *app) run(ctx context.Context, req runRequest) (runResponse, error) {
 		Tools:           a.tools,
 		Sandbox:         a.sandbox,
 		MaxTurns:        a.cfg.MaxTurns,
+		AgentType:       req.AgentType,
 		Model:           modelName,
 		ReasoningEffort: req.ReasoningEffort,
 		Temperature:     req.Temperature,
@@ -376,6 +386,7 @@ func (a *app) streamRun(w http.ResponseWriter, r *http.Request, req runRequest) 
 		Tools:           a.tools,
 		Sandbox:         a.sandbox,
 		MaxTurns:        a.cfg.MaxTurns,
+		AgentType:       req.AgentType,
 		Model:           modelName,
 		ReasoningEffort: req.ReasoningEffort,
 		Temperature:     req.Temperature,
@@ -387,6 +398,11 @@ func (a *app) streamRun(w http.ResponseWriter, r *http.Request, req runRequest) 
 	w.Header().Set("Connection", "keep-alive")
 
 	done := make(chan struct{})
+	ctx := clarification.WithThreadID(r.Context(), req.SessionID)
+	ctx = clarification.WithEventSink(ctx, func(item *clarification.Clarification) {
+		writeSSE(w, "clarification_request", item)
+		flusher.Flush()
+	})
 	go func() {
 		defer close(done)
 		for evt := range runAgent.Events() {
@@ -395,7 +411,7 @@ func (a *app) streamRun(w http.ResponseWriter, r *http.Request, req runRequest) 
 		}
 	}()
 
-	result, err := runAgent.Run(r.Context(), req.SessionID, history)
+	result, err := runAgent.Run(ctx, req.SessionID, history)
 	<-done
 	if err != nil {
 		return
@@ -558,6 +574,7 @@ func parseRunConfig(raw map[string]any) parsedRunConfig {
 	return parsedRunConfig{
 		ModelName:       firstNonEmpty(stringFromAny(raw["model_name"]), stringFromAny(raw["model"]), stringFromAny(configurable["model_name"]), stringFromAny(configurable["model"])),
 		ReasoningEffort: firstNonEmpty(stringFromAny(raw["reasoning_effort"]), stringFromAny(configurable["reasoning_effort"])),
+		AgentType:       agent.AgentType(firstNonEmpty(stringFromAny(raw["agent_type"]), stringFromAny(configurable["agent_type"]))),
 		Temperature:     floatPointerFromAny(firstNonNil(raw["temperature"], configurable["temperature"])),
 		MaxTokens:       intPointerFromAny(firstNonNil(raw["max_tokens"], configurable["max_tokens"])),
 	}
@@ -566,6 +583,7 @@ func parseRunConfig(raw map[string]any) parsedRunConfig {
 type parsedRunConfig struct {
 	ModelName       string
 	ReasoningEffort string
+	AgentType       agent.AgentType
 	Temperature     *float64
 	MaxTokens       *int
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/checkpoint"
+	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
@@ -25,6 +26,8 @@ type Server struct {
 	llmProvider  llm.LLMProvider
 	tools        *tools.Registry
 	subagents    *subagent.Pool
+	clarify      *clarification.Manager
+	clarifyAPI   *clarification.API
 	defaultModel string
 	maxTurns     int
 	store        *checkpoint.PostgresStore
@@ -110,10 +113,12 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 
 	// Create tool registry with built-in tools
 	registry := tools.NewRegistry()
+	clarifyManager := clarification.NewManager(32)
 	registry.Register(builtin.BashTool())
 	for _, tool := range builtin.FileTools() {
 		registry.Register(tool)
 	}
+	registry.Register(clarification.AskClarificationTool(clarifyManager))
 	subagentPool := agent.NewSubagentPool(provider, registry, nil, 2, 2*time.Minute)
 	registry.Register(tools.TaskTool(subagentPool))
 
@@ -132,6 +137,8 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		llmProvider:  provider,
 		tools:        registry,
 		subagents:    subagentPool,
+		clarify:      clarifyManager,
+		clarifyAPI:   clarification.NewAPI(clarifyManager),
 		defaultModel: defaultModel,
 		maxTurns:     8,
 		store:        store,
@@ -156,8 +163,10 @@ func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
 		Tools:           s.tools,
 		PresentFiles:    cfg.PresentFiles,
 		MaxTurns:        s.maxTurns,
+		AgentType:       cfg.AgentType,
 		Model:           cfg.Model,
 		ReasoningEffort: cfg.ReasoningEffort,
+		SystemPrompt:    cfg.SystemPrompt,
 		Temperature:     cfg.Temperature,
 		MaxTokens:       cfg.MaxTokens,
 		Sandbox:         cfg.Sandbox,
@@ -184,6 +193,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /threads/{thread_id}/runs/stream", s.handleThreadRunsStream)
 	mux.HandleFunc("GET /threads/{thread_id}/runs/{run_id}/stream", s.handleThreadRunStream)
 	mux.HandleFunc("GET /threads/{thread_id}/stream", s.handleThreadJoinStream)
+	mux.HandleFunc("POST /threads/{thread_id}/clarifications", s.handleThreadClarificationCreate)
+	mux.HandleFunc("GET /threads/{thread_id}/clarifications/{id}", s.handleThreadClarificationGet)
+	mux.HandleFunc("POST /threads/{thread_id}/clarifications/{id}/resolve", s.handleThreadClarificationResolve)
 
 	// Health check
 	mux.HandleFunc("GET /health", s.handleHealth)

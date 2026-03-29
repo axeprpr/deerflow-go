@@ -27,8 +27,10 @@ type Agent struct {
 	llm             llm.LLMProvider
 	tools           *tools.Registry
 	sandbox         *sandbox.Sandbox
+	agentType       AgentType
 	model           string
 	reasoningEffort string
+	systemPrompt    string
 	temperature     *float64
 	maxTokens       *int
 	maxTurns        int
@@ -36,6 +38,10 @@ type Agent struct {
 }
 
 func New(cfg AgentConfig) *Agent {
+	if err := ApplyAgentType(&cfg, cfg.AgentType); err != nil {
+		cfg.AgentType = AgentTypeGeneral
+		_ = ApplyAgentType(&cfg, AgentTypeGeneral)
+	}
 	maxTurns := cfg.MaxTurns
 	if maxTurns <= 0 {
 		maxTurns = defaultMaxTurns
@@ -51,8 +57,10 @@ func New(cfg AgentConfig) *Agent {
 		llm:             cfg.LLMProvider,
 		tools:           registry,
 		sandbox:         cfg.Sandbox,
+		agentType:       cfg.AgentType,
 		model:           resolveModel(cfg.Model),
 		reasoningEffort: strings.TrimSpace(cfg.ReasoningEffort),
+		systemPrompt:    strings.TrimSpace(cfg.SystemPrompt),
 		temperature:     cfg.Temperature,
 		maxTokens:       cfg.MaxTokens,
 		maxTurns:        maxTurns,
@@ -252,7 +260,8 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 
 func (a *Agent) BuildSystemPrompt(_ context.Context, _ string) string {
 	sections := []string{
-		"You are a ReAct-style agent. Think step by step, call tools when necessary, and stop when you have a complete answer.",
+		strings.TrimSpace(a.systemPrompt),
+		"You are running in a ReAct-style loop. Think step by step, call tools when necessary, and stop when you have a complete answer.",
 	}
 	if toolDescriptions := a.tools.Descriptions(); strings.TrimSpace(toolDescriptions) != "" {
 		sections = append(sections, "Available Tools:\n"+toolDescriptions)

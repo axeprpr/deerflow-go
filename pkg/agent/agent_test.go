@@ -85,7 +85,8 @@ func TestAgent_New_WithTools(t *testing.T) {
 
 func TestAgent_BuildSystemPrompt(t *testing.T) {
 	cfg := AgentConfig{
-		MaxTurns: 5,
+		MaxTurns:     5,
+		SystemPrompt: "custom system prompt",
 	}
 
 	agent := New(cfg)
@@ -95,6 +96,9 @@ func TestAgent_BuildSystemPrompt(t *testing.T) {
 
 	if prompt == "" {
 		t.Error("System prompt should not be empty")
+	}
+	if prompt == "custom system prompt" {
+		t.Error("BuildSystemPrompt should include runtime instructions in addition to the base prompt")
 	}
 }
 
@@ -128,7 +132,7 @@ func TestAgent_emit(t *testing.T) {
 func TestResolveModel(t *testing.T) {
 	// Clear the environment variable first
 	os.Unsetenv("DEFAULT_LLM_MODEL")
-	
+
 	tests := []struct {
 		input    string
 		expected string
@@ -185,5 +189,36 @@ func TestRunResult(t *testing.T) {
 	}
 	if result.FinalOutput != "Hello" {
 		t.Errorf("FinalOutput = %s, want 'Hello'", result.FinalOutput)
+	}
+}
+
+func TestApplyAgentType(t *testing.T) {
+	registry := tools.NewRegistry()
+	_ = registry.Register(models.Tool{Name: "bash", Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }})
+	_ = registry.Register(models.Tool{Name: "read_file", Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }})
+	_ = registry.Register(models.Tool{Name: "write_file", Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }})
+	_ = registry.Register(models.Tool{Name: "ask_clarification", Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }})
+
+	cfg := AgentConfig{
+		Tools:     registry,
+		AgentType: AgentTypeCoder,
+	}
+	if err := ApplyAgentType(&cfg, cfg.AgentType); err != nil {
+		t.Fatalf("ApplyAgentType() error = %v", err)
+	}
+	if cfg.SystemPrompt == "" {
+		t.Fatal("ApplyAgentType() did not set system prompt")
+	}
+	if cfg.MaxTurns <= 0 {
+		t.Fatal("ApplyAgentType() did not set max turns")
+	}
+	if cfg.Temperature == nil {
+		t.Fatal("ApplyAgentType() did not set temperature")
+	}
+	if cfg.Tools.Get("bash") == nil {
+		t.Fatal("ApplyAgentType() removed allowed tool bash")
+	}
+	if cfg.Tools.Get("read_file") == nil {
+		t.Fatal("ApplyAgentType() removed allowed tool read_file")
 	}
 }
