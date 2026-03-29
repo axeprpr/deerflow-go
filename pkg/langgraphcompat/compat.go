@@ -11,6 +11,7 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/checkpoint"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
+	"github.com/axeprpr/deerflow-go/pkg/subagent"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 	"github.com/axeprpr/deerflow-go/pkg/tools/builtin"
 )
@@ -23,6 +24,7 @@ type Server struct {
 	logger       *log.Logger
 	llmProvider  llm.LLMProvider
 	tools        *tools.Registry
+	subagents    *subagent.Pool
 	defaultModel string
 	maxTurns     int
 	store        *checkpoint.PostgresStore
@@ -111,6 +113,8 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 	for _, tool := range builtin.FileTools() {
 		registry.Register(tool)
 	}
+	subagentPool := agent.NewSubagentPool(provider, registry, nil, 2, 2*time.Minute)
+	registry.Register(tools.TaskTool(subagentPool))
 
 	// Create checkpoint store
 	var store *checkpoint.PostgresStore
@@ -126,6 +130,7 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		logger:       logger,
 		llmProvider:  provider,
 		tools:        registry,
+		subagents:    subagentPool,
 		defaultModel: defaultModel,
 		maxTurns:     8,
 		store:        store,

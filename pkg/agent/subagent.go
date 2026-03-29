@@ -3,104 +3,169 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/sandbox"
+	"github.com/axeprpr/deerflow-go/pkg/subagent"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
-// SubagentPool executes bounded subagent tasks.
-type SubagentPool struct {
-	llm           llm.LLMProvider
-	tools         *tools.Registry
-	sandbox       *sandbox.Sandbox
-	maxConcurrent int
-	timeout       time.Duration
-	sem           chan struct{}
+var subagentMessageSeq uint64
+
+type SubagentExecutor struct {
+	llm     llm.LLMProvider
+	tools   *tools.Registry
+	sandbox *sandbox.Sandbox
+	model   string
 }
 
-type SubagentConfig struct {
-	Name         string
-	SystemPrompt string
-	AllowedTools []string
-	MaxTurns     int
-}
-
-func NewSubagentPool(provider llm.LLMProvider, registry *tools.Registry, sb *sandbox.Sandbox, maxConcurrent int, timeout time.Duration) *SubagentPool {
-	if maxConcurrent <= 0 {
-		maxConcurrent = 1
-	}
-	if timeout <= 0 {
-		timeout = 2 * time.Minute
-	}
+func NewSubagentExecutor(provider llm.LLMProvider, registry *tools.Registry, sb *sandbox.Sandbox) *SubagentExecutor {
 	if registry == nil {
 		registry = tools.NewRegistry()
 	}
-	if sb == nil {
-		id := fmt.Sprintf("subagent-%d", time.Now().UnixNano())
-		sb, _ = sandbox.New(id, "/tmp/deerflow-sandbox")
-	}
-	return &SubagentPool{
-		llm:           provider,
-		tools:         registry,
-		sandbox:       sb,
-		maxConcurrent: maxConcurrent,
-		timeout:       timeout,
-		sem:           make(chan struct{}, maxConcurrent),
+	return &SubagentExecutor{
+		llm:     provider,
+		tools:   registry,
+		sandbox: sb,
 	}
 }
 
-func (p *SubagentPool) Execute(ctx context.Context, task string, cfg SubagentConfig) (string, error) {
-	if p == nil || p.llm == nil {
-		return "", fmt.Errorf("subagent pool llm provider is required")
+func (e *SubagentExecutor) Execute(ctx context.Context, task *subagent.Task, emit func(subagent.TaskEvent)) (subagent.ExecutionResult, error) {
+	if e == nil || e.llm == nil {
+		return subagent.ExecutionResult{}, fmt.Errorf("subagent llm provider is required")
 	}
 
-	select {
-	case p.sem <- struct{}{}:
-	case <-ctx.Done():
-		return "", ctx.Err()
+	registry := tools.NewRegistry()
+	for _, tool := range selectSubagentTools(e.tools.List(), task.Config.Tools) {
+		_ = registry.Register(tool)
 	}
-	defer func() { <-p.sem }()
 
-	runCtx, cancel := context.WithTimeout(ctx, p.timeout)
-	defer cancel()
-
-	restricted := p.tools.Restrict(cfg.AllowedTools)
-	agent := New(AgentConfig{
-		LLMProvider: p.llm,
-		Tools:       restricted,
-		MaxTurns:    cfg.MaxTurns,
-		Sandbox:     p.sandbox,
+	runAgent := New(AgentConfig{
+		LLMProvider: e.llm,
+		Tools:       registry,
+		MaxTurns:    task.Config.MaxTurns,
+		Model:       e.model,
+		Sandbox:     e.sandbox,
 	})
 
-	systemPrompt := cfg.SystemPrompt
-	if systemPrompt == "" {
-		systemPrompt = "You are a focused subagent. Complete the assigned task and return the result."
-	}
-	if cfg.Name != "" {
-		systemPrompt = fmt.Sprintf("Subagent Name: %s\n\n%s", cfg.Name, systemPrompt)
-	}
+	eventsDone := make(chan struct{})
+	go func() {
+		defer close(eventsDone)
+		for evt := range runAgent.Events() {
+			message := subagentMessageFromAgentEvent(evt)
+			if strings.TrimSpace(message) == "" {
+				continue
+			}
+			emit(subagent.TaskEvent{
+				Type:        "task_running",
+				TaskID:      task.ID,
+				Description: task.Description,
+				Message:     message,
+			})
+		}
+	}()
 
-	result, err := agent.Run(runCtx, cfg.Name, []models.Message{
+	result, err := runAgent.Run(ctx, task.ID, []models.Message{
 		{
-			ID:        newMessageID("system"),
-			SessionID: cfg.Name,
+			ID:        newSubagentMessageID("system"),
+			SessionID: task.ID,
 			Role:      models.RoleSystem,
-			Content:   systemPrompt,
+			Content:   subagentSystemPrompt(task),
 			CreatedAt: time.Now().UTC(),
 		},
 		{
-			ID:        newMessageID("human"),
-			SessionID: cfg.Name,
+			ID:        newSubagentMessageID("human"),
+			SessionID: task.ID,
 			Role:      models.RoleHuman,
-			Content:   task,
+			Content:   task.Prompt,
 			CreatedAt: time.Now().UTC(),
 		},
 	})
+	<-eventsDone
 	if err != nil {
-		return "", err
+		return subagent.ExecutionResult{}, err
 	}
-	return result.FinalOutput, nil
+	return subagent.ExecutionResult{
+		Result:   result.FinalOutput,
+		Messages: result.Messages,
+	}, nil
+}
+
+func NewSubagentPool(provider llm.LLMProvider, registry *tools.Registry, sb *sandbox.Sandbox, maxConcurrent int, timeout time.Duration) *subagent.Pool {
+	return subagent.NewPool(NewSubagentExecutor(provider, registry, sb), subagent.PoolConfig{
+		MaxConcurrent: maxConcurrent,
+		Timeout:       timeout,
+	})
+}
+
+func selectSubagentTools(all []models.Tool, selectors []string) []models.Tool {
+	if len(selectors) == 0 {
+		return append([]models.Tool(nil), all...)
+	}
+
+	allowNames := make(map[string]struct{}, len(selectors))
+	allowGroups := make(map[string]struct{}, len(selectors))
+	for _, selector := range selectors {
+		selector = strings.TrimSpace(selector)
+		if selector == "" {
+			continue
+		}
+		allowNames[selector] = struct{}{}
+		allowGroups[selector] = struct{}{}
+	}
+
+	selected := make([]models.Tool, 0, len(all))
+	for _, tool := range all {
+		if tool.Name == "task" {
+			continue
+		}
+		if _, ok := allowNames[tool.Name]; ok {
+			selected = append(selected, tool)
+			continue
+		}
+		for _, group := range tool.Groups {
+			if _, ok := allowGroups[group]; ok {
+				selected = append(selected, tool)
+				break
+			}
+		}
+	}
+	return selected
+}
+
+func subagentMessageFromAgentEvent(evt AgentEvent) string {
+	switch evt.Type {
+	case AgentEventChunk, AgentEventTextChunk:
+		return strings.TrimSpace(evt.Text)
+	case AgentEventToolCallStart:
+		if evt.ToolEvent != nil {
+			return fmt.Sprintf("calling tool %s", evt.ToolEvent.Name)
+		}
+	case AgentEventToolCallEnd:
+		if evt.ToolEvent != nil {
+			if evt.ToolEvent.Error != "" {
+				return fmt.Sprintf("tool %s failed: %s", evt.ToolEvent.Name, evt.ToolEvent.Error)
+			}
+			return fmt.Sprintf("tool %s completed", evt.ToolEvent.Name)
+		}
+	case AgentEventError:
+		return strings.TrimSpace(evt.Err)
+	}
+	return ""
+}
+
+func subagentSystemPrompt(task *subagent.Task) string {
+	if task != nil && strings.TrimSpace(task.Config.SystemPrompt) != "" {
+		return strings.TrimSpace(task.Config.SystemPrompt)
+	}
+	return "You are a focused subagent. Complete the assigned task and return the result."
+}
+
+func newSubagentMessageID(prefix string) string {
+	seq := atomic.AddUint64(&subagentMessageSeq, 1)
+	return fmt.Sprintf("%s_%d_%d", prefix, time.Now().UTC().UnixNano(), seq)
 }

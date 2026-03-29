@@ -19,6 +19,7 @@ import (
 	deerflowmcp "github.com/axeprpr/deerflow-go/pkg/mcp"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/sandbox"
+	"github.com/axeprpr/deerflow-go/pkg/subagent"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 	"github.com/axeprpr/deerflow-go/pkg/tools/builtin"
 	"github.com/caarlos0/env/v11"
@@ -46,7 +47,7 @@ type app struct {
 	tools        *tools.Registry
 	sandbox      *sandbox.Sandbox
 	store        sessionStore
-	subagentPool *agent.SubagentPool
+	subagentPool *subagent.Pool
 }
 
 type runRequest struct {
@@ -194,7 +195,7 @@ func newApp(ctx context.Context, cfg config) (*app, func(), error) {
 	}
 
 	subagentPool := agent.NewSubagentPool(provider, registry, sb, cfg.SubagentMaxConcurrent, cfg.SubagentTimeout)
-	mustRegister(registry, builtin.TaskTool(subagentPool))
+	mustRegister(registry, tools.TaskTool(subagentPool))
 
 	store := sessionStore(newMemoryStore())
 	if strings.TrimSpace(cfg.DatabaseURL) != "" {

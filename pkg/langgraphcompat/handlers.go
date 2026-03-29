@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/axeprpr/deerflow-go/pkg/models"
+	"github.com/axeprpr/deerflow-go/pkg/subagent"
 )
 
 type runConfig struct {
@@ -105,7 +106,9 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		MaxTokens:       runCfg.MaxTokens,
 	})
 
-	ctx := r.Context()
+	ctx := subagent.WithEventSink(r.Context(), func(evt subagent.TaskEvent) {
+		s.forwardTaskEvent(w, flusher, run, evt)
+	})
 	eventsDone := make(chan struct{})
 	go func() {
 		defer close(eventsDone)
@@ -393,6 +396,18 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 		}
 		s.recordAndSendEvent(w, flusher, run, "error", errData)
 	}
+}
+
+func (s *Server) forwardTaskEvent(w http.ResponseWriter, flusher http.Flusher, run *Run, evt subagent.TaskEvent) {
+	data := map[string]any{
+		"type":        evt.Type,
+		"task_id":     evt.TaskID,
+		"description": evt.Description,
+		"message":     evt.Message,
+		"result":      evt.Result,
+		"error":       evt.Error,
+	}
+	s.recordAndSendEvent(w, flusher, run, evt.Type, data)
 }
 
 func parseRunConfig(raw map[string]any) runConfig {
