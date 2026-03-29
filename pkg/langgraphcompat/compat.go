@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +42,10 @@ type Server struct {
 	sessionsMu   sync.RWMutex
 	runs         map[string]*Run
 	runsMu       sync.RWMutex
+	dataRoot     string
+	uiStateMu    sync.RWMutex
+	skills       map[string]gatewaySkill
+	mcpConfig    gatewayMCPConfig
 }
 
 type HealthStatus struct {
@@ -150,6 +155,18 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		}
 	}
 
+	dataRoot := strings.TrimSpace(os.Getenv("DEERFLOW_DATA_ROOT"))
+	if dataRoot == "" {
+		dataRoot = filepath.Join(os.TempDir(), "deerflow-go-data")
+	}
+	dataRootAbs, err := filepath.Abs(dataRoot)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dataRootAbs, 0o755); err != nil {
+		return nil, err
+	}
+
 	s := &Server{
 		logger:       logger,
 		llmProvider:  provider,
@@ -164,6 +181,12 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		startedAt:    time.Now().UTC(),
 		sessions:     make(map[string]*Session),
 		runs:         make(map[string]*Run),
+		dataRoot:     dataRootAbs,
+		skills:       defaultGatewaySkills(),
+		mcpConfig:    defaultGatewayMCPConfig(),
+	}
+	if err := s.loadGatewayState(); err != nil {
+		logger.Printf("Warning: failed to load gateway state: %v", err)
 	}
 
 	mux := http.NewServeMux()
@@ -199,31 +222,35 @@ func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
 }
 
 func (s *Server) registerRoutes(mux *http.ServeMux) {
-	// LangGraph-compatible endpoints
-	mux.HandleFunc("POST /runs/stream", s.handleRunsStream)
-	mux.HandleFunc("GET /runs/{run_id}", s.handleRunGet)
-	mux.HandleFunc("GET /runs/{run_id}/stream", s.handleRunStream)
-
-	// Thread endpoints
-	mux.HandleFunc("GET /threads/{thread_id}", s.handleThreadGet)
-	mux.HandleFunc("POST /threads", s.handleThreadCreate)
-	mux.HandleFunc("PATCH /threads/{thread_id}", s.handleThreadUpdate)
-	mux.HandleFunc("DELETE /threads/{thread_id}", s.handleThreadDelete)
-	mux.HandleFunc("POST /threads/search", s.handleThreadSearch)
-	mux.HandleFunc("GET /threads/{thread_id}/files", s.handleThreadFiles)
-	mux.HandleFunc("GET /threads/{thread_id}/state", s.handleThreadStateGet)
-	mux.HandleFunc("POST /threads/{thread_id}/state", s.handleThreadStatePost)
-	mux.HandleFunc("PATCH /threads/{thread_id}/state", s.handleThreadStatePatch)
-	mux.HandleFunc("POST /threads/{thread_id}/history", s.handleThreadHistory)
-	mux.HandleFunc("POST /threads/{thread_id}/runs/stream", s.handleThreadRunsStream)
-	mux.HandleFunc("GET /threads/{thread_id}/runs/{run_id}/stream", s.handleThreadRunStream)
-	mux.HandleFunc("GET /threads/{thread_id}/stream", s.handleThreadJoinStream)
-	mux.HandleFunc("POST /threads/{thread_id}/clarifications", s.handleThreadClarificationCreate)
-	mux.HandleFunc("GET /threads/{thread_id}/clarifications/{id}", s.handleThreadClarificationGet)
-	mux.HandleFunc("POST /threads/{thread_id}/clarifications/{id}/resolve", s.handleThreadClarificationResolve)
+	s.registerLangGraphRoutes(mux, "")
+	s.registerLangGraphRoutes(mux, "/api/langgraph")
+	s.registerGatewayRoutes(mux)
 
 	// Health check
 	mux.HandleFunc("GET /health", s.handleHealth)
+}
+
+func (s *Server) registerLangGraphRoutes(mux *http.ServeMux, prefix string) {
+	mux.HandleFunc("POST "+prefix+"/runs/stream", s.handleRunsStream)
+	mux.HandleFunc("GET "+prefix+"/runs/{run_id}", s.handleRunGet)
+	mux.HandleFunc("GET "+prefix+"/runs/{run_id}/stream", s.handleRunStream)
+
+	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}", s.handleThreadGet)
+	mux.HandleFunc("POST "+prefix+"/threads", s.handleThreadCreate)
+	mux.HandleFunc("PATCH "+prefix+"/threads/{thread_id}", s.handleThreadUpdate)
+	mux.HandleFunc("DELETE "+prefix+"/threads/{thread_id}", s.handleThreadDelete)
+	mux.HandleFunc("POST "+prefix+"/threads/search", s.handleThreadSearch)
+	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/files", s.handleThreadFiles)
+	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/state", s.handleThreadStateGet)
+	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/state", s.handleThreadStatePost)
+	mux.HandleFunc("PATCH "+prefix+"/threads/{thread_id}/state", s.handleThreadStatePatch)
+	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/history", s.handleThreadHistory)
+	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/runs/stream", s.handleThreadRunsStream)
+	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/runs/{run_id}/stream", s.handleThreadRunStream)
+	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/stream", s.handleThreadJoinStream)
+	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/clarifications", s.handleThreadClarificationCreate)
+	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/clarifications/{id}", s.handleThreadClarificationGet)
+	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/clarifications/{id}/resolve", s.handleThreadClarificationResolve)
 }
 
 func (s *Server) Start() error {
