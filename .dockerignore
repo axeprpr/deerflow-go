@@ -1,0 +1,9 @@
+.git/
+bin/
+dist/
+tmp/
+coverage/
+*.test
+.env
+.env.*
+docker-compose*.yml

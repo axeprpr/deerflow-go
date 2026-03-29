@@ -1,33 +1,25 @@
 GO := PATH=/usr/local/go/bin:$$PATH go
 
-.PHONY: tidy build test run docker checkpoint-test checkpoint-migrate gateway-build gateway-test gateway-run
+.PHONY: tidy build test run docker docker-run clean
 
 tidy:
 	$(GO) mod tidy
 
-build: tidy
-	$(GO) build ./...
+build:
+	mkdir -p bin
+	$(GO) build -o bin/deerflow ./cmd/langgraph
 
 test:
-	$(GO) test ./...
+	$(GO) test -v -cover ./...
 
-checkpoint-test:
-	$(GO) test ./pkg/checkpoint/... -v
-
-checkpoint-migrate:
-	$(GO) run ./cmd/checkpoint migrate
-
-run:
-	$(GO) run ./cmd/agent serve
-
-gateway-build:
-	$(GO) build ./cmd/gateway
-
-gateway-test:
-	$(GO) test ./pkg/gateway/...
-
-gateway-run:
-	$(GO) run ./cmd/gateway
+run: build
+	./bin/deerflow
 
 docker:
-	docker build -t deerflow-go:local .
+	docker build -t deerflow-go .
+
+docker-run:
+	docker run -p 8080:8080 --env-file .env deerflow-go
+
+clean:
+	rm -rf bin/
