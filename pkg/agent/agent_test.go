@@ -2,9 +2,12 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
+	"time"
 
+	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
@@ -192,6 +195,25 @@ func TestRunResult(t *testing.T) {
 	}
 }
 
+func TestAgentRunUsesRequestTimeout(t *testing.T) {
+	runAgent := New(AgentConfig{
+		LLMProvider:    timeoutProvider{},
+		RequestTimeout: 20 * time.Millisecond,
+	})
+
+	_, err := runAgent.Run(context.Background(), "session_1", []models.Message{
+		{ID: "m1", SessionID: "s1", Role: models.RoleHuman, Content: "Hello"},
+	})
+	if err == nil {
+		t.Fatal("Run() error = nil, want timeout")
+	}
+
+	var timeoutErr *TimeoutError
+	if !errors.As(err, &timeoutErr) {
+		t.Fatalf("Run() error = %T, want *TimeoutError", err)
+	}
+}
+
 func TestApplyAgentType(t *testing.T) {
 	registry := tools.NewRegistry()
 	_ = registry.Register(models.Tool{Name: "bash", Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }})
@@ -221,4 +243,20 @@ func TestApplyAgentType(t *testing.T) {
 	if cfg.Tools.Get("read_file") == nil {
 		t.Fatal("ApplyAgentType() removed allowed tool read_file")
 	}
+}
+
+type timeoutProvider struct{}
+
+func (timeoutProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, nil
+}
+
+func (timeoutProvider) Stream(ctx context.Context, req llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	ch := make(chan llm.StreamChunk, 1)
+	go func() {
+		defer close(ch)
+		<-ctx.Done()
+		ch <- llm.StreamChunk{Err: ctx.Err(), Done: true}
+	}()
+	return ch, nil
 }

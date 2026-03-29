@@ -43,6 +43,7 @@ type PoolConfig struct {
 
 type Task struct {
 	ID          string
+	RequestID   string
 	Type        SubagentType
 	Config      SubagentConfig
 	Status      TaskStatus

@@ -2,8 +2,11 @@ package langgraphcompat
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
+	"github.com/axeprpr/deerflow-go/pkg/sandbox"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 	"github.com/axeprpr/deerflow-go/pkg/tools/builtin"
@@ -25,16 +29,24 @@ type Server struct {
 	logger       *log.Logger
 	llmProvider  llm.LLMProvider
 	tools        *tools.Registry
+	sandbox      *sandbox.Sandbox
 	subagents    *subagent.Pool
 	clarify      *clarification.Manager
 	clarifyAPI   *clarification.API
 	defaultModel string
 	maxTurns     int
 	store        *checkpoint.PostgresStore
+	startedAt    time.Time
 	sessions     map[string]*Session
 	sessionsMu   sync.RWMutex
 	runs         map[string]*Run
 	runsMu       sync.RWMutex
+}
+
+type HealthStatus struct {
+	Status     string            `json:"status"`
+	Components map[string]string `json:"components"`
+	Uptime     time.Duration     `json:"uptime"`
 }
 
 type Session struct {
@@ -119,7 +131,13 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		registry.Register(tool)
 	}
 	registry.Register(clarification.AskClarificationTool(clarifyManager))
-	subagentPool := agent.NewSubagentPool(provider, registry, nil, 2, 2*time.Minute)
+	var sb *sandbox.Sandbox
+	sb, err := sandbox.New("langgraph", filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox"))
+	if err != nil {
+		logger.Printf("Warning: failed to create sandbox: %v", err)
+	}
+
+	subagentPool := agent.NewSubagentPool(provider, registry, sb, 2, 2*time.Minute)
 	registry.Register(tools.TaskTool(subagentPool))
 
 	// Create checkpoint store
@@ -136,12 +154,14 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		logger:       logger,
 		llmProvider:  provider,
 		tools:        registry,
+		sandbox:      sb,
 		subagents:    subagentPool,
 		clarify:      clarifyManager,
 		clarifyAPI:   clarification.NewAPI(clarifyManager),
 		defaultModel: defaultModel,
 		maxTurns:     8,
 		store:        store,
+		startedAt:    time.Now().UTC(),
 		sessions:     make(map[string]*Session),
 		runs:         make(map[string]*Run),
 	}
@@ -158,6 +178,10 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 }
 
 func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
+	sandboxRef := cfg.Sandbox
+	if sandboxRef == nil {
+		sandboxRef = s.sandbox
+	}
 	return agent.New(agent.AgentConfig{
 		LLMProvider:     s.llmProvider,
 		Tools:           s.tools,
@@ -169,7 +193,8 @@ func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
 		SystemPrompt:    cfg.SystemPrompt,
 		Temperature:     cfg.Temperature,
 		MaxTokens:       cfg.MaxTokens,
-		Sandbox:         cfg.Sandbox,
+		Sandbox:         sandboxRef,
+		RequestTimeout:  cfg.RequestTimeout,
 	})
 }
 
@@ -207,5 +232,105 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
-	return s.httpServer.Shutdown(ctx)
+	var shutdownErr error
+	if s.httpServer != nil {
+		shutdownErr = s.httpServer.Shutdown(ctx)
+	}
+	if s.store != nil {
+		s.store.Close()
+	}
+	if s.sandbox != nil {
+		if err := s.sandbox.Close(); err != nil && shutdownErr == nil {
+			shutdownErr = err
+		}
+	}
+	return shutdownErr
+}
+
+func (s *Server) healthStatus(ctx context.Context) HealthStatus {
+	status := HealthStatus{
+		Status:     "ok",
+		Components: map[string]string{},
+		Uptime:     time.Since(s.startedAt).Round(time.Second),
+	}
+
+	componentCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	status.Components["llm"] = s.checkLLMProvider(componentCtx)
+	status.Components["database"] = s.checkDatabase(componentCtx)
+	status.Components["sandbox"] = s.checkSandbox(componentCtx)
+
+	overall := "ok"
+	for name, componentStatus := range status.Components {
+		switch componentStatus {
+		case "down":
+			if name == "llm" {
+				overall = "down"
+			} else if overall == "ok" {
+				overall = "degraded"
+			}
+		case "disabled":
+			if overall == "ok" {
+				overall = "degraded"
+			}
+		}
+	}
+	status.Status = overall
+	return status
+}
+
+func (s *Server) checkLLMProvider(ctx context.Context) string {
+	if s == nil || s.llmProvider == nil {
+		return "down"
+	}
+	if _, ok := s.llmProvider.(*llm.UnavailableProvider); ok {
+		return "down"
+	}
+	stream, err := s.llmProvider.Stream(ctx, llm.ChatRequest{})
+	if err == nil {
+		for chunk := range stream {
+			if chunk.Err != nil && !errors.Is(chunk.Err, context.DeadlineExceeded) {
+				if errors.Is(chunk.Err, context.Canceled) || chunk.Err.Error() == "model is required" || chunk.Err.Error() == "messages are required" {
+					return "ok"
+				}
+				return "down"
+			}
+		}
+		return "ok"
+	}
+	if err.Error() == "model is required" || err.Error() == "messages are required" {
+		return "ok"
+	}
+	return "down"
+}
+
+func (s *Server) checkDatabase(ctx context.Context) string {
+	if s == nil || s.store == nil {
+		return "disabled"
+	}
+	if err := s.store.Ping(ctx); err != nil {
+		s.logger.Printf("health check: database down: %v", err)
+		return "down"
+	}
+	return "ok"
+}
+
+func (s *Server) checkSandbox(ctx context.Context) string {
+	if s == nil || s.sandbox == nil {
+		return "disabled"
+	}
+	result, err := s.sandbox.Exec(ctx, "printf sandbox-ok", 2*time.Second)
+	if err != nil {
+		s.logger.Printf("health check: sandbox down: %v", err)
+		return "down"
+	}
+	if result == nil || result.ExitCode() != 0 {
+		return "down"
+	}
+	if result.Stdout() != "sandbox-ok" {
+		s.logger.Printf("health check: sandbox unexpected output: %q", result.Stdout())
+		return "down"
+	}
+	return "ok"
 }

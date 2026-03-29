@@ -307,9 +307,12 @@ func (s *Server) handleRunGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "ok",
-	})
+	status := s.healthStatus(r.Context())
+	code := http.StatusOK
+	if status.Status == "down" {
+		code = http.StatusServiceUnavailable
+	}
+	writeJSON(w, code, status)
 }
 
 func (s *Server) handleThreadClarificationCreate(w http.ResponseWriter, r *http.Request) {

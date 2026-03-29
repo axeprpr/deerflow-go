@@ -186,6 +186,16 @@ func (s *PostgresStore) Close() {
 	}
 }
 
+func (s *PostgresStore) Ping(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return errors.New("postgres store is not initialized")
+	}
+	if _, err := s.db.Exec(ctx, "select 1"); err != nil {
+		return fmt.Errorf("ping postgres: %w", err)
+	}
+	return nil
+}
+
 func (s *PostgresStore) AutoMigrate(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return errors.New("postgres store is not initialized")

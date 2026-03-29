@@ -5,6 +5,7 @@ import "context"
 type TaskEvent struct {
 	Type        string `json:"type"`
 	TaskID      string `json:"task_id"`
+	RequestID   string `json:"request_id,omitempty"`
 	Description string `json:"description,omitempty"`
 	Message     string `json:"message,omitempty"`
 	Result      string `json:"result,omitempty"`

@@ -49,6 +49,9 @@ func TestPoolStartTaskCompletes(t *testing.T) {
 	if completed.Result != "done" {
 		t.Fatalf("result = %q, want %q", completed.Result, "done")
 	}
+	if completed.RequestID == "" {
+		t.Fatal("RequestID = empty, want generated request id")
+	}
 	if len(completed.Messages) != 1 {
 		t.Fatalf("messages = %d, want 1", len(completed.Messages))
 	}
@@ -57,6 +60,9 @@ func TestPoolStartTaskCompletes(t *testing.T) {
 	}
 	if events[0].Type != "task_started" {
 		t.Fatalf("first event = %s, want task_started", events[0].Type)
+	}
+	if events[0].RequestID == "" {
+		t.Fatal("first event missing request id")
 	}
 	if events[len(events)-1].Type != "task_completed" {
 		t.Fatalf("last event = %s, want task_completed", events[len(events)-1].Type)

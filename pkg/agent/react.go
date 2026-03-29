@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -19,8 +20,10 @@ import (
 )
 
 const defaultMaxTurns = 8
+const defaultRequestTimeout = 10 * time.Minute
 
 var messageSeq uint64
+var agentRequestSeq uint64
 
 // Agent runs our custom ReAct loop while delegating model streaming and tool schemas to Eino.
 type Agent struct {
@@ -34,7 +37,13 @@ type Agent struct {
 	temperature     *float64
 	maxTokens       *int
 	maxTurns        int
+	requestTimeout  time.Duration
 	events          chan AgentEvent
+	requests        sync.Map
+	runMu           sync.Mutex
+	eventsMu        sync.RWMutex
+	eventsClosed    bool
+	started         bool
 }
 
 func New(cfg AgentConfig) *Agent {
@@ -53,6 +62,10 @@ func New(cfg AgentConfig) *Agent {
 	if cfg.PresentFiles != nil {
 		registry = cloneRegistryWithPresentFileTool(registry, cfg.PresentFiles)
 	}
+	requestTimeout := cfg.RequestTimeout
+	if requestTimeout <= 0 {
+		requestTimeout = defaultRequestTimeout
+	}
 	return &Agent{
 		llm:             cfg.LLMProvider,
 		tools:           registry,
@@ -64,6 +77,7 @@ func New(cfg AgentConfig) *Agent {
 		temperature:     cfg.Temperature,
 		maxTokens:       cfg.MaxTokens,
 		maxTurns:        maxTurns,
+		requestTimeout:  requestTimeout,
 		events:          make(chan AgentEvent, 128),
 	}
 }
@@ -91,17 +105,44 @@ func (a *Agent) EinoAgent() adk.Agent {
 }
 
 func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Message) (*RunResult, error) {
+	if a == nil {
+		return nil, fmt.Errorf("agent is nil")
+	}
+	a.runMu.Lock()
+	if a.started {
+		a.runMu.Unlock()
+		return nil, errors.New("agent instances are single-use")
+	}
+	a.started = true
+	a.runMu.Unlock()
+	defer a.closeEvents()
+
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if a == nil || a.llm == nil {
+	if a.llm == nil {
 		return nil, fmt.Errorf("agent llm provider is required")
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, a.requestTimeout)
+		defer cancel()
+	}
+
+	requestID := newAgentRequestID()
+	a.requests.Store(requestID, sessionID)
+	defer a.requests.Delete(requestID)
+
+	emit := func(evt AgentEvent) {
+		evt.RequestID = requestID
+		if evt.SessionID == "" {
+			evt.SessionID = sessionID
+		}
+		a.emit(evt)
 	}
 
 	runMessages := append([]models.Message(nil), messages...)
 	usage := &Usage{}
-
-	defer close(a.events)
 
 	for turn := 0; turn < a.maxTurns; turn++ {
 		req := llm.ChatRequest{
@@ -116,7 +157,8 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 
 		stream, err := a.llm.Stream(ctx, req)
 		if err != nil {
-			a.emit(AgentEvent{Type: AgentEventError, SessionID: sessionID, Err: err.Error(), Error: newAgentError(err)})
+			err = normalizeRunError(ctx, err, a.requestTimeout)
+			emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
 			return nil, err
 		}
 
@@ -129,13 +171,14 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 
 		for chunk := range stream {
 			if chunk.Err != nil {
-				a.emit(AgentEvent{Type: AgentEventError, SessionID: sessionID, Err: chunk.Err.Error(), Error: newAgentError(chunk.Err)})
-				return nil, chunk.Err
+				err := normalizeRunError(ctx, chunk.Err, a.requestTimeout)
+				emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
+				return nil, err
 			}
 			if chunk.Delta != "" {
 				textBuilder.WriteString(chunk.Delta)
-				a.emit(AgentEvent{Type: AgentEventChunk, SessionID: sessionID, Text: chunk.Delta})
-				a.emit(AgentEvent{Type: AgentEventTextChunk, SessionID: sessionID, Text: chunk.Delta})
+				emit(AgentEvent{Type: AgentEventChunk, Text: chunk.Delta})
+				emit(AgentEvent{Type: AgentEventTextChunk, Text: chunk.Delta})
 			}
 			if len(chunk.ToolCalls) > 0 {
 				toolCalls = mergeToolCalls(toolCalls, chunk.ToolCalls)
@@ -154,6 +197,11 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 					}
 				}
 			}
+		}
+		if err := ctx.Err(); err != nil {
+			err = normalizeRunError(ctx, err, a.requestTimeout)
+			emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
+			return nil, err
 		}
 
 		if streamUsage != nil {
@@ -174,11 +222,10 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 		}
 
 		if len(toolCalls) == 0 {
-			a.emit(AgentEvent{
-				Type:      AgentEventEnd,
-				SessionID: sessionID,
-				Text:      assistantMessage.Content,
-				Usage:     cloneUsage(usage),
+			emit(AgentEvent{
+				Type:  AgentEventEnd,
+				Text:  assistantMessage.Content,
+				Usage: cloneUsage(usage),
 			})
 			return &RunResult{
 				Messages:    runMessages,
@@ -188,9 +235,8 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 		}
 
 		for _, call := range toolCalls {
-			a.emit(AgentEvent{
+			emit(AgentEvent{
 				Type:      AgentEventToolCall,
-				SessionID: sessionID,
 				ToolCall:  &call,
 				ToolEvent: newToolCallEvent(call, nil),
 			})
@@ -198,9 +244,8 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			runningCall := call
 			runningCall.Status = models.CallStatusRunning
 			runningCall.StartedAt = startedAt
-			a.emit(AgentEvent{
+			emit(AgentEvent{
 				Type:      AgentEventToolCallStart,
-				SessionID: sessionID,
 				ToolCall:  &runningCall,
 				ToolEvent: newToolCallEvent(runningCall, nil),
 			})
@@ -208,6 +253,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			toolStarted := time.Now().UTC()
 			result, err := a.tools.Execute(tools.WithSandbox(ctx, a.sandbox), call)
 			if err != nil {
+				err = normalizeRunError(ctx, err, a.requestTimeout)
 				result = models.ToolResult{
 					CallID:      call.ID,
 					ToolName:    call.Name,
@@ -229,32 +275,31 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 				ToolResult: &result,
 				CreatedAt:  time.Now().UTC(),
 			})
-			a.emit(AgentEvent{
+			emit(AgentEvent{
 				Type:      AgentEventToolResult,
-				SessionID: sessionID,
 				Result:    &result,
 				ToolEvent: newToolEventFromResult(call, result),
 			})
 			completedCall := runningCall
 			completedCall.Status = result.Status
 			completedCall.CompletedAt = result.CompletedAt
-			a.emit(AgentEvent{
+			emit(AgentEvent{
 				Type:      AgentEventToolCallEnd,
-				SessionID: sessionID,
 				ToolCall:  &completedCall,
 				Result:    &result,
 				ToolEvent: newToolEventFromResult(completedCall, result),
 			})
 
 			if err := ctx.Err(); err != nil {
-				a.emit(AgentEvent{Type: AgentEventError, SessionID: sessionID, Err: err.Error(), Error: newAgentError(err)})
+				err = normalizeRunError(ctx, err, a.requestTimeout)
+				emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
 				return nil, err
 			}
 		}
 	}
 
 	err := fmt.Errorf("agent exceeded max turns (%d)", a.maxTurns)
-	a.emit(AgentEvent{Type: AgentEventError, SessionID: sessionID, Err: err.Error(), Error: newAgentError(err)})
+	emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
 	return nil, err
 }
 
@@ -270,10 +315,25 @@ func (a *Agent) BuildSystemPrompt(_ context.Context, _ string) string {
 }
 
 func (a *Agent) emit(evt AgentEvent) {
+	a.eventsMu.RLock()
+	defer a.eventsMu.RUnlock()
+	if a.eventsClosed {
+		return
+	}
 	select {
 	case a.events <- evt:
 	default:
 	}
+}
+
+func (a *Agent) closeEvents() {
+	a.eventsMu.Lock()
+	defer a.eventsMu.Unlock()
+	if a.eventsClosed {
+		return
+	}
+	close(a.events)
+	a.eventsClosed = true
 }
 
 func resolveModel(model string) string {
@@ -289,6 +349,24 @@ func resolveModel(model string) string {
 func newMessageID(prefix string) string {
 	seq := atomic.AddUint64(&messageSeq, 1)
 	return fmt.Sprintf("%s_%d_%d", prefix, time.Now().UTC().UnixNano(), seq)
+}
+
+func newAgentRequestID() string {
+	seq := atomic.AddUint64(&agentRequestSeq, 1)
+	return fmt.Sprintf("req_%d_%d", time.Now().UTC().UnixNano(), seq)
+}
+
+func normalizeRunError(ctx context.Context, err error, timeout time.Duration) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return &TimeoutError{
+			Duration: timeout,
+			Message:  "agent request timed out",
+		}
+	}
+	return err
 }
 
 func mergeToolCalls(existing, incoming []models.ToolCall) []models.ToolCall {

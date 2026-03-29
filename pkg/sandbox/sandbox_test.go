@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,5 +87,9 @@ func TestSandboxTimeout(t *testing.T) {
 	}
 	if result.Error() == nil {
 		t.Fatal("result.Error() = nil, want timeout")
+	}
+	var timeoutErr *TimeoutError
+	if !errors.As(err, &timeoutErr) {
+		t.Fatalf("Exec() error = %T, want *TimeoutError", err)
 	}
 }

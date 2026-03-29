@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/sandbox"
@@ -34,6 +37,22 @@ type AgentConfig struct {
 	Temperature     *float64
 	MaxTokens       *int
 	Sandbox         *sandbox.Sandbox
+	RequestTimeout  time.Duration
+}
+
+type TimeoutError struct {
+	Duration time.Duration
+	Message  string
+}
+
+func (e *TimeoutError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Message != "" {
+		return fmt.Sprintf("%s after %s", e.Message, e.Duration)
+	}
+	return fmt.Sprintf("request timed out after %s", e.Duration)
 }
 
 type AgentEventType string
@@ -75,6 +94,7 @@ type AgentError struct {
 type AgentEvent struct {
 	Type      AgentEventType     `json:"type"`
 	SessionID string             `json:"session_id,omitempty"`
+	RequestID string             `json:"request_id,omitempty"`
 	Text      string             `json:"text,omitempty"`
 	ToolCall  *models.ToolCall   `json:"tool_call,omitempty"`
 	ToolEvent *ToolCallEvent     `json:"tool_event,omitempty"`

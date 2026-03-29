@@ -14,11 +14,11 @@ import (
 )
 
 var taskSeq uint64
+var taskRequestSeq uint64
 
 type Pool struct {
 	executor Executor
-	tasks    map[string]*Task
-	mu       sync.RWMutex
+	tasks    sync.Map
 	cfg      PoolConfig
 	sem      chan struct{}
 }
@@ -51,7 +51,6 @@ func NewPool(executor Executor, cfg PoolConfig) *Pool {
 	}
 	return &Pool{
 		executor: executor,
-		tasks:    make(map[string]*Task),
 		cfg:      cfg,
 		sem:      make(chan struct{}, cfg.MaxConcurrent),
 	}
@@ -73,6 +72,7 @@ func (p *Pool) StartTask(ctx context.Context, description, prompt string, cfg Su
 	now := time.Now().UTC()
 	task := &Task{
 		ID:          newTaskID(),
+		RequestID:   newTaskRequestID(),
 		Type:        resolved.Type,
 		Config:      resolved,
 		Status:      TaskStatusPending,
@@ -85,13 +85,12 @@ func (p *Pool) StartTask(ctx context.Context, description, prompt string, cfg Su
 		task.Description = task.Prompt
 	}
 
-	p.mu.Lock()
-	p.tasks[task.ID] = task
-	p.mu.Unlock()
+	p.tasks.Store(task.ID, task)
 
 	p.emit(ctx, TaskEvent{
 		Type:        "task_started",
 		TaskID:      task.ID,
+		RequestID:   task.RequestID,
 		Description: task.Description,
 		Message:     "task queued",
 	})
@@ -123,10 +122,12 @@ func (p *Pool) GetTask(taskID string) (*Task, bool) {
 }
 
 func (p *Pool) getTask(taskID string) (*Task, bool) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	task, ok := p.tasks[taskID]
-	return task, ok
+	task, ok := p.tasks.Load(taskID)
+	if !ok {
+		return nil, false
+	}
+	typed, ok := task.(*Task)
+	return typed, ok
 }
 
 func (p *Pool) runTask(parentCtx context.Context, task *Task) {
@@ -147,6 +148,7 @@ func (p *Pool) runTask(parentCtx context.Context, task *Task) {
 	p.emit(parentCtx, TaskEvent{
 		Type:        "task_running",
 		TaskID:      task.ID,
+		RequestID:   task.RequestID,
 		Description: task.Description,
 		Message:     "task started",
 	})
@@ -161,6 +163,9 @@ func (p *Pool) runTask(parentCtx context.Context, task *Task) {
 	result, err := p.executor.Execute(runCtx, task, func(evt TaskEvent) {
 		if evt.TaskID == "" {
 			evt.TaskID = task.ID
+		}
+		if evt.RequestID == "" {
+			evt.RequestID = task.RequestID
 		}
 		if evt.Description == "" {
 			evt.Description = task.Description
@@ -195,6 +200,7 @@ func (p *Pool) finishTask(ctx context.Context, task *Task, status TaskStatus, re
 
 	event := TaskEvent{
 		TaskID:      task.ID,
+		RequestID:   task.RequestID,
 		Description: task.Description,
 		Result:      result,
 	}
@@ -217,7 +223,7 @@ func (p *Pool) finishTask(ctx context.Context, task *Task, status TaskStatus, re
 		event.Error = task.Error
 	}
 
-	p.cfg.Logger.Printf("subagent task id=%s type=%s status=%s", task.ID, task.Type, task.Status)
+	p.cfg.Logger.Printf("subagent task id=%s request_id=%s type=%s status=%s", task.ID, task.RequestID, task.Type, task.Status)
 	p.emit(ctx, event)
 }
 
@@ -257,4 +263,9 @@ func (p *Pool) resolveConfig(cfg SubagentConfig) SubagentConfig {
 func newTaskID() string {
 	seq := atomic.AddUint64(&taskSeq, 1)
 	return fmt.Sprintf("task_%d_%d", time.Now().UTC().UnixNano(), seq)
+}
+
+func newTaskRequestID() string {
+	seq := atomic.AddUint64(&taskRequestSeq, 1)
+	return fmt.Sprintf("subreq_%d_%d", time.Now().UTC().UnixNano(), seq)
 }

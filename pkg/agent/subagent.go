@@ -45,11 +45,12 @@ func (e *SubagentExecutor) Execute(ctx context.Context, task *subagent.Task, emi
 	}
 
 	runAgent := New(AgentConfig{
-		LLMProvider: e.llm,
-		Tools:       registry,
-		MaxTurns:    task.Config.MaxTurns,
-		Model:       e.model,
-		Sandbox:     e.sandbox,
+		LLMProvider:    e.llm,
+		Tools:          registry,
+		MaxTurns:       task.Config.MaxTurns,
+		Model:          e.model,
+		Sandbox:        e.sandbox,
+		RequestTimeout: task.Config.Timeout,
 	})
 
 	eventsDone := make(chan struct{})

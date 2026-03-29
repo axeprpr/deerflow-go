@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,11 +17,12 @@ import (
 )
 
 const (
-	helperEnvEnabled = "DEERFLOW_SANDBOX_HELPER"
-	helperEnvBackend = "DEERFLOW_SANDBOX_BACKEND"
-	helperEnvDir     = "DEERFLOW_SANDBOX_DIR"
-	helperEnvCmd     = "DEERFLOW_SANDBOX_CMD"
-	defaultTimeout   = 60 * time.Second
+	helperEnvEnabled    = "DEERFLOW_SANDBOX_HELPER"
+	helperEnvBackend    = "DEERFLOW_SANDBOX_BACKEND"
+	helperEnvDir        = "DEERFLOW_SANDBOX_DIR"
+	helperEnvCmd        = "DEERFLOW_SANDBOX_CMD"
+	defaultTimeout      = 5 * time.Minute
+	defaultCleanupDelay = 250 * time.Millisecond
 )
 
 type backend string
@@ -31,6 +33,27 @@ const (
 	backendLandlock backend = "landlock"
 )
 
+type Config struct {
+	Timeout      time.Duration
+	MaxInstances int
+	CleanupDelay time.Duration
+}
+
+type TimeoutError struct {
+	Duration time.Duration
+	Message  string
+}
+
+func (e *TimeoutError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if strings.TrimSpace(e.Message) != "" {
+		return fmt.Sprintf("%s after %s", e.Message, e.Duration)
+	}
+	return fmt.Sprintf("sandbox timed out after %s", e.Duration)
+}
+
 // Sandbox isolates commands and files inside a per-session directory.
 type Sandbox struct {
 	sessionDir string
@@ -38,6 +61,7 @@ type Sandbox struct {
 
 	mu      sync.Mutex
 	backend backend
+	cfg     Config
 }
 
 func init() {
@@ -49,6 +73,11 @@ func init() {
 
 // New creates a session directory below baseDir and selects the best available backend.
 func New(sessionID string, baseDir string) (*Sandbox, error) {
+	return NewWithConfig(sessionID, baseDir, Config{})
+}
+
+// NewWithConfig creates a session directory below baseDir and applies sandbox settings.
+func NewWithConfig(sessionID string, baseDir string, cfg Config) (*Sandbox, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	baseDir = strings.TrimSpace(baseDir)
 	if sessionID == "" {
@@ -66,6 +95,7 @@ func New(sessionID string, baseDir string) (*Sandbox, error) {
 	sb := &Sandbox{
 		sessionDir: sessionDir,
 		backend:    backendDirect,
+		cfg:        normalizeConfig(cfg),
 	}
 
 	if CheckLandlockAvailable() {
@@ -92,7 +122,7 @@ func (s *Sandbox) Exec(ctx context.Context, cmd string, timeout time.Duration) (
 		return nil, errors.New("cmd is required")
 	}
 	if timeout <= 0 {
-		timeout = defaultTimeout
+		timeout = s.cfg.Timeout
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -106,6 +136,7 @@ func (s *Sandbox) Exec(ctx context.Context, cmd string, timeout time.Duration) (
 
 	command := exec.CommandContext(runCtx, exePath)
 	command.Dir = s.sessionDir
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	command.Env = append(os.Environ(),
 		helperEnvEnabled+"=1",
 		helperEnvBackend+"="+string(s.backend),
@@ -125,7 +156,21 @@ func (s *Sandbox) Exec(ctx context.Context, cmd string, timeout time.Duration) (
 	s.trackProcess(command.Process)
 	defer s.untrackProcess(command.Process)
 
-	waitErr := command.Wait()
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- command.Wait()
+	}()
+
+	var waitErr error
+	select {
+	case waitErr = <-waitDone:
+	case <-runCtx.Done():
+		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			log.Printf("sandbox warning: session=%s timeout=%s cmd=%q", filepath.Base(s.sessionDir), timeout, cmd)
+		}
+		s.forceKill(command.Process)
+		waitErr = s.waitAfterKill(waitDone)
+	}
 
 	result := &Result{
 		stdout:   stdout.String(),
@@ -135,8 +180,12 @@ func (s *Sandbox) Exec(ctx context.Context, cmd string, timeout time.Duration) (
 	}
 
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-		result.err = runCtx.Err()
-		return result, runCtx.Err()
+		timeoutErr := &TimeoutError{
+			Duration: timeout,
+			Message:  "sandbox execution timed out",
+		}
+		result.err = timeoutErr
+		return result, timeoutErr
 	}
 
 	var exitErr *exec.ExitError
@@ -195,8 +244,11 @@ func (s *Sandbox) Close() error {
 		if proc == nil {
 			continue
 		}
-		_ = proc.Kill()
-		_, _ = proc.Wait()
+		s.forceKill(proc)
+	}
+
+	if delay := s.cfg.CleanupDelay; delay > 0 {
+		time.Sleep(delay)
 	}
 
 	if err := os.RemoveAll(s.sessionDir); err != nil {
@@ -247,6 +299,23 @@ func (s *Sandbox) trackProcess(proc *os.Process) {
 	s.processes = append(s.processes, proc)
 }
 
+func (s *Sandbox) forceKill(proc *os.Process) {
+	forceKillProcess(proc)
+}
+
+func (s *Sandbox) waitAfterKill(waitDone <-chan error) error {
+	if s == nil || s.cfg.CleanupDelay <= 0 {
+		return <-waitDone
+	}
+
+	select {
+	case err := <-waitDone:
+		return err
+	case <-time.After(s.cfg.CleanupDelay):
+		return context.DeadlineExceeded
+	}
+}
+
 func (s *Sandbox) untrackProcess(proc *os.Process) {
 	if proc == nil {
 		return
@@ -270,6 +339,26 @@ func exitCode(state *os.ProcessState, waitErr error) int {
 		return exitErr.ExitCode()
 	}
 	return -1
+}
+
+func forceKillProcess(proc *os.Process) {
+	if proc == nil {
+		return
+	}
+	if proc.Pid > 0 {
+		_ = syscall.Kill(-proc.Pid, syscall.SIGKILL)
+	}
+	_ = proc.Kill()
+}
+
+func normalizeConfig(cfg Config) Config {
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = defaultTimeout
+	}
+	if cfg.CleanupDelay <= 0 {
+		cfg.CleanupDelay = defaultCleanupDelay
+	}
+	return cfg
 }
 
 func runHelper() int {

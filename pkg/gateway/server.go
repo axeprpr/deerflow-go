@@ -31,24 +31,30 @@ const (
 )
 
 type Config struct {
-	Addr         string
-	DatabaseURL  string
-	DefaultModel string
-	Logger       *log.Logger
+	Addr            string
+	DatabaseURL     string
+	DefaultModel    string
+	Logger          *log.Logger
+	ShutdownTimeout time.Duration
 }
 
 type Server struct {
-	cfg            Config
-	httpServer     *http.Server
-	logger         *log.Logger
-	store          sessionStore
-	tools          *tools.Registry
-	sandbox        *sandbox.Sandbox
-	providerMu     sync.Mutex
-	providers      map[string]llm.LLMProvider
+	cfg             Config
+	httpServer      *http.Server
+	logger          *log.Logger
+	store           sessionStore
+	tools           *tools.Registry
+	sandbox         *sandbox.Sandbox
+	providerMu      sync.Mutex
+	providers       map[string]llm.LLMProvider
 	providerFactory func(string) (llm.LLMProvider, error)
-	cleanupFns     []func()
-	shutdownOnce   sync.Once
+	cleanupFns      []func()
+	shutdownOnce    sync.Once
+	startedAt       time.Time
+	shutdownTimeout time.Duration
+	inFlight        sync.WaitGroup
+	inFlightCount   int64
+	shuttingDown    atomic.Bool
 }
 
 type sessionStore interface {
@@ -77,6 +83,9 @@ func NewServer(cfg Config) (*Server, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = log.New(os.Stderr, "gateway ", log.LstdFlags)
 	}
+	if cfg.ShutdownTimeout <= 0 {
+		cfg.ShutdownTimeout = defaultShutdownTimeout
+	}
 
 	sb, err := sandbox.New("gateway", defaultSandboxRoot)
 	if err != nil {
@@ -101,14 +110,16 @@ func NewServer(cfg Config) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:            cfg,
-		logger:         cfg.Logger,
-		store:          store,
-		tools:          registry,
-		sandbox:        sb,
-		providers:      make(map[string]llm.LLMProvider),
+		cfg:             cfg,
+		logger:          cfg.Logger,
+		store:           store,
+		tools:           registry,
+		sandbox:         sb,
+		providers:       make(map[string]llm.LLMProvider),
 		providerFactory: defaultProviderFactory,
-		cleanupFns:     cleanupFns,
+		cleanupFns:      cleanupFns,
+		startedAt:       time.Now().UTC(),
+		shutdownTimeout: cfg.ShutdownTimeout,
 	}
 
 	s.httpServer = &http.Server{
@@ -139,12 +150,42 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 	var shutdownErr error
 	s.shutdownOnce.Do(func() {
+		s.shuttingDown.Store(true)
+		if _, ok := ctx.Deadline(); !ok {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, s.shutdownTimeout)
+			defer cancel()
+		}
+		started := time.Now()
+		s.logger.Printf("gateway shutdown started inflight=%d", atomic.LoadInt64(&s.inFlightCount))
+
 		if s.httpServer != nil {
 			shutdownErr = s.httpServer.Shutdown(ctx)
 		}
+
+		drained := make(chan struct{})
+		go func() {
+			s.inFlight.Wait()
+			close(drained)
+		}()
+		select {
+		case <-drained:
+		case <-ctx.Done():
+			if shutdownErr == nil {
+				shutdownErr = ctx.Err()
+			}
+		}
+
 		for i := len(s.cleanupFns) - 1; i >= 0; i-- {
 			s.cleanupFns[i]()
 		}
+		s.logger.Printf(
+			"gateway shutdown finished duration=%s inflight=%d uptime=%s err=%v",
+			time.Since(started).Round(time.Millisecond),
+			atomic.LoadInt64(&s.inFlightCount),
+			time.Since(s.startedAt).Round(time.Second),
+			shutdownErr,
+		)
 	})
 	return shutdownErr
 }

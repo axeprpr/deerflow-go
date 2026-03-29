@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -64,6 +65,20 @@ func TestHandleChatSSE(t *testing.T) {
 	}
 	if !strings.Contains(body, "event: done") {
 		t.Fatalf("missing done event: %s", body)
+	}
+}
+
+func TestServerShutdownRunsCleanup(t *testing.T) {
+	cleaned := false
+	server := newTestServer()
+	server.cleanupFns = []func(){func() { cleaned = true }}
+	server.shutdownTimeout = 20 * time.Millisecond
+
+	if err := server.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+	if !cleaned {
+		t.Fatal("cleanup function was not called")
 	}
 }
 
