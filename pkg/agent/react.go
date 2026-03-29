@@ -44,6 +44,9 @@ func New(cfg AgentConfig) *Agent {
 	if registry == nil {
 		registry = tools.NewRegistry()
 	}
+	if cfg.PresentFiles != nil {
+		registry = cloneRegistryWithPresentFileTool(registry, cfg.PresentFiles)
+	}
 	return &Agent{
 		llm:             cfg.LLMProvider,
 		tools:           registry,
@@ -55,6 +58,20 @@ func New(cfg AgentConfig) *Agent {
 		maxTurns:        maxTurns,
 		events:          make(chan AgentEvent, 128),
 	}
+}
+
+func cloneRegistryWithPresentFileTool(base *tools.Registry, presentFiles *tools.PresentFileRegistry) *tools.Registry {
+	cloned := tools.NewRegistry()
+	if base != nil {
+		for _, tool := range base.List() {
+			if tool.Name == "present_file" {
+				continue
+			}
+			_ = cloned.Register(tool)
+		}
+	}
+	_ = cloned.Register(tools.PresentFileTool(presentFiles))
+	return cloned
 }
 
 func (a *Agent) Events() <-chan AgentEvent {

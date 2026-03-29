@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/axeprpr/deerflow-go/pkg/models"
+	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
 func (s *Server) handleThreadGet(w http.ResponseWriter, r *http.Request) {
@@ -151,6 +152,31 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, threads[start:end])
+}
+
+func (s *Server) handleThreadFiles(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	if threadID == "" {
+		http.Error(w, "thread ID required", http.StatusBadRequest)
+		return
+	}
+
+	s.sessionsMu.RLock()
+	session, exists := s.sessions[threadID]
+	s.sessionsMu.RUnlock()
+	if !exists {
+		http.Error(w, "thread not found", http.StatusNotFound)
+		return
+	}
+
+	files := []tools.PresentFile{}
+	if session.PresentFiles != nil {
+		files = session.PresentFiles.List()
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"files": files,
+	})
 }
 
 func (s *Server) handleThreadStateGet(w http.ResponseWriter, r *http.Request) {
@@ -325,7 +351,8 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 			"configurable": map[string]any{},
 		},
 		"values": map[string]any{
-			"title": session.Metadata["title"],
+			"title":     session.Metadata["title"],
+			"artifacts": sessionArtifactPaths(session),
 		},
 	}
 }
@@ -341,7 +368,7 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 	values := map[string]any{
 		"messages":  s.messagesToLangChain(session.Messages),
 		"title":     stringValue(session.Metadata["title"]),
-		"artifacts": []string{},
+		"artifacts": sessionArtifactPaths(session),
 	}
 
 	return &ThreadState{
@@ -375,12 +402,13 @@ func (s *Server) ensureSession(threadID string, metadata map[string]any) *Sessio
 	}
 	now := time.Now().UTC()
 	session := &Session{
-		ThreadID:  threadID,
-		Messages:  []models.Message{},
-		Metadata:  metadata,
-		Status:    "idle",
-		CreatedAt: now,
-		UpdatedAt: now,
+		ThreadID:     threadID,
+		Messages:     []models.Message{},
+		Metadata:     metadata,
+		Status:       "idle",
+		PresentFiles: tools.NewPresentFileRegistry(),
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 	s.sessions[threadID] = session
 	return session
@@ -454,6 +482,19 @@ func (s *Server) getLatestRunForThread(threadID string) *Run {
 func stringValue(v any) string {
 	s, _ := v.(string)
 	return s
+}
+
+func sessionArtifactPaths(session *Session) []string {
+	if session == nil || session.PresentFiles == nil {
+		return []string{}
+	}
+
+	files := session.PresentFiles.List()
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		paths = append(paths, file.Path)
+	}
+	return paths
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

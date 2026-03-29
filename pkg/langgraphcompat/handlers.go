@@ -14,6 +14,7 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
+	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
 type runConfig struct {
@@ -56,6 +57,9 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	}
 
 	session := s.ensureSession(threadID, nil)
+	if session.PresentFiles != nil {
+		session.PresentFiles.Clear()
+	}
 	s.markThreadStatus(threadID, "busy")
 
 	input := req.Input
@@ -100,6 +104,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 
 	runCfg := parseRunConfig(req.Config)
 	runAgent := s.newAgent(agent.AgentConfig{
+		PresentFiles:    session.PresentFiles,
 		Model:           firstNonEmpty(runCfg.ModelName, s.defaultModel),
 		ReasoningEffort: runCfg.ReasoningEffort,
 		Temperature:     runCfg.Temperature,
@@ -328,12 +333,13 @@ func (s *Server) saveSession(threadID string, messages []models.Message) {
 		session.UpdatedAt = time.Now().UTC()
 	} else {
 		s.sessions[threadID] = &Session{
-			ThreadID:  threadID,
-			Messages:  append([]models.Message(nil), messages...),
-			Metadata:  make(map[string]any),
-			Status:    "idle",
-			CreatedAt: time.Now().UTC(),
-			UpdatedAt: time.Now().UTC(),
+			ThreadID:     threadID,
+			Messages:     append([]models.Message(nil), messages...),
+			Metadata:     make(map[string]any),
+			Status:       "idle",
+			PresentFiles: tools.NewPresentFileRegistry(),
+			CreatedAt:    time.Now().UTC(),
+			UpdatedAt:    time.Now().UTC(),
 		}
 	}
 }

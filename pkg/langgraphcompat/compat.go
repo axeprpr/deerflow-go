@@ -35,12 +35,13 @@ type Server struct {
 }
 
 type Session struct {
-	ThreadID  string
-	Messages  []models.Message
-	Metadata  map[string]any
-	Status    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ThreadID     string
+	Messages     []models.Message
+	Metadata     map[string]any
+	Status       string
+	PresentFiles *tools.PresentFileRegistry
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type ThreadState struct {
@@ -153,6 +154,7 @@ func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
 	return agent.New(agent.AgentConfig{
 		LLMProvider:     s.llmProvider,
 		Tools:           s.tools,
+		PresentFiles:    cfg.PresentFiles,
 		MaxTurns:        s.maxTurns,
 		Model:           cfg.Model,
 		ReasoningEffort: cfg.ReasoningEffort,
@@ -174,6 +176,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /threads/{thread_id}", s.handleThreadUpdate)
 	mux.HandleFunc("DELETE /threads/{thread_id}", s.handleThreadDelete)
 	mux.HandleFunc("POST /threads/search", s.handleThreadSearch)
+	mux.HandleFunc("GET /threads/{thread_id}/files", s.handleThreadFiles)
 	mux.HandleFunc("GET /threads/{thread_id}/state", s.handleThreadStateGet)
 	mux.HandleFunc("POST /threads/{thread_id}/state", s.handleThreadStatePost)
 	mux.HandleFunc("PATCH /threads/{thread_id}/state", s.handleThreadStatePatch)

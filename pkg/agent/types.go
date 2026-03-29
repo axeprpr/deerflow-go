@@ -25,6 +25,7 @@ type RunResult struct {
 type AgentConfig struct {
 	LLMProvider     llm.LLMProvider
 	Tools           *tools.Registry
+	PresentFiles    *tools.PresentFileRegistry
 	MaxTurns        int
 	Model           string
 	ReasoningEffort string
