@@ -34,7 +34,7 @@ cp .env.example .env
 Minimum required variables:
 
 ```bash
-export SILICONFLOW_API_KEY=sk-your-key-here
+export SILICON_FLOW_API_KEY=sk-your-key-here
 export DEFAULT_LLM_MODEL=qwen/Qwen3.5-9B
 export PORT=8080
 ```
@@ -101,15 +101,15 @@ The server can be configured through environment variables. `cmd/langgraph` read
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `SILICONFLOW_API_KEY` | Yes for SiliconFlow | none | API key used by the default `siliconflow` provider. |
+| `SILICON_FLOW_API_KEY` | Yes for SiliconFlow | none | API key used by the default `siliconflow` provider. |
 | `POSTGRES_URL` | No | empty | PostgreSQL connection string for checkpoint persistence. When unset, state is in-memory only. |
 | `DEFAULT_LLM_MODEL` | No | `qwen/Qwen3.5-9B` for `cmd/langgraph` | Default model passed to runs when the request does not override `config.configurable.model_name`. |
 | `PORT` | No | `8080` | HTTP port used by `cmd/langgraph`. |
 | `ADDR` | No | derived from `PORT` | Optional full listen address override such as `0.0.0.0:8080` or `:8080`. |
 | `LOG_LEVEL` | No | empty | Logged at startup for deployment consistency. Current runtime logging still uses Go's standard logger. |
 | `DEFAULT_LLM_PROVIDER` | No | `siliconflow` from server construction | Provider fallback used by `pkg/llm` when a caller does not pass a provider name explicitly. |
-| `OPENAI_API_KEY` | Only for OpenAI | none | API key when using the OpenAI-compatible provider path. |
-| `OPENAI_BASE_URL` | No | provider-specific | Optional OpenAI-compatible base URL override. |
+| `OPEN_AI_API_KEY` | Only for OpenAI | none | API key when using the OpenAI-compatible provider path. |
+| `OPEN_AI_BASE_URL` | No | provider-specific | Optional OpenAI-compatible base URL override. |
 | `ANTHROPIC_API_KEY` | Only for Anthropic gateway usage | none | API key when using the Anthropic provider via an OpenAI-compatible endpoint. |
 | `SANDBOX_ENABLED` | No | implementation-defined | Reserved deployment variable for sandbox-related rollout policy. |
 | `SANDBOX_TIMEOUT` | No | implementation-defined | Reserved deployment variable for sandbox timeout policy. |
@@ -117,7 +117,7 @@ The server can be configured through environment variables. `cmd/langgraph` read
 Example:
 
 ```bash
-export SILICONFLOW_API_KEY=sk-xxx
+export SILICON_FLOW_API_KEY=sk-xxx
 export POSTGRES_URL=postgres://postgres:password@localhost:5432/deerflow?sslmode=disable
 export DEFAULT_LLM_MODEL=qwen/Qwen3.5-9B
 export PORT=8080
@@ -848,7 +848,7 @@ docker compose up --build
 
 Notes:
 
-- `SILICONFLOW_API_KEY` must be present in your shell or `.env`
+- `SILICON_FLOW_API_KEY` must be present in your shell or `.env`
 - PostgreSQL data is stored in the `postgres_data` volume
 - The UI service depends on a local checkout of `deerflow-ui`
 
@@ -856,7 +856,7 @@ Notes:
 
 Minimal deployment pattern:
 
-1. Create a `Secret` containing `SILICONFLOW_API_KEY`.
+1. Create a `Secret` containing `SILICON_FLOW_API_KEY`.
 2. Create a `ConfigMap` or env block for `DEFAULT_LLM_MODEL`, `PORT`, and `POSTGRES_URL`.
 3. Deploy the API container with port `8080`.
 4. Add a PostgreSQL service or point `POSTGRES_URL` at a managed database.
@@ -875,7 +875,7 @@ env:
       secretKeyRef:
         name: deerflow-go
         key: postgres-url
-  - name: SILICONFLOW_API_KEY
+  - name: SILICON_FLOW_API_KEY
     valueFrom:
       secretKeyRef:
         name: deerflow-go

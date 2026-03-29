@@ -196,22 +196,22 @@ func newEinoChatModelConfig(provider string) (*einoOpenAI.ChatModelConfig, error
 
 	switch provider {
 	case "", "openai":
-		cfg.APIKey = strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
-		cfg.BaseURL = strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
+		cfg.APIKey = strings.TrimSpace(os.Getenv("OPEN_AI_API_KEY"))
+		cfg.BaseURL = strings.TrimSpace(os.Getenv("OPEN_AI_BASE_URL"))
 		if cfg.BaseURL == "" {
 			cfg.BaseURL = defaultOpenAIBaseURL
 		}
 	case "siliconflow":
-		cfg.APIKey = strings.TrimSpace(os.Getenv("SILICONFLOW_API_KEY"))
-		cfg.BaseURL = strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
+		cfg.APIKey = strings.TrimSpace(os.Getenv("SILICON_FLOW_API_KEY"))
+		cfg.BaseURL = strings.TrimSpace(os.Getenv("OPEN_AI_BASE_URL"))
 		if cfg.BaseURL == "" {
 			cfg.BaseURL = defaultSiliconFlowBaseURL
 		}
 	case "anthropic":
 		cfg.APIKey = strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
-		cfg.BaseURL = strings.TrimSpace(os.Getenv("OPENAI_BASE_URL"))
+		cfg.BaseURL = strings.TrimSpace(os.Getenv("OPEN_AI_BASE_URL"))
 		if cfg.BaseURL == "" {
-			return nil, fmt.Errorf("anthropic requires OPENAI_BASE_URL to point at an OpenAI-compatible gateway")
+			return nil, fmt.Errorf("anthropic requires OPEN_AI_BASE_URL to point at an OpenAI-compatible gateway")
 		}
 	default:
 		return nil, fmt.Errorf("unsupported llm provider %q", provider)
