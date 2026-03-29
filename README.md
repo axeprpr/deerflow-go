@@ -84,7 +84,7 @@ make build
 
 ```bash
 cp .env.example .env
-# Edit .env and add your SILICON_FLOW_API_KEY
+# Edit .env and add your siliconflow_api_key
 ```
 
 ### 3. Run
@@ -118,7 +118,7 @@ Set `NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://localhost:8080` in your deerflow-ui `
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SILICON_FLOW_API_KEY` | LLM API key | Required |
+| `siliconflow_api_key` | LLM API key | Required |
 | `DEFAULT_LLM_MODEL` | Default model | `qwen/Qwen3.5-9B` |
 | `POSTGRES_URL` | Postgres connection | Optional |
 | `PORT` | Server port | `8080` |

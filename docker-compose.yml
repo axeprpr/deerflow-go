@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      SILICON_FLOW_API_KEY: ${SILICON_FLOW_API_KEY:?SILICON_FLOW_API_KEY is required}
+      siliconflow_api_key: ${siliconflow_api_key:?siliconflow_api_key is required}
       POSTGRES_URL: postgres://postgres:password@db:5432/deerflow?sslmode=disable
       DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:-qwen/Qwen3.5-9B}
       PORT: 8080
