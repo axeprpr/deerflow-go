@@ -34,28 +34,15 @@ func TestHandleChatJSON(t *testing.T) {
 
 func TestHandleChatSSE(t *testing.T) {
 	server := newTestServer()
-	ts := httptest.NewServer(server.routes())
-	defer ts.Close()
-
-	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/chat", strings.NewReader(`{"session_id":"s2","message":"stream","stream":true}`))
-	if err != nil {
-		t.Fatal(err)
-	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/chat", strings.NewReader(`{"session_id":"s2","message":"stream","stream":true}`))
 	req.Header.Set("Accept", "text/event-stream")
+	rec := httptest.NewRecorder()
 
-	resp, err := ts.Client().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
+	server.routes().ServeHTTP(rec, req)
 
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := string(bodyBytes)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, body)
 	}
 	if !strings.Contains(body, "event: ready") {
 		t.Fatalf("missing ready event: %s", body)

@@ -127,6 +127,8 @@ Set `NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://localhost:8080` in your deerflow-ui `
 | `OPENAI_API_BASE_URL` | OpenAI-compatible provider base URL | Optional |
 | `ANTHROPIC_API_KEY` | Anthropic gateway API key | Optional |
 | `DEFAULT_LLM_MODEL` | Default model | `qwen/Qwen3.5-9B` |
+| `DEERFLOW_MODELS` | Optional model catalog, e.g. `gpt-5=openai/gpt-5,claude=anthropic/claude-3-7-sonnet` | Optional |
+| `DEERFLOW_MODELS_JSON` | Optional JSON model catalog for `/api/models` metadata | Optional |
 | `POSTGRES_URL` | Postgres connection | Optional |
 | `PORT` | Server port | `8080` |
 | `LOG_LEVEL` | Log level | `info` |

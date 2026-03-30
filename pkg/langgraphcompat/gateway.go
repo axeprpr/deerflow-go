@@ -140,43 +140,17 @@ func (s *Server) registerGatewayRoutes(mux *http.ServeMux) {
 }
 
 func (s *Server) handleModelsList(w http.ResponseWriter, r *http.Request) {
-	model := strings.TrimSpace(s.defaultModel)
-	if model == "" {
-		model = "qwen/Qwen3.5-9B"
-	}
-	models := []gatewayModel{
-		{
-			ID:                      "default",
-			Name:                    model,
-			Model:                   model,
-			DisplayName:             model,
-			Description:             "Default model configured by deerflow-go",
-			SupportsThinking:        true,
-			SupportsReasoningEffort: true,
-		},
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"models": models})
+	writeJSON(w, http.StatusOK, map[string]any{"models": configuredGatewayModels(s.defaultModel)})
 }
 
 func (s *Server) handleModelGet(w http.ResponseWriter, r *http.Request) {
 	modelName := strings.TrimSpace(r.PathValue("model_name"))
-	model := strings.TrimSpace(s.defaultModel)
-	if model == "" {
-		model = "qwen/Qwen3.5-9B"
-	}
-	if modelName == "" || modelName != model {
+	model, ok := findConfiguredGatewayModel(s.defaultModel, modelName)
+	if modelName == "" || !ok {
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Model '%s' not found", modelName)})
 		return
 	}
-	writeJSON(w, http.StatusOK, gatewayModel{
-		ID:                      "default",
-		Name:                    model,
-		Model:                   model,
-		DisplayName:             model,
-		Description:             "Default model configured by deerflow-go",
-		SupportsThinking:        true,
-		SupportsReasoningEffort: true,
-	})
+	writeJSON(w, http.StatusOK, model)
 }
 
 func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
@@ -1356,6 +1330,181 @@ func defaultGatewayMemory() gatewayMemoryResponse {
 		},
 		Facts: []memoryFact{},
 	}
+}
+
+type rawGatewayModel struct {
+	ID                      string `json:"id"`
+	Name                    string `json:"name"`
+	Model                   string `json:"model"`
+	DisplayName             string `json:"display_name"`
+	Description             string `json:"description"`
+	SupportsThinking        *bool  `json:"supports_thinking"`
+	SupportsReasoningEffort *bool  `json:"supports_reasoning_effort"`
+}
+
+func configuredGatewayModels(defaultModel string) []gatewayModel {
+	if models := configuredGatewayModelsFromJSON(defaultModel); len(models) > 0 {
+		return models
+	}
+	if models := configuredGatewayModelsFromList(defaultModel); len(models) > 0 {
+		return models
+	}
+	return []gatewayModel{defaultGatewayModel(defaultModel)}
+}
+
+func configuredGatewayModelsFromJSON(defaultModel string) []gatewayModel {
+	raw := strings.TrimSpace(os.Getenv("DEERFLOW_MODELS_JSON"))
+	if raw == "" {
+		return nil
+	}
+
+	var parsed []rawGatewayModel
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return nil
+	}
+
+	models := make([]gatewayModel, 0, len(parsed))
+	seen := map[string]struct{}{}
+	for _, item := range parsed {
+		model := normalizeGatewayModel(item, defaultModel)
+		if model.Name == "" {
+			continue
+		}
+		if _, exists := seen[model.Name]; exists {
+			continue
+		}
+		seen[model.Name] = struct{}{}
+		models = append(models, model)
+	}
+	sort.Slice(models, func(i, j int) bool { return models[i].Name < models[j].Name })
+	return models
+}
+
+func configuredGatewayModelsFromList(defaultModel string) []gatewayModel {
+	raw := strings.TrimSpace(os.Getenv("DEERFLOW_MODELS"))
+	if raw == "" {
+		return nil
+	}
+
+	parts := strings.Split(raw, ",")
+	models := make([]gatewayModel, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, part := range parts {
+		entry := strings.TrimSpace(part)
+		if entry == "" {
+			continue
+		}
+
+		name := entry
+		modelID := entry
+		if left, right, ok := strings.Cut(entry, "="); ok {
+			name = strings.TrimSpace(left)
+			modelID = strings.TrimSpace(right)
+		}
+
+		model := normalizeGatewayModel(rawGatewayModel{
+			Name:  name,
+			Model: modelID,
+		}, defaultModel)
+		if model.Name == "" {
+			continue
+		}
+		if _, exists := seen[model.Name]; exists {
+			continue
+		}
+		seen[model.Name] = struct{}{}
+		models = append(models, model)
+	}
+	sort.Slice(models, func(i, j int) bool { return models[i].Name < models[j].Name })
+	return models
+}
+
+func defaultGatewayModel(defaultModel string) gatewayModel {
+	name := strings.TrimSpace(defaultModel)
+	if name == "" {
+		name = "qwen/Qwen3.5-9B"
+	}
+	thinking, reasoning := inferGatewayModelCapabilities(name)
+	return gatewayModel{
+		ID:                      "default",
+		Name:                    name,
+		Model:                   name,
+		DisplayName:             name,
+		Description:             "Default model configured by deerflow-go",
+		SupportsThinking:        thinking,
+		SupportsReasoningEffort: reasoning,
+	}
+}
+
+func normalizeGatewayModel(raw rawGatewayModel, defaultModel string) gatewayModel {
+	name := strings.TrimSpace(raw.Name)
+	modelID := strings.TrimSpace(raw.Model)
+	switch {
+	case name == "" && modelID != "":
+		name = modelID
+	case modelID == "" && name != "":
+		modelID = name
+	case name == "" && modelID == "":
+		fallback := defaultGatewayModel(defaultModel)
+		name = fallback.Name
+		modelID = fallback.Model
+	}
+
+	id := strings.TrimSpace(raw.ID)
+	if id == "" {
+		id = name
+	}
+	displayName := strings.TrimSpace(raw.DisplayName)
+	if displayName == "" {
+		displayName = name
+	}
+
+	thinking, reasoning := inferGatewayModelCapabilities(firstNonEmpty(modelID, name))
+	if raw.SupportsThinking != nil {
+		thinking = *raw.SupportsThinking
+	}
+	if raw.SupportsReasoningEffort != nil {
+		reasoning = *raw.SupportsReasoningEffort
+	}
+
+	return gatewayModel{
+		ID:                      id,
+		Name:                    name,
+		Model:                   modelID,
+		DisplayName:             displayName,
+		Description:             strings.TrimSpace(raw.Description),
+		SupportsThinking:        thinking,
+		SupportsReasoningEffort: reasoning,
+	}
+}
+
+func inferGatewayModelCapabilities(name string) (supportsThinking bool, supportsReasoningEffort bool) {
+	model := strings.ToLower(strings.TrimSpace(name))
+	if model == "" {
+		return false, false
+	}
+
+	for _, token := range []string{
+		"gpt-5", "o1", "o3", "o4", "qwen3", "qwq", "deepseek-r1", "gemini-2.5", "claude-3.7", "claude-3-7", "claude-sonnet-4", "reasoner", "thinking",
+	} {
+		if strings.Contains(model, token) {
+			return true, true
+		}
+	}
+	return false, false
+}
+
+func findConfiguredGatewayModel(defaultModel, modelName string) (gatewayModel, bool) {
+	target := strings.TrimSpace(modelName)
+	if target == "" {
+		return gatewayModel{}, false
+	}
+	for _, model := range configuredGatewayModels(defaultModel) {
+		if model.Name == target {
+			return model, true
+		}
+	}
+	return gatewayModel{}, false
 }
 
 func normalizeAgentName(name string) (string, bool) {

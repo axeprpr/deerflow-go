@@ -20,7 +20,7 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
-func newCompatTestServer(t *testing.T) (*Server, *httptest.Server) {
+func newCompatTestServer(t *testing.T) (*Server, http.Handler) {
 	t.Helper()
 	root := t.TempDir()
 	s := &Server{
@@ -35,26 +35,30 @@ func newCompatTestServer(t *testing.T) (*Server, *httptest.Server) {
 	}
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
-	ts := httptest.NewServer(mux)
-	t.Cleanup(ts.Close)
-	return s, ts
+	return s, mux
+}
+
+func performCompatRequest(t *testing.T, handler http.Handler, method, target string, body io.Reader, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, target, body)
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec
 }
 
 func TestAPILangGraphPrefixCreateThread(t *testing.T) {
-	_, ts := newCompatTestServer(t)
-	resp, err := http.Post(ts.URL+"/api/langgraph/threads", "application/json", strings.NewReader(`{}`))
-	if err != nil {
-		t.Fatalf("post thread: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status=%d body=%s", resp.StatusCode, string(body))
+	_, handler := newCompatTestServer(t)
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/langgraph/threads", strings.NewReader(`{}`), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
 	}
 }
 
 func TestUploadsAndArtifactsEndpoints(t *testing.T) {
-	s, ts := newCompatTestServer(t)
+	s, handler := newCompatTestServer(t)
 	threadID := "thread-gateway-1"
 	s.ensureSession(threadID, nil)
 
@@ -71,25 +75,14 @@ func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 		t.Fatalf("close writer: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/threads/"+threadID+"/uploads", &body)
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("upload request: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		t.Fatalf("upload status=%d body=%s", resp.StatusCode, string(b))
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/"+threadID+"/uploads", &body, map[string]string{"Content-Type": w.FormDataContentType()})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("upload status=%d body=%s", resp.Code, resp.Body.String())
 	}
 
-	listResp, err := http.Get(ts.URL + "/api/threads/" + threadID + "/uploads/list")
-	if err != nil {
-		t.Fatalf("list request: %v", err)
-	}
-	defer listResp.Body.Close()
-	if listResp.StatusCode != http.StatusOK {
-		t.Fatalf("list status=%d", listResp.StatusCode)
+	listResp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/uploads/list", nil, nil)
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("list status=%d", listResp.Code)
 	}
 	var listed struct {
 		Count int              `json:"count"`
@@ -102,23 +95,17 @@ func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 		t.Fatalf("count=%d want=1", listed.Count)
 	}
 
-	artifactURL := ts.URL + "/api/threads/" + threadID + "/artifacts/mnt/user-data/uploads/hello.txt"
-	artifactResp, err := http.Get(artifactURL)
-	if err != nil {
-		t.Fatalf("artifact request: %v", err)
+	artifactResp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/hello.txt", nil, nil)
+	if artifactResp.Code != http.StatusOK {
+		t.Fatalf("artifact status=%d", artifactResp.Code)
 	}
-	defer artifactResp.Body.Close()
-	if artifactResp.StatusCode != http.StatusOK {
-		t.Fatalf("artifact status=%d", artifactResp.StatusCode)
-	}
-	artifactBody, _ := io.ReadAll(artifactResp.Body)
-	if string(artifactBody) != "hello artifact" {
-		t.Fatalf("artifact body=%q", string(artifactBody))
+	if artifactResp.Body.String() != "hello artifact" {
+		t.Fatalf("artifact body=%q", artifactResp.Body.String())
 	}
 }
 
 func TestUploadConvertibleDocumentCreatesMarkdownCompanion(t *testing.T) {
-	_, ts := newCompatTestServer(t)
+	_, handler := newCompatTestServer(t)
 	threadID := "thread-gateway-docx"
 
 	var body bytes.Buffer
@@ -134,16 +121,9 @@ func TestUploadConvertibleDocumentCreatesMarkdownCompanion(t *testing.T) {
 		t.Fatalf("close writer: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/threads/"+threadID+"/uploads", &body)
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("upload request: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		t.Fatalf("upload status=%d body=%s", resp.StatusCode, string(b))
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/"+threadID+"/uploads", &body, map[string]string{"Content-Type": w.FormDataContentType()})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("upload status=%d body=%s", resp.Code, resp.Body.String())
 	}
 
 	var uploaded struct {
@@ -159,22 +139,17 @@ func TestUploadConvertibleDocumentCreatesMarkdownCompanion(t *testing.T) {
 		t.Fatalf("markdown_file=%q want=report.md", got)
 	}
 
-	mdResp, err := http.Get(ts.URL + "/api/threads/" + threadID + "/artifacts/mnt/user-data/uploads/report.md")
-	if err != nil {
-		t.Fatalf("markdown artifact request: %v", err)
+	mdResp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/report.md", nil, nil)
+	if mdResp.Code != http.StatusOK {
+		t.Fatalf("markdown artifact status=%d", mdResp.Code)
 	}
-	defer mdResp.Body.Close()
-	if mdResp.StatusCode != http.StatusOK {
-		t.Fatalf("markdown artifact status=%d", mdResp.StatusCode)
-	}
-	mdBody, _ := io.ReadAll(mdResp.Body)
-	if !strings.Contains(string(mdBody), "Quarterly Review") {
-		t.Fatalf("markdown body=%q missing extracted text", string(mdBody))
+	if !strings.Contains(mdResp.Body.String(), "Quarterly Review") {
+		t.Fatalf("markdown body=%q missing extracted text", mdResp.Body.String())
 	}
 }
 
 func TestDeleteConvertibleUploadRemovesMarkdownCompanion(t *testing.T) {
-	s, ts := newCompatTestServer(t)
+	s, handler := newCompatTestServer(t)
 	threadID := "thread-delete-companion"
 	uploadDir := s.uploadsDir(threadID)
 	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
@@ -189,14 +164,9 @@ func TestDeleteConvertibleUploadRemovesMarkdownCompanion(t *testing.T) {
 		t.Fatalf("write companion: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/threads/"+threadID+"/uploads/report.docx", nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("delete request: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d", resp.StatusCode)
+	resp := performCompatRequest(t, handler, http.MethodDelete, "/api/threads/"+threadID+"/uploads/report.docx", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d", resp.Code)
 	}
 	if _, err := os.Stat(original); !os.IsNotExist(err) {
 		t.Fatalf("expected original removed, stat err=%v", err)
@@ -207,15 +177,11 @@ func TestDeleteConvertibleUploadRemovesMarkdownCompanion(t *testing.T) {
 }
 
 func TestSuggestionsEndpoint(t *testing.T) {
-	_, ts := newCompatTestServer(t)
+	_, handler := newCompatTestServer(t)
 	payload := `{"messages":[{"role":"user","content":"请帮我分析部署方案"}],"n":3}`
-	resp, err := http.Post(ts.URL+"/api/threads/t1/suggestions", "application/json", strings.NewReader(payload))
-	if err != nil {
-		t.Fatalf("suggestions request: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d", resp.StatusCode)
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/t1/suggestions", strings.NewReader(payload), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d", resp.Code)
 	}
 	var data struct {
 		Suggestions []string `json:"suggestions"`
@@ -230,18 +196,14 @@ func TestSuggestionsEndpoint(t *testing.T) {
 
 func TestSuggestionsEndpointUsesLLMResponse(t *testing.T) {
 	provider := &titleProvider{response: "```json\n[\"Q1\",\"Q2\",\"Q3\"]\n```"}
-	s, ts := newCompatTestServer(t)
+	s, handler := newCompatTestServer(t)
 	s.llmProvider = provider
 	s.defaultModel = "default-model"
 
 	payload := `{"messages":[{"role":"user","content":"Hi"},{"role":"assistant","content":"Hello"}],"n":2,"model_name":"run-model"}`
-	resp, err := http.Post(ts.URL+"/api/threads/t1/suggestions", "application/json", strings.NewReader(payload))
-	if err != nil {
-		t.Fatalf("suggestions request: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d", resp.StatusCode)
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/t1/suggestions", strings.NewReader(payload), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d", resp.Code)
 	}
 
 	var data struct {
@@ -287,7 +249,7 @@ func TestParseJSONStringList(t *testing.T) {
 }
 
 func TestGatewayThreadDeleteRemovesLocalData(t *testing.T) {
-	s, ts := newCompatTestServer(t)
+	s, handler := newCompatTestServer(t)
 	threadID := "thread-delete-1"
 	uploadDir := s.uploadsDir(threadID)
 	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
@@ -298,14 +260,9 @@ func TestGatewayThreadDeleteRemovesLocalData(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/threads/"+threadID, nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("delete request: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d", resp.StatusCode)
+	resp := performCompatRequest(t, handler, http.MethodDelete, "/api/threads/"+threadID, nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d", resp.Code)
 	}
 	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
 		t.Fatalf("expected file removed, stat err=%v", err)
@@ -336,15 +293,11 @@ func minimalDOCX(t *testing.T, text string) []byte {
 }
 
 func TestModelsSkillsMCPConfigEndpoints(t *testing.T) {
-	_, ts := newCompatTestServer(t)
+	_, handler := newCompatTestServer(t)
 
-	modelsResp, err := http.Get(ts.URL + "/api/models")
-	if err != nil {
-		t.Fatalf("models request: %v", err)
-	}
-	defer modelsResp.Body.Close()
-	if modelsResp.StatusCode != http.StatusOK {
-		t.Fatalf("models status=%d", modelsResp.StatusCode)
+	modelsResp := performCompatRequest(t, handler, http.MethodGet, "/api/models", nil, nil)
+	if modelsResp.Code != http.StatusOK {
+		t.Fatalf("models status=%d", modelsResp.Code)
 	}
 	var modelsData struct {
 		Models []map[string]any `json:"models"`
@@ -356,13 +309,9 @@ func TestModelsSkillsMCPConfigEndpoints(t *testing.T) {
 		t.Fatal("expected at least one model")
 	}
 
-	skillsResp, err := http.Get(ts.URL + "/api/skills")
-	if err != nil {
-		t.Fatalf("skills request: %v", err)
-	}
-	defer skillsResp.Body.Close()
-	if skillsResp.StatusCode != http.StatusOK {
-		t.Fatalf("skills status=%d", skillsResp.StatusCode)
+	skillsResp := performCompatRequest(t, handler, http.MethodGet, "/api/skills", nil, nil)
+	if skillsResp.Code != http.StatusOK {
+		t.Fatalf("skills status=%d", skillsResp.Code)
 	}
 	var skillsData struct {
 		Skills []map[string]any `json:"skills"`
@@ -374,50 +323,107 @@ func TestModelsSkillsMCPConfigEndpoints(t *testing.T) {
 		t.Fatal("expected at least one skill")
 	}
 
-	setBody := strings.NewReader(`{"enabled":false}`)
-	setReq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/skills/deep-research", setBody)
-	setReq.Header.Set("Content-Type", "application/json")
-	setResp, err := http.DefaultClient.Do(setReq)
-	if err != nil {
-		t.Fatalf("set skill request: %v", err)
-	}
-	defer setResp.Body.Close()
-	if setResp.StatusCode != http.StatusOK {
-		t.Fatalf("set skill status=%d", setResp.StatusCode)
+	setResp := performCompatRequest(t, handler, http.MethodPut, "/api/skills/deep-research", strings.NewReader(`{"enabled":false}`), map[string]string{"Content-Type": "application/json"})
+	if setResp.Code != http.StatusOK {
+		t.Fatalf("set skill status=%d", setResp.Code)
 	}
 
-	mcpResp, err := http.Get(ts.URL + "/api/mcp/config")
-	if err != nil {
-		t.Fatalf("mcp get request: %v", err)
-	}
-	defer mcpResp.Body.Close()
-	if mcpResp.StatusCode != http.StatusOK {
-		t.Fatalf("mcp get status=%d", mcpResp.StatusCode)
+	mcpResp := performCompatRequest(t, handler, http.MethodGet, "/api/mcp/config", nil, nil)
+	if mcpResp.Code != http.StatusOK {
+		t.Fatalf("mcp get status=%d", mcpResp.Code)
 	}
 
-	putMCPReq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/mcp/config", strings.NewReader(`{"mcp_servers":{"foo":{"enabled":true,"description":"x"}}}`))
-	putMCPReq.Header.Set("Content-Type", "application/json")
-	putMCPResp, err := http.DefaultClient.Do(putMCPReq)
-	if err != nil {
-		t.Fatalf("mcp put request: %v", err)
-	}
-	defer putMCPResp.Body.Close()
-	if putMCPResp.StatusCode != http.StatusOK {
-		t.Fatalf("mcp put status=%d", putMCPResp.StatusCode)
+	putMCPResp := performCompatRequest(t, handler, http.MethodPut, "/api/mcp/config", strings.NewReader(`{"mcp_servers":{"foo":{"enabled":true,"description":"x"}}}`), map[string]string{"Content-Type": "application/json"})
+	if putMCPResp.Code != http.StatusOK {
+		t.Fatalf("mcp put status=%d", putMCPResp.Code)
 	}
 
-	modelGetResp, err := http.Get(ts.URL + "/api/models/qwen/Qwen3.5-9B")
-	if err != nil {
-		t.Fatalf("model get request: %v", err)
+	modelGetResp := performCompatRequest(t, handler, http.MethodGet, "/api/models/qwen/Qwen3.5-9B", nil, nil)
+	if modelGetResp.Code != http.StatusOK {
+		t.Fatalf("model get status=%d", modelGetResp.Code)
 	}
-	defer modelGetResp.Body.Close()
-	if modelGetResp.StatusCode != http.StatusOK {
-		t.Fatalf("model get status=%d", modelGetResp.StatusCode)
+}
+
+func TestModelsEndpointSupportsConfiguredModelCatalogJSON(t *testing.T) {
+	t.Setenv("DEERFLOW_MODELS_JSON", `[
+		{
+			"id": "gpt-5",
+			"name": "gpt-5",
+			"model": "openai/gpt-5",
+			"display_name": "GPT-5",
+			"description": "Primary reasoning model",
+			"supports_thinking": true,
+			"supports_reasoning_effort": true
+		},
+		{
+			"name": "deepseek-v3",
+			"model": "deepseek/deepseek-v3",
+			"display_name": "DeepSeek V3"
+		}
+	]`)
+
+	_, handler := newCompatTestServer(t)
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/models", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d", resp.Code)
+	}
+
+	var payload struct {
+		Models []gatewayModel `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Models) != 2 {
+		t.Fatalf("models=%d want=2", len(payload.Models))
+	}
+	if payload.Models[1].Name != "gpt-5" {
+		t.Fatalf("unexpected models ordering/content: %#v", payload.Models)
+	}
+	if payload.Models[1].Model != "openai/gpt-5" {
+		t.Fatalf("model=%q want=%q", payload.Models[1].Model, "openai/gpt-5")
+	}
+	if !payload.Models[1].SupportsThinking {
+		t.Fatalf("expected explicit thinking support for %#v", payload.Models[1])
+	}
+
+	modelResp := performCompatRequest(t, handler, http.MethodGet, "/api/models/gpt-5", nil, nil)
+	if modelResp.Code != http.StatusOK {
+		t.Fatalf("model get status=%d", modelResp.Code)
+	}
+}
+
+func TestModelsEndpointSupportsConfiguredModelCatalogList(t *testing.T) {
+	t.Setenv("DEERFLOW_MODELS", "gpt-5=openai/gpt-5, claude-3-7-sonnet=anthropic/claude-3-7-sonnet")
+
+	_, handler := newCompatTestServer(t)
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/models", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d", resp.Code)
+	}
+
+	var payload struct {
+		Models []gatewayModel `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Models) != 2 {
+		t.Fatalf("models=%d want=2", len(payload.Models))
+	}
+	if payload.Models[0].Name != "claude-3-7-sonnet" {
+		t.Fatalf("unexpected first model: %#v", payload.Models[0])
+	}
+	if payload.Models[0].DisplayName != "claude-3-7-sonnet" {
+		t.Fatalf("display_name=%q want=%q", payload.Models[0].DisplayName, "claude-3-7-sonnet")
+	}
+	if !payload.Models[0].SupportsReasoningEffort {
+		t.Fatalf("expected reasoning support for %#v", payload.Models[0])
 	}
 }
 
 func TestSkillInstallFromArchive(t *testing.T) {
-	s, ts := newCompatTestServer(t)
+	s, handler := newCompatTestServer(t)
 	threadID := "thread-skill-1"
 	uploadDir := s.uploadsDir(threadID)
 	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
@@ -429,14 +435,9 @@ func TestSkillInstallFromArchive(t *testing.T) {
 	}
 
 	body := `{"thread_id":"` + threadID + `","path":"/mnt/user-data/uploads/demo.skill"}`
-	resp, err := http.Post(ts.URL+"/api/skills/install", "application/json", strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("install request: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/skills/install", strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
 	}
 	var payload struct {
 		Success   bool                   `json:"success"`
@@ -463,70 +464,42 @@ func TestSkillInstallFromArchive(t *testing.T) {
 }
 
 func TestAgentsAndMemoryEndpoints(t *testing.T) {
-	_, ts := newCompatTestServer(t)
+	_, handler := newCompatTestServer(t)
 
 	createBody := `{"name":"my-agent","description":"a","model":"qwen/Qwen3.5-9B","tool_groups":["file"],"soul":"hello"}`
-	createResp, err := http.Post(ts.URL+"/api/agents", "application/json", strings.NewReader(createBody))
-	if err != nil {
-		t.Fatalf("create agent request: %v", err)
-	}
-	defer createResp.Body.Close()
-	if createResp.StatusCode != http.StatusCreated {
-		t.Fatalf("create agent status=%d", createResp.StatusCode)
+	createResp := performCompatRequest(t, handler, http.MethodPost, "/api/agents", strings.NewReader(createBody), map[string]string{"Content-Type": "application/json"})
+	if createResp.Code != http.StatusCreated {
+		t.Fatalf("create agent status=%d", createResp.Code)
 	}
 
-	listResp, err := http.Get(ts.URL + "/api/agents")
-	if err != nil {
-		t.Fatalf("list agents request: %v", err)
-	}
-	defer listResp.Body.Close()
-	if listResp.StatusCode != http.StatusOK {
-		t.Fatalf("list agents status=%d", listResp.StatusCode)
+	listResp := performCompatRequest(t, handler, http.MethodGet, "/api/agents", nil, nil)
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("list agents status=%d", listResp.Code)
 	}
 
-	getResp, err := http.Get(ts.URL + "/api/agents/my-agent")
-	if err != nil {
-		t.Fatalf("get agent request: %v", err)
-	}
-	defer getResp.Body.Close()
-	if getResp.StatusCode != http.StatusOK {
-		t.Fatalf("get agent status=%d", getResp.StatusCode)
+	getResp := performCompatRequest(t, handler, http.MethodGet, "/api/agents/my-agent", nil, nil)
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("get agent status=%d", getResp.Code)
 	}
 
-	checkResp, err := http.Get(ts.URL + "/api/agents/check?name=my-agent")
-	if err != nil {
-		t.Fatalf("check agent request: %v", err)
-	}
-	defer checkResp.Body.Close()
-	if checkResp.StatusCode != http.StatusOK {
-		t.Fatalf("check agent status=%d", checkResp.StatusCode)
+	checkResp := performCompatRequest(t, handler, http.MethodGet, "/api/agents/check?name=my-agent", nil, nil)
+	if checkResp.Code != http.StatusOK {
+		t.Fatalf("check agent status=%d", checkResp.Code)
 	}
 
-	memResp, err := http.Get(ts.URL + "/api/memory")
-	if err != nil {
-		t.Fatalf("memory request: %v", err)
-	}
-	defer memResp.Body.Close()
-	if memResp.StatusCode != http.StatusOK {
-		t.Fatalf("memory status=%d", memResp.StatusCode)
+	memResp := performCompatRequest(t, handler, http.MethodGet, "/api/memory", nil, nil)
+	if memResp.Code != http.StatusOK {
+		t.Fatalf("memory status=%d", memResp.Code)
 	}
 
-	memCfgResp, err := http.Get(ts.URL + "/api/memory/config")
-	if err != nil {
-		t.Fatalf("memory config request: %v", err)
-	}
-	defer memCfgResp.Body.Close()
-	if memCfgResp.StatusCode != http.StatusOK {
-		t.Fatalf("memory config status=%d", memCfgResp.StatusCode)
+	memCfgResp := performCompatRequest(t, handler, http.MethodGet, "/api/memory/config", nil, nil)
+	if memCfgResp.Code != http.StatusOK {
+		t.Fatalf("memory config status=%d", memCfgResp.Code)
 	}
 
-	chResp, err := http.Get(ts.URL + "/api/channels")
-	if err != nil {
-		t.Fatalf("channels request: %v", err)
-	}
-	defer chResp.Body.Close()
-	if chResp.StatusCode != http.StatusOK {
-		t.Fatalf("channels status=%d", chResp.StatusCode)
+	chResp := performCompatRequest(t, handler, http.MethodGet, "/api/channels", nil, nil)
+	if chResp.Code != http.StatusOK {
+		t.Fatalf("channels status=%d", chResp.Code)
 	}
 }
 
