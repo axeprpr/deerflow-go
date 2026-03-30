@@ -3,6 +3,7 @@ package langgraphcompat
 import (
 	"archive/zip"
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,9 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode"
+
+	"github.com/axeprpr/deerflow-go/pkg/llm"
+	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
 type gatewayModel struct {
@@ -728,7 +732,8 @@ func (s *Server) handleSuggestions(w http.ResponseWriter, r *http.Request) {
 			Role    string `json:"role"`
 			Content string `json:"content"`
 		} `json:"messages"`
-		N int `json:"n"`
+		N         int    `json:"n"`
+		ModelName string `json:"model_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"suggestions": []string{}})
@@ -741,32 +746,13 @@ func (s *Server) handleSuggestions(w http.ResponseWriter, r *http.Request) {
 		req.N = 5
 	}
 
-	lastUser := ""
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		if strings.EqualFold(req.Messages[i].Role, "user") {
-			lastUser = strings.TrimSpace(req.Messages[i].Content)
-			break
-		}
-	}
-	if lastUser == "" {
+	if len(req.Messages) == 0 {
 		writeJSON(w, http.StatusOK, map[string]any{"suggestions": []string{}})
 		return
 	}
 
-	subject := compactSubject(lastUser)
-	candidates := []string{
-		"请基于以上内容给出一个可执行的分步计划。",
-		"请总结关键结论，并标注不确定性。",
-		"请给出 3 个下一步可选方案并比较利弊。",
-	}
-	if subject != "" {
-		candidates[0] = "围绕“" + subject + "”给出一个可执行的分步计划。"
-		candidates[1] = "继续深入“" + subject + "”：请总结关键结论并标注不确定性。"
-	}
-	if req.N < len(candidates) {
-		candidates = candidates[:req.N]
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"suggestions": candidates})
+	suggestions := s.generateSuggestions(r.Context(), req.Messages, req.N, req.ModelName)
+	writeJSON(w, http.StatusOK, map[string]any{"suggestions": suggestions})
 }
 
 func (s *Server) saveUploadedFile(threadID, uploadDir string, fh *multipart.FileHeader) (map[string]any, error) {
@@ -867,6 +853,165 @@ func compactSubject(text string) string {
 		return text[:48]
 	}
 	return text
+}
+
+func (s *Server) generateSuggestions(ctx context.Context, messages []struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}, n int, modelName string) []string {
+	if len(messages) == 0 {
+		return []string{}
+	}
+
+	conversation := formatSuggestionConversation(messages)
+	if conversation == "" {
+		return []string{}
+	}
+
+	if suggestions := s.generateSuggestionsWithLLM(ctx, conversation, n, modelName); len(suggestions) > 0 {
+		return suggestions
+	}
+	return fallbackSuggestions(messages, n)
+}
+
+func (s *Server) generateSuggestionsWithLLM(ctx context.Context, conversation string, n int, modelName string) []string {
+	provider := s.llmProvider
+	if provider == nil {
+		return nil
+	}
+
+	maxTokens := 128
+	resp, err := provider.Chat(ctx, llm.ChatRequest{
+		Model: resolveTitleModel(modelName, s.defaultModel),
+		Messages: []models.Message{{
+			ID:        "suggestions-user",
+			SessionID: "suggestions",
+			Role:      models.RoleHuman,
+			Content:   buildSuggestionsPrompt(conversation, n),
+		}},
+		MaxTokens: &maxTokens,
+	})
+	if err != nil {
+		return nil
+	}
+
+	suggestions := parseJSONStringList(resp.Message.Content)
+	if len(suggestions) == 0 {
+		return nil
+	}
+	if len(suggestions) > n {
+		suggestions = suggestions[:n]
+	}
+	return suggestions
+}
+
+func buildSuggestionsPrompt(conversation string, n int) string {
+	return fmt.Sprintf(
+		"You are generating follow-up questions to help the user continue the conversation.\n"+
+			"Based on the conversation below, produce EXACTLY %d short questions the user might ask next.\n"+
+			"Requirements:\n"+
+			"- Questions must be relevant to the conversation.\n"+
+			"- Questions must be written in the same language as the user.\n"+
+			"- Keep each question concise (ideally <= 20 words / <= 40 Chinese characters).\n"+
+			"- Do NOT include numbering, markdown, or any extra text.\n"+
+			"- Output MUST be a JSON array of strings only.\n\n"+
+			"Conversation:\n%s\n",
+		n,
+		conversation,
+	)
+}
+
+func formatSuggestionConversation(messages []struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}) string {
+	parts := make([]string, 0, len(messages))
+	for _, msg := range messages {
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			continue
+		}
+
+		role := strings.ToLower(strings.TrimSpace(msg.Role))
+		switch role {
+		case "user", "human":
+			parts = append(parts, "User: "+content)
+		case "assistant", "ai":
+			parts = append(parts, "Assistant: "+content)
+		default:
+			parts = append(parts, strings.TrimSpace(msg.Role)+": "+content)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func parseJSONStringList(raw string) []string {
+	candidate := strings.TrimSpace(raw)
+	if candidate == "" {
+		return nil
+	}
+	if strings.HasPrefix(candidate, "```") {
+		lines := strings.Split(candidate, "\n")
+		if len(lines) >= 3 && strings.HasPrefix(strings.TrimSpace(lines[0]), "```") && strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
+			candidate = strings.TrimSpace(strings.Join(lines[1:len(lines)-1], "\n"))
+		}
+	}
+
+	start := strings.Index(candidate, "[")
+	end := strings.LastIndex(candidate, "]")
+	if start < 0 || end <= start {
+		return nil
+	}
+
+	var decoded []any
+	if err := json.Unmarshal([]byte(candidate[start:end+1]), &decoded); err != nil {
+		return nil
+	}
+
+	out := make([]string, 0, len(decoded))
+	for _, item := range decoded {
+		text, ok := item.(string)
+		if !ok {
+			continue
+		}
+		text = strings.TrimSpace(strings.ReplaceAll(text, "\n", " "))
+		if text == "" {
+			continue
+		}
+		out = append(out, text)
+	}
+	return out
+}
+
+func fallbackSuggestions(messages []struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}, n int) []string {
+	lastUser := ""
+	for i := len(messages) - 1; i >= 0; i-- {
+		if strings.EqualFold(messages[i].Role, "user") || strings.EqualFold(messages[i].Role, "human") {
+			lastUser = strings.TrimSpace(messages[i].Content)
+			break
+		}
+	}
+	if lastUser == "" {
+		return []string{}
+	}
+
+	subject := compactSubject(lastUser)
+	candidates := []string{
+		"请基于以上内容给出一个可执行的分步计划。",
+		"请总结关键结论，并标注不确定性。",
+		"请给出 3 个下一步可选方案并比较利弊。",
+	}
+	if subject != "" {
+		candidates[0] = "围绕“" + subject + "”给出一个可执行的分步计划。"
+		candidates[1] = "继续深入“" + subject + "”：请总结关键结论并标注不确定性。"
+	}
+	if n < len(candidates) {
+		candidates = candidates[:n]
+	}
+	return candidates
 }
 
 func nowUnix() int64 { return time.Now().UTC().Unix() }

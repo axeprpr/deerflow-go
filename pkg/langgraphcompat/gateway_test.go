@@ -223,6 +223,64 @@ func TestSuggestionsEndpoint(t *testing.T) {
 	}
 }
 
+func TestSuggestionsEndpointUsesLLMResponse(t *testing.T) {
+	provider := &titleProvider{response: "```json\n[\"Q1\",\"Q2\",\"Q3\"]\n```"}
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = provider
+	s.defaultModel = "default-model"
+
+	payload := `{"messages":[{"role":"user","content":"Hi"},{"role":"assistant","content":"Hello"}],"n":2,"model_name":"run-model"}`
+	resp, err := http.Post(ts.URL+"/api/threads/t1/suggestions", "application/json", strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("suggestions request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	var data struct {
+		Suggestions []string `json:"suggestions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got := strings.Join(data.Suggestions, ","); got != "Q1,Q2" {
+		t.Fatalf("suggestions=%q want=%q", got, "Q1,Q2")
+	}
+	if provider.lastReq.Model != "run-model" {
+		t.Fatalf("model=%q want=%q", provider.lastReq.Model, "run-model")
+	}
+	if !strings.Contains(provider.lastReq.Messages[0].Content, "User: Hi") {
+		t.Fatalf("prompt missing user conversation: %q", provider.lastReq.Messages[0].Content)
+	}
+	if !strings.Contains(provider.lastReq.Messages[0].Content, "Assistant: Hello") {
+		t.Fatalf("prompt missing assistant conversation: %q", provider.lastReq.Messages[0].Content)
+	}
+}
+
+func TestParseJSONStringList(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "plain", raw: `["a","b"]`, want: "a,b"},
+		{name: "fenced", raw: "```json\n[\"a\",\"b\"]\n```", want: "a,b"},
+		{name: "wrapped", raw: "output:\n[\"a\",\"b\"]", want: "a,b"},
+		{name: "invalid", raw: "nope", want: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := strings.Join(parseJSONStringList(tc.raw), ",")
+			if got != tc.want {
+				t.Fatalf("got=%q want=%q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGatewayThreadDeleteRemovesLocalData(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-delete-1"
