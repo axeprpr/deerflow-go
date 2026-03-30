@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -260,6 +262,12 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 			continue
 		}
 
+		additionalKwargs, _ := msgMap["additional_kwargs"].(map[string]any)
+		files := extractUploadedFiles(additionalKwargs)
+		if len(files) > 0 || hasHistoricalUploads(s.uploadsDir(threadID), files) {
+			content = injectUploadedFilesBlock(content, files, listHistoricalUploads(s.uploadsDir(threadID), files))
+		}
+
 		msgSeq++
 		msg := models.Message{
 			ID:        fmt.Sprintf("msg_%d", msgSeq),
@@ -267,10 +275,151 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 			Role:      s.convertRole(role),
 			Content:   content,
 		}
+		if len(additionalKwargs) > 0 {
+			if raw, err := json.Marshal(additionalKwargs); err == nil {
+				msg.Metadata = map[string]string{"additional_kwargs": string(raw)}
+			}
+		}
 		messages = append(messages, msg)
 	}
 
 	return messages
+}
+
+type uploadedFile struct {
+	Filename string `json:"filename"`
+	Size     int64  `json:"size"`
+	Path     string `json:"path"`
+}
+
+func extractUploadedFiles(additionalKwargs map[string]any) []uploadedFile {
+	if len(additionalKwargs) == 0 {
+		return nil
+	}
+	rawFiles, _ := additionalKwargs["files"].([]any)
+	files := make([]uploadedFile, 0, len(rawFiles))
+	for _, raw := range rawFiles {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		filename := sanitizeFilename(stringFromAny(item["filename"]))
+		path := strings.TrimSpace(firstNonEmpty(stringFromAny(item["virtual_path"]), stringFromAny(item["path"])))
+		if filename == "" || path == "" {
+			continue
+		}
+		files = append(files, uploadedFile{
+			Filename: filename,
+			Size:     int64FromAny(item["size"]),
+			Path:     path,
+		})
+	}
+	return files
+}
+
+func hasHistoricalUploads(uploadDir string, current []uploadedFile) bool {
+	return len(listHistoricalUploads(uploadDir, current)) > 0
+}
+
+func listHistoricalUploads(uploadDir string, current []uploadedFile) []uploadedFile {
+	entries, err := os.ReadDir(uploadDir)
+	if err != nil {
+		return nil
+	}
+	currentNames := make(map[string]struct{}, len(current))
+	for _, file := range current {
+		currentNames[file.Filename] = struct{}{}
+	}
+	files := make([]uploadedFile, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := sanitizeFilename(entry.Name())
+		if name == "" {
+			continue
+		}
+		if _, exists := currentNames[name]; exists {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, uploadedFile{
+			Filename: name,
+			Size:     info.Size(),
+			Path:     "/mnt/user-data/uploads/" + filepath.ToSlash(name),
+		})
+	}
+	return files
+}
+
+func injectUploadedFilesBlock(content string, current []uploadedFile, historical []uploadedFile) string {
+	var b strings.Builder
+	b.WriteString("<uploaded_files>\n")
+	b.WriteString("The following files were uploaded in this message:\n\n")
+	if len(current) == 0 {
+		b.WriteString("(empty)\n")
+	} else {
+		for _, file := range current {
+			b.WriteString("- ")
+			b.WriteString(file.Filename)
+			b.WriteString(" (")
+			b.WriteString(formatUploadSize(file.Size))
+			b.WriteString(")\n")
+			b.WriteString("  Path: ")
+			b.WriteString(file.Path)
+			b.WriteString("\n\n")
+		}
+	}
+	if len(historical) > 0 {
+		b.WriteString("The following files were uploaded in previous messages and are still available:\n\n")
+		for _, file := range historical {
+			b.WriteString("- ")
+			b.WriteString(file.Filename)
+			b.WriteString(" (")
+			b.WriteString(formatUploadSize(file.Size))
+			b.WriteString(")\n")
+			b.WriteString("  Path: ")
+			b.WriteString(file.Path)
+			b.WriteString("\n\n")
+		}
+	}
+	b.WriteString("You can read these files using the `read_file` tool with the paths shown above.\n")
+	b.WriteString("</uploaded_files>")
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return b.String()
+	}
+	return b.String() + "\n\n" + content
+}
+
+func formatUploadSize(size int64) string {
+	if size < 0 {
+		size = 0
+	}
+	kb := float64(size) / 1024
+	if kb < 1024 {
+		return fmt.Sprintf("%.1f KB", kb)
+	}
+	return fmt.Sprintf("%.1f MB", kb/1024)
+}
+
+func int64FromAny(v any) int64 {
+	switch value := v.(type) {
+	case int:
+		return int64(value)
+	case int64:
+		return value
+	case float64:
+		return int64(value)
+	case json.Number:
+		if parsed, err := value.Int64(); err == nil {
+			return parsed
+		}
+	}
+	return 0
 }
 
 func extractMessageContent(raw any) string {

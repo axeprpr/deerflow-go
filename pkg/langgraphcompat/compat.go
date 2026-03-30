@@ -97,14 +97,15 @@ type RunCreateRequest struct {
 
 // Message represents a LangGraph-compatible message
 type Message struct {
-	Type       string         `json:"type"`
-	ID         string         `json:"id"`
-	Role       string         `json:"role,omitempty"`
-	Content    string         `json:"content,omitempty"`
-	Name       string         `json:"name,omitempty"`
-	Data       map[string]any `json:"data,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	ToolCalls  []ToolCall     `json:"tool_calls,omitempty"`
+	Type             string         `json:"type"`
+	ID               string         `json:"id"`
+	Role             string         `json:"role,omitempty"`
+	Content          string         `json:"content,omitempty"`
+	Name             string         `json:"name,omitempty"`
+	Data             map[string]any `json:"data,omitempty"`
+	AdditionalKwargs map[string]any `json:"additional_kwargs,omitempty"`
+	ToolCallID       string         `json:"tool_call_id,omitempty"`
+	ToolCalls        []ToolCall     `json:"tool_calls,omitempty"`
 }
 
 // ToolCall represents a LangGraph-compatible tool call

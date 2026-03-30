@@ -19,7 +19,10 @@ type Sandbox = pkgsandbox.Sandbox
 
 type contextKey string
 
-const sandboxContextKey contextKey = "tool_sandbox"
+const (
+	sandboxContextKey  contextKey = "tool_sandbox"
+	threadIDContextKey contextKey = "tool_thread_id"
+)
 
 var toolCallSeq uint64
 
@@ -132,6 +135,25 @@ func SandboxFromContext(ctx context.Context) *Sandbox {
 	}
 	sandbox, _ := ctx.Value(sandboxContextKey).(*Sandbox)
 	return sandbox
+}
+
+func WithThreadID(ctx context.Context, threadID string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, threadIDContextKey, threadID)
+}
+
+func ThreadIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	threadID, _ := ctx.Value(threadIDContextKey).(string)
+	return strings.TrimSpace(threadID)
 }
 
 func (r *Registry) Call(ctx context.Context, name string, args map[string]interface{}, sandbox *Sandbox) (string, error) {

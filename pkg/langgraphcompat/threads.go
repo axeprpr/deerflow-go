@@ -365,13 +365,29 @@ func (s *Server) messagesToLangChain(messages []models.Message) []Message {
 		}
 
 		result = append(result, Message{
-			Type:    msgType,
-			ID:      msg.ID,
-			Role:    role,
-			Content: msg.Content,
+			Type:             msgType,
+			ID:               msg.ID,
+			Role:             role,
+			Content:          msg.Content,
+			AdditionalKwargs: decodeAdditionalKwargs(msg.Metadata),
 		})
 	}
 	return result
+}
+
+func decodeAdditionalKwargs(metadata map[string]string) map[string]any {
+	if len(metadata) == 0 {
+		return nil
+	}
+	raw := strings.TrimSpace(metadata["additional_kwargs"])
+	if raw == "" {
+		return nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 func (s *Server) threadResponse(session *Session) map[string]any {

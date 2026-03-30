@@ -251,7 +251,9 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			})
 
 			toolStarted := time.Now().UTC()
-			result, err := a.tools.Execute(tools.WithSandbox(ctx, a.sandbox), call)
+			toolCtx := tools.WithSandbox(ctx, a.sandbox)
+			toolCtx = tools.WithThreadID(toolCtx, sessionID)
+			result, err := a.tools.Execute(toolCtx, call)
 			if err != nil {
 				err = normalizeRunError(ctx, err, a.requestTimeout)
 				result = models.ToolResult{
