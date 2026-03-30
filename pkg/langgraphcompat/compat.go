@@ -93,6 +93,7 @@ type RunCreateRequest struct {
 	ThreadID    string         `json:"thread_id,omitempty"`
 	Input       map[string]any `json:"input,omitempty"`
 	Config      map[string]any `json:"config,omitempty"`
+	Context     map[string]any `json:"context,omitempty"`
 }
 
 // Message represents a LangGraph-compatible message
@@ -211,9 +212,13 @@ func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
 	if sandboxRef == nil {
 		sandboxRef = s.sandbox
 	}
+	registry := cfg.Tools
+	if registry == nil {
+		registry = s.tools
+	}
 	return agent.New(agent.AgentConfig{
 		LLMProvider:     s.llmProvider,
-		Tools:           s.tools,
+		Tools:           registry,
 		PresentFiles:    cfg.PresentFiles,
 		MaxTurns:        s.maxTurns,
 		AgentType:       cfg.AgentType,

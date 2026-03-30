@@ -24,6 +24,9 @@ type runConfig struct {
 	ModelName       string
 	ReasoningEffort string
 	AgentType       agent.AgentType
+	AgentName       string
+	SystemPrompt    string
+	Tools           *tools.Registry
 	Temperature     *float64
 	MaxTokens       *int
 }
@@ -58,6 +61,13 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	}
 	if threadID == "" {
 		threadID = uuid.New().String()
+	}
+
+	runCfg := parseRunConfig(req.Config)
+	resolvedRunCfg, err := s.resolveRunConfig(runCfg, req.Context)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
 	}
 
 	session := s.ensureSession(threadID, nil)
@@ -106,17 +116,18 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		"thread_id": threadID,
 	})
 
-	runCfg := parseRunConfig(req.Config)
-	if runCfg.AgentType != "" {
-		s.setThreadMetadata(threadID, "agent_type", string(runCfg.AgentType))
+	if resolvedRunCfg.AgentType != "" {
+		s.setThreadMetadata(threadID, "agent_type", string(resolvedRunCfg.AgentType))
 	}
 	runAgent := s.newAgent(agent.AgentConfig{
+		Tools:           resolvedRunCfg.Tools,
 		PresentFiles:    session.PresentFiles,
-		AgentType:       runCfg.AgentType,
-		Model:           firstNonEmpty(runCfg.ModelName, s.defaultModel),
-		ReasoningEffort: runCfg.ReasoningEffort,
-		Temperature:     runCfg.Temperature,
-		MaxTokens:       runCfg.MaxTokens,
+		AgentType:       resolvedRunCfg.AgentType,
+		Model:           firstNonEmpty(resolvedRunCfg.ModelName, s.defaultModel),
+		ReasoningEffort: resolvedRunCfg.ReasoningEffort,
+		SystemPrompt:    resolvedRunCfg.SystemPrompt,
+		Temperature:     resolvedRunCfg.Temperature,
+		MaxTokens:       resolvedRunCfg.MaxTokens,
 	})
 
 	ctx := subagent.WithEventSink(r.Context(), func(evt subagent.TaskEvent) {
@@ -149,7 +160,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	}
 
 	s.saveSession(threadID, result.Messages)
-	s.maybeGenerateThreadTitle(ctx, threadID, runCfg.ModelName, result.Messages)
+	s.maybeGenerateThreadTitle(ctx, threadID, resolvedRunCfg.ModelName, result.Messages)
 	state := s.getThreadState(threadID)
 
 	s.recordAndSendEvent(w, flusher, run, "updates", map[string]any{
@@ -589,10 +600,122 @@ func parseRunConfig(raw map[string]any) runConfig {
 		ModelName:       firstNonEmpty(stringFromAny(raw["model_name"]), stringFromAny(raw["model"]), stringFromAny(configurable["model_name"]), stringFromAny(configurable["model"])),
 		ReasoningEffort: firstNonEmpty(stringFromAny(raw["reasoning_effort"]), stringFromAny(configurable["reasoning_effort"])),
 		AgentType:       agent.AgentType(firstNonEmpty(stringFromAny(raw["agent_type"]), stringFromAny(configurable["agent_type"]))),
+		AgentName:       firstNonEmpty(stringFromAny(raw["agent_name"]), stringFromAny(configurable["agent_name"])),
 		Temperature:     floatPointerFromAny(firstNonNil(raw["temperature"], configurable["temperature"])),
 		MaxTokens:       intPointerFromAny(firstNonNil(raw["max_tokens"], configurable["max_tokens"])),
 	}
 	return cfg
+}
+
+func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) (runConfig, error) {
+	cfg.AgentName = firstNonEmpty(stringFromAny(runtimeContext["agent_name"]), cfg.AgentName)
+	if cfg.AgentName == "" {
+		return cfg, nil
+	}
+
+	name, ok := normalizeAgentName(cfg.AgentName)
+	if !ok {
+		return runConfig{}, fmt.Errorf("invalid agent name")
+	}
+
+	s.uiStateMu.RLock()
+	customAgent, exists := s.getAgentsLocked()[name]
+	s.uiStateMu.RUnlock()
+	if !exists {
+		return runConfig{}, fmt.Errorf("agent %q not found", name)
+	}
+
+	cfg.AgentName = name
+	if cfg.ModelName == "" && customAgent.Model != nil {
+		cfg.ModelName = strings.TrimSpace(*customAgent.Model)
+	}
+
+	customPrompt := buildCustomAgentPrompt(customAgent)
+	basePrompt := strings.TrimSpace(cfg.SystemPrompt)
+	if basePrompt == "" {
+		basePrompt = agent.GetAgentTypeConfig(cfg.AgentType).SystemPrompt
+	}
+	cfg.SystemPrompt = joinPromptSections(basePrompt, customPrompt)
+
+	if len(customAgent.ToolGroups) > 0 {
+		cfg.Tools = resolveAgentToolRegistry(s.tools, customAgent.ToolGroups)
+	}
+	return cfg, nil
+}
+
+func buildCustomAgentPrompt(customAgent gatewayAgent) string {
+	parts := make([]string, 0, 2)
+	if desc := strings.TrimSpace(customAgent.Description); desc != "" {
+		parts = append(parts, "Agent description:\n"+desc)
+	}
+	if soul := strings.TrimSpace(customAgent.Soul); soul != "" {
+		parts = append(parts, "SOUL.md:\n"+soul)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func joinPromptSections(parts ...string) string {
+	trimmed := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			trimmed = append(trimmed, part)
+		}
+	}
+	return strings.Join(trimmed, "\n\n")
+}
+
+func resolveAgentToolRegistry(base *tools.Registry, toolGroups []string) *tools.Registry {
+	if base == nil || len(toolGroups) == 0 {
+		return base
+	}
+
+	allowed := make(map[string]struct{})
+	addTool := func(name string) {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			allowed[name] = struct{}{}
+		}
+	}
+
+	for _, group := range toolGroups {
+		group = strings.TrimSpace(group)
+		switch group {
+		case "bash":
+			addTool("bash")
+		case "file":
+			addTool("read_file")
+			addTool("write_file")
+			addTool("glob")
+			addTool("present_file")
+		case "file:read":
+			addTool("read_file")
+			addTool("glob")
+		case "file:write":
+			addTool("write_file")
+			addTool("present_file")
+		case "interaction":
+			addTool("ask_clarification")
+		case "agent", "task":
+			addTool("task")
+		default:
+			if tool := base.Get(group); tool != nil {
+				addTool(group)
+				continue
+			}
+			for _, tool := range base.ListByGroup(group) {
+				addTool(tool.Name)
+			}
+		}
+	}
+
+	addTool("ask_clarification")
+
+	names := make([]string, 0, len(allowed))
+	for name := range allowed {
+		names = append(names, name)
+	}
+	return base.Restrict(names)
 }
 
 func firstNonEmpty(values ...string) string {

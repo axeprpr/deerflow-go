@@ -3,6 +3,7 @@ package langgraphcompat
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -13,6 +14,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axeprpr/deerflow-go/pkg/llm"
+	"github.com/axeprpr/deerflow-go/pkg/models"
+	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
 func newCompatTestServer(t *testing.T) (*Server, *httptest.Server) {
@@ -523,6 +528,130 @@ func TestAgentsAndMemoryEndpoints(t *testing.T) {
 	if chResp.StatusCode != http.StatusOK {
 		t.Fatalf("channels status=%d", chResp.StatusCode)
 	}
+}
+
+func TestRunsStreamAppliesCustomAgentRuntimeConfig(t *testing.T) {
+	provider := &streamSpyProvider{}
+	s := &Server{
+		llmProvider:  provider,
+		defaultModel: "default-model",
+		tools:        newRuntimeToolRegistry(t),
+		sessions:     make(map[string]*Session),
+		runs:         make(map[string]*Run),
+		dataRoot:     t.TempDir(),
+		agents:       map[string]gatewayAgent{},
+	}
+	s.ensureSession("thread-custom-agent", map[string]any{"title": "Existing title"})
+	modelName := "custom-model"
+	s.agents["code-reviewer"] = gatewayAgent{
+		Name:        "code-reviewer",
+		Description: "Review code changes carefully.",
+		Model:       &modelName,
+		ToolGroups:  []string{"file:read", "bash"},
+		Soul:        "You are a meticulous code reviewer.",
+	}
+
+	body := `{
+		"thread_id":"thread-custom-agent",
+		"input":{"messages":[{"role":"user","content":"Review this patch"}]},
+		"context":{"agent_name":"code-reviewer"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/runs/stream", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleRunsStream(rec, req)
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(payload))
+	}
+
+	if provider.lastReq.Model != "custom-model" {
+		t.Fatalf("model=%q want=%q", provider.lastReq.Model, "custom-model")
+	}
+	if !strings.Contains(provider.lastReq.SystemPrompt, "Review code changes carefully.") {
+		t.Fatalf("system prompt missing description: %q", provider.lastReq.SystemPrompt)
+	}
+	if !strings.Contains(provider.lastReq.SystemPrompt, "You are a meticulous code reviewer.") {
+		t.Fatalf("system prompt missing soul: %q", provider.lastReq.SystemPrompt)
+	}
+
+	gotTools := make([]string, 0, len(provider.lastReq.Tools))
+	for _, tool := range provider.lastReq.Tools {
+		gotTools = append(gotTools, tool.Name)
+	}
+	if strings.Join(gotTools, ",") != "ask_clarification,bash,glob,present_file,read_file" {
+		t.Fatalf("tools=%q want=%q", strings.Join(gotTools, ","), "ask_clarification,bash,glob,present_file,read_file")
+	}
+}
+
+func TestRunsStreamRejectsMissingCustomAgent(t *testing.T) {
+	s := &Server{
+		sessions: make(map[string]*Session),
+		runs:     make(map[string]*Run),
+		agents:   map[string]gatewayAgent{},
+	}
+	s.ensureSession("thread-missing-agent", map[string]any{"title": "Existing title"})
+
+	body := `{
+		"thread_id":"thread-missing-agent",
+		"input":{"messages":[{"role":"user","content":"Hello"}]},
+		"context":{"agent_name":"missing-agent"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/runs/stream", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleRunsStream(rec, req)
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(payload))
+	}
+}
+
+func newRuntimeToolRegistry(t *testing.T) *tools.Registry {
+	t.Helper()
+	registry := tools.NewRegistry()
+	for _, tool := range []models.Tool{
+		{Name: "bash", Groups: []string{"builtin"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
+		{Name: "read_file", Groups: []string{"builtin", "file_ops"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
+		{Name: "write_file", Groups: []string{"builtin", "file_ops"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
+		{Name: "glob", Groups: []string{"builtin", "file_ops"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
+		{Name: "present_file", Groups: []string{"builtin", "file_ops"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
+		{Name: "ask_clarification", Groups: []string{"builtin", "interaction"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
+		{Name: "task", Groups: []string{"agent"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
+	} {
+		if err := registry.Register(tool); err != nil {
+			t.Fatalf("register tool %q: %v", tool.Name, err)
+		}
+	}
+	return registry
+}
+
+type streamSpyProvider struct {
+	lastReq llm.ChatRequest
+}
+
+func (p *streamSpyProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, nil
+}
+
+func (p *streamSpyProvider) Stream(_ context.Context, req llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	p.lastReq = req
+	ch := make(chan llm.StreamChunk, 1)
+	ch <- llm.StreamChunk{
+		Done: true,
+		Message: &models.Message{
+			ID:        "stream-response",
+			SessionID: "stream",
+			Role:      models.RoleAI,
+			Content:   "done",
+		},
+	}
+	close(ch)
+	return ch, nil
 }
 
 func writeSkillArchive(path, name string) error {
