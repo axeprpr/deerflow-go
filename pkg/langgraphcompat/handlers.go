@@ -31,6 +31,9 @@ type runConfig struct {
 	MaxTokens       *int
 }
 
+const planModeTodoPrompt = `When the task is multi-step or likely to take several actions, maintain a concise todo list with the write_todos tool.
+Write the initial todo list early, keep exactly one item in_progress when work is active, update statuses immediately after progress, and clear or complete the list when finished.`
+
 func (s *Server) handleRunsStream(w http.ResponseWriter, r *http.Request) {
 	s.handleStreamRequest(w, r, "")
 }
@@ -133,6 +136,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	ctx := subagent.WithEventSink(r.Context(), func(evt subagent.TaskEvent) {
 		s.forwardTaskEvent(w, flusher, run, evt)
 	})
+	ctx = tools.WithThreadID(ctx, threadID)
 	ctx = clarification.WithThreadID(ctx, threadID)
 	ctx = clarification.WithEventSink(ctx, func(item *clarification.Clarification) {
 		if item == nil {
@@ -168,6 +172,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 			"messages":  state.Values["messages"],
 			"title":     state.Values["title"],
 			"artifacts": state.Values["artifacts"],
+			"todos":     state.Values["todos"],
 		},
 	})
 	s.recordAndSendEvent(w, flusher, run, "values", state.Values)
@@ -499,23 +504,28 @@ func (s *Server) recordAndSendEvent(w http.ResponseWriter, flusher http.Flusher,
 
 func (s *Server) saveSession(threadID string, messages []models.Message) {
 	s.sessionsMu.Lock()
-	defer s.sessionsMu.Unlock()
-
+	var snapshot *Session
 	if session, exists := s.sessions[threadID]; exists {
 		session.Messages = append([]models.Message(nil), messages...)
 		session.Status = "idle"
 		session.UpdatedAt = time.Now().UTC()
+		snapshot = cloneSession(session)
 	} else {
-		s.sessions[threadID] = &Session{
+		session := &Session{
 			ThreadID:     threadID,
 			Messages:     append([]models.Message(nil), messages...),
+			Todos:        nil,
 			Metadata:     make(map[string]any),
 			Status:       "idle",
 			PresentFiles: tools.NewPresentFileRegistry(),
 			CreatedAt:    time.Now().UTC(),
 			UpdatedAt:    time.Now().UTC(),
 		}
+		s.sessions[threadID] = session
+		snapshot = cloneSession(session)
 	}
+	s.sessionsMu.Unlock()
+	_ = s.persistSessionSnapshot(snapshot)
 }
 
 func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, run *Run, evt agent.AgentEvent) {
@@ -582,6 +592,16 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 				"error":          evt.ToolEvent.Error,
 			},
 		})
+		if evt.Result != nil && evt.Result.ToolName == "write_todos" {
+			state := s.getThreadState(run.ThreadID)
+			if state != nil {
+				s.recordAndSendEvent(w, flusher, run, "updates", map[string]any{
+					"agent": map[string]any{
+						"todos": state.Values["todos"],
+					},
+				})
+			}
+		}
 	case agent.AgentEventError:
 		errData := map[string]any{
 			"error":   "RunError",
@@ -627,6 +647,9 @@ func parseRunConfig(raw map[string]any) runConfig {
 }
 
 func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) (runConfig, error) {
+	if boolFromAny(runtimeContext["is_plan_mode"]) {
+		cfg.SystemPrompt = joinPromptSections(cfg.SystemPrompt, planModeTodoPrompt)
+	}
 	cfg.AgentName = firstNonEmpty(stringFromAny(runtimeContext["agent_name"]), cfg.AgentName)
 	if cfg.AgentName == "" {
 		return cfg, nil
@@ -812,4 +835,16 @@ func intPointerFromAny(v any) *int {
 		}
 	}
 	return nil
+}
+
+func boolFromAny(v any) bool {
+	switch value := v.(type) {
+	case bool:
+		return value
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+		return err == nil && parsed
+	default:
+		return false
+	}
 }

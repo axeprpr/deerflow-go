@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -63,6 +65,11 @@ const maxSkillArchiveSize int64 = 512 << 20
 
 var skillInstallSeq uint64
 var agentNameRE = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
+var activeArtifactMIMETypes = map[string]struct{}{
+	"text/html":             {},
+	"application/xhtml+xml": {},
+	"image/svg+xml":         {},
+}
 
 type gatewayAgent struct {
 	Name        string   `json:"name"`
@@ -550,6 +557,10 @@ func (s *Server) handleGatewayThreadDelete(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to delete local thread data"})
 		return
 	}
+	if err := s.deletePersistedSession(threadID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to delete thread session"})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success": true,
 		"message": "local thread data deleted",
@@ -684,20 +695,67 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.Contains(artifactPath, ".skill/") {
+		s.handleSkillArchiveArtifactGet(w, r, threadID, artifactPath)
+		return
+	}
+
 	absPath := s.resolveArtifactPath(threadID, artifactPath)
 	if !s.artifactAllowed(threadID, absPath) {
 		http.NotFound(w, r)
 		return
 	}
-	if _, err := os.Stat(absPath); err != nil {
+	info, err := os.Stat(absPath)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if !info.Mode().IsRegular() {
+		http.Error(w, "path is not a file", http.StatusBadRequest)
+		return
+	}
+
+	mimeType := mime.TypeByExtension(strings.ToLower(filepath.Ext(absPath)))
+	if shouldForceAttachment(r, mimeType) {
+		w.Header().Set("Content-Disposition", contentDisposition("attachment", filepath.Base(absPath)))
+	}
+
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	serveArtifactContent(w, filepath.Base(absPath), mimeType, data, downloadRequested(r))
+}
+
+func (s *Server) handleSkillArchiveArtifactGet(w http.ResponseWriter, r *http.Request, threadID, artifactPath string) {
+	skillPath, internalPath, ok := splitSkillArchiveArtifactPath(artifactPath)
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
 
-	if strings.EqualFold(r.URL.Query().Get("download"), "true") {
-		w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(absPath)+`"`)
+	archivePath := s.resolveArtifactPath(threadID, skillPath)
+	if !s.artifactAllowed(threadID, archivePath) {
+		http.NotFound(w, r)
+		return
 	}
-	http.ServeFile(w, r, absPath)
+	content, err := extractSkillArchiveFile(archivePath, internalPath)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, os.ErrNotExist) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+
+	name := filepath.Base(internalPath)
+	mimeType := mime.TypeByExtension(strings.ToLower(filepath.Ext(name)))
+	if shouldForceAttachment(r, mimeType) {
+		w.Header().Set("Content-Disposition", contentDisposition("attachment", name))
+	}
+	serveArtifactContent(w, name, mimeType, content, downloadRequested(r))
 }
 
 func (s *Server) handleSuggestions(w http.ResponseWriter, r *http.Request) {
@@ -789,6 +847,49 @@ func (s *Server) artifactAllowed(threadID, absPath string) bool {
 	return false
 }
 
+func splitSkillArchiveArtifactPath(path string) (string, string, bool) {
+	const marker = ".skill/"
+	idx := strings.Index(path, marker)
+	if idx < 0 {
+		return "", "", false
+	}
+	skillPath := path[:idx+len(".skill")]
+	internalPath := strings.TrimPrefix(path[idx+len(marker):], "/")
+	if skillPath == "" || internalPath == "" {
+		return "", "", false
+	}
+	cleanInternal := filepath.Clean(internalPath)
+	if cleanInternal == "." || cleanInternal == ".." || strings.HasPrefix(cleanInternal, ".."+string(filepath.Separator)) {
+		return "", "", false
+	}
+	return skillPath, filepath.ToSlash(cleanInternal), true
+}
+
+func extractSkillArchiveFile(archivePath, internalPath string) ([]byte, error) {
+	reader, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+
+	for _, file := range reader.File {
+		name := filepath.ToSlash(filepath.Clean(file.Name))
+		if strings.TrimPrefix(name, "./") != internalPath {
+			continue
+		}
+		if file.FileInfo().IsDir() {
+			return nil, os.ErrNotExist
+		}
+		rc, err := file.Open()
+		if err != nil {
+			return nil, err
+		}
+		defer rc.Close()
+		return io.ReadAll(rc)
+	}
+	return nil, os.ErrNotExist
+}
+
 func (s *Server) resolveArtifactPath(threadID, artifactPath string) string {
 	clean := filepath.Clean("/" + strings.TrimSpace(artifactPath))
 	if strings.HasPrefix(clean, "/mnt/user-data/") {
@@ -796,6 +897,97 @@ func (s *Server) resolveArtifactPath(threadID, artifactPath string) string {
 		return filepath.Join(s.threadRoot(threadID), filepath.FromSlash(suffix))
 	}
 	return clean
+}
+
+func serveArtifactContent(w http.ResponseWriter, filename, mimeType string, data []byte, download bool) {
+	if mimeType == "" && looksLikeText(data) {
+		mimeType = "text/plain; charset=utf-8"
+	}
+	if mimeType == "" {
+		mimeType = http.DetectContentType(data)
+	}
+
+	if download || isActiveArtifactMIMEType(mimeType) {
+		if w.Header().Get("Content-Disposition") == "" {
+			w.Header().Set("Content-Disposition", contentDisposition("attachment", filename))
+		}
+		if mimeType != "" {
+			w.Header().Set("Content-Type", mimeType)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+		return
+	}
+
+	if isTextMIMEType(mimeType) && utf8.Valid(data) {
+		w.Header().Set("Content-Type", withUTF8Charset(mimeType))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+		return
+	}
+
+	if looksLikeText(data) && utf8.Valid(data) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+		return
+	}
+
+	w.Header().Set("Content-Disposition", contentDisposition("inline", filename))
+	w.Header().Set("Content-Type", mimeType)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
+func downloadRequested(r *http.Request) bool {
+	return strings.EqualFold(r.URL.Query().Get("download"), "true")
+}
+
+func shouldForceAttachment(r *http.Request, mimeType string) bool {
+	return downloadRequested(r) || isActiveArtifactMIMEType(mimeType)
+}
+
+func isActiveArtifactMIMEType(mimeType string) bool {
+	base := strings.TrimSpace(strings.SplitN(mimeType, ";", 2)[0])
+	_, ok := activeArtifactMIMETypes[base]
+	return ok
+}
+
+func isTextMIMEType(mimeType string) bool {
+	base := strings.TrimSpace(strings.SplitN(mimeType, ";", 2)[0])
+	return strings.HasPrefix(base, "text/")
+}
+
+func looksLikeText(data []byte) bool {
+	if len(data) == 0 {
+		return true
+	}
+	const sampleSize = 8192
+	if len(data) > sampleSize {
+		data = data[:sampleSize]
+	}
+	return !bytesContainsNUL(data)
+}
+
+func bytesContainsNUL(data []byte) bool {
+	for _, b := range data {
+		if b == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func withUTF8Charset(mimeType string) string {
+	if strings.Contains(strings.ToLower(mimeType), "charset=") {
+		return mimeType
+	}
+	return mimeType + "; charset=utf-8"
+}
+
+func contentDisposition(kind, filename string) string {
+	filename = strings.ReplaceAll(filename, `"`, "")
+	return fmt.Sprintf(`%s; filename="%s"`, kind, filename)
 }
 
 func (s *Server) threadRoot(threadID string) string {

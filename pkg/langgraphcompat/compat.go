@@ -60,11 +60,17 @@ type HealthStatus struct {
 type Session struct {
 	ThreadID     string
 	Messages     []models.Message
+	Todos        []Todo
 	Metadata     map[string]any
 	Status       string
 	PresentFiles *tools.PresentFileRegistry
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+type Todo struct {
+	Content string `json:"content,omitempty"`
+	Status  string `json:"status,omitempty"`
 }
 
 type ThreadState struct {
@@ -193,8 +199,12 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		agents:       map[string]gatewayAgent{},
 		memory:       defaultGatewayMemory(),
 	}
+	registry.Register(s.todoTool())
 	if err := s.loadGatewayState(); err != nil {
 		logger.Printf("Warning: failed to load gateway state: %v", err)
+	}
+	if err := s.loadPersistedSessions(); err != nil {
+		logger.Printf("Warning: failed to load persisted sessions: %v", err)
 	}
 
 	mux := http.NewServeMux()

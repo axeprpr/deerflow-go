@@ -19,6 +19,7 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
+	toolctx "github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
 func newCompatTestServer(t *testing.T) (*Server, http.Handler) {
@@ -162,6 +163,145 @@ func TestAPILangGraphPrefixCreateThread(t *testing.T) {
 	}
 }
 
+func TestPersistedSessionsReloadMessagesTodosAndArtifacts(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	threadID := "thread-persisted"
+	session := s.ensureSession(threadID, map[string]any{"title": "Saved thread"})
+	session.Messages = []models.Message{{
+		ID:        "msg-1",
+		SessionID: threadID,
+		Role:      models.RoleHuman,
+		Content:   "hello",
+	}}
+	session.Todos = []Todo{{Content: "Keep state", Status: "in_progress"}}
+	session.UpdatedAt = time.Now().UTC()
+	if err := s.persistSessionSnapshot(cloneSession(session)); err != nil {
+		t.Fatalf("persist session: %v", err)
+	}
+
+	artifactPath := filepath.Join(s.threadRoot(threadID), "outputs", "report.md")
+	if err := os.MkdirAll(filepath.Dir(artifactPath), 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	if err := os.WriteFile(artifactPath, []byte("# report"), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+
+	reloaded := &Server{
+		sessions: make(map[string]*Session),
+		runs:     make(map[string]*Run),
+		dataRoot: s.dataRoot,
+	}
+	if err := reloaded.loadPersistedSessions(); err != nil {
+		t.Fatalf("load persisted sessions: %v", err)
+	}
+
+	state := reloaded.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("state is nil")
+	}
+	messages, ok := state.Values["messages"].([]Message)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("messages=%#v", state.Values["messages"])
+	}
+	todos, ok := state.Values["todos"].([]map[string]any)
+	if !ok || len(todos) != 1 {
+		t.Fatalf("todos=%#v", state.Values["todos"])
+	}
+	artifacts, ok := state.Values["artifacts"].([]string)
+	if !ok || len(artifacts) != 1 {
+		t.Fatalf("artifacts=%#v", state.Values["artifacts"])
+	}
+	if artifacts[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("artifact=%q want /mnt/user-data/outputs/report.md", artifacts[0])
+	}
+}
+
+func TestWriteTodosToolUpdatesThreadState(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	s.ensureSession("thread-todos", nil)
+
+	result, err := s.todoTool().Handler(
+		toolctx.WithThreadID(context.Background(), "thread-todos"),
+		models.ToolCall{
+			ID:   "call-todos",
+			Name: "write_todos",
+			Arguments: map[string]any{
+				"todos": []any{
+					map[string]any{"content": "Inspect repo", "status": "completed"},
+					map[string]any{"content": "Implement feature", "status": "in_progress"},
+				},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("write_todos error: %v", err)
+	}
+	if result.Status != models.CallStatusCompleted {
+		t.Fatalf("status=%s want completed", result.Status)
+	}
+
+	state := s.getThreadState("thread-todos")
+	if state == nil {
+		t.Fatal("state is nil")
+	}
+	todos, ok := state.Values["todos"].([]map[string]any)
+	if !ok {
+		t.Fatalf("todos type=%T", state.Values["todos"])
+	}
+	if len(todos) != 2 {
+		t.Fatalf("todos len=%d want=2", len(todos))
+	}
+	if todos[1]["status"] != "in_progress" {
+		t.Fatalf("todo status=%v want in_progress", todos[1]["status"])
+	}
+}
+
+func TestForwardAgentEventWriteTodosEmitsUpdates(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	s.ensureSession("thread-1", nil)
+	s.setThreadTodos("thread-1", []Todo{{Content: "Ship todo support", Status: "in_progress"}})
+
+	rec := httptest.NewRecorder()
+	run := &Run{RunID: "run-1", ThreadID: "thread-1"}
+
+	s.forwardAgentEvent(rec, rec, run, agent.AgentEvent{
+		Type:      agent.AgentEventToolCallEnd,
+		MessageID: "tool-msg-1",
+		Result: &models.ToolResult{
+			CallID:   "call-1",
+			ToolName: "write_todos",
+			Status:   models.CallStatusCompleted,
+			Content:  "Updated todo list",
+		},
+		ToolEvent: &agent.ToolCallEvent{
+			ID:     "call-1",
+			Name:   "write_todos",
+			Status: models.CallStatusCompleted,
+		},
+	})
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: updates") {
+		t.Fatalf("expected updates event in %q", body)
+	}
+	if !strings.Contains(body, `"todos":[{"content":"Ship todo support","status":"in_progress"}]`) {
+		t.Fatalf("expected todos payload in %q", body)
+	}
+}
+
+func TestResolveRunConfigAddsPlanModeTodoPrompt(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+
+	cfg, err := s.resolveRunConfig(runConfig{}, map[string]any{"is_plan_mode": true})
+	if err != nil {
+		t.Fatalf("resolveRunConfig error: %v", err)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "write_todos") {
+		t.Fatalf("system prompt missing todo guidance: %q", cfg.SystemPrompt)
+	}
+}
+
 func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-gateway-1"
@@ -206,6 +346,89 @@ func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 	}
 	if artifactResp.Body.String() != "hello artifact" {
 		t.Fatalf("artifact body=%q", artifactResp.Body.String())
+	}
+}
+
+func TestArtifactEndpointForcesDownloadForActiveContent(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-active-artifact"
+	artifactPath := filepath.Join(s.threadRoot(threadID), "outputs", "page.html")
+	if err := os.MkdirAll(filepath.Dir(artifactPath), 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	if err := os.WriteFile(artifactPath, []byte("<html><body>x</body></html>"), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/page.html", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get("Content-Disposition"); !strings.HasPrefix(got, "attachment;") {
+		t.Fatalf("content-disposition=%q want attachment", got)
+	}
+}
+
+func TestArtifactEndpointReadsFileInsideSkillArchive(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-skill-artifact"
+	archivePath := filepath.Join(s.threadRoot(threadID), "outputs", "sample.skill")
+	if err := os.MkdirAll(filepath.Dir(archivePath), 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	writeArtifactSkillArchive(t, archivePath, map[string]string{
+		"notes.txt": "hello from skill",
+	})
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/sample.skill/notes.txt", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if resp.Body.String() != "hello from skill" {
+		t.Fatalf("body=%q", resp.Body.String())
+	}
+	if got := resp.Header().Get("Content-Disposition"); got != "" {
+		t.Fatalf("content-disposition=%q want empty", got)
+	}
+}
+
+func TestArtifactEndpointDownloadTrueForSkillArchive(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-skill-download"
+	archivePath := filepath.Join(s.threadRoot(threadID), "outputs", "sample.skill")
+	if err := os.MkdirAll(filepath.Dir(archivePath), 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	writeArtifactSkillArchive(t, archivePath, map[string]string{
+		"notes.txt": "hello from skill",
+	})
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/sample.skill/notes.txt?download=true", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get("Content-Disposition"); !strings.HasPrefix(got, "attachment;") {
+		t.Fatalf("content-disposition=%q want attachment", got)
+	}
+}
+
+func TestArtifactEndpointForcesDownloadForActiveContentInSkillArchive(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-skill-active"
+	archivePath := filepath.Join(s.threadRoot(threadID), "outputs", "sample.skill")
+	if err := os.MkdirAll(filepath.Dir(archivePath), 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	writeArtifactSkillArchive(t, archivePath, map[string]string{
+		"page.html": "<html><body>x</body></html>",
+	})
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/sample.skill/page.html", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get("Content-Disposition"); !strings.HasPrefix(got, "attachment;") {
+		t.Fatalf("content-disposition=%q want attachment", got)
 	}
 }
 
@@ -395,6 +618,29 @@ func minimalDOCX(t *testing.T, text string) []byte {
 		t.Fatalf("close docx zip: %v", err)
 	}
 	return buf.Bytes()
+}
+
+func writeArtifactSkillArchive(t *testing.T, archivePath string, files map[string]string) {
+	t.Helper()
+	f, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatalf("create archive: %v", err)
+	}
+	defer f.Close()
+
+	w := zip.NewWriter(f)
+	for name, content := range files {
+		entry, err := w.Create(name)
+		if err != nil {
+			t.Fatalf("create zip entry %q: %v", name, err)
+		}
+		if _, err := entry.Write([]byte(content)); err != nil {
+			t.Fatalf("write zip entry %q: %v", name, err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close archive: %v", err)
+	}
 }
 
 func TestModelsSkillsMCPConfigEndpoints(t *testing.T) {

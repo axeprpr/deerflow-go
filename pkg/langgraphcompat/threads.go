@@ -3,6 +3,7 @@ package langgraphcompat
 import (
 	"encoding/json"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -63,10 +64,9 @@ func (s *Server) handleThreadUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.sessionsMu.Lock()
-	defer s.sessionsMu.Unlock()
-
 	session, exists := s.sessions[threadID]
 	if !exists {
+		s.sessionsMu.Unlock()
 		http.Error(w, "thread not found", http.StatusNotFound)
 		return
 	}
@@ -77,6 +77,9 @@ func (s *Server) handleThreadUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	session.UpdatedAt = time.Now().UTC()
+	snapshot := cloneSession(session)
+	s.sessionsMu.Unlock()
+	_ = s.persistSessionSnapshot(snapshot)
 
 	writeJSON(w, http.StatusOK, s.threadResponse(session))
 }
@@ -91,6 +94,10 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 	s.sessionsMu.Lock()
 	delete(s.sessions, threadID)
 	s.sessionsMu.Unlock()
+	if err := s.deletePersistedSession(threadID); err != nil {
+		http.Error(w, "failed to delete thread", http.StatusInternalServerError)
+		return
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -220,10 +227,15 @@ func (s *Server) handleThreadStatePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if title, ok := req.Values["title"].(string); ok {
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]any)
+		}
 		session.Metadata["title"] = title
 	}
 	session.UpdatedAt = time.Now().UTC()
+	snapshot := cloneSession(session)
 	s.sessionsMu.Unlock()
+	_ = s.persistSessionSnapshot(snapshot)
 
 	writeJSON(w, http.StatusOK, s.getThreadState(threadID))
 }
@@ -251,11 +263,16 @@ func (s *Server) handleThreadStatePatch(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "thread not found", http.StatusNotFound)
 		return
 	}
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]any)
+	}
 	for k, v := range req.Metadata {
 		session.Metadata[k] = v
 	}
 	session.UpdatedAt = time.Now().UTC()
+	snapshot := cloneSession(session)
 	s.sessionsMu.Unlock()
+	_ = s.persistSessionSnapshot(snapshot)
 
 	writeJSON(w, http.StatusOK, s.getThreadState(threadID))
 }
@@ -463,7 +480,8 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 		},
 		"values": map[string]any{
 			"title":     session.Metadata["title"],
-			"artifacts": sessionArtifactPaths(session),
+			"artifacts": s.sessionArtifactPaths(session),
+			"todos":     todosToAny(session.Todos),
 		},
 	}
 }
@@ -479,7 +497,8 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 	values := map[string]any{
 		"messages":  s.messagesToLangChain(session.Messages),
 		"title":     stringValue(session.Metadata["title"]),
-		"artifacts": sessionArtifactPaths(session),
+		"artifacts": s.sessionArtifactPaths(session),
+		"todos":     todosToAny(session.Todos),
 	}
 
 	return &ThreadState{
@@ -497,13 +516,18 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 
 func (s *Server) ensureSession(threadID string, metadata map[string]any) *Session {
 	s.sessionsMu.Lock()
-	defer s.sessionsMu.Unlock()
-
+	var snapshot *Session
 	if session, exists := s.sessions[threadID]; exists {
 		if metadata != nil {
 			for k, v := range metadata {
 				session.Metadata[k] = v
 			}
+			session.UpdatedAt = time.Now().UTC()
+			snapshot = cloneSession(session)
+		}
+		s.sessionsMu.Unlock()
+		if snapshot != nil {
+			_ = s.persistSessionSnapshot(snapshot)
 		}
 		return session
 	}
@@ -515,6 +539,7 @@ func (s *Server) ensureSession(threadID string, metadata map[string]any) *Sessio
 	session := &Session{
 		ThreadID:     threadID,
 		Messages:     []models.Message{},
+		Todos:        nil,
 		Metadata:     metadata,
 		Status:       "idle",
 		PresentFiles: tools.NewPresentFileRegistry(),
@@ -522,28 +547,37 @@ func (s *Server) ensureSession(threadID string, metadata map[string]any) *Sessio
 		UpdatedAt:    now,
 	}
 	s.sessions[threadID] = session
+	snapshot = cloneSession(session)
+	s.sessionsMu.Unlock()
+	_ = s.persistSessionSnapshot(snapshot)
 	return session
 }
 
 func (s *Server) markThreadStatus(threadID string, status string) {
 	s.sessionsMu.Lock()
-	defer s.sessionsMu.Unlock()
+	var snapshot *Session
 	if session, exists := s.sessions[threadID]; exists {
 		session.Status = status
 		session.UpdatedAt = time.Now().UTC()
+		snapshot = cloneSession(session)
 	}
+	s.sessionsMu.Unlock()
+	_ = s.persistSessionSnapshot(snapshot)
 }
 
 func (s *Server) setThreadMetadata(threadID string, key string, value any) {
 	s.sessionsMu.Lock()
-	defer s.sessionsMu.Unlock()
+	var snapshot *Session
 	if session, exists := s.sessions[threadID]; exists {
 		if session.Metadata == nil {
 			session.Metadata = make(map[string]any)
 		}
 		session.Metadata[key] = value
 		session.UpdatedAt = time.Now().UTC()
+		snapshot = cloneSession(session)
 	}
+	s.sessionsMu.Unlock()
+	_ = s.persistSessionSnapshot(snapshot)
 }
 
 func (s *Server) saveRun(run *Run) {
@@ -607,17 +641,50 @@ func stringValue(v any) string {
 	return s
 }
 
-func sessionArtifactPaths(session *Session) []string {
-	if session == nil || session.PresentFiles == nil {
+func (s *Server) sessionArtifactPaths(session *Session) []string {
+	if session == nil {
 		return []string{}
 	}
 
-	files := session.PresentFiles.List()
-	paths := make([]string, 0, len(files))
-	for _, file := range files {
-		paths = append(paths, file.Path)
+	seen := make(map[string]struct{})
+	paths := make([]string, 0)
+	if session.PresentFiles != nil {
+		files := session.PresentFiles.List()
+		for _, file := range files {
+			if file.Path == "" {
+				continue
+			}
+			if _, ok := seen[file.Path]; ok {
+				continue
+			}
+			seen[file.Path] = struct{}{}
+			paths = append(paths, file.Path)
+		}
 	}
+	for _, path := range collectArtifactPaths(filepath.Join(s.threadRoot(session.ThreadID), "outputs")) {
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
 	return paths
+}
+
+func cloneSession(session *Session) *Session {
+	if session == nil {
+		return nil
+	}
+	return &Session{
+		ThreadID:  session.ThreadID,
+		Messages:  append([]models.Message(nil), session.Messages...),
+		Todos:     append([]Todo(nil), session.Todos...),
+		Metadata:  copyMetadataMap(session.Metadata),
+		Status:    session.Status,
+		CreatedAt: session.CreatedAt,
+		UpdatedAt: session.UpdatedAt,
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
