@@ -608,6 +608,16 @@ func (s *Server) handleUploadsCreate(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
 			return
 		}
+		if mdPath, err := generateUploadMarkdownCompanion(asString(info["path"])); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
+			return
+		} else if mdPath != "" {
+			mdName := filepath.Base(mdPath)
+			info["markdown_file"] = mdName
+			info["markdown_path"] = mdPath
+			info["markdown_virtual_path"] = "/mnt/user-data/uploads/" + mdName
+			info["markdown_artifact_url"] = "/api/threads/" + threadID + "/artifacts/mnt/user-data/uploads/" + mdName
+		}
 		infos = append(infos, info)
 	}
 
@@ -677,6 +687,9 @@ func (s *Server) handleUploadsDelete(w http.ResponseWriter, r *http.Request) {
 	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to delete file"})
 		return
+	}
+	if isConvertibleUploadExtension(filename) {
+		_ = os.Remove(strings.TrimSuffix(target, filepath.Ext(target)) + ".md")
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

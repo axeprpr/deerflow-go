@@ -112,6 +112,95 @@ func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 	}
 }
 
+func TestUploadConvertibleDocumentCreatesMarkdownCompanion(t *testing.T) {
+	_, ts := newCompatTestServer(t)
+	threadID := "thread-gateway-docx"
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	part, err := w.CreateFormFile("files", "report.docx")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write(minimalDOCX(t, "Quarterly Review")); err != nil {
+		t.Fatalf("write docx: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/threads/"+threadID+"/uploads", &body)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("upload request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("upload status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var uploaded struct {
+		Files []map[string]any `json:"files"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&uploaded); err != nil {
+		t.Fatalf("decode upload response: %v", err)
+	}
+	if len(uploaded.Files) != 1 {
+		t.Fatalf("files=%d want=1", len(uploaded.Files))
+	}
+	if got := asString(uploaded.Files[0]["markdown_file"]); got != "report.md" {
+		t.Fatalf("markdown_file=%q want=report.md", got)
+	}
+
+	mdResp, err := http.Get(ts.URL + "/api/threads/" + threadID + "/artifacts/mnt/user-data/uploads/report.md")
+	if err != nil {
+		t.Fatalf("markdown artifact request: %v", err)
+	}
+	defer mdResp.Body.Close()
+	if mdResp.StatusCode != http.StatusOK {
+		t.Fatalf("markdown artifact status=%d", mdResp.StatusCode)
+	}
+	mdBody, _ := io.ReadAll(mdResp.Body)
+	if !strings.Contains(string(mdBody), "Quarterly Review") {
+		t.Fatalf("markdown body=%q missing extracted text", string(mdBody))
+	}
+}
+
+func TestDeleteConvertibleUploadRemovesMarkdownCompanion(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-delete-companion"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir upload dir: %v", err)
+	}
+	original := filepath.Join(uploadDir, "report.docx")
+	companion := filepath.Join(uploadDir, "report.md")
+	if err := os.WriteFile(original, []byte("docx"), 0o644); err != nil {
+		t.Fatalf("write original: %v", err)
+	}
+	if err := os.WriteFile(companion, []byte("md"), 0o644); err != nil {
+		t.Fatalf("write companion: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/threads/"+threadID+"/uploads/report.docx", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("delete request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	if _, err := os.Stat(original); !os.IsNotExist(err) {
+		t.Fatalf("expected original removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(companion); !os.IsNotExist(err) {
+		t.Fatalf("expected companion removed, stat err=%v", err)
+	}
+}
+
 func TestSuggestionsEndpoint(t *testing.T) {
 	_, ts := newCompatTestServer(t)
 	payload := `{"messages":[{"role":"user","content":"请帮我分析部署方案"}],"n":3}`
@@ -158,6 +247,29 @@ func TestGatewayThreadDeleteRemovesLocalData(t *testing.T) {
 	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
 		t.Fatalf("expected file removed, stat err=%v", err)
 	}
+}
+
+func minimalDOCX(t *testing.T, text string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	f, err := w.Create("word/document.xml")
+	if err != nil {
+		t.Fatalf("create docx entry: %v", err)
+	}
+	content := `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>` + text + `</w:t></w:r></w:p>
+  </w:body>
+</w:document>`
+	if _, err := f.Write([]byte(content)); err != nil {
+		t.Fatalf("write docx entry: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close docx zip: %v", err)
+	}
+	return buf.Bytes()
 }
 
 func TestModelsSkillsMCPConfigEndpoints(t *testing.T) {
