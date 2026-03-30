@@ -147,6 +147,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	}
 
 	s.saveSession(threadID, result.Messages)
+	s.maybeGenerateThreadTitle(ctx, threadID, runCfg.ModelName, result.Messages)
 	state := s.getThreadState(threadID)
 
 	s.recordAndSendEvent(w, flusher, run, "updates", map[string]any{
