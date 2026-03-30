@@ -532,14 +532,25 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 		s.recordAndSendEvent(w, flusher, run, "chunk", chunkData)
 		s.recordAndSendEvent(w, flusher, run, "messages-tuple", Message{
 			Type:    "ai",
+			ID:      evt.MessageID,
 			Role:    "assistant",
 			Content: evt.Text,
 		})
 	case agent.AgentEventToolCall:
-		if evt.ToolEvent == nil {
+		if evt.ToolEvent == nil || evt.ToolCall == nil {
 			return
 		}
 		s.recordAndSendEvent(w, flusher, run, "tool_call", evt.ToolEvent)
+		s.recordAndSendEvent(w, flusher, run, "messages-tuple", Message{
+			Type: "ai",
+			ID:   evt.MessageID,
+			Role: "assistant",
+			ToolCalls: []ToolCall{{
+				ID:   evt.ToolCall.ID,
+				Name: evt.ToolCall.Name,
+				Args: cloneToolArguments(evt.ToolCall.Arguments),
+			}},
+		})
 	case agent.AgentEventToolCallStart:
 		if evt.ToolEvent == nil {
 			return
@@ -550,11 +561,19 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 			return
 		}
 		s.recordAndSendEvent(w, flusher, run, "tool_call_end", evt.ToolEvent)
+		content := ""
+		if evt.Result != nil {
+			content = evt.Result.Content
+			if content == "" {
+				content = evt.Result.Error
+			}
+		}
 		s.recordAndSendEvent(w, flusher, run, "messages-tuple", Message{
 			Type:       "tool",
+			ID:         evt.MessageID,
 			Role:       "tool",
 			Name:       evt.ToolEvent.Name,
-			Content:    evt.ToolEvent.ResultPreview,
+			Content:    content,
 			ToolCallID: evt.ToolEvent.ID,
 			Data: map[string]any{
 				"status":         evt.ToolEvent.Status,

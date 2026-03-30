@@ -95,6 +95,7 @@ type AgentEvent struct {
 	Type      AgentEventType     `json:"type"`
 	SessionID string             `json:"session_id,omitempty"`
 	RequestID string             `json:"request_id,omitempty"`
+	MessageID string             `json:"message_id,omitempty"`
 	Text      string             `json:"text,omitempty"`
 	ToolCall  *models.ToolCall   `json:"tool_call,omitempty"`
 	ToolEvent *ToolCallEvent     `json:"tool_event,omitempty"`

@@ -163,6 +163,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 		}
 
 		var (
+			aiMessageID = newMessageID("ai")
 			textBuilder strings.Builder
 			toolCalls   []models.ToolCall
 			streamUsage *llm.Usage
@@ -177,8 +178,8 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			}
 			if chunk.Delta != "" {
 				textBuilder.WriteString(chunk.Delta)
-				emit(AgentEvent{Type: AgentEventChunk, Text: chunk.Delta})
-				emit(AgentEvent{Type: AgentEventTextChunk, Text: chunk.Delta})
+				emit(AgentEvent{Type: AgentEventChunk, MessageID: aiMessageID, Text: chunk.Delta})
+				emit(AgentEvent{Type: AgentEventTextChunk, MessageID: aiMessageID, Text: chunk.Delta})
 			}
 			if len(chunk.ToolCalls) > 0 {
 				toolCalls = mergeToolCalls(toolCalls, chunk.ToolCalls)
@@ -208,13 +209,19 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			accumulateUsage(usage, streamUsage)
 		}
 
+		assistantMetadata := map[string]string{"stop_reason": stopReason}
+		if streamUsage != nil {
+			if raw, err := json.Marshal(streamUsage); err == nil {
+				assistantMetadata["usage_metadata"] = string(raw)
+			}
+		}
 		assistantMessage := models.Message{
-			ID:        newMessageID("ai"),
+			ID:        aiMessageID,
 			SessionID: sessionID,
 			Role:      models.RoleAI,
 			Content:   textBuilder.String(),
 			ToolCalls: toolCalls,
-			Metadata:  map[string]string{"stop_reason": stopReason},
+			Metadata:  assistantMetadata,
 			CreatedAt: time.Now().UTC(),
 		}
 		if assistantMessage.Content != "" || len(assistantMessage.ToolCalls) > 0 {
@@ -223,9 +230,10 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 
 		if len(toolCalls) == 0 {
 			emit(AgentEvent{
-				Type:  AgentEventEnd,
-				Text:  assistantMessage.Content,
-				Usage: cloneUsage(usage),
+				Type:      AgentEventEnd,
+				MessageID: aiMessageID,
+				Text:      assistantMessage.Content,
+				Usage:     cloneUsage(usage),
 			})
 			return &RunResult{
 				Messages:    runMessages,
@@ -237,6 +245,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 		for _, call := range toolCalls {
 			emit(AgentEvent{
 				Type:      AgentEventToolCall,
+				MessageID: aiMessageID,
 				ToolCall:  &call,
 				ToolEvent: newToolCallEvent(call, nil),
 			})
@@ -277,8 +286,10 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 				ToolResult: &result,
 				CreatedAt:  time.Now().UTC(),
 			})
+			toolMessage := runMessages[len(runMessages)-1]
 			emit(AgentEvent{
 				Type:      AgentEventToolResult,
+				MessageID: toolMessage.ID,
 				Result:    &result,
 				ToolEvent: newToolEventFromResult(call, result),
 			})
@@ -287,6 +298,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			completedCall.CompletedAt = result.CompletedAt
 			emit(AgentEvent{
 				Type:      AgentEventToolCallEnd,
+				MessageID: toolMessage.ID,
 				ToolCall:  &completedCall,
 				Result:    &result,
 				ToolEvent: newToolEventFromResult(completedCall, result),

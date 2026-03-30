@@ -364,13 +364,28 @@ func (s *Server) messagesToLangChain(messages []models.Message) []Message {
 			role = "tool"
 		}
 
-		result = append(result, Message{
+		item := Message{
 			Type:             msgType,
 			ID:               msg.ID,
 			Role:             role,
 			Content:          msg.Content,
 			AdditionalKwargs: decodeAdditionalKwargs(msg.Metadata),
-		})
+			UsageMetadata:    decodeUsageMetadata(msg.Metadata),
+		}
+		if msg.Role == models.RoleAI && len(msg.ToolCalls) > 0 {
+			item.ToolCalls = toLangChainToolCalls(msg.ToolCalls)
+		}
+		if msg.Role == models.RoleTool && msg.ToolResult != nil {
+			item.Name = msg.ToolResult.ToolName
+			item.ToolCallID = msg.ToolResult.CallID
+			item.Data = map[string]any{
+				"status": msg.ToolResult.Status,
+			}
+			if msg.ToolResult.Error != "" {
+				item.Data["error"] = msg.ToolResult.Error
+			}
+		}
+		result = append(result, item)
 	}
 	return result
 }
@@ -386,6 +401,50 @@ func decodeAdditionalKwargs(metadata map[string]string) map[string]any {
 	var out map[string]any
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		return nil
+	}
+	return out
+}
+
+func decodeUsageMetadata(metadata map[string]string) map[string]int {
+	if len(metadata) == 0 {
+		return nil
+	}
+	raw := strings.TrimSpace(metadata["usage_metadata"])
+	if raw == "" {
+		return nil
+	}
+	var usage map[string]int
+	if err := json.Unmarshal([]byte(raw), &usage); err != nil {
+		return nil
+	}
+	if len(usage) == 0 {
+		return nil
+	}
+	return usage
+}
+
+func toLangChainToolCalls(calls []models.ToolCall) []ToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]ToolCall, 0, len(calls))
+	for _, call := range calls {
+		out = append(out, ToolCall{
+			ID:   call.ID,
+			Name: call.Name,
+			Args: cloneToolArguments(call.Arguments),
+		})
+	}
+	return out
+}
+
+func cloneToolArguments(args map[string]any) map[string]any {
+	if len(args) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(args))
+	for k, v := range args {
+		out[k] = v
 	}
 	return out
 }

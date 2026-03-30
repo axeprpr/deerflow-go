@@ -107,6 +107,7 @@ type Message struct {
 	AdditionalKwargs map[string]any `json:"additional_kwargs,omitempty"`
 	ToolCallID       string         `json:"tool_call_id,omitempty"`
 	ToolCalls        []ToolCall     `json:"tool_calls,omitempty"`
+	UsageMetadata    map[string]int `json:"usage_metadata,omitempty"`
 }
 
 // ToolCall represents a LangGraph-compatible tool call

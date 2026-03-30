@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
@@ -47,6 +48,110 @@ func performCompatRequest(t *testing.T, handler http.Handler, method, target str
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	return rec
+}
+
+func TestMessagesToLangChainPreservesToolCallsAndUsageMetadata(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	messages := []models.Message{
+		{
+			ID:        "ai-1",
+			SessionID: "thread-1",
+			Role:      models.RoleAI,
+			Content:   "Working on it",
+			ToolCalls: []models.ToolCall{{
+				ID:        "call-1",
+				Name:      "present_file",
+				Arguments: map[string]any{"content": "artifact body"},
+				Status:    models.CallStatusCompleted,
+			}},
+			Metadata: map[string]string{
+				"usage_metadata": `{"input_tokens":11,"output_tokens":7,"total_tokens":18}`,
+			},
+		},
+		{
+			ID:        "tool-1",
+			SessionID: "thread-1",
+			Role:      models.RoleTool,
+			Content:   "artifact body",
+			ToolResult: &models.ToolResult{
+				CallID:   "call-1",
+				ToolName: "present_file",
+				Status:   models.CallStatusCompleted,
+				Content:  "artifact body",
+			},
+		},
+	}
+
+	got := s.messagesToLangChain(messages)
+	if len(got) != 2 {
+		t.Fatalf("messages=%d want=2", len(got))
+	}
+	if len(got[0].ToolCalls) != 1 || got[0].ToolCalls[0].ID != "call-1" {
+		t.Fatalf("ai tool_calls=%#v", got[0].ToolCalls)
+	}
+	if got[0].UsageMetadata["total_tokens"] != 18 {
+		t.Fatalf("usage_metadata=%#v", got[0].UsageMetadata)
+	}
+	if got[1].Name != "present_file" || got[1].ToolCallID != "call-1" {
+		t.Fatalf("tool message name=%q tool_call_id=%q", got[1].Name, got[1].ToolCallID)
+	}
+}
+
+func TestForwardAgentEventEmitsCompatibleMessagesTuplePayloads(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	rec := httptest.NewRecorder()
+	run := &Run{RunID: "run-1", ThreadID: "thread-1"}
+
+	s.forwardAgentEvent(rec, rec, run, agent.AgentEvent{
+		Type:      agent.AgentEventChunk,
+		MessageID: "ai-msg-1",
+		Text:      "Hello",
+	})
+	s.forwardAgentEvent(rec, rec, run, agent.AgentEvent{
+		Type:      agent.AgentEventToolCall,
+		MessageID: "ai-msg-1",
+		ToolCall: &models.ToolCall{
+			ID:        "call-1",
+			Name:      "present_file",
+			Arguments: map[string]any{"content": "full artifact"},
+			Status:    models.CallStatusPending,
+		},
+		ToolEvent: &agent.ToolCallEvent{
+			ID:     "call-1",
+			Name:   "present_file",
+			Status: models.CallStatusPending,
+		},
+	})
+	s.forwardAgentEvent(rec, rec, run, agent.AgentEvent{
+		Type:      agent.AgentEventToolCallEnd,
+		MessageID: "tool-msg-1",
+		Result: &models.ToolResult{
+			CallID:   "call-1",
+			ToolName: "present_file",
+			Status:   models.CallStatusCompleted,
+			Content:  "full artifact",
+		},
+		ToolEvent: &agent.ToolCallEvent{
+			ID:            "call-1",
+			Name:          "present_file",
+			Status:        models.CallStatusCompleted,
+			ResultPreview: "truncated preview",
+		},
+	})
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `event: messages-tuple`) {
+		t.Fatalf("expected messages-tuple event in %q", body)
+	}
+	if !strings.Contains(body, `"id":"ai-msg-1"`) {
+		t.Fatalf("expected ai message id in %q", body)
+	}
+	if !strings.Contains(body, `"tool_calls":[{"id":"call-1","name":"present_file","args":{"content":"full artifact"}}]`) {
+		t.Fatalf("expected tool_calls payload in %q", body)
+	}
+	if !strings.Contains(body, `"id":"tool-msg-1"`) || !strings.Contains(body, `"content":"full artifact"`) {
+		t.Fatalf("expected full tool result payload in %q", body)
+	}
 }
 
 func TestAPILangGraphPrefixCreateThread(t *testing.T) {
