@@ -11,6 +11,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -590,9 +591,21 @@ func (s *Server) handleUploadsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	seenNames, err := existingUploadNames(uploadDir)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to inspect upload dir"})
+		return
+	}
+
 	infos := make([]map[string]any, 0, len(files))
 	for _, fh := range files {
-		info, err := s.saveUploadedFile(threadID, uploadDir, fh)
+		name := sanitizeFilename(fh.Filename)
+		if name == "" {
+			continue
+		}
+		name = claimUniqueFilename(name, seenNames)
+
+		info, err := s.saveUploadedFile(threadID, uploadDir, name, fh)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
 			return
@@ -605,7 +618,7 @@ func (s *Server) handleUploadsCreate(w http.ResponseWriter, r *http.Request) {
 			info["markdown_file"] = mdName
 			info["markdown_path"] = mdPath
 			info["markdown_virtual_path"] = "/mnt/user-data/uploads/" + mdName
-			info["markdown_artifact_url"] = "/api/threads/" + threadID + "/artifacts/mnt/user-data/uploads/" + mdName
+			info["markdown_artifact_url"] = uploadArtifactURL(threadID, mdName)
 		}
 		infos = append(infos, info)
 	}
@@ -787,12 +800,10 @@ func (s *Server) handleSuggestions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"suggestions": suggestions})
 }
 
-func (s *Server) saveUploadedFile(threadID, uploadDir string, fh *multipart.FileHeader) (map[string]any, error) {
-	name := sanitizeFilename(fh.Filename)
+func (s *Server) saveUploadedFile(threadID, uploadDir, name string, fh *multipart.FileHeader) (map[string]any, error) {
 	if name == "" {
 		return nil, errBadFileName
 	}
-
 	src, err := fh.Open()
 	if err != nil {
 		return nil, err
@@ -820,7 +831,7 @@ func (s *Server) uploadInfo(threadID, fullPath, name string, size int64, modifie
 		"size":         size,
 		"path":         fullPath,
 		"virtual_path": virtualPath,
-		"artifact_url": "/api/threads/" + threadID + "/artifacts" + virtualPath,
+		"artifact_url": uploadArtifactURL(threadID, name),
 		"extension":    strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), "."),
 		"modified":     modified,
 	}
@@ -1011,6 +1022,50 @@ func sanitizeFilename(name string) string {
 		}
 	}
 	return name
+}
+
+func existingUploadNames(uploadDir string) (map[string]struct{}, error) {
+	entries, err := os.ReadDir(uploadDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]struct{}{}, nil
+		}
+		return nil, err
+	}
+
+	seen := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		seen[entry.Name()] = struct{}{}
+	}
+	return seen, nil
+}
+
+func claimUniqueFilename(name string, seen map[string]struct{}) string {
+	if seen == nil {
+		seen = map[string]struct{}{}
+	}
+	if _, exists := seen[name]; !exists {
+		seen[name] = struct{}{}
+		return name
+	}
+
+	ext := filepath.Ext(name)
+	stem := strings.TrimSuffix(name, ext)
+	for i := 1; ; i++ {
+		candidate := fmt.Sprintf("%s_%d%s", stem, i, ext)
+		if _, exists := seen[candidate]; exists {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		return candidate
+	}
+}
+
+func uploadArtifactURL(threadID, filename string) string {
+	return "/api/threads/" + threadID + "/artifacts/mnt/user-data/uploads/" + url.PathEscape(filename)
 }
 
 func compactSubject(text string) string {

@@ -629,6 +629,101 @@ func TestDeleteConvertibleUploadRemovesMarkdownCompanion(t *testing.T) {
 	}
 }
 
+func TestUploadsCreateDoesNotOverwriteExistingFile(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-upload-collision"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir upload dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "report.txt"), []byte("old"), 0o644); err != nil {
+		t.Fatalf("seed existing file: %v", err)
+	}
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	part, err := w.CreateFormFile("files", "report.txt")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("new")); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/"+threadID+"/uploads", &body, map[string]string{"Content-Type": w.FormDataContentType()})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("upload status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var uploaded struct {
+		Files []map[string]any `json:"files"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&uploaded); err != nil {
+		t.Fatalf("decode upload response: %v", err)
+	}
+	if len(uploaded.Files) != 1 {
+		t.Fatalf("files=%d want=1", len(uploaded.Files))
+	}
+	if got := asString(uploaded.Files[0]["filename"]); got != "report_1.txt" {
+		t.Fatalf("filename=%q want=report_1.txt", got)
+	}
+
+	oldData, err := os.ReadFile(filepath.Join(uploadDir, "report.txt"))
+	if err != nil {
+		t.Fatalf("read original: %v", err)
+	}
+	if string(oldData) != "old" {
+		t.Fatalf("original=%q want=old", oldData)
+	}
+
+	newData, err := os.ReadFile(filepath.Join(uploadDir, "report_1.txt"))
+	if err != nil {
+		t.Fatalf("read deduplicated file: %v", err)
+	}
+	if string(newData) != "new" {
+		t.Fatalf("deduplicated=%q want=new", newData)
+	}
+}
+
+func TestUploadArtifactURLPercentEncodesFilename(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+	threadID := "thread-upload-encoded"
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	part, err := w.CreateFormFile("files", "report #1?.txt")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("encoded")); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/"+threadID+"/uploads", &body, map[string]string{"Content-Type": w.FormDataContentType()})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("upload status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var uploaded struct {
+		Files []map[string]any `json:"files"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&uploaded); err != nil {
+		t.Fatalf("decode upload response: %v", err)
+	}
+	if len(uploaded.Files) != 1 {
+		t.Fatalf("files=%d want=1", len(uploaded.Files))
+	}
+	if got := asString(uploaded.Files[0]["artifact_url"]); got != "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/report%20%231%3F.txt" {
+		t.Fatalf("artifact_url=%q", got)
+	}
+}
+
 func TestSuggestionsEndpoint(t *testing.T) {
 	_, handler := newCompatTestServer(t)
 	payload := `{"messages":[{"role":"user","content":"请帮我分析部署方案"}],"n":3}`
@@ -1081,6 +1176,68 @@ func TestResolveRunConfigAllowsBootstrapForNewAgent(t *testing.T) {
 	}
 	if !strings.Contains(cfg.SystemPrompt, "create a brand-new custom agent") {
 		t.Fatalf("system prompt missing bootstrap guidance: %q", cfg.SystemPrompt)
+	}
+}
+
+func TestThreadRunsCreateAndList(t *testing.T) {
+	provider := &streamSpyProvider{}
+	s := &Server{
+		llmProvider:  provider,
+		defaultModel: "default-model",
+		tools:        newRuntimeToolRegistry(t),
+		sessions:     make(map[string]*Session),
+		runs:         make(map[string]*Run),
+		runStreams:   make(map[string]map[uint64]chan StreamEvent),
+		dataRoot:     t.TempDir(),
+		agents:       map[string]gatewayAgent{},
+	}
+	mux := http.NewServeMux()
+	s.registerRoutes(mux)
+
+	createBody := `{"input":{"messages":[{"role":"user","content":"Hello"}]}}`
+	createResp := performCompatRequest(t, mux, http.MethodPost, "/threads/thread-runs/runs", strings.NewReader(createBody), map[string]string{"Content-Type": "application/json"})
+	if createResp.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", createResp.Code, createResp.Body.String())
+	}
+
+	var created struct {
+		RunID    string `json:"run_id"`
+		ThreadID string `json:"thread_id"`
+		Status   string `json:"status"`
+	}
+	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if created.ThreadID != "thread-runs" {
+		t.Fatalf("thread_id=%q want=%q", created.ThreadID, "thread-runs")
+	}
+	if created.Status != "success" {
+		t.Fatalf("status=%q want=%q", created.Status, "success")
+	}
+	if created.RunID == "" {
+		t.Fatal("expected run_id")
+	}
+
+	listResp := performCompatRequest(t, mux, http.MethodGet, "/threads/thread-runs/runs", nil, nil)
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", listResp.Code, listResp.Body.String())
+	}
+
+	var listed struct {
+		Runs []struct {
+			RunID    string `json:"run_id"`
+			ThreadID string `json:"thread_id"`
+			Status   string `json:"status"`
+		} `json:"runs"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listed.Runs) != 1 {
+		t.Fatalf("runs=%d want=1", len(listed.Runs))
+	}
+	if listed.Runs[0].RunID != created.RunID {
+		t.Fatalf("listed run_id=%q want=%q", listed.Runs[0].RunID, created.RunID)
 	}
 }
 

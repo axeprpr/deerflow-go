@@ -2,6 +2,9 @@ package langgraphcompat
 
 import (
 	"archive/zip"
+	"bytes"
+	"compress/flate"
+	"compress/zlib"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -11,6 +14,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 var convertibleUploadExtensions = map[string]struct{}{
@@ -51,6 +56,8 @@ func generateUploadMarkdownCompanion(path string) (string, error) {
 
 func convertUploadedDocumentToMarkdown(path string, ext string) (string, error) {
 	switch ext {
+	case ".pdf":
+		return convertPDFToMarkdown(path)
 	case ".docx":
 		return convertDOCXToMarkdown(path)
 	case ".pptx":
@@ -64,6 +71,19 @@ func convertUploadedDocumentToMarkdown(path string, ext string) (string, error) 
 
 func defaultConversionPlaceholder(name string, ext string) string {
 	return fmt.Sprintf("# %s\n\nAutomatic Markdown extraction is not available for `%s` yet.\nOpen the original file from `/mnt/user-data/uploads/%s`.\n", name, ext, name)
+}
+
+func convertPDFToMarkdown(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+
+	text := extractPDFText(data)
+	if strings.TrimSpace(text) == "" {
+		return "", nil
+	}
+	return "# " + filepath.Base(path) + "\n\n" + text + "\n", nil
 }
 
 func convertDOCXToMarkdown(path string) (string, error) {
@@ -395,4 +415,277 @@ func naturalLess(left string, right string) bool {
 		}
 	}
 	return left < right
+}
+
+func extractPDFText(data []byte) string {
+	streams := extractPDFStreams(data)
+	if len(streams) == 0 {
+		return ""
+	}
+
+	var sections []string
+	for _, stream := range streams {
+		text := strings.TrimSpace(extractPDFTextFromStream(stream))
+		if text == "" {
+			continue
+		}
+		sections = append(sections, text)
+	}
+	return strings.Join(sections, "\n\n")
+}
+
+func extractPDFStreams(data []byte) []string {
+	var streams []string
+	offset := 0
+	for {
+		idx := bytes.Index(data[offset:], []byte("stream"))
+		if idx < 0 {
+			break
+		}
+		idx += offset
+		start := idx + len("stream")
+		if start < len(data) && data[start] == '\r' {
+			start++
+		}
+		if start < len(data) && data[start] == '\n' {
+			start++
+		}
+		endRel := bytes.Index(data[start:], []byte("endstream"))
+		if endRel < 0 {
+			break
+		}
+		end := start + endRel
+		raw := bytes.Trim(data[start:end], "\r\n")
+		dict := pdfStreamDict(data, idx)
+		streams = append(streams, decodePDFStream(raw, dict))
+		offset = end + len("endstream")
+	}
+	return streams
+}
+
+func pdfStreamDict(data []byte, streamIdx int) string {
+	searchStart := streamIdx - 2048
+	if searchStart < 0 {
+		searchStart = 0
+	}
+	window := data[searchStart:streamIdx]
+	open := bytes.LastIndex(window, []byte("<<"))
+	close := bytes.LastIndex(window, []byte(">>"))
+	if open < 0 || close < 0 || close < open {
+		return ""
+	}
+	return string(window[open : close+2])
+}
+
+func decodePDFStream(raw []byte, dict string) string {
+	if strings.Contains(dict, "/FlateDecode") {
+		if decoded, err := readPDFFlateStream(raw); err == nil {
+			return string(decoded)
+		}
+	}
+	return string(raw)
+}
+
+func readPDFFlateStream(raw []byte) ([]byte, error) {
+	reader, err := zlib.NewReader(bytes.NewReader(raw))
+	if err == nil {
+		defer reader.Close()
+		return io.ReadAll(reader)
+	}
+
+	reader = flate.NewReader(bytes.NewReader(raw))
+	defer reader.Close()
+	return io.ReadAll(reader)
+}
+
+func extractPDFTextFromStream(stream string) string {
+	var out strings.Builder
+	inText := false
+	needsSpace := false
+	for i := 0; i < len(stream); {
+		switch {
+		case hasPDFOperator(stream, i, "BT"):
+			inText = true
+			i += 2
+		case hasPDFOperator(stream, i, "ET"):
+			inText = false
+			appendPDFNewline(&out)
+			i += 2
+		case !inText:
+			i++
+		case stream[i] == '(':
+			text, next := consumePDFLiteralString(stream, i)
+			appendPDFText(&out, text, &needsSpace)
+			i = next
+		case stream[i] == '<' && (i+1 >= len(stream) || stream[i+1] != '<'):
+			text, next := consumePDFHexString(stream, i)
+			appendPDFText(&out, text, &needsSpace)
+			i = next
+		case hasPDFOperator(stream, i, "Tj"), hasPDFOperator(stream, i, "TJ"), hasPDFOperator(stream, i, "'"), hasPDFOperator(stream, i, `"`):
+			appendPDFNewline(&out)
+			needsSpace = false
+			switch {
+			case hasPDFOperator(stream, i, "TJ"):
+				i += 2
+			case hasPDFOperator(stream, i, "Tj"):
+				i += 2
+			default:
+				i++
+			}
+		case hasPDFOperator(stream, i, "Td"), hasPDFOperator(stream, i, "TD"), hasPDFOperator(stream, i, "Tm"), hasPDFOperator(stream, i, "T*"):
+			appendPDFNewline(&out)
+			needsSpace = false
+			i += 2
+		default:
+			i++
+		}
+	}
+	return normalizePDFExtractedText(out.String())
+}
+
+func hasPDFOperator(stream string, idx int, op string) bool {
+	if idx < 0 || idx+len(op) > len(stream) || stream[idx:idx+len(op)] != op {
+		return false
+	}
+	if idx > 0 {
+		r := rune(stream[idx-1])
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return false
+		}
+	}
+	if idx+len(op) < len(stream) {
+		r := rune(stream[idx+len(op)])
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func consumePDFLiteralString(stream string, start int) (string, int) {
+	var out strings.Builder
+	depth := 0
+	for i := start; i < len(stream); i++ {
+		ch := stream[i]
+		if ch == '(' {
+			if depth > 0 {
+				out.WriteByte(ch)
+			}
+			depth++
+			continue
+		}
+		if ch == ')' {
+			depth--
+			if depth == 0 {
+				return out.String(), i + 1
+			}
+			out.WriteByte(ch)
+			continue
+		}
+		if ch == '\\' && i+1 < len(stream) {
+			i++
+			switch stream[i] {
+			case 'n':
+				out.WriteByte('\n')
+			case 'r':
+				out.WriteByte('\r')
+			case 't':
+				out.WriteByte('\t')
+			case 'b':
+				out.WriteByte('\b')
+			case 'f':
+				out.WriteByte('\f')
+			case '(', ')', '\\':
+				out.WriteByte(stream[i])
+			case '\n':
+			case '\r':
+				if i+1 < len(stream) && stream[i+1] == '\n' {
+					i++
+				}
+			default:
+				if stream[i] >= '0' && stream[i] <= '7' {
+					value := int(stream[i] - '0')
+					for count := 1; count < 3 && i+1 < len(stream) && stream[i+1] >= '0' && stream[i+1] <= '7'; count++ {
+						i++
+						value = value*8 + int(stream[i]-'0')
+					}
+					out.WriteByte(byte(value))
+				} else {
+					out.WriteByte(stream[i])
+				}
+			}
+			continue
+		}
+		if depth > 0 {
+			out.WriteByte(ch)
+		}
+	}
+	return out.String(), len(stream)
+}
+
+func consumePDFHexString(stream string, start int) (string, int) {
+	end := start + 1
+	for end < len(stream) && stream[end] != '>' {
+		end++
+	}
+	if end >= len(stream) {
+		return "", len(stream)
+	}
+	hex := strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, stream[start+1:end])
+	if len(hex)%2 == 1 {
+		hex += "0"
+	}
+	var out strings.Builder
+	for i := 0; i+1 < len(hex); i += 2 {
+		value, err := strconv.ParseUint(hex[i:i+2], 16, 8)
+		if err != nil {
+			continue
+		}
+		out.WriteByte(byte(value))
+	}
+	return out.String(), end + 1
+}
+
+func appendPDFText(out *strings.Builder, text string, needsSpace *bool) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	if out.Len() > 0 && *needsSpace {
+		last, _ := utf8.DecodeLastRuneInString(out.String())
+		if last != '\n' {
+			out.WriteByte(' ')
+		}
+	}
+	out.WriteString(text)
+	*needsSpace = true
+}
+
+func appendPDFNewline(out *strings.Builder) {
+	if out.Len() == 0 {
+		return
+	}
+	last, _ := utf8.DecodeLastRuneInString(out.String())
+	if last == '\n' {
+		return
+	}
+	out.WriteByte('\n')
+}
+
+func normalizePDFExtractedText(text string) string {
+	lines := strings.Split(text, "\n")
+	cleaned := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.Join(strings.Fields(strings.TrimSpace(line)), " ")
+		if line == "" {
+			continue
+		}
+		cleaned = append(cleaned, line)
+	}
+	return strings.Join(cleaned, "\n")
 }

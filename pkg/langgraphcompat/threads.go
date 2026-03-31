@@ -314,14 +314,41 @@ func (s *Server) handleRunGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"run_id":       run.RunID,
-		"thread_id":    run.ThreadID,
-		"assistant_id": run.AssistantID,
-		"status":       run.Status,
-		"created_at":   run.CreatedAt.Format(time.RFC3339Nano),
-		"updated_at":   run.UpdatedAt.Format(time.RFC3339Nano),
+	writeJSON(w, http.StatusOK, s.runResponse(run))
+}
+
+func (s *Server) handleThreadRunsList(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	if threadID == "" {
+		http.Error(w, "thread ID required", http.StatusBadRequest)
+		return
+	}
+	if s.getThreadState(threadID) == nil {
+		http.Error(w, "thread not found", http.StatusNotFound)
+		return
+	}
+
+	s.runsMu.RLock()
+	runs := make([]*Run, 0)
+	for _, run := range s.runs {
+		if run.ThreadID != threadID {
+			continue
+		}
+		copyRun := *run
+		copyRun.Events = append([]StreamEvent(nil), run.Events...)
+		runs = append(runs, &copyRun)
+	}
+	s.runsMu.RUnlock()
+
+	sort.Slice(runs, func(i, j int) bool {
+		return runs[i].CreatedAt.After(runs[j].CreatedAt)
 	})
+
+	items := make([]map[string]any, 0, len(runs))
+	for _, run := range runs {
+		items = append(items, s.runResponse(run))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runs": items})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -485,6 +512,24 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 			"todos":     todosToAny(session.Todos),
 		},
 	}
+}
+
+func (s *Server) runResponse(run *Run) map[string]any {
+	if run == nil {
+		return map[string]any{}
+	}
+	resp := map[string]any{
+		"run_id":       run.RunID,
+		"thread_id":    run.ThreadID,
+		"assistant_id": run.AssistantID,
+		"status":       run.Status,
+		"created_at":   run.CreatedAt.Format(time.RFC3339Nano),
+		"updated_at":   run.UpdatedAt.Format(time.RFC3339Nano),
+	}
+	if run.Error != "" {
+		resp["error"] = run.Error
+	}
+	return resp
 }
 
 func (s *Server) getThreadState(threadID string) *ThreadState {

@@ -1,6 +1,7 @@
 package langgraphcompat
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -44,26 +45,76 @@ func (s *Server) handleRunsStream(w http.ResponseWriter, r *http.Request) {
 	s.handleStreamRequest(w, r, "")
 }
 
+func (s *Server) handleRunsCreate(w http.ResponseWriter, r *http.Request) {
+	s.handleRunCreateRequest(w, r, "")
+}
+
 func (s *Server) handleThreadRunsStream(w http.ResponseWriter, r *http.Request) {
 	s.handleStreamRequest(w, r, r.PathValue("thread_id"))
 }
 
+func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) {
+	s.handleRunCreateRequest(w, r, r.PathValue("thread_id"))
+}
+
 func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, routeThreadID string) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to read body: %v", err), http.StatusBadRequest)
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
 		return
 	}
-	defer r.Body.Close()
 
-	var req RunCreateRequest
-	if len(body) > 0 {
-		if err := json.Unmarshal(body, &req); err != nil {
-			http.Error(w, fmt.Sprintf("invalid request: %v", err), http.StatusBadRequest)
-			return
-		}
+	req, err := parseRunRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	run, _, execErr, statusCode := s.executeRun(r.Context(), req, routeThreadID, w, flusher)
+	if run != nil {
+		w.Header().Set("Content-Location", fmt.Sprintf("/threads/%s/runs/%s", run.ThreadID, run.RunID))
+	}
+	if execErr != nil && statusCode != 0 && run == nil {
+		http.Error(w, execErr.Error(), statusCode)
+	}
+}
+
+func (s *Server) handleRunCreateRequest(w http.ResponseWriter, r *http.Request, routeThreadID string) {
+	req, err := parseRunRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	run, _, execErr, statusCode := s.executeRun(r.Context(), req, routeThreadID, nil, nil)
+	if execErr != nil {
+		http.Error(w, execErr.Error(), statusCode)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.runResponse(run))
+}
+
+func parseRunRequest(r *http.Request) (RunCreateRequest, error) {
+	var req RunCreateRequest
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return RunCreateRequest{}, fmt.Errorf("failed to read body: %v", err)
+	}
+	defer r.Body.Close()
+	if len(body) == 0 {
+		return req, nil
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return RunCreateRequest{}, fmt.Errorf("invalid request: %v", err)
+	}
+	return req, nil
+}
+
+func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThreadID string, w http.ResponseWriter, flusher http.Flusher) (*Run, *ThreadState, error, int) {
 	threadID := routeThreadID
 	if threadID == "" {
 		threadID = req.ThreadID
@@ -95,8 +146,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	}
 	resolvedRunCfg, err := s.resolveRunConfig(runCfg, runtimeContext)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
+		return nil, nil, err, http.StatusNotFound
 	}
 
 	s.sessionsMu.RLock()
@@ -104,15 +154,8 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	s.sessionsMu.RUnlock()
 	deerMessages := append(existingMessages, newMessages...)
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
-		return
-	}
-
-	runID := uuid.New().String()
 	run := &Run{
-		RunID:       runID,
+		RunID:       uuid.New().String(),
 		ThreadID:    threadID,
 		AssistantID: req.AssistantID,
 		Status:      "running",
@@ -120,15 +163,11 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		UpdatedAt:   time.Now().UTC(),
 	}
 	s.saveRun(run)
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.Header().Set("Content-Location", fmt.Sprintf("/threads/%s/runs/%s", threadID, runID))
-
+	if w != nil {
+		w.Header().Set("Content-Location", fmt.Sprintf("/threads/%s/runs/%s", threadID, run.RunID))
+	}
 	s.recordAndSendEvent(w, flusher, run, "metadata", map[string]any{
-		"run_id":    runID,
+		"run_id":    run.RunID,
 		"thread_id": threadID,
 	})
 
@@ -146,7 +185,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		MaxTokens:       resolvedRunCfg.MaxTokens,
 	})
 
-	ctx := subagent.WithEventSink(r.Context(), func(evt subagent.TaskEvent) {
+	ctx = subagent.WithEventSink(ctx, func(evt subagent.TaskEvent) {
 		s.forwardTaskEvent(w, flusher, run, evt)
 	})
 	ctx = tools.WithThreadID(ctx, threadID)
@@ -179,24 +218,25 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		run.UpdatedAt = time.Now().UTC()
 		s.saveRun(run)
 		s.markThreadStatus(threadID, "error")
-		return
+		return run, nil, err, http.StatusInternalServerError
 	}
 
 	s.saveSession(threadID, result.Messages)
 	s.maybeGenerateThreadTitle(ctx, threadID, resolvedRunCfg.ModelName, result.Messages)
 	state := s.getThreadState(threadID)
-
-	s.recordAndSendEvent(w, flusher, run, "updates", map[string]any{
-		"agent": map[string]any{
-			"messages":  state.Values["messages"],
-			"title":     state.Values["title"],
-			"artifacts": state.Values["artifacts"],
-			"todos":     state.Values["todos"],
-		},
-	})
-	s.recordAndSendEvent(w, flusher, run, "values", state.Values)
+	if state != nil {
+		s.recordAndSendEvent(w, flusher, run, "updates", map[string]any{
+			"agent": map[string]any{
+				"messages":  state.Values["messages"],
+				"title":     state.Values["title"],
+				"artifacts": state.Values["artifacts"],
+				"todos":     state.Values["todos"],
+			},
+		})
+		s.recordAndSendEvent(w, flusher, run, "values", state.Values)
+	}
 	s.recordAndSendEvent(w, flusher, run, "end", map[string]any{
-		"run_id": runID,
+		"run_id": run.RunID,
 		"usage":  result.Usage,
 	})
 
@@ -204,6 +244,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	run.UpdatedAt = time.Now().UTC()
 	s.saveRun(run)
 	s.markThreadStatus(threadID, "idle")
+	return run, state, nil, http.StatusOK
 }
 
 func (s *Server) handleRunStream(w http.ResponseWriter, r *http.Request) {
@@ -538,7 +579,9 @@ func (s *Server) recordAndSendEvent(w http.ResponseWriter, flusher http.Flusher,
 		ThreadID: run.ThreadID,
 	}
 	s.appendRunEvent(run.RunID, event)
-	s.sendSSEEvent(w, flusher, event)
+	if w != nil && flusher != nil {
+		s.sendSSEEvent(w, flusher, event)
+	}
 }
 
 func (s *Server) saveSession(threadID string, messages []models.Message) {
