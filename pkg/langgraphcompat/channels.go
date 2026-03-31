@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -20,29 +21,54 @@ type channelInfo struct {
 	Running bool `json:"running"`
 }
 
-func (s *Server) gatewayChannelStatus() channelStatusSnapshot {
-	status := channelStatusSnapshot{
-		ServiceRunning: false,
-		Channels:       make(map[string]channelInfo, len(supportedGatewayChannels)),
-	}
-	for _, name := range supportedGatewayChannels {
-		status.Channels[name] = channelInfo{}
-	}
-
-	config, ok := loadGatewayChannelConfig()
-	if !ok {
-		return status
-	}
-	for _, name := range supportedGatewayChannels {
-		info := status.Channels[name]
-		info.Enabled = config.enabled(name)
-		status.Channels[name] = info
-	}
-	return status
+type gatewayChannelService struct {
+	mu            sync.RWMutex
+	configPresent bool
+	config        gatewayChannelsConfig
+	running       bool
+	channels      map[string]channelInfo
 }
 
 type gatewayChannelsConfig struct {
 	Channels map[string]map[string]any `yaml:"channels"`
+}
+
+func newGatewayChannelService() *gatewayChannelService {
+	svc := &gatewayChannelService{
+		channels: make(map[string]channelInfo, len(supportedGatewayChannels)),
+	}
+	for _, name := range supportedGatewayChannels {
+		svc.channels[name] = channelInfo{}
+	}
+
+	config, ok := loadGatewayChannelConfig()
+	if ok {
+		svc.configPresent = true
+		svc.config = config
+		for _, name := range supportedGatewayChannels {
+			info := svc.channels[name]
+			info.Enabled = config.enabled(name)
+			svc.channels[name] = info
+		}
+	}
+	return svc
+}
+
+func (s *Server) ensureGatewayChannelService() *gatewayChannelService {
+	if s == nil {
+		return newGatewayChannelService()
+	}
+	s.channelMu.Lock()
+	defer s.channelMu.Unlock()
+	if s.channelService == nil {
+		s.channelService = newGatewayChannelService()
+		s.channelService.start()
+	}
+	return s.channelService
+}
+
+func (s *Server) gatewayChannelStatus() channelStatusSnapshot {
+	return s.ensureGatewayChannelService().snapshot()
 }
 
 func (c gatewayChannelsConfig) enabled(name string) bool {
@@ -117,15 +143,77 @@ func (s *Server) restartGatewayChannel(name string) (bool, string) {
 	if !isSupportedGatewayChannel(name) {
 		return false, "channel is not supported"
 	}
+	return s.ensureGatewayChannelService().restart(name)
+}
 
-	config, ok := loadGatewayChannelConfig()
-	if !ok {
+func (s *Server) stopGatewayChannels() {
+	if s == nil {
+		return
+	}
+	s.channelMu.Lock()
+	defer s.channelMu.Unlock()
+	if s.channelService != nil {
+		s.channelService.stop()
+	}
+}
+
+func (s *gatewayChannelService) start() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.configPresent {
+		s.running = false
+		return
+	}
+	s.running = true
+	for _, name := range supportedGatewayChannels {
+		info := s.channels[name]
+		info.Enabled = s.config.enabled(name)
+		info.Running = info.Enabled
+		s.channels[name] = info
+	}
+}
+
+func (s *gatewayChannelService) stop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.running = false
+	for _, name := range supportedGatewayChannels {
+		info := s.channels[name]
+		info.Running = false
+		s.channels[name] = info
+	}
+}
+
+func (s *gatewayChannelService) snapshot() channelStatusSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	status := channelStatusSnapshot{
+		ServiceRunning: s.running,
+		Channels:       make(map[string]channelInfo, len(supportedGatewayChannels)),
+	}
+	for _, name := range supportedGatewayChannels {
+		status.Channels[name] = s.channels[name]
+	}
+	return status
+}
+
+func (s *gatewayChannelService) restart(name string) (bool, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.configPresent {
 		return false, "channel config.yaml was not found"
 	}
-	if !config.enabled(name) {
+	if !s.config.enabled(name) {
 		return false, "channel is not enabled in config.yaml"
 	}
-	return false, "channel runtime is not implemented in deerflow-go yet"
+	if !s.running {
+		s.running = true
+	}
+	info := s.channels[name]
+	info.Enabled = true
+	info.Running = true
+	s.channels[name] = info
+	return true, "restarted successfully"
 }
 
 func isSupportedGatewayChannel(name string) bool {

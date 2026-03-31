@@ -146,7 +146,7 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 		if !threadMatchesSearch(thread, req) {
 			continue
 		}
-		threads = append(threads, selectThreadFields(thread, req.Select))
+		threads = append(threads, thread)
 	}
 	s.sessionsMu.RUnlock()
 
@@ -180,7 +180,11 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 		end = start
 	}
 
-	writeJSON(w, http.StatusOK, threads[start:end])
+	selected := make([]map[string]any, 0, end-start)
+	for _, thread := range threads[start:end] {
+		selected = append(selected, selectThreadFields(thread, req.Select))
+	}
+	writeJSON(w, http.StatusOK, selected)
 }
 
 func parseThreadSearchRequest(r *http.Request) threadSearchRequest {

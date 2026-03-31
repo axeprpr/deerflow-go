@@ -60,6 +60,8 @@ type Server struct {
 	mcpClients        map[string]gatewayMCPClient
 	mcpToolNames      map[string]struct{}
 	mcpConnector      gatewayMCPConnector
+	channelMu         sync.Mutex
+	channelService    *gatewayChannelService
 }
 
 type HealthStatus struct {
@@ -243,6 +245,8 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		mcpToolNames:      map[string]struct{}{},
 		mcpConnector:      defaultGatewayMCPConnector,
 	}
+	s.channelService = newGatewayChannelService()
+	s.channelService.start()
 	registry.Register(s.setupAgentTool())
 	registry.Register(s.todoTool())
 	if err := s.loadGatewayState(); err != nil {
@@ -337,6 +341,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	if s.store != nil {
 		s.store.Close()
+	}
+	if s.channelService != nil {
+		s.channelService.stop()
 	}
 	if s.memoryStoreCloser != nil {
 		s.memoryStoreCloser.Close()
