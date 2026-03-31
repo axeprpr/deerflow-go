@@ -50,6 +50,51 @@ func TestConvertUploadedDocumentToMarkdownReturnsEmptyForPDFWithoutText(t *testi
 	}
 }
 
+func TestConvertUploadedDocumentToMarkdownExtractsLegacyOfficeText(t *testing.T) {
+	tests := []struct {
+		name string
+		ext  string
+		data []byte
+		want []string
+	}{
+		{
+			name: "doc utf16",
+			ext:  ".doc",
+			data: append(minimalOLEHeader(), utf16LEText("Project Phoenix\nLaunch checklist")...),
+			want: []string{"Project Phoenix", "Launch checklist"},
+		},
+		{
+			name: "ppt ascii",
+			ext:  ".ppt",
+			data: append(minimalOLEHeader(), []byte("Quarterly Kickoff\x00North Star Metrics\x00")...),
+			want: []string{"Quarterly Kickoff", "North Star Metrics"},
+		},
+		{
+			name: "xls mixed",
+			ext:  ".xls",
+			data: append(append(minimalOLEHeader(), []byte("Revenue\x00Margin\x00")...), utf16LEText("Q1 2026")...),
+			want: []string{"Revenue", "Margin", "Q1 2026"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			md, err := convertUploadedDocumentToMarkdown(writeTempFile(t, "legacy"+tt.ext, tt.data), tt.ext)
+			if err != nil {
+				t.Fatalf("convert legacy office: %v", err)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(md, want) {
+					t.Fatalf("markdown missing %q: %q", want, md)
+				}
+			}
+			if strings.Contains(md, "Automatic Markdown extraction is not available") {
+				t.Fatalf("unexpected placeholder markdown: %q", md)
+			}
+		})
+	}
+}
+
 type pdfCompressionMode int
 
 const (
@@ -109,4 +154,17 @@ func newPDFCompressionWriter(dst *bytes.Buffer, mode pdfCompressionMode) (io.Wri
 	default:
 		return flate.NewWriter(dst, flate.DefaultCompression)
 	}
+}
+
+func minimalOLEHeader() []byte {
+	return []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
+}
+
+func utf16LEText(text string) []byte {
+	var out []byte
+	for _, r := range text {
+		out = append(out, byte(r), byte(r>>8))
+	}
+	out = append(out, 0x00, 0x00)
+	return out
 }

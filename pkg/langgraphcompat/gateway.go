@@ -77,9 +77,14 @@ const (
 	skillCategoryCustom = "custom"
 )
 
+var activeContentMIMETypes = map[string]struct{}{
+	"image/svg+xml": {},
+}
+
 var skillInstallSeq uint64
 var agentNameRE = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
 var threadIDRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
 type gatewayAgent struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
@@ -1034,7 +1039,12 @@ func downloadRequested(r *http.Request) bool {
 }
 
 func shouldForceAttachment(r *http.Request, mimeType string) bool {
-	return downloadRequested(r)
+	if downloadRequested(r) {
+		return true
+	}
+	base := strings.TrimSpace(strings.SplitN(mimeType, ";", 2)[0])
+	_, active := activeContentMIMETypes[base]
+	return active
 }
 
 func isTextMIMEType(mimeType string) bool {

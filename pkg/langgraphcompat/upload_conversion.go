@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -58,6 +59,8 @@ func convertUploadedDocumentToMarkdown(path string, ext string) (string, error) 
 	switch ext {
 	case ".pdf":
 		return convertPDFToMarkdown(path)
+	case ".doc", ".ppt", ".xls":
+		return convertLegacyOfficeToMarkdown(path)
 	case ".docx":
 		return convertDOCXToMarkdown(path)
 	case ".pptx":
@@ -71,6 +74,19 @@ func convertUploadedDocumentToMarkdown(path string, ext string) (string, error) 
 
 func defaultConversionPlaceholder(name string, ext string) string {
 	return fmt.Sprintf("# %s\n\nAutomatic Markdown extraction is not available for `%s` yet.\nOpen the original file from `/mnt/user-data/uploads/%s`.\n", name, ext, name)
+}
+
+func convertLegacyOfficeToMarkdown(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+
+	text := extractLegacyOfficeText(data)
+	if strings.TrimSpace(text) == "" {
+		return "", nil
+	}
+	return "# " + filepath.Base(path) + "\n\n" + text + "\n", nil
 }
 
 func convertPDFToMarkdown(path string) (string, error) {
@@ -688,4 +704,145 @@ func normalizePDFExtractedText(text string) string {
 		cleaned = append(cleaned, line)
 	}
 	return strings.Join(cleaned, "\n")
+}
+
+var legacyOfficeNoise = map[string]struct{}{
+	"root entry":                 {},
+	"worddocument":               {},
+	"powerpoint document":        {},
+	"workbook":                   {},
+	"book":                       {},
+	"summaryinformation":         {},
+	"documentsummaryinformation": {},
+	"compobj":                    {},
+	"objectpool":                 {},
+	"1table":                     {},
+	"0table":                     {},
+}
+
+func extractLegacyOfficeText(data []byte) string {
+	candidates := append(extractUTF16LEStrings(data, 4), extractASCIIStrings(data, 6)...)
+	if len(candidates) == 0 {
+		return ""
+	}
+
+	seen := make(map[string]struct{}, len(candidates))
+	lines := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		line := normalizeLegacyOfficeLine(candidate)
+		if line == "" {
+			continue
+		}
+		key := strings.ToLower(line)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func extractASCIIStrings(data []byte, minLen int) []string {
+	var out []string
+	var buf []byte
+	flush := func() {
+		if len(buf) >= minLen {
+			out = append(out, string(buf))
+		}
+		buf = buf[:0]
+	}
+
+	for _, b := range data {
+		if isASCIITextByte(b) {
+			buf = append(buf, b)
+			continue
+		}
+		flush()
+	}
+	flush()
+	return out
+}
+
+func extractUTF16LEStrings(data []byte, minRunes int) []string {
+	var out []string
+	for start := 0; start <= 1; start++ {
+		buf := make([]uint16, 0, 32)
+		flush := func() {
+			if len(buf) >= minRunes {
+				out = append(out, string(utf16.Decode(buf)))
+			}
+			buf = buf[:0]
+		}
+
+		for i := start; i+1 < len(data); i += 2 {
+			value := uint16(data[i]) | uint16(data[i+1])<<8
+			if isLikelyUTF16TextRune(rune(value)) {
+				buf = append(buf, value)
+				continue
+			}
+			flush()
+		}
+		flush()
+	}
+	return out
+}
+
+func isASCIITextByte(b byte) bool {
+	return b == '\t' || b == '\n' || b == '\r' || (b >= 32 && b <= 126)
+}
+
+func isLikelyUTF16TextRune(r rune) bool {
+	if r == '\t' || r == '\n' || r == '\r' {
+		return true
+	}
+	if r < 32 || r == utf8.RuneError {
+		return false
+	}
+	return unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r)
+}
+
+func normalizeLegacyOfficeLine(line string) string {
+	line = strings.Map(func(r rune) rune {
+		switch {
+		case r == '\u0000':
+			return -1
+		case unicode.IsControl(r) && r != '\n' && r != '\t' && r != '\r':
+			return -1
+		default:
+			return r
+		}
+	}, line)
+	line = strings.Join(strings.Fields(strings.TrimSpace(line)), " ")
+	if utf8.RuneCountInString(line) < 4 {
+		return ""
+	}
+
+	lower := strings.ToLower(line)
+	if _, ok := legacyOfficeNoise[lower]; ok {
+		return ""
+	}
+
+	var alphaNum int
+	var weird int
+	for _, r := range line {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			alphaNum++
+		case unicode.IsSpace(r):
+		case unicode.IsPunct(r):
+			if !strings.ContainsRune(".,:;!?()[]{}<>-_/#%&+*'\"@", r) {
+				weird++
+			}
+		default:
+			weird++
+		}
+	}
+	if alphaNum == 0 {
+		return ""
+	}
+	if weird > alphaNum {
+		return ""
+	}
+	return line
 }

@@ -682,7 +682,7 @@ func TestArtifactEndpointReadsSkillArchiveWithTopLevelDirectory(t *testing.T) {
 	}
 }
 
-func TestArtifactEndpointServesSkillArchiveHTMLInlineByDefault(t *testing.T) {
+func TestArtifactEndpointForcesDownloadForSVGInSkillArchive(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-skill-active"
 	archivePath := filepath.Join(s.threadRoot(threadID), "outputs", "sample.skill")
@@ -690,15 +690,42 @@ func TestArtifactEndpointServesSkillArchiveHTMLInlineByDefault(t *testing.T) {
 		t.Fatalf("mkdir artifact dir: %v", err)
 	}
 	writeArtifactSkillArchive(t, archivePath, map[string]string{
-		"page.html": "<html><body>x</body></html>",
+		"chart.svg": `<svg xmlns="http://www.w3.org/2000/svg"/>`,
 	})
 
-	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/sample.skill/page.html", nil, nil)
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/sample.skill/chart.svg", nil, nil)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
 	}
-	if got := resp.Header().Get("Content-Disposition"); got != "" {
-		t.Fatalf("content-disposition=%q want empty", got)
+	if got := resp.Header().Get("Content-Disposition"); !strings.HasPrefix(got, "attachment;") {
+		t.Fatalf("content-disposition=%q want attachment", got)
+	}
+}
+
+func TestArtifactEndpointForcesDownloadForSVG(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-active-artifact"
+	outputDir := filepath.Join(s.threadRoot(threadID), "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "chart.svg"), []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+
+	resp := performCompatRequest(
+		t,
+		handler,
+		http.MethodGet,
+		"/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/chart.svg",
+		nil,
+		nil,
+	)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get("Content-Disposition"); !strings.HasPrefix(got, "attachment;") {
+		t.Fatalf("content-disposition=%q want attachment", got)
 	}
 }
 
