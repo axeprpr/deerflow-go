@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,8 +45,13 @@ func newGatewayMCPOAuthProvider(cfg *gatewayMCPOAuthConfig) (*gatewayMCPOAuthPro
 }
 
 func normalizeGatewayMCPOAuthConfig(cfg gatewayMCPOAuthConfig) gatewayMCPOAuthConfig {
-	cfg.TokenURL = strings.TrimSpace(cfg.TokenURL)
+	cfg.TokenURL = strings.TrimSpace(os.ExpandEnv(cfg.TokenURL))
 	cfg.GrantType = strings.TrimSpace(cfg.GrantType)
+	cfg.ClientID = strings.TrimSpace(os.ExpandEnv(cfg.ClientID))
+	cfg.ClientSecret = strings.TrimSpace(os.ExpandEnv(cfg.ClientSecret))
+	cfg.RefreshToken = strings.TrimSpace(os.ExpandEnv(cfg.RefreshToken))
+	cfg.Scope = strings.TrimSpace(os.ExpandEnv(cfg.Scope))
+	cfg.Audience = strings.TrimSpace(os.ExpandEnv(cfg.Audience))
 	if cfg.GrantType == "" {
 		cfg.GrantType = "client_credentials"
 	}
@@ -63,6 +69,17 @@ func normalizeGatewayMCPOAuthConfig(cfg gatewayMCPOAuthConfig) gatewayMCPOAuthCo
 	}
 	if cfg.RefreshSkewSeconds < 0 {
 		cfg.RefreshSkewSeconds = 0
+	}
+	if len(cfg.ExtraTokenParams) > 0 {
+		expanded := make(map[string]string, len(cfg.ExtraTokenParams))
+		for key, value := range cfg.ExtraTokenParams {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			expanded[key] = os.ExpandEnv(value)
+		}
+		cfg.ExtraTokenParams = expanded
 	}
 	return cfg
 }

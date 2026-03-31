@@ -161,7 +161,17 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 	s.sessionsMu.RLock()
 	existingMessages := append([]models.Message(nil), session.Messages...)
 	s.sessionsMu.RUnlock()
+	historySummary := s.threadHistorySummary(threadID)
+	compactedExisting := s.compactConversationHistory(ctx, threadID, resolvedRunCfg.ModelName, historySummary, existingMessages)
+	if compactedExisting.Changed {
+		existingMessages = compactedExisting.Messages
+		historySummary = compactedExisting.Summary
+		s.setThreadHistorySummary(threadID, historySummary)
+	}
 	deerMessages := append(existingMessages, newMessages...)
+	if strings.TrimSpace(historySummary) != "" {
+		deerMessages = append([]models.Message{conversationSummaryMessage(threadID, historySummary)}, deerMessages...)
+	}
 
 	run := &Run{
 		RunID:       uuid.New().String(),
@@ -230,9 +240,16 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 		return run, nil, err, http.StatusInternalServerError
 	}
 
-	s.saveSession(threadID, result.Messages)
-	s.scheduleMemoryUpdate(threadID, result.Messages)
-	s.maybeGenerateThreadTitle(ctx, threadID, resolvedRunCfg.ModelName, result.Messages)
+	storedMessages := filterTransientMessages(result.Messages)
+	compactedStored := s.compactConversationHistory(ctx, threadID, resolvedRunCfg.ModelName, historySummary, storedMessages)
+	if compactedStored.Changed {
+		storedMessages = compactedStored.Messages
+		historySummary = compactedStored.Summary
+	}
+	s.setThreadHistorySummary(threadID, historySummary)
+	s.saveSession(threadID, storedMessages)
+	s.scheduleMemoryUpdate(threadID, storedMessages)
+	s.maybeGenerateThreadTitle(ctx, threadID, resolvedRunCfg.ModelName, storedMessages)
 	state := s.getThreadState(threadID)
 	if state != nil {
 		s.recordAndSendEvent(w, flusher, run, "updates", map[string]any{
@@ -658,11 +675,13 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 			return
 		}
 		s.recordAndSendEvent(w, flusher, run, "tool_call_start", evt.ToolEvent)
+		s.recordAndSendEvent(w, flusher, run, "events", langChainToolEvent("on_tool_start", run, evt))
 	case agent.AgentEventToolCallEnd:
 		if evt.ToolEvent == nil {
 			return
 		}
 		s.recordAndSendEvent(w, flusher, run, "tool_call_end", evt.ToolEvent)
+		s.recordAndSendEvent(w, flusher, run, "events", langChainToolEvent("on_tool_end", run, evt))
 		content := ""
 		if evt.Result != nil {
 			content = evt.Result.Content
@@ -707,6 +726,26 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 		}
 		s.recordAndSendEvent(w, flusher, run, "error", errData)
 	}
+}
+
+func langChainToolEvent(eventName string, run *Run, evt agent.AgentEvent) map[string]any {
+	payload := map[string]any{
+		"event": eventName,
+	}
+	if evt.ToolEvent != nil {
+		payload["name"] = evt.ToolEvent.Name
+		payload["data"] = evt.ToolEvent
+	}
+	if evt.MessageID != "" {
+		payload["message_id"] = evt.MessageID
+	}
+	if run != nil && run.RunID != "" {
+		payload["run_id"] = run.RunID
+	}
+	if run != nil && run.ThreadID != "" {
+		payload["thread_id"] = run.ThreadID
+	}
+	return payload
 }
 
 func (s *Server) forwardTaskEvent(w http.ResponseWriter, flusher http.Flusher, run *Run, evt subagent.TaskEvent) {
@@ -864,6 +903,27 @@ func (s *Server) memoryInjectionPrompt(ctx context.Context, threadID string) str
 		return ""
 	}
 	return strings.TrimSpace(s.memorySvc.Inject(ctx, threadID))
+}
+
+func filterTransientMessages(messages []models.Message) []models.Message {
+	if len(messages) == 0 {
+		return nil
+	}
+	filtered := make([]models.Message, 0, len(messages))
+	for _, msg := range messages {
+		if isTransientViewedImagesMessage(msg) || isInjectedSummaryMessage(msg) {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	return filtered
+}
+
+func isTransientViewedImagesMessage(msg models.Message) bool {
+	if msg.Role != models.RoleHuman || len(msg.Metadata) == 0 {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(msg.Metadata["transient_viewed_images"]), "true")
 }
 
 func (s *Server) scheduleMemoryUpdate(threadID string, messages []models.Message) {

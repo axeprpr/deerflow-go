@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
 func TestThreadSearchAcceptsCamelCaseAndSelectsRequestedFields(t *testing.T) {
@@ -109,6 +111,52 @@ func TestThreadSearchFiltersByQueryStatusMetadataAndValues(t *testing.T) {
 	}
 	if got := asString(threads[0]["thread_id"]); got != "thread-reporting" {
 		t.Fatalf("thread_id=%q want=thread-reporting", got)
+	}
+}
+
+func TestThreadSearchMatchesMessageContent(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	matching := s.ensureSession("thread-incident", map[string]any{
+		"title": "Runbook updates",
+	})
+	matching.Messages = []models.Message{
+		{
+			ID:        "msg-1",
+			SessionID: "thread-incident",
+			Role:      models.RoleHuman,
+			Content:   "Please summarize the incident timeline and customer impact.",
+		},
+	}
+
+	other := s.ensureSession("thread-planning", map[string]any{
+		"title": "Trip planning",
+	})
+	other.Messages = []models.Message{
+		{
+			ID:        "msg-2",
+			SessionID: "thread-planning",
+			Role:      models.RoleHuman,
+			Content:   "Plan a weekend in Hangzhou.",
+		},
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/threads/search", strings.NewReader(`{"query":"customer impact"}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var threads []map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(threads) != 1 {
+		t.Fatalf("threads=%d want=1 body=%s", len(threads), resp.Body.String())
+	}
+	if got := asString(threads[0]["thread_id"]); got != "thread-incident" {
+		t.Fatalf("thread_id=%q want=thread-incident", got)
 	}
 }
 

@@ -637,7 +637,7 @@ func (s *Server) handleGatewayThreadDelete(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": err.Error()})
 		return
 	}
-	if err := os.RemoveAll(s.threadRoot(threadID)); err != nil {
+	if err := os.RemoveAll(s.threadDir(threadID)); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to delete local thread data"})
 		return
 	}
@@ -1115,7 +1115,11 @@ func validateThreadID(threadID string) error {
 }
 
 func (s *Server) threadRoot(threadID string) string {
-	return filepath.Join(s.dataRoot, "threads", threadID, "user-data")
+	return filepath.Join(s.threadDir(threadID), "user-data")
+}
+
+func (s *Server) threadDir(threadID string) string {
+	return filepath.Join(s.dataRoot, "threads", threadID)
 }
 
 func (s *Server) uploadsDir(threadID string) string {

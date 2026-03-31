@@ -86,6 +86,7 @@ func viewedImagesMessage(sessionID string, images []viewedImage, includeImageDat
 		SessionID: sessionID,
 		Role:      models.RoleHuman,
 		Content:   content,
+		Metadata:  map[string]string{"transient_viewed_images": "true"},
 		CreatedAt: time.Now().UTC(),
 	}
 	if !includeImageData || len(images) == 0 {
@@ -104,7 +105,7 @@ func viewedImagesMessage(sessionID string, images []viewedImage, includeImageDat
 		})
 	}
 	if raw, err := json.Marshal(parts); err == nil {
-		msg.Metadata = map[string]string{"multi_content": string(raw)}
+		msg.Metadata["multi_content"] = string(raw)
 	}
 	return msg
 }

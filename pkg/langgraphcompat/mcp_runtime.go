@@ -99,7 +99,7 @@ func cloneGatewayMCPHeaders(src map[string]string) map[string]string {
 	}
 	dst := make(map[string]string, len(src))
 	for key, value := range src {
-		dst[key] = value
+		dst[key] = os.ExpandEnv(value)
 	}
 	return dst
 }

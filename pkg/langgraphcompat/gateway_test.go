@@ -1230,6 +1230,7 @@ func TestParseJSONStringList(t *testing.T) {
 
 func TestGatewayThreadDeleteRemovesLocalData(t *testing.T) {
 	s, handler := newCompatTestServer(t)
+	t.Setenv("DEERFLOW_DATA_ROOT", s.dataRoot)
 	threadID := "thread-delete-1"
 	uploadDir := s.uploadsDir(threadID)
 	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
@@ -1239,6 +1240,17 @@ func TestGatewayThreadDeleteRemovesLocalData(t *testing.T) {
 	if err := os.WriteFile(filePath, []byte("x"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
+	acpDir, err := tools.ACPWorkspaceDir(threadID)
+	if err != nil {
+		t.Fatalf("acp workspace dir: %v", err)
+	}
+	acpFile := filepath.Join(acpDir, "artifact.txt")
+	if err := os.MkdirAll(acpDir, 0o755); err != nil {
+		t.Fatalf("mkdir acp dir: %v", err)
+	}
+	if err := os.WriteFile(acpFile, []byte("acp"), 0o644); err != nil {
+		t.Fatalf("write acp file: %v", err)
+	}
 
 	resp := performCompatRequest(t, handler, http.MethodDelete, "/api/threads/"+threadID, nil, nil)
 	if resp.Code != http.StatusOK {
@@ -1246,6 +1258,9 @@ func TestGatewayThreadDeleteRemovesLocalData(t *testing.T) {
 	}
 	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
 		t.Fatalf("expected file removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(acpFile); !os.IsNotExist(err) {
+		t.Fatalf("expected ACP file removed, stat err=%v", err)
 	}
 }
 

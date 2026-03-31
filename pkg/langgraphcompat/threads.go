@@ -143,7 +143,7 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 	threads := make([]map[string]any, 0, len(s.sessions))
 	for _, session := range s.sessions {
 		thread := s.threadResponse(session)
-		if !threadMatchesSearch(thread, req) {
+		if !threadMatchesSearch(session, thread, req) {
 			continue
 		}
 		threads = append(threads, thread)
@@ -242,7 +242,7 @@ func stringFromAnyValue(v any) string {
 	}
 }
 
-func threadMatchesSearch(thread map[string]any, req threadSearchRequest) bool {
+func threadMatchesSearch(session *Session, thread map[string]any, req threadSearchRequest) bool {
 	if len(req.Metadata) > 0 {
 		threadMetadata, _ := thread["metadata"].(map[string]any)
 		if !mapContainsSubset(threadMetadata, req.Metadata) {
@@ -269,6 +269,24 @@ func threadMatchesSearch(thread map[string]any, req threadSearchRequest) bool {
 	threadID := strings.ToLower(stringFromAnyValue(thread["thread_id"]))
 	if strings.Contains(threadID, query) || strings.Contains(title, query) {
 		return true
+	}
+	if sessionContainsQuery(session, query) {
+		return true
+	}
+	return false
+}
+
+func sessionContainsQuery(session *Session, query string) bool {
+	if session == nil || query == "" {
+		return false
+	}
+	for _, msg := range session.Messages {
+		if strings.Contains(strings.ToLower(strings.TrimSpace(msg.Content)), query) {
+			return true
+		}
+		if msg.ToolResult != nil && strings.Contains(strings.ToLower(strings.TrimSpace(msg.ToolResult.Content)), query) {
+			return true
+		}
 	}
 	return false
 }

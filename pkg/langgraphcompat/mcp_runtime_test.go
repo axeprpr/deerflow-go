@@ -199,6 +199,68 @@ func TestDefaultGatewayMCPConnectorInjectsOAuthHeaders(t *testing.T) {
 	}
 }
 
+func TestDefaultGatewayMCPConnectorExpandsEnvInHeadersAndOAuth(t *testing.T) {
+	restore := stubGatewayMCPConnectors(t)
+	defer restore()
+
+	t.Setenv("DEERFLOW_MCP_HEADER_TOKEN", "header-secret")
+	t.Setenv("DEERFLOW_MCP_CLIENT_ID", "env-client")
+	t.Setenv("DEERFLOW_MCP_CLIENT_SECRET", "env-secret")
+	t.Setenv("DEERFLOW_MCP_RESOURCE", "env-resource")
+
+	prevClientFactory := gatewayMCPOAuthHTTPClient
+	defer func() { gatewayMCPOAuthHTTPClient = prevClientFactory }()
+
+	gatewayMCPOAuthHTTPClient = func() *http.Client {
+		return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse form: %v", err)
+			}
+			if got := r.Form.Get("client_id"); got != "env-client" {
+				t.Fatalf("client_id=%q", got)
+			}
+			if got := r.Form.Get("client_secret"); got != "env-secret" {
+				t.Fatalf("client_secret=%q", got)
+			}
+			if got := r.Form.Get("resource"); got != "env-resource" {
+				t.Fatalf("resource=%q", got)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"access_token":"token-env","token_type":"Bearer","expires_in":3600}`)),
+			}, nil
+		})}
+	}
+
+	gatewayMCPConnectHTTP = func(ctx context.Context, name, baseURL string, headers map[string]string, headerFunc func(context.Context) map[string]string) (gatewayMCPClient, error) {
+		if got := headers["X-Api-Key"]; got != "header-secret" {
+			t.Fatalf("X-Api-Key=%q", got)
+		}
+		if got := headers["Authorization"]; got != "Bearer token-env" {
+			t.Fatalf("authorization=%q", got)
+		}
+		return &fakeGatewayMCPClientAdapter{}, nil
+	}
+
+	_, err := defaultGatewayMCPConnector(context.Background(), "demo", gatewayMCPServerConfig{
+		Type:    "http",
+		URL:     "https://example.com/mcp",
+		Headers: map[string]string{"X-Api-Key": "$DEERFLOW_MCP_HEADER_TOKEN"},
+		OAuth: &gatewayMCPOAuthConfig{
+			Enabled:          true,
+			TokenURL:         "https://auth.example.com/token",
+			GrantType:        "client_credentials",
+			ClientID:         "$DEERFLOW_MCP_CLIENT_ID",
+			ClientSecret:     "$DEERFLOW_MCP_CLIENT_SECRET",
+			ExtraTokenParams: map[string]string{"resource": "$DEERFLOW_MCP_RESOURCE"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("connect http oauth env: %v", err)
+	}
+}
+
 func TestGatewayMCPOAuthProviderRefreshTokenGrant(t *testing.T) {
 	prevClientFactory := gatewayMCPOAuthHTTPClient
 	defer func() { gatewayMCPOAuthHTTPClient = prevClientFactory }()
@@ -249,6 +311,41 @@ func TestGatewayMCPOAuthProviderReturnsErrorForInvalidConfig(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "token_url") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestNormalizeGatewayMCPOAuthConfigExpandsEnvValues(t *testing.T) {
+	t.Setenv("DEERFLOW_MCP_TOKEN_URL", "https://auth.example.com/token")
+	t.Setenv("DEERFLOW_MCP_REFRESH_TOKEN", "refresh-123")
+	t.Setenv("DEERFLOW_MCP_SCOPE", "repo")
+	t.Setenv("DEERFLOW_MCP_AUDIENCE", "mcp")
+	t.Setenv("DEERFLOW_MCP_RESOURCE", "github")
+
+	cfg := normalizeGatewayMCPOAuthConfig(gatewayMCPOAuthConfig{
+		Enabled:      true,
+		TokenURL:     "$DEERFLOW_MCP_TOKEN_URL",
+		RefreshToken: "$DEERFLOW_MCP_REFRESH_TOKEN",
+		Scope:        "$DEERFLOW_MCP_SCOPE",
+		Audience:     "$DEERFLOW_MCP_AUDIENCE",
+		ExtraTokenParams: map[string]string{
+			"resource": "$DEERFLOW_MCP_RESOURCE",
+		},
+	})
+
+	if cfg.TokenURL != "https://auth.example.com/token" {
+		t.Fatalf("tokenURL=%q", cfg.TokenURL)
+	}
+	if cfg.RefreshToken != "refresh-123" {
+		t.Fatalf("refreshToken=%q", cfg.RefreshToken)
+	}
+	if cfg.Scope != "repo" {
+		t.Fatalf("scope=%q", cfg.Scope)
+	}
+	if cfg.Audience != "mcp" {
+		t.Fatalf("audience=%q", cfg.Audience)
+	}
+	if got := cfg.ExtraTokenParams["resource"]; got != "github" {
+		t.Fatalf("resource=%q", got)
 	}
 }
 

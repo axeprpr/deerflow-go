@@ -39,6 +39,9 @@ func TestViewedImagesMessageAddsMultiContentMetadata(t *testing.T) {
 	if msg.Role != models.RoleHuman {
 		t.Fatalf("role=%s", msg.Role)
 	}
+	if msg.Metadata["transient_viewed_images"] != "true" {
+		t.Fatalf("transient_viewed_images=%q want=true", msg.Metadata["transient_viewed_images"])
+	}
 	if msg.Metadata["multi_content"] == "" {
 		t.Fatal("expected multi_content metadata")
 	}
