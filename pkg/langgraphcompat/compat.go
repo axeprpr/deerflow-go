@@ -59,6 +59,7 @@ type Server struct {
 	mcpMu             sync.Mutex
 	mcpClients        map[string]gatewayMCPClient
 	mcpToolNames      map[string]struct{}
+	mcpDeferredTools  []models.Tool
 	mcpConnector      gatewayMCPConnector
 	channelMu         sync.Mutex
 	channelService    *gatewayChannelService
@@ -283,6 +284,7 @@ func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
 	return agent.New(agent.AgentConfig{
 		LLMProvider:     s.llmProvider,
 		Tools:           registry,
+		DeferredTools:   s.currentDeferredMCPTools(),
 		PresentFiles:    cfg.PresentFiles,
 		MaxTurns:        s.maxTurns,
 		AgentType:       cfg.AgentType,
@@ -294,6 +296,22 @@ func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
 		Sandbox:         sandboxRef,
 		RequestTimeout:  cfg.RequestTimeout,
 	})
+}
+
+func (s *Server) currentDeferredMCPTools() []models.Tool {
+	if s == nil {
+		return nil
+	}
+	s.mcpMu.Lock()
+	defer s.mcpMu.Unlock()
+	if len(s.mcpDeferredTools) == 0 {
+		return nil
+	}
+	out := make([]models.Tool, 0, len(s.mcpDeferredTools))
+	for _, tool := range s.mcpDeferredTools {
+		out = append(out, tool)
+	}
+	return out
 }
 
 func (s *Server) registerRoutes(mux *http.ServeMux) {

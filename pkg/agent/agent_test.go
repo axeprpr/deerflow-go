@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -470,6 +471,88 @@ func TestAgentRunPatchesDanglingToolCallsBeforeModelInvocation(t *testing.T) {
 	}
 }
 
+func TestAgentRunActivatesDeferredToolsViaToolSearch(t *testing.T) {
+	var deferredExecutions atomic.Int32
+	provider := &scriptedStreamProvider{
+		steps: []streamStep{
+			{
+				check: func(t *testing.T, req llm.ChatRequest) {
+					names := toolNames(req.Tools)
+					if !slices.Contains(names, "tool_search") {
+						t.Fatalf("tools=%v want tool_search", names)
+					}
+					if slices.Contains(names, "github.search_repos") {
+						t.Fatalf("tools=%v should not include deferred tool before search", names)
+					}
+					if !strings.Contains(req.SystemPrompt, "github.search_repos") {
+						t.Fatalf("system prompt missing deferred tools: %q", req.SystemPrompt)
+					}
+				},
+				toolCalls: []models.ToolCall{{
+					ID:        "call-search",
+					Name:      "tool_search",
+					Arguments: map[string]any{"query": "select:github.search_repos"},
+				}},
+			},
+			{
+				check: func(t *testing.T, req llm.ChatRequest) {
+					names := toolNames(req.Tools)
+					if !slices.Contains(names, "github.search_repos") {
+						t.Fatalf("tools=%v want activated deferred tool", names)
+					}
+					last := req.Messages[len(req.Messages)-1]
+					if last.Role != models.RoleTool || last.ToolResult == nil || !strings.Contains(last.Content, "github.search_repos") {
+						t.Fatalf("last message=%#v", last)
+					}
+				},
+				toolCalls: []models.ToolCall{{
+					ID:        "call-github",
+					Name:      "github.search_repos",
+					Arguments: map[string]any{"query": "deerflow"},
+				}},
+			},
+			{
+				check: func(t *testing.T, req llm.ChatRequest) {
+					if deferredExecutions.Load() != 1 {
+						t.Fatalf("deferred executions=%d want 1", deferredExecutions.Load())
+					}
+				},
+				content: "Deferred tool completed.",
+			},
+		},
+		t: t,
+	}
+
+	runAgent := New(AgentConfig{
+		LLMProvider: provider,
+		DeferredTools: []models.Tool{{
+			Name:        "github.search_repos",
+			Description: "Search repositories",
+			InputSchema: map[string]any{"type": "object"},
+			Handler: func(_ context.Context, call models.ToolCall) (models.ToolResult, error) {
+				deferredExecutions.Add(1)
+				return models.ToolResult{
+					CallID:   call.ID,
+					ToolName: call.Name,
+					Status:   models.CallStatusCompleted,
+					Content:  "found deerflow",
+				}, nil
+			},
+		}},
+		MaxTurns: 4,
+	})
+
+	result, err := runAgent.Run(context.Background(), "session-deferred-tool", []models.Message{
+		{ID: "m1", SessionID: "session-deferred-tool", Role: models.RoleHuman, Content: "Find repos"},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "Deferred tool completed." {
+		t.Fatalf("FinalOutput=%q", result.FinalOutput)
+	}
+}
+
 type timeoutProvider struct{}
 
 func (timeoutProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
@@ -526,4 +609,12 @@ func (p *scriptedStreamProvider) Stream(_ context.Context, req llm.ChatRequest) 
 		}
 	}()
 	return ch, nil
+}
+
+func toolNames(items []models.Tool) []string {
+	names := make([]string, 0, len(items))
+	for _, tool := range items {
+		names = append(names, tool.Name)
+	}
+	return names
 }

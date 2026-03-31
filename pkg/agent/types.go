@@ -28,6 +28,7 @@ type RunResult struct {
 type AgentConfig struct {
 	LLMProvider     llm.LLMProvider
 	Tools           *tools.Registry
+	DeferredTools   []models.Tool
 	PresentFiles    *tools.PresentFileRegistry
 	AgentType       AgentType
 	MaxTurns        int

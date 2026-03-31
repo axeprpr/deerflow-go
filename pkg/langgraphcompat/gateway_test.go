@@ -1510,6 +1510,40 @@ func TestApplyGatewayMCPConfigRegistersConnectedTools(t *testing.T) {
 	}
 }
 
+func TestApplyGatewayMCPConfigDefersConnectedToolsWhenToolSearchEnabled(t *testing.T) {
+	t.Setenv("DEERFLOW_TOOL_SEARCH_ENABLED", "true")
+
+	s, _ := newCompatTestServer(t)
+	s.tools = tools.NewRegistry()
+	s.mcpConnector = func(ctx context.Context, name string, cfg gatewayMCPServerConfig) (gatewayMCPClient, error) {
+		return &fakeGatewayMCPClient{tools: []models.Tool{{
+			Name:        "github.search_repos",
+			Description: "Search repositories",
+			Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+				return models.ToolResult{CallID: call.ID, ToolName: call.Name, Status: models.CallStatusCompleted, Content: "ok"}, nil
+			},
+		}}}, nil
+	}
+
+	s.applyGatewayMCPConfig(context.Background(), gatewayMCPConfig{
+		MCPServers: map[string]gatewayMCPServerConfig{
+			"github": {
+				Enabled: true,
+				Type:    "stdio",
+				Command: "npx",
+			},
+		},
+	})
+
+	if tool := s.tools.Get("github.search_repos"); tool != nil {
+		t.Fatal("expected MCP tool to stay out of the base registry when deferred")
+	}
+	deferred := s.currentDeferredMCPTools()
+	if len(deferred) != 1 || deferred[0].Name != "github.search_repos" {
+		t.Fatalf("deferred=%v", deferred)
+	}
+}
+
 func TestModelsEndpointSupportsConfiguredModelCatalogJSON(t *testing.T) {
 	t.Setenv("DEERFLOW_MODELS_JSON", `[
 		{

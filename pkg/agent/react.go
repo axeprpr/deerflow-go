@@ -37,6 +37,7 @@ var agentRequestSeq uint64
 type Agent struct {
 	llm             llm.LLMProvider
 	tools           *tools.Registry
+	deferredTools   *tools.DeferredToolRegistry
 	sandbox         *sandbox.Sandbox
 	agentType       AgentType
 	model           string
@@ -77,6 +78,7 @@ func New(cfg AgentConfig) *Agent {
 	return &Agent{
 		llm:             cfg.LLMProvider,
 		tools:           registry,
+		deferredTools:   tools.NewDeferredToolRegistry(cfg.DeferredTools),
 		sandbox:         cfg.Sandbox,
 		agentType:       cfg.AgentType,
 		model:           resolveModel(cfg.Model),
@@ -141,6 +143,8 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 	a.requests.Store(requestID, sessionID)
 	defer a.requests.Delete(requestID)
 
+	deferredState := newDeferredToolState(a.deferredTools)
+
 	emit := func(evt AgentEvent) {
 		evt.RequestID = requestID
 		if evt.SessionID == "" {
@@ -159,11 +163,11 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 		req := llm.ChatRequest{
 			Model:           a.model,
 			Messages:        runMessages,
-			Tools:           a.tools.List(),
+			Tools:           a.visibleTools(deferredState),
 			ReasoningEffort: a.reasoningEffort,
 			Temperature:     a.temperature,
 			MaxTokens:       a.maxTokens,
-			SystemPrompt:    a.BuildSystemPrompt(ctx, sessionID),
+			SystemPrompt:    a.buildSystemPrompt(ctx, sessionID, deferredState),
 		}
 
 		stream, err := a.llm.Stream(ctx, req)
@@ -301,7 +305,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 				toolStarted := time.Now().UTC()
 				toolCtx := tools.WithSandbox(ctx, a.sandbox)
 				toolCtx = tools.WithThreadID(toolCtx, sessionID)
-				result, err := a.tools.Execute(toolCtx, call)
+				result, err := a.executeTool(toolCtx, call, deferredState)
 				if err != nil {
 					err = normalizeRunError(ctx, err, a.requestTimeout)
 					result = models.ToolResult{
@@ -385,7 +389,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			toolStarted := time.Now().UTC()
 			toolCtx := tools.WithSandbox(ctx, a.sandbox)
 			toolCtx = tools.WithThreadID(toolCtx, sessionID)
-			result, err := a.tools.Execute(toolCtx, call)
+			result, err := a.executeTool(toolCtx, call, deferredState)
 			if err != nil {
 				err = normalizeRunError(ctx, err, a.requestTimeout)
 				result = models.ToolResult{
@@ -512,15 +516,141 @@ func marshalLoopArgs(args map[string]any) string {
 	return string(raw)
 }
 
-func (a *Agent) BuildSystemPrompt(_ context.Context, _ string) string {
+func (a *Agent) BuildSystemPrompt(ctx context.Context, sessionID string) string {
+	return a.buildSystemPrompt(ctx, sessionID, newDeferredToolState(a.deferredTools))
+}
+
+func (a *Agent) buildSystemPrompt(_ context.Context, _ string, deferredState *deferredToolState) string {
 	sections := []string{
 		strings.TrimSpace(a.systemPrompt),
 		"You are running in a ReAct-style loop. Think step by step, call tools when necessary, and stop when you have a complete answer.",
 	}
-	if toolDescriptions := a.tools.Descriptions(); strings.TrimSpace(toolDescriptions) != "" {
+	if deferredPrompt := deferredState.prompt(); deferredPrompt != "" {
+		sections = append(sections, deferredPrompt)
+	}
+	if toolDescriptions := describeTools(a.visibleTools(deferredState)); strings.TrimSpace(toolDescriptions) != "" {
 		sections = append(sections, "Available Tools:\n"+toolDescriptions)
 	}
 	return strings.Join(sections, "\n\n")
+}
+
+func (a *Agent) visibleTools(deferredState *deferredToolState) []models.Tool {
+	visible := append([]models.Tool(nil), a.tools.List()...)
+	if deferredState == nil || !deferredState.hasDeferred() {
+		return visible
+	}
+	visible = append(visible, deferredState.searchTool())
+	visible = append(visible, deferredState.activatedTools()...)
+	return visible
+}
+
+func (a *Agent) executeTool(ctx context.Context, call models.ToolCall, deferredState *deferredToolState) (models.ToolResult, error) {
+	if deferredState != nil {
+		if call.Name == "tool_search" && deferredState.hasDeferred() {
+			registry := tools.NewRegistry()
+			_ = registry.Register(deferredState.searchTool())
+			return registry.Execute(ctx, call)
+		}
+		if tool, ok := deferredState.activatedTool(call.Name); ok {
+			registry := tools.NewRegistry()
+			_ = registry.Register(tool)
+			return registry.Execute(ctx, call)
+		}
+	}
+	return a.tools.Execute(ctx, call)
+}
+
+type deferredToolState struct {
+	registry  *tools.DeferredToolRegistry
+	activated map[string]models.Tool
+}
+
+func newDeferredToolState(registry *tools.DeferredToolRegistry) *deferredToolState {
+	return &deferredToolState{
+		registry:  registry,
+		activated: map[string]models.Tool{},
+	}
+}
+
+func (s *deferredToolState) hasDeferred() bool {
+	return s != nil && s.registry != nil && len(s.registry.Entries()) > 0
+}
+
+func (s *deferredToolState) activate(matched []models.Tool) {
+	if s == nil {
+		return
+	}
+	for _, tool := range matched {
+		if strings.TrimSpace(tool.Name) == "" {
+			continue
+		}
+		s.activated[tool.Name] = tool
+	}
+}
+
+func (s *deferredToolState) activatedTool(name string) (models.Tool, bool) {
+	if s == nil {
+		return models.Tool{}, false
+	}
+	tool, ok := s.activated[strings.TrimSpace(name)]
+	return tool, ok
+}
+
+func (s *deferredToolState) activatedTools() []models.Tool {
+	if s == nil || len(s.activated) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(s.activated))
+	for name := range s.activated {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]models.Tool, 0, len(names))
+	for _, name := range names {
+		out = append(out, s.activated[name])
+	}
+	return out
+}
+
+func (s *deferredToolState) searchTool() models.Tool {
+	return tools.DeferredToolSearchTool(s.registry.Search, s.activate)
+}
+
+func (s *deferredToolState) prompt() string {
+	if !s.hasDeferred() {
+		return ""
+	}
+	entries := s.registry.Entries()
+	lines := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		line := "- " + entry.Name
+		if entry.Description != "" {
+			line += ": " + entry.Description
+		}
+		lines = append(lines, line)
+	}
+	return "<available_deferred_tools>\n" +
+		"Some tools are loaded lazily to keep context small. Search them with `tool_search` before calling them.\n" +
+		"Use `select:name1,name2` for exact names, keywords for search, or `+keyword rest` to require text in the tool name.\n" +
+		strings.Join(lines, "\n") + "\n" +
+		"</available_deferred_tools>"
+}
+
+func describeTools(items []models.Tool) string {
+	if len(items) == 0 {
+		return ""
+	}
+	var lines []string
+	for _, tool := range items {
+		line := fmt.Sprintf("- %s: %s", tool.Name, strings.TrimSpace(tool.Description))
+		if len(tool.InputSchema) > 0 {
+			if raw, err := json.MarshalIndent(tool.InputSchema, "", "  "); err == nil {
+				line += "\n  schema: " + strings.ReplaceAll(string(raw), "\n", "\n  ")
+			}
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (a *Agent) emit(evt AgentEvent) {

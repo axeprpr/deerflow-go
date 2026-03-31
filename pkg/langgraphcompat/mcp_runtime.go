@@ -182,19 +182,28 @@ func (s *Server) applyGatewayMCPConfig(ctx context.Context, cfg gatewayMCPConfig
 		}
 	}
 
+	deferTools := shouldDeferMCPTools(newTools)
+
 	s.mcpMu.Lock()
 	oldClients := s.mcpClients
 	oldToolNames := s.mcpToolNames
 	s.mcpClients = newClients
 	s.mcpToolNames = newToolNames
+	if deferTools {
+		s.mcpDeferredTools = append([]models.Tool(nil), newTools...)
+	} else {
+		s.mcpDeferredTools = nil
+	}
 	s.mcpMu.Unlock()
 
 	for name := range oldToolNames {
 		s.tools.Unregister(name)
 	}
-	for _, tool := range newTools {
-		if err := s.tools.Register(tool); err != nil {
-			s.logMCPError("register tool "+tool.Name, tool.Name, err)
+	if !deferTools {
+		for _, tool := range newTools {
+			if err := s.tools.Register(tool); err != nil {
+				s.logMCPError("register tool "+tool.Name, tool.Name, err)
+			}
 		}
 	}
 	for name, client := range oldClients {
@@ -213,6 +222,7 @@ func (s *Server) closeGatewayMCPClients() {
 	toolNames := s.mcpToolNames
 	s.mcpClients = nil
 	s.mcpToolNames = nil
+	s.mcpDeferredTools = nil
 	s.mcpMu.Unlock()
 
 	for name := range toolNames {
@@ -234,4 +244,17 @@ func (s *Server) logMCPError(action, name string, err error) {
 		logger = log.Default()
 	}
 	logger.Printf("MCP %s failed for %s: %v", strings.TrimSpace(action), strings.TrimSpace(name), err)
+}
+
+func shouldDeferMCPTools(tools []models.Tool) bool {
+	raw := strings.TrimSpace(os.Getenv("DEERFLOW_TOOL_SEARCH_ENABLED"))
+	if raw != "" {
+		switch strings.ToLower(raw) {
+		case "1", "true", "yes", "on":
+			return true
+		case "0", "false", "no", "off":
+			return false
+		}
+	}
+	return len(tools) >= 8
 }
