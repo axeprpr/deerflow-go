@@ -653,6 +653,61 @@ func TestResolveRunConfigKeepsTaskToolWhenSubagentsEnabled(t *testing.T) {
 	}
 }
 
+func TestResolveRunConfigRemovesViewImageForNonVisionModel(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	s.defaultModel = "deepseek-reasoner"
+	registry := tools.NewRegistry()
+	for _, tool := range []models.Tool{
+		{Name: "bash", Groups: []string{"builtin"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
+		{Name: "view_image", Groups: []string{"builtin"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
+	} {
+		if err := registry.Register(tool); err != nil {
+			t.Fatalf("register tool %q: %v", tool.Name, err)
+		}
+	}
+	s.tools = registry
+
+	cfg, err := s.resolveRunConfig(runConfig{}, nil)
+	if err != nil {
+		t.Fatalf("resolveRunConfig error: %v", err)
+	}
+	if cfg.Tools == nil {
+		t.Fatal("expected tool registry")
+	}
+	if tool := cfg.Tools.Get("view_image"); tool != nil {
+		t.Fatalf("expected view_image to be removed for non-vision model, got %+v", tool)
+	}
+	if tool := cfg.Tools.Get("bash"); tool == nil {
+		t.Fatal("expected unrelated tools to remain available")
+	}
+}
+
+func TestResolveRunConfigKeepsViewImageForVisionModel(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	s.defaultModel = "gpt-4.1-mini"
+	registry := tools.NewRegistry()
+	for _, tool := range []models.Tool{
+		{Name: "bash", Groups: []string{"builtin"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
+		{Name: "view_image", Groups: []string{"builtin"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
+	} {
+		if err := registry.Register(tool); err != nil {
+			t.Fatalf("register tool %q: %v", tool.Name, err)
+		}
+	}
+	s.tools = registry
+
+	cfg, err := s.resolveRunConfig(runConfig{ModelName: "gpt-4o"}, nil)
+	if err != nil {
+		t.Fatalf("resolveRunConfig error: %v", err)
+	}
+	if cfg.Tools == nil {
+		t.Fatal("expected tool registry")
+	}
+	if tool := cfg.Tools.Get("view_image"); tool == nil {
+		t.Fatal("expected view_image to remain available for vision model")
+	}
+}
+
 func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-gateway-1"
@@ -1799,7 +1854,6 @@ func TestRunsStreamAppliesCustomAgentRuntimeConfig(t *testing.T) {
 		t.Fatalf("tools=%q want=%q", strings.Join(gotTools, ","), "ask_clarification,bash,glob,present_file,read_file")
 	}
 }
-
 
 func TestRunsStreamInjectsUserProfileIntoCustomAgentPrompt(t *testing.T) {
 	provider := &streamSpyProvider{}

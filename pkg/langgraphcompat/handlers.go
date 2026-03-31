@@ -760,6 +760,7 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 		}
 		cfg.SystemPrompt = joinPromptSections(basePrompt, bootstrapAgentPrompt)
 		cfg.Tools = resolveRuntimeToolRegistry(s.tools, runtimeContext)
+		cfg.Tools = resolveModelToolRegistry(cfg.Tools, firstNonEmpty(cfg.ModelName, s.defaultModel))
 		return cfg, nil
 	}
 	if cfg.AgentName == "" {
@@ -767,6 +768,7 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 			cfg.Tools = s.tools
 		}
 		cfg.Tools = resolveRuntimeToolRegistry(cfg.Tools, runtimeContext)
+		cfg.Tools = resolveModelToolRegistry(cfg.Tools, firstNonEmpty(cfg.ModelName, s.defaultModel))
 		return cfg, nil
 	}
 
@@ -801,6 +803,7 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 		cfg.Tools = s.tools
 	}
 	cfg.Tools = resolveRuntimeToolRegistry(cfg.Tools, runtimeContext)
+	cfg.Tools = resolveModelToolRegistry(cfg.Tools, firstNonEmpty(cfg.ModelName, s.defaultModel))
 	return cfg, nil
 }
 
@@ -1031,6 +1034,29 @@ func resolveRuntimeToolRegistry(base *tools.Registry, runtimeContext map[string]
 			continue
 		}
 		allowed = append(allowed, tool.Name)
+	}
+	return base.Restrict(allowed)
+}
+
+func resolveModelToolRegistry(base *tools.Registry, modelName string) *tools.Registry {
+	if base == nil {
+		return nil
+	}
+	if agent.ModelLikelySupportsVision(modelName) {
+		return base
+	}
+
+	hasViewImage := false
+	allowed := make([]string, 0, len(base.List()))
+	for _, tool := range base.List() {
+		if tool.Name == "view_image" {
+			hasViewImage = true
+			continue
+		}
+		allowed = append(allowed, tool.Name)
+	}
+	if !hasViewImage {
+		return base
 	}
 	return base.Restrict(allowed)
 }

@@ -144,6 +144,10 @@ func modelLikelySupportsVision(model string) bool {
 	return false
 }
 
+func ModelLikelySupportsVision(model string) bool {
+	return modelLikelySupportsVision(model)
+}
+
 func asString(v any) string {
 	switch value := v.(type) {
 	case string:
