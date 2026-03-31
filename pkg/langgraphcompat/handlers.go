@@ -841,6 +841,7 @@ func parseRunConfig(raw map[string]any) runConfig {
 func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) (runConfig, error) {
 	cfg.IsBootstrap = cfg.IsBootstrap || boolFromAny(runtimeContext["is_bootstrap"])
 	cfg.AgentName = firstNonEmpty(stringFromAny(runtimeContext["agent_name"]), cfg.AgentName)
+	cfg.ReasoningEffort = s.effectiveReasoningEffort(firstNonEmpty(stringFromAny(runtimeContext["model_name"]), cfg.ModelName), cfg.ReasoningEffort, runtimeContext)
 	basePrompt := strings.TrimSpace(cfg.SystemPrompt)
 	if basePrompt == "" {
 		basePrompt = agent.GetAgentTypeConfig(cfg.AgentType).SystemPrompt
@@ -905,6 +906,31 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 	cfg.Tools = resolveRuntimeToolRegistry(cfg.Tools, runtimeContext)
 	cfg.Tools = s.resolveModelToolRegistry(cfg.Tools, firstNonEmpty(cfg.ModelName, s.defaultModel))
 	return cfg, nil
+}
+
+func (s *Server) effectiveReasoningEffort(modelName, requested string, runtimeContext map[string]any) string {
+	modelName = strings.TrimSpace(firstNonEmpty(modelName, s.defaultModel))
+	requested = strings.TrimSpace(requested)
+
+	supportsThinking, supportsReasoning := inferGatewayModelCapabilities(modelName)
+	if s != nil {
+		if model, ok := findConfiguredGatewayModelByNameOrID(s.defaultModel, modelName); ok {
+			supportsThinking = model.SupportsThinking
+			supportsReasoning = model.SupportsReasoningEffort
+		}
+	}
+
+	thinkingEnabled, hasThinkingEnabled := optionalBoolFromAny(runtimeContext["thinking_enabled"])
+	if !supportsReasoning {
+		return ""
+	}
+	if hasThinkingEnabled && !thinkingEnabled {
+		return "minimal"
+	}
+	if hasThinkingEnabled && thinkingEnabled && !supportsThinking {
+		return ""
+	}
+	return requested
 }
 
 func (s *Server) runtimeModePrompt(runtimeContext map[string]any) string {
@@ -1238,6 +1264,31 @@ func firstNonNil(values ...any) any {
 		}
 	}
 	return nil
+}
+
+func optionalBoolFromAny(v any) (bool, bool) {
+	switch value := v.(type) {
+	case bool:
+		return value, true
+	case string:
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "true", "1", "yes", "on":
+			return true, true
+		case "false", "0", "no", "off":
+			return false, true
+		}
+	case float64:
+		return value != 0, true
+	case int:
+		return value != 0, true
+	case int64:
+		return value != 0, true
+	case json.Number:
+		if i, err := value.Int64(); err == nil {
+			return i != 0, true
+		}
+	}
+	return false, false
 }
 
 func stringFromAny(v any) string {

@@ -2188,6 +2188,78 @@ func TestRunsStreamInjectsUserProfileIntoCustomAgentPrompt(t *testing.T) {
 	}
 }
 
+func TestRunsStreamMapsThinkingDisabledToMinimalReasoningEffort(t *testing.T) {
+	provider := &streamSpyProvider{}
+	t.Setenv("DEERFLOW_MODELS_JSON", `[{"name":"gpt-5","model":"openai/gpt-5","supports_thinking":true,"supports_reasoning_effort":true}]`)
+
+	s := &Server{
+		llmProvider:  provider,
+		defaultModel: "gpt-5",
+		tools:        newRuntimeToolRegistry(t),
+		sessions:     make(map[string]*Session),
+		runs:         make(map[string]*Run),
+		dataRoot:     t.TempDir(),
+		agents:       map[string]gatewayAgent{},
+	}
+	s.ensureSession("thread-flash-mode", map[string]any{"title": "Existing title"})
+
+	body := `{
+		"thread_id":"thread-flash-mode",
+		"input":{"messages":[{"role":"user","content":"Answer quickly"}]},
+		"context":{"thinking_enabled":false}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/runs/stream", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleRunsStream(rec, req)
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(payload))
+	}
+
+	if provider.lastReq.ReasoningEffort != "minimal" {
+		t.Fatalf("reasoning_effort=%q want=%q", provider.lastReq.ReasoningEffort, "minimal")
+	}
+}
+
+func TestRunsStreamClearsReasoningEffortWhenModelDoesNotSupportIt(t *testing.T) {
+	provider := &streamSpyProvider{}
+	t.Setenv("DEERFLOW_MODELS_JSON", `[{"name":"fast-model","model":"acme/fast-model","supports_thinking":false,"supports_reasoning_effort":false}]`)
+
+	s := &Server{
+		llmProvider:  provider,
+		defaultModel: "fast-model",
+		tools:        newRuntimeToolRegistry(t),
+		sessions:     make(map[string]*Session),
+		runs:         make(map[string]*Run),
+		dataRoot:     t.TempDir(),
+		agents:       map[string]gatewayAgent{},
+	}
+	s.ensureSession("thread-no-reasoning", map[string]any{"title": "Existing title"})
+
+	body := `{
+		"thread_id":"thread-no-reasoning",
+		"input":{"messages":[{"role":"user","content":"Be brief"}]},
+		"context":{"thinking_enabled":false,"reasoning_effort":"high"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/runs/stream", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleRunsStream(rec, req)
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(payload))
+	}
+
+	if provider.lastReq.ReasoningEffort != "" {
+		t.Fatalf("reasoning_effort=%q want empty", provider.lastReq.ReasoningEffort)
+	}
+}
+
 func TestRunsStreamInjectsStoredMemoryIntoSystemPrompt(t *testing.T) {
 	provider := &streamSpyProvider{}
 	store := &fakeGatewayMemoryStore{
