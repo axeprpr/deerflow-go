@@ -2,9 +2,11 @@ package langgraphcompat
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -141,7 +143,7 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 		input = make(map[string]any)
 	}
 	messages, _ := input["messages"].([]any)
-	newMessages := s.convertToMessages(threadID, messages)
+	newMessages := s.convertToMessages(threadID, messages, false)
 
 	runtimeContext := runtimeContextFromRequest(req)
 	runCfg := parseRunConfig(req.Config)
@@ -154,6 +156,9 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 	resolvedRunCfg, err := s.resolveRunConfig(runCfg, runtimeContext)
 	if err != nil {
 		return nil, nil, err, http.StatusNotFound
+	}
+	if s.modelSupportsVision(firstNonEmpty(resolvedRunCfg.ModelName, s.defaultModel)) {
+		newMessages = s.convertToMessages(threadID, messages, true)
 	}
 	s.setThreadConfig(threadID, threadConfigFromRuntimeContext(threadID, runtimeContext, resolvedRunCfg))
 	resolvedRunCfg.SystemPrompt = joinPromptSections(resolvedRunCfg.SystemPrompt, s.memoryInjectionPrompt(ctx, threadID))
@@ -366,7 +371,7 @@ func (s *Server) streamRunEvents(w http.ResponseWriter, r *http.Request, flusher
 	}
 }
 
-func (s *Server) convertToMessages(threadID string, input []any) []models.Message {
+func (s *Server) convertToMessages(threadID string, input []any, includeUploadedImages bool) []models.Message {
 	messages := make([]models.Message, 0, len(input))
 	msgSeq := uint64(time.Now().UnixNano())
 
@@ -393,6 +398,9 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 			uploadsBlock := buildUploadedFilesBlock(files, historical)
 			content = injectUploadedFilesBlock(content, files, historical)
 			multiContent = prependTextPart(multiContent, uploadsBlock)
+			if includeUploadedImages {
+				multiContent = append(multiContent, uploadedImageParts(s.uploadsDir(threadID), files)...)
+			}
 		}
 
 		msgSeq++
@@ -422,10 +430,21 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 	return messages
 }
 
+func (s *Server) modelSupportsVision(modelName string) bool {
+	supportsVision := agent.ModelLikelySupportsVision(modelName)
+	if s != nil {
+		if model, ok := findConfiguredGatewayModelByNameOrID(s.defaultModel, modelName); ok {
+			supportsVision = model.SupportsVision
+		}
+	}
+	return supportsVision
+}
+
 type uploadedFile struct {
-	Filename string `json:"filename"`
-	Size     int64  `json:"size"`
-	Path     string `json:"path"`
+	Filename     string `json:"filename"`
+	Size         int64  `json:"size"`
+	Path         string `json:"path"`
+	MarkdownPath string `json:"markdown_path,omitempty"`
 }
 
 func extractUploadedFiles(additionalKwargs map[string]any, uploadDir string) []uploadedFile {
@@ -450,9 +469,10 @@ func extractUploadedFiles(additionalKwargs map[string]any, uploadDir string) []u
 			}
 		}
 		files = append(files, uploadedFile{
-			Filename: filename,
-			Size:     int64FromAny(item["size"]),
-			Path:     "/mnt/user-data/uploads/" + filepath.ToSlash(filename),
+			Filename:     filename,
+			Size:         int64FromAny(item["size"]),
+			Path:         "/mnt/user-data/uploads/" + filepath.ToSlash(filename),
+			MarkdownPath: uploadedMarkdownPath(uploadDir, filename),
 		})
 	}
 	return files
@@ -480,6 +500,9 @@ func listHistoricalUploads(uploadDir string, current []uploadedFile) []uploadedF
 		if name == "" {
 			continue
 		}
+		if isGeneratedMarkdownCompanion(uploadDir, name) {
+			continue
+		}
 		if _, exists := currentNames[name]; exists {
 			continue
 		}
@@ -488,12 +511,106 @@ func listHistoricalUploads(uploadDir string, current []uploadedFile) []uploadedF
 			continue
 		}
 		files = append(files, uploadedFile{
-			Filename: name,
-			Size:     info.Size(),
-			Path:     "/mnt/user-data/uploads/" + filepath.ToSlash(name),
+			Filename:     name,
+			Size:         info.Size(),
+			Path:         "/mnt/user-data/uploads/" + filepath.ToSlash(name),
+			MarkdownPath: uploadedMarkdownPath(uploadDir, name),
 		})
 	}
 	return files
+}
+
+func uploadedMarkdownPath(uploadDir string, filename string) string {
+	if strings.TrimSpace(uploadDir) == "" || !isConvertibleUploadExtension(filename) {
+		return ""
+	}
+	mdName := strings.TrimSuffix(filename, filepath.Ext(filename)) + ".md"
+	info, err := os.Stat(filepath.Join(uploadDir, mdName))
+	if err != nil || !info.Mode().IsRegular() {
+		return ""
+	}
+	return "/mnt/user-data/uploads/" + filepath.ToSlash(mdName)
+}
+
+func uploadedImageParts(uploadDir string, current []uploadedFile) []map[string]any {
+	if strings.TrimSpace(uploadDir) == "" || len(current) == 0 {
+		return nil
+	}
+
+	out := make([]map[string]any, 0, len(current))
+	for _, file := range current {
+		dataURL, err := uploadedImageDataURL(filepath.Join(uploadDir, file.Filename))
+		if err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"type": "image_url",
+			"image_url": map[string]any{
+				"url": dataURL,
+			},
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func uploadedImageDataURL(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("not a file")
+	}
+
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".webp", ".gif":
+	default:
+		return "", fmt.Errorf("unsupported image extension %q", ext)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+
+	mimeType := mime.TypeByExtension(ext)
+	if mimeType == "" {
+		switch ext {
+		case ".jpg", ".jpeg":
+			mimeType = "image/jpeg"
+		case ".png":
+			mimeType = "image/png"
+		case ".webp":
+			mimeType = "image/webp"
+		case ".gif":
+			mimeType = "image/gif"
+		}
+	}
+	if mimeType == "" {
+		return "", fmt.Errorf("unsupported image extension %q", ext)
+	}
+
+	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data), nil
+}
+
+func isGeneratedMarkdownCompanion(uploadDir string, filename string) bool {
+	if strings.TrimSpace(uploadDir) == "" || strings.ToLower(filepath.Ext(filename)) != ".md" {
+		return false
+	}
+
+	stem := strings.TrimSuffix(filename, filepath.Ext(filename))
+	for ext := range convertibleUploadExtensions {
+		sourcePath := filepath.Join(uploadDir, stem+ext)
+		info, err := os.Stat(sourcePath)
+		if err == nil && info.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
 }
 
 func injectUploadedFilesBlock(content string, current []uploadedFile, historical []uploadedFile) string {
@@ -521,6 +638,11 @@ func buildUploadedFilesBlock(current []uploadedFile, historical []uploadedFile) 
 			b.WriteString("  Path: ")
 			b.WriteString(file.Path)
 			b.WriteString("\n\n")
+			if file.MarkdownPath != "" {
+				b.WriteString("  Markdown copy: ")
+				b.WriteString(file.MarkdownPath)
+				b.WriteString("\n\n")
+			}
 		}
 	}
 	if len(historical) > 0 {
@@ -534,6 +656,11 @@ func buildUploadedFilesBlock(current []uploadedFile, historical []uploadedFile) 
 			b.WriteString("  Path: ")
 			b.WriteString(file.Path)
 			b.WriteString("\n\n")
+			if file.MarkdownPath != "" {
+				b.WriteString("  Markdown copy: ")
+				b.WriteString(file.MarkdownPath)
+				b.WriteString("\n\n")
+			}
 		}
 	}
 	b.WriteString("You can read these files using the `read_file` tool with the paths shown above.\n")

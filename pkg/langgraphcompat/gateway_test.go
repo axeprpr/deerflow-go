@@ -1110,6 +1110,41 @@ func TestUploadConvertibleDocumentCreatesMarkdownCompanion(t *testing.T) {
 	if !strings.Contains(mdResp.Body.String(), "Quarterly Review") {
 		t.Fatalf("markdown body=%q missing extracted text", mdResp.Body.String())
 	}
+
+	listResp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/uploads/list", nil, nil)
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", listResp.Code, listResp.Body.String())
+	}
+
+	var listed struct {
+		Files []map[string]any `json:"files"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+
+	var report map[string]any
+	for _, file := range listed.Files {
+		if asString(file["filename"]) == "report.docx" {
+			report = file
+			break
+		}
+	}
+	if report == nil {
+		t.Fatalf("list missing report.docx entry: %#v", listed.Files)
+	}
+	if len(listed.Files) != 1 {
+		t.Fatalf("listed files=%#v want only original upload entry", listed.Files)
+	}
+	if got := asString(report["markdown_file"]); got != "report.md" {
+		t.Fatalf("list markdown_file=%q want=report.md", got)
+	}
+	if got := asString(report["markdown_virtual_path"]); got != "/mnt/user-data/uploads/report.md" {
+		t.Fatalf("list markdown_virtual_path=%q want=/mnt/user-data/uploads/report.md", got)
+	}
+	if got := asString(report["markdown_artifact_url"]); got != "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/report.md" {
+		t.Fatalf("list markdown_artifact_url=%q want markdown artifact path", got)
+	}
 }
 
 func TestDeleteConvertibleUploadRemovesMarkdownCompanion(t *testing.T) {
@@ -1131,6 +1166,13 @@ func TestDeleteConvertibleUploadRemovesMarkdownCompanion(t *testing.T) {
 	resp := performCompatRequest(t, handler, http.MethodDelete, "/api/threads/"+threadID+"/uploads/report.docx", nil, nil)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("status=%d", resp.Code)
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode delete response: %v", err)
+	}
+	if got := asString(payload["message"]); got != "Deleted report.docx" {
+		t.Fatalf("message=%q want=Deleted report.docx", got)
 	}
 	if _, err := os.Stat(original); !os.IsNotExist(err) {
 		t.Fatalf("expected original removed, stat err=%v", err)

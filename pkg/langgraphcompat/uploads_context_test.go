@@ -29,6 +29,9 @@ func TestConvertToMessagesInjectsUploadedFilesBlockAndPreservesKwargs(t *testing
 	if err := os.WriteFile(filepath.Join(uploadDir, "report.pdf"), []byte("pdf"), 0o644); err != nil {
 		t.Fatalf("write current upload: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "report.md"), []byte("# Report"), 0o644); err != nil {
+		t.Fatalf("write markdown companion: %v", err)
+	}
 
 	input := []any{
 		map[string]any{
@@ -51,7 +54,7 @@ func TestConvertToMessagesInjectsUploadedFilesBlockAndPreservesKwargs(t *testing
 		},
 	}
 
-	messages := s.convertToMessages(threadID, input)
+	messages := s.convertToMessages(threadID, input, false)
 	if len(messages) != 1 {
 		t.Fatalf("messages len=%d want=1", len(messages))
 	}
@@ -63,8 +66,14 @@ func TestConvertToMessagesInjectsUploadedFilesBlockAndPreservesKwargs(t *testing
 	if !strings.Contains(content, "report.pdf") || !strings.Contains(content, "old.txt") {
 		t.Fatalf("expected current and historical uploads in %q", content)
 	}
+	if strings.Contains(content, "\n- report.md (") {
+		t.Fatalf("unexpected standalone markdown companion in %q", content)
+	}
 	if !strings.Contains(content, "/mnt/user-data/uploads/report.pdf") {
 		t.Fatalf("expected virtual upload path in %q", content)
+	}
+	if !strings.Contains(content, "Markdown copy: /mnt/user-data/uploads/report.md") {
+		t.Fatalf("expected markdown companion path in %q", content)
 	}
 	if !strings.Contains(content, "please analyse") {
 		t.Fatalf("expected original user content in %q", content)
@@ -106,6 +115,9 @@ func TestConvertToMessagesNormalizesUploadedFilePathAndSkipsMissingFiles(t *test
 	if err := os.WriteFile(filepath.Join(uploadDir, "report.pdf"), []byte("pdf"), 0o644); err != nil {
 		t.Fatalf("write current upload: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "report.md"), []byte("# Report"), 0o644); err != nil {
+		t.Fatalf("write markdown companion: %v", err)
+	}
 
 	input := []any{
 		map[string]any{
@@ -128,7 +140,7 @@ func TestConvertToMessagesNormalizesUploadedFilePathAndSkipsMissingFiles(t *test
 		},
 	}
 
-	messages := s.convertToMessages(threadID, input)
+	messages := s.convertToMessages(threadID, input, false)
 	if len(messages) != 1 {
 		t.Fatalf("messages len=%d want=1", len(messages))
 	}
@@ -137,11 +149,17 @@ func TestConvertToMessagesNormalizesUploadedFilePathAndSkipsMissingFiles(t *test
 	if !strings.Contains(content, "/mnt/user-data/uploads/report.pdf") {
 		t.Fatalf("expected normalized upload path in %q", content)
 	}
+	if !strings.Contains(content, "Markdown copy: /mnt/user-data/uploads/report.md") {
+		t.Fatalf("expected markdown companion path in %q", content)
+	}
 	if strings.Contains(content, "/tmp/arbitrary/report.pdf") {
 		t.Fatalf("unexpected unnormalized path in %q", content)
 	}
 	if strings.Contains(content, "missing.pdf") {
 		t.Fatalf("unexpected missing file in %q", content)
+	}
+	if strings.Contains(content, "\n- report.md (") {
+		t.Fatalf("unexpected standalone markdown companion in %q", content)
 	}
 	if !strings.Contains(content, "2.0 KB") {
 		t.Fatalf("expected parsed size in %q", content)
@@ -190,7 +208,7 @@ func TestConvertToMessagesPreservesMultimodalContent(t *testing.T) {
 				map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,abc"}},
 			},
 		},
-	})
+	}, false)
 	if len(messages) != 1 {
 		t.Fatalf("messages len=%d want=1", len(messages))
 	}
@@ -200,6 +218,105 @@ func TestConvertToMessagesPreservesMultimodalContent(t *testing.T) {
 	}
 	if got := multi[1]["type"]; got != "image_url" {
 		t.Fatalf("multi_content[1].type=%v want image_url", got)
+	}
+}
+
+func TestConvertToMessagesIncludesUploadedImagesForVisionModels(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{
+		sessions: make(map[string]*Session),
+		runs:     make(map[string]*Run),
+		dataRoot: root,
+	}
+
+	threadID := "thread-upload-image"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads dir: %v", err)
+	}
+	imageBytes := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
+	if err := os.WriteFile(filepath.Join(uploadDir, "diagram.png"), imageBytes, 0o644); err != nil {
+		t.Fatalf("write uploaded image: %v", err)
+	}
+
+	input := []any{
+		map[string]any{
+			"role":    "user",
+			"content": "what is in this image?",
+			"additional_kwargs": map[string]any{
+				"files": []any{
+					map[string]any{
+						"filename": "diagram.png",
+						"size":     len(imageBytes),
+						"path":     "/mnt/user-data/uploads/diagram.png",
+					},
+				},
+			},
+		},
+	}
+
+	messages := s.convertToMessages(threadID, input, true)
+	if len(messages) != 1 {
+		t.Fatalf("messages len=%d want=1", len(messages))
+	}
+
+	multi := decodeMultiContent(messages[0].Metadata)
+	if len(multi) != 2 {
+		t.Fatalf("multi_content len=%d want=2", len(multi))
+	}
+	if got := multi[1]["type"]; got != "image_url" {
+		t.Fatalf("multi_content[1].type=%v want image_url", got)
+	}
+	imageURL, _ := multi[1]["image_url"].(map[string]any)
+	if got := imageURL["url"]; got != "data:image/png;base64,iVBORw0KGgo=" {
+		t.Fatalf("image_url=%v want data URL", got)
+	}
+}
+
+func TestConvertToMessagesSkipsUploadedImagesForNonVisionModels(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{
+		sessions: make(map[string]*Session),
+		runs:     make(map[string]*Run),
+		dataRoot: root,
+	}
+
+	threadID := "thread-upload-image-disabled"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "diagram.png"), []byte{0x89, 0x50, 0x4e, 0x47}, 0o644); err != nil {
+		t.Fatalf("write uploaded image: %v", err)
+	}
+
+	input := []any{
+		map[string]any{
+			"role":    "user",
+			"content": "what is in this image?",
+			"additional_kwargs": map[string]any{
+				"files": []any{
+					map[string]any{
+						"filename": "diagram.png",
+						"size":     4,
+						"path":     "/mnt/user-data/uploads/diagram.png",
+					},
+				},
+			},
+		},
+	}
+
+	messages := s.convertToMessages(threadID, input, false)
+	if len(messages) != 1 {
+		t.Fatalf("messages len=%d want=1", len(messages))
+	}
+
+	multi := decodeMultiContent(messages[0].Metadata)
+	if len(multi) != 1 {
+		t.Fatalf("multi_content len=%d want=1", len(multi))
+	}
+	if got := multi[0]["type"]; got != "text" {
+		t.Fatalf("multi_content[0].type=%v want text", got)
 	}
 }
 

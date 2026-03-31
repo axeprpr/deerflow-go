@@ -741,12 +741,17 @@ func (s *Server) handleUploadsList(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		name := entry.Name()
+		if isGeneratedMarkdownCompanion(uploadDir, name) {
+			continue
+		}
 		fullPath := filepath.Join(uploadDir, name)
 		stat, err := entry.Info()
 		if err != nil {
 			continue
 		}
-		files = append(files, s.uploadInfo(threadID, fullPath, name, stat.Size(), stat.ModTime().Unix()))
+		info := s.uploadInfo(threadID, fullPath, name, stat.Size(), stat.ModTime().Unix())
+		s.attachMarkdownCompanionInfo(threadID, uploadDir, name, info)
+		files = append(files, info)
 	}
 
 	sort.Slice(files, func(i, j int) bool {
@@ -787,7 +792,7 @@ func (s *Server) handleUploadsDelete(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success": true,
-		"message": "file deleted",
+		"message": fmt.Sprintf("Deleted %s", filename),
 	})
 }
 
@@ -918,6 +923,26 @@ func (s *Server) saveUploadedFile(threadID, uploadDir, name string, fh *multipar
 		return nil, err
 	}
 	return s.uploadInfo(threadID, dstPath, name, n, nowUnix()), nil
+}
+
+func (s *Server) attachMarkdownCompanionInfo(threadID, uploadDir, name string, info map[string]any) {
+	if !isConvertibleUploadExtension(name) {
+		return
+	}
+
+	mdName := strings.TrimSuffix(name, filepath.Ext(name)) + ".md"
+	mdPath := filepath.Join(uploadDir, mdName)
+	stat, err := os.Stat(mdPath)
+	if err != nil || !stat.Mode().IsRegular() {
+		return
+	}
+
+	info["markdown_file"] = mdName
+	info["markdown_path"] = "/mnt/user-data/uploads/" + mdName
+	info["markdown_virtual_path"] = "/mnt/user-data/uploads/" + mdName
+	if strings.TrimSpace(threadID) != "" {
+		info["markdown_artifact_url"] = uploadArtifactURL(threadID, mdName)
+	}
 }
 
 func (s *Server) uploadInfo(threadID, fullPath, name string, size int64, modified int64) map[string]any {
@@ -1202,7 +1227,7 @@ func (s *Server) generateSuggestions(ctx context.Context, messages []struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }, n int, modelName string) []string {
-	if len(messages) == 0 {
+	if len(messages) == 0 || n <= 0 {
 		return []string{}
 	}
 
@@ -1211,10 +1236,11 @@ func (s *Server) generateSuggestions(ctx context.Context, messages []struct {
 		return []string{}
 	}
 
-	if suggestions := s.generateSuggestionsWithLLM(ctx, conversation, n, modelName); len(suggestions) > 0 {
-		return suggestions
-	}
-	return fallbackSuggestions(messages, n)
+	return finalizeSuggestions(
+		s.generateSuggestionsWithLLM(ctx, conversation, n, modelName),
+		fallbackSuggestions(messages, n),
+		n,
+	)
 }
 
 func (s *Server) generateSuggestionsWithLLM(ctx context.Context, conversation string, n int, modelName string) []string {
@@ -1322,6 +1348,38 @@ func parseJSONStringList(raw string) []string {
 			continue
 		}
 		out = append(out, text)
+	}
+	return out
+}
+
+func finalizeSuggestions(primary, fallback []string, n int) []string {
+	if n <= 0 {
+		return []string{}
+	}
+
+	out := make([]string, 0, n)
+	seen := make(map[string]struct{}, n)
+	appendUnique := func(items []string) {
+		for _, item := range items {
+			text := strings.TrimSpace(strings.ReplaceAll(item, "\n", " "))
+			if text == "" {
+				continue
+			}
+			key := strings.ToLower(text)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, text)
+			if len(out) == n {
+				return
+			}
+		}
+	}
+
+	appendUnique(primary)
+	if len(out) < n {
+		appendUnique(fallback)
 	}
 	return out
 }
