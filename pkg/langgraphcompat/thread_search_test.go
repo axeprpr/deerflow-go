@@ -180,3 +180,121 @@ func TestThreadSearchHonorsZeroLimit(t *testing.T) {
 		t.Fatalf("threads=%d want=0", len(threads))
 	}
 }
+
+func TestThreadSearchUsesDeterministicTieBreakersForDescSort(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	alpha := s.ensureSession("thread-alpha", map[string]any{"title": "Alpha"})
+	beta := s.ensureSession("thread-beta", map[string]any{"title": "Beta"})
+	gamma := s.ensureSession("thread-gamma", map[string]any{"title": "Gamma"})
+
+	created := time.Date(2026, 3, 31, 10, 0, 0, 0, time.UTC)
+	updated := created.Add(30 * time.Minute)
+
+	alpha.CreatedAt, alpha.UpdatedAt = created, updated
+	beta.CreatedAt, beta.UpdatedAt = created, updated
+	gamma.CreatedAt, gamma.UpdatedAt = created, updated
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/threads/search", strings.NewReader(`{"sortBy":"updated_at","sortOrder":"desc","select":["thread_id"]}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var threads []map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(threads) != 3 {
+		t.Fatalf("threads=%d want=3", len(threads))
+	}
+
+	got := []string{
+		asString(threads[0]["thread_id"]),
+		asString(threads[1]["thread_id"]),
+		asString(threads[2]["thread_id"]),
+	}
+	want := []string{"thread-gamma", "thread-beta", "thread-alpha"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("thread order=%q want=%q", strings.Join(got, ","), strings.Join(want, ","))
+	}
+}
+
+func TestThreadSearchUsesDeterministicTieBreakersForAscSort(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	alpha := s.ensureSession("thread-alpha", map[string]any{"title": "Alpha"})
+	beta := s.ensureSession("thread-beta", map[string]any{"title": "Beta"})
+	gamma := s.ensureSession("thread-gamma", map[string]any{"title": "Gamma"})
+
+	created := time.Date(2026, 3, 31, 10, 0, 0, 0, time.UTC)
+	updated := created.Add(30 * time.Minute)
+
+	alpha.CreatedAt, alpha.UpdatedAt = created, updated
+	beta.CreatedAt, beta.UpdatedAt = created, updated
+	gamma.CreatedAt, gamma.UpdatedAt = created, updated
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/threads/search", strings.NewReader(`{"sortBy":"updated_at","sortOrder":"asc","select":["thread_id"]}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var threads []map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(threads) != 3 {
+		t.Fatalf("threads=%d want=3", len(threads))
+	}
+
+	got := []string{
+		asString(threads[0]["thread_id"]),
+		asString(threads[1]["thread_id"]),
+		asString(threads[2]["thread_id"]),
+	}
+	want := []string{"thread-alpha", "thread-beta", "thread-gamma"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("thread order=%q want=%q", strings.Join(got, ","), strings.Join(want, ","))
+	}
+}
+
+func TestThreadSearchUsesCreatedAtAsSecondaryTieBreakerForUpdatedAtSort(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	alpha := s.ensureSession("thread-alpha", map[string]any{"title": "Alpha"})
+	beta := s.ensureSession("thread-beta", map[string]any{"title": "Beta"})
+	gamma := s.ensureSession("thread-gamma", map[string]any{"title": "Gamma"})
+
+	updated := time.Date(2026, 3, 31, 12, 0, 0, 0, time.UTC)
+	alpha.CreatedAt, alpha.UpdatedAt = time.Date(2026, 3, 31, 9, 0, 0, 0, time.UTC), updated
+	beta.CreatedAt, beta.UpdatedAt = time.Date(2026, 3, 31, 10, 0, 0, 0, time.UTC), updated
+	gamma.CreatedAt, gamma.UpdatedAt = time.Date(2026, 3, 31, 11, 0, 0, 0, time.UTC), updated
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/threads/search", strings.NewReader(`{"sortBy":"updated_at","sortOrder":"desc","select":["thread_id"]}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var threads []map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(threads) != 3 {
+		t.Fatalf("threads=%d want=3", len(threads))
+	}
+
+	got := []string{
+		asString(threads[0]["thread_id"]),
+		asString(threads[1]["thread_id"]),
+		asString(threads[2]["thread_id"]),
+	}
+	want := []string{"thread-gamma", "thread-beta", "thread-alpha"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("thread order=%q want=%q", strings.Join(got, ","), strings.Join(want, ","))
+	}
+}

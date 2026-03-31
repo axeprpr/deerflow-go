@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -26,7 +27,13 @@ func BashHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, 
 	}
 
 	cmd = tools.ResolveVirtualCommand(ctx, cmd)
-	result, err := sandbox.ExecDirect(ctx, cmd, timeout)
+	workdir := tools.ResolveWorkingDirectory(ctx)
+	if strings.TrimSpace(workdir) != "" {
+		if err := os.MkdirAll(workdir, 0o755); err != nil {
+			return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("prepare workspace failed: %w", err)
+		}
+	}
+	result, err := sandbox.ExecDirectInDir(ctx, cmd, workdir, timeout)
 	if err != nil {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("bash failed: %w", err)
 	}

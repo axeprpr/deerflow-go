@@ -2,6 +2,8 @@ package langgraphcompat
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -56,5 +58,42 @@ func TestResolveRunConfigIncludesACPGuidanceWhenToolConfigured(t *testing.T) {
 	}
 	if !strings.Contains(cfg.SystemPrompt, "copy from `/mnt/acp-workspace/<file>` to `/mnt/user-data/outputs/<file>`") {
 		t.Fatalf("system prompt missing ACP delivery guidance: %q", cfg.SystemPrompt)
+	}
+}
+
+func TestResolveRunConfigIncludesEnabledSkillsPrompt(t *testing.T) {
+	root := t.TempDir()
+	skillDir := filepath.Join(root, "skills", "public", "demo-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: demo-skill
+description: Demo workflow
+---
+
+# Demo Skill
+`), 0o644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	s := &Server{
+		dataRoot: root,
+		tools:    newRuntimeToolRegistry(t),
+	}
+
+	cfg, err := s.resolveRunConfig(runConfig{}, nil)
+	if err != nil {
+		t.Fatalf("resolveRunConfig error: %v", err)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "<skill_system>") {
+		t.Fatalf("system prompt missing skill system section: %q", cfg.SystemPrompt)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "/mnt/skills/public/demo-skill/SKILL.md") {
+		t.Fatalf("system prompt missing skill location: %q", cfg.SystemPrompt)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "Demo workflow") {
+		t.Fatalf("system prompt missing skill description: %q", cfg.SystemPrompt)
 	}
 }

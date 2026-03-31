@@ -433,9 +433,17 @@ func helperEnv(base []string, dir string) []string {
 
 // ExecDirect runs a command without sandbox restrictions (fallback).
 func ExecDirect(ctx context.Context, cmd string, timeout time.Duration) (*Result, error) {
+	return ExecDirectInDir(ctx, cmd, "", timeout)
+}
+
+// ExecDirectInDir runs a command without sandbox restrictions from the provided directory.
+func ExecDirectInDir(ctx context.Context, cmd string, dir string, timeout time.Duration) (*Result, error) {
 	start := time.Now()
 	execCmd := exec.Command("sh", "-c", cmd)
 	execCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if strings.TrimSpace(dir) != "" {
+		execCmd.Dir = dir
+	}
 
 	done := make(chan struct{})
 	var buf bytes.Buffer

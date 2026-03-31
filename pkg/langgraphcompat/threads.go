@@ -153,19 +153,11 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(threads, func(i, j int) bool {
 		left := threads[i]
 		right := threads[j]
-		var less bool
-		switch sortBy {
-		case "created_at":
-			less = compareThreadSortValue(left["created_at"], right["created_at"])
-		case "thread_id":
-			less = compareThreadSortValue(left["thread_id"], right["thread_id"])
-		default:
-			less = compareThreadSortValue(left["updated_at"], right["updated_at"])
-		}
+		cmp := compareThreadForSort(left, right, sortBy)
 		if sortOrder == "asc" {
-			return less
+			return cmp < 0
 		}
-		return !less
+		return cmp > 0
 	})
 
 	start := offset
@@ -229,8 +221,38 @@ func normalizeThreadSortOrder(value string) string {
 	return "desc"
 }
 
-func compareThreadSortValue(left, right any) bool {
-	return stringFromAnyValue(left) < stringFromAnyValue(right)
+func compareThreadForSort(left, right map[string]any, sortBy string) int {
+	for _, field := range threadSortFields(sortBy) {
+		cmp := compareThreadSortValue(left[field], right[field])
+		if cmp != 0 {
+			return cmp
+		}
+	}
+	return 0
+}
+
+func threadSortFields(sortBy string) []string {
+	switch sortBy {
+	case "created_at":
+		return []string{"created_at", "updated_at", "thread_id"}
+	case "thread_id":
+		return []string{"thread_id", "updated_at", "created_at"}
+	default:
+		return []string{"updated_at", "created_at", "thread_id"}
+	}
+}
+
+func compareThreadSortValue(left, right any) int {
+	leftValue := stringFromAnyValue(left)
+	rightValue := stringFromAnyValue(right)
+	switch {
+	case leftValue < rightValue:
+		return -1
+	case leftValue > rightValue:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func stringFromAnyValue(v any) string {

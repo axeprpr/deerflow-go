@@ -43,11 +43,21 @@ func WriteFileHandler(ctx context.Context, call models.ToolCall) (models.ToolRes
 	if !ok {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("content is required")
 	}
+	appendMode, _ := args["append"].(bool)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("mkdir failed: %w", err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if appendMode {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("write failed: %w", err)
+		}
+		defer f.Close()
+		if _, err := f.WriteString(content); err != nil {
+			return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("write failed: %w", err)
+		}
+	} else if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("write failed: %w", err)
 	}
 

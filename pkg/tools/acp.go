@@ -167,6 +167,11 @@ func ResolveVirtualPath(ctx context.Context, path string) string {
 			return path
 		}
 		return filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(path, "/mnt/user-data/")))
+	case path == skillsVirtualPath || strings.HasPrefix(path, skillsVirtualPath+"/"):
+		if resolved, ok := resolveSkillsVirtualPath(path); ok {
+			return resolved
+		}
+		return path
 	case path == acpWorkspaceVirtualPath || strings.HasPrefix(path, acpWorkspaceVirtualPath+"/"):
 		root, err := ACPWorkspaceDir(ThreadIDFromContext(ctx))
 		if err != nil {
@@ -178,6 +183,12 @@ func ResolveVirtualPath(ctx context.Context, path string) string {
 			return root
 		}
 		return filepath.Join(root, filepath.FromSlash(suffix))
+	case !filepath.IsAbs(path):
+		root := ThreadWorkspaceDir(ThreadIDFromContext(ctx))
+		if root == "" {
+			return path
+		}
+		return filepath.Join(root, filepath.FromSlash(path))
 	default:
 		return path
 	}
@@ -210,6 +221,18 @@ func threadDataRootFromThreadID(threadID string) string {
 		root = filepath.Join(os.TempDir(), "deerflow-go-data")
 	}
 	return filepath.Join(root, "threads", threadID, "user-data")
+}
+
+func ThreadWorkspaceDir(threadID string) string {
+	root := threadDataRootFromThreadID(threadID)
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, "workspace")
+}
+
+func ResolveWorkingDirectory(ctx context.Context) string {
+	return ThreadWorkspaceDir(ThreadIDFromContext(ctx))
 }
 
 func acpTimeoutFromArgs(raw any) time.Duration {

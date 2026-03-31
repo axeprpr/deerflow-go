@@ -91,3 +91,39 @@ func TestBashHandlerResolvesACPWorkspacePaths(t *testing.T) {
 		t.Fatalf("stdout=%q want %q", got, "hello")
 	}
 }
+
+func TestBashHandlerUsesThreadWorkspaceAsWorkingDirectory(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	threadID := "thread-bash-workdir"
+	ctx := tools.WithThreadID(context.Background(), threadID)
+	result, err := BashHandler(ctx, models.ToolCall{
+		ID:   "call-bash-workdir-1",
+		Name: "bash",
+		Arguments: map[string]any{
+			"command": "pwd && printf 'workspace' > relative.txt",
+		},
+	})
+	if err != nil {
+		t.Fatalf("BashHandler() error = %v", err)
+	}
+
+	var output BashOutput
+	if err := json.Unmarshal([]byte(result.Content), &output); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+
+	expectedDir := filepath.Join(root, "threads", threadID, "user-data", "workspace")
+	if got := strings.TrimSpace(output.Stdout); got != expectedDir {
+		t.Fatalf("stdout=%q want %q", got, expectedDir)
+	}
+
+	data, err := os.ReadFile(filepath.Join(expectedDir, "relative.txt"))
+	if err != nil {
+		t.Fatalf("read relative file: %v", err)
+	}
+	if string(data) != "workspace" {
+		t.Fatalf("file content=%q want %q", string(data), "workspace")
+	}
+}

@@ -1,6 +1,9 @@
 package langgraphcompat
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 const workingDirectoryPrompt = "<working_directory existed=\"true\">\n" +
 	"- User uploads: `/mnt/user-data/uploads` - Files uploaded by the user\n" +
@@ -21,9 +24,60 @@ const acpAgentPrompt = "**ACP Agent Tasks (`invoke_acp_agent`):**\n" +
 	"- To deliver ACP output to the user: copy from `/mnt/acp-workspace/<file>` to `/mnt/user-data/outputs/<file>`, then use `present_file`"
 
 func (s *Server) environmentPrompt() string {
-	parts := []string{workingDirectoryPrompt}
+	parts := make([]string, 0, 3)
+	if skills := s.skillsPrompt(); skills != "" {
+		parts = append(parts, skills)
+	}
+	parts = append(parts, workingDirectoryPrompt)
 	if s != nil && s.tools != nil && s.tools.Get("invoke_acp_agent") != nil {
 		parts = append(parts, acpAgentPrompt)
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+func (s *Server) skillsPrompt() string {
+	if s == nil {
+		return ""
+	}
+
+	skills := make([]gatewaySkill, 0)
+	for _, skill := range s.currentGatewaySkills() {
+		if !skill.Enabled {
+			continue
+		}
+		if _, ok := s.loadGatewaySkillBody(skill.Name, skill.Category); !ok {
+			continue
+		}
+		skills = append(skills, skill)
+	}
+	if len(skills) == 0 {
+		return ""
+	}
+
+	sort.Slice(skills, func(i, j int) bool {
+		if skills[i].Category == skills[j].Category {
+			return skills[i].Name < skills[j].Name
+		}
+		return skills[i].Category < skills[j].Category
+	})
+
+	var b strings.Builder
+	b.WriteString("<skill_system>\n")
+	b.WriteString("You have access to skills that provide optimized workflows for specific tasks. Each skill contains instructions, best practices, and references to extra resources.\n\n")
+	b.WriteString("Rules:\n")
+	b.WriteString("1. When a user request matches a skill, read that skill's `SKILL.md` with `read_file` before starting the main work.\n")
+	b.WriteString("2. Follow the skill's workflow and only load extra files it references when needed.\n")
+	b.WriteString("3. Prefer the paths listed below when reading skill files.\n\n")
+	b.WriteString("<available_skills>\n")
+	for _, skill := range skills {
+		category := resolveSkillCategory(skill.Category, skillCategoryPublic)
+		b.WriteString("    <skill>\n")
+		b.WriteString("        <name>" + skill.Name + "</name>\n")
+		b.WriteString("        <description>" + skill.Description + "</description>\n")
+		b.WriteString("        <location>/mnt/skills/" + category + "/" + skill.Name + "/SKILL.md</location>\n")
+		b.WriteString("    </skill>\n")
+	}
+	b.WriteString("</available_skills>\n")
+	b.WriteString("</skill_system>")
+	return b.String()
 }
