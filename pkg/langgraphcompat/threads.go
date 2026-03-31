@@ -1085,10 +1085,12 @@ func defaultThreadConfig(threadID string) map[string]any {
 }
 
 func (s *Server) threadDataState(threadID string) map[string]any {
+	acpWorkspace, _ := tools.ACPWorkspaceDir(threadID)
 	return map[string]any{
-		"workspace_path": filepath.Join(s.threadRoot(threadID), "workspace"),
-		"uploads_path":   s.uploadsDir(threadID),
-		"outputs_path":   filepath.Join(s.threadRoot(threadID), "outputs"),
+		"workspace_path":     filepath.Join(s.threadRoot(threadID), "workspace"),
+		"uploads_path":       s.uploadsDir(threadID),
+		"outputs_path":       filepath.Join(s.threadRoot(threadID), "outputs"),
+		"acp_workspace_path": acpWorkspace,
 	}
 }
 

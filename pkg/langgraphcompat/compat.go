@@ -164,6 +164,9 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 	}
 	registry.Register(builtin.ViewImageTool())
 	registry.Register(clarification.AskClarificationTool(clarifyManager))
+	if acpAgents := loadACPAgentConfigs(); len(acpAgents) > 0 {
+		registry.Register(tools.InvokeACPAgentTool(acpAgents))
+	}
 	var sb *sandbox.Sandbox
 	sb, err := sandbox.New("langgraph", filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox"))
 	if err != nil {

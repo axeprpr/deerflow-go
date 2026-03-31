@@ -18,7 +18,7 @@ func ReadFileHandler(ctx context.Context, call models.ToolCall) (models.ToolResu
 	if !ok || strings.TrimSpace(path) == "" {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("path is required")
 	}
-	path = resolveVirtualPath(ctx, path)
+	path = tools.ResolveVirtualPath(ctx, path)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -38,7 +38,7 @@ func WriteFileHandler(ctx context.Context, call models.ToolCall) (models.ToolRes
 	if !ok || strings.TrimSpace(path) == "" {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("path is required")
 	}
-	path = resolveVirtualPath(ctx, path)
+	path = tools.ResolveVirtualPath(ctx, path)
 	content, ok := args["content"].(string)
 	if !ok {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("content is required")
@@ -60,7 +60,7 @@ func GlobHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, 
 	if !ok || strings.TrimSpace(pattern) == "" {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("pattern is required")
 	}
-	pattern = resolveVirtualPath(ctx, pattern)
+	pattern = tools.ResolveVirtualPath(ctx, pattern)
 
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
@@ -130,29 +130,4 @@ func FileTools() []models.Tool {
 		WriteFileTool(),
 		GlobTool(),
 	}
-}
-
-func resolveVirtualPath(ctx context.Context, path string) string {
-	path = strings.TrimSpace(path)
-	if !strings.HasPrefix(path, "/mnt/user-data/") {
-		return path
-	}
-	root := threadDataRootFromContext(ctx)
-	if root == "" {
-		return path
-	}
-	suffix := strings.TrimPrefix(path, "/mnt/user-data/")
-	return filepath.Join(root, filepath.FromSlash(suffix))
-}
-
-func threadDataRootFromContext(ctx context.Context) string {
-	threadID := tools.ThreadIDFromContext(ctx)
-	if threadID == "" {
-		return ""
-	}
-	root := strings.TrimSpace(os.Getenv("DEERFLOW_DATA_ROOT"))
-	if root == "" {
-		root = filepath.Join(os.TempDir(), "deerflow-go-data")
-	}
-	return filepath.Join(root, "threads", threadID, "user-data")
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/axeprpr/deerflow-go/pkg/models"
+	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
 const maxViewImageBytes = 8 << 20
@@ -21,7 +22,7 @@ func ViewImageHandler(ctx context.Context, call models.ToolCall) (models.ToolRes
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("image_path is required")
 	}
 
-	resolved := resolveVirtualPath(ctx, path)
+	resolved := tools.ResolveVirtualPath(ctx, path)
 	if resolved == path && strings.HasPrefix(path, "/mnt/user-data/") {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("thread context is required for virtual image paths")
 	}

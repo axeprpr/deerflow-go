@@ -744,6 +744,7 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 		cfg.SystemPrompt = joinPromptSections(cfg.SystemPrompt, planModeTodoPrompt)
 	}
 	cfg.SystemPrompt = joinPromptSections(cfg.SystemPrompt, s.runtimeModePrompt(runtimeContext))
+	cfg.SystemPrompt = joinPromptSections(cfg.SystemPrompt, s.environmentPrompt())
 	cfg.IsBootstrap = cfg.IsBootstrap || boolFromAny(runtimeContext["is_bootstrap"])
 	cfg.AgentName = firstNonEmpty(stringFromAny(runtimeContext["agent_name"]), cfg.AgentName)
 	if cfg.IsBootstrap {

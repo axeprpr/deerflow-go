@@ -53,7 +53,41 @@ func TestBashHandlerResolvesThreadVirtualPaths(t *testing.T) {
 
 func TestResolveVirtualCommandWithoutThreadIDLeavesCommandUntouched(t *testing.T) {
 	cmd := "cat /mnt/user-data/uploads/demo.txt"
-	if got := resolveVirtualCommand(context.Background(), cmd); got != cmd {
+	if got := tools.ResolveVirtualCommand(context.Background(), cmd); got != cmd {
 		t.Fatalf("command = %q, want %q", got, cmd)
+	}
+}
+
+func TestBashHandlerResolvesACPWorkspacePaths(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	threadID := "thread-bash-acp"
+	acpDir := filepath.Join(root, "threads", threadID, "acp-workspace")
+	if err := os.MkdirAll(acpDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(acpDir, "hello.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	ctx := tools.WithThreadID(context.Background(), threadID)
+	result, err := BashHandler(ctx, models.ToolCall{
+		ID:   "call-bash-acp-1",
+		Name: "bash",
+		Arguments: map[string]any{
+			"command": "cat /mnt/acp-workspace/hello.txt",
+		},
+	})
+	if err != nil {
+		t.Fatalf("BashHandler() error = %v", err)
+	}
+
+	var output BashOutput
+	if err := json.Unmarshal([]byte(result.Content), &output); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if got := strings.TrimSpace(output.Stdout); got != "hello" {
+		t.Fatalf("stdout=%q want %q", got, "hello")
 	}
 }

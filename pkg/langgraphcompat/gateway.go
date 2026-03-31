@@ -96,7 +96,9 @@ const (
 )
 
 var activeContentMIMETypes = map[string]struct{}{
-	"image/svg+xml": {},
+	"text/html":             {},
+	"application/xhtml+xml": {},
+	"image/svg+xml":         {},
 }
 
 var skillInstallSeq uint64

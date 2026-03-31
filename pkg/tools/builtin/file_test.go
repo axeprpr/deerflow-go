@@ -97,3 +97,32 @@ func TestGlobHandlerResolvesVirtualPattern(t *testing.T) {
 		t.Fatalf("glob result=%q", result.Content)
 	}
 }
+
+func TestReadFileHandlerResolvesACPWorkspaceVirtualPath(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	threadID := "thread-acp-read-tool"
+	target := filepath.Join(root, "threads", threadID, "acp-workspace", "notes.txt")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("from acp"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	ctx := tools.WithThreadID(context.Background(), threadID)
+	result, err := ReadFileHandler(ctx, models.ToolCall{
+		ID:   "call-acp-read-1",
+		Name: "read_file",
+		Arguments: map[string]any{
+			"path": "/mnt/acp-workspace/notes.txt",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ReadFileHandler() error = %v", err)
+	}
+	if result.Content != "from acp" {
+		t.Fatalf("content=%q want %q", result.Content, "from acp")
+	}
+}

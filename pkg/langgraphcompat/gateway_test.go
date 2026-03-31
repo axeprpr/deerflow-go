@@ -758,7 +758,7 @@ func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 	}
 }
 
-func TestArtifactEndpointServesHTMLInlineByDefault(t *testing.T) {
+func TestArtifactEndpointForcesDownloadForHTML(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-active-artifact"
 	artifactPath := filepath.Join(s.threadRoot(threadID), "outputs", "page.html")
@@ -773,8 +773,28 @@ func TestArtifactEndpointServesHTMLInlineByDefault(t *testing.T) {
 	if resp.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
 	}
-	if got := resp.Header().Get("Content-Disposition"); got != "" {
-		t.Fatalf("content-disposition=%q want empty", got)
+	if got := resp.Header().Get("Content-Disposition"); !strings.HasPrefix(got, "attachment;") {
+		t.Fatalf("content-disposition=%q want attachment", got)
+	}
+}
+
+func TestArtifactEndpointForcesDownloadForXHTML(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-active-xhtml-artifact"
+	artifactPath := filepath.Join(s.threadRoot(threadID), "outputs", "page.xhtml")
+	if err := os.MkdirAll(filepath.Dir(artifactPath), 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	if err := os.WriteFile(artifactPath, []byte(`<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body>x</body></html>`), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/page.xhtml", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Header().Get("Content-Disposition"); !strings.HasPrefix(got, "attachment;") {
+		t.Fatalf("content-disposition=%q want attachment", got)
 	}
 }
 
