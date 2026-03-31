@@ -481,6 +481,36 @@ func TestResolveRunConfigAddsPlanModeTodoPrompt(t *testing.T) {
 	}
 }
 
+func TestRuntimeContextFromRequestMergesConfigurableFlags(t *testing.T) {
+	req := RunCreateRequest{
+		Config: map[string]any{
+			"configurable": map[string]any{
+				"is_plan_mode":             true,
+				"subagent_enabled":         false,
+				"max_concurrent_subagents": 4,
+				"agent_name":               "config-agent",
+			},
+		},
+		Context: map[string]any{
+			"agent_name": "context-agent",
+		},
+	}
+
+	runtimeContext := runtimeContextFromRequest(req)
+	if !boolFromAny(runtimeContext["is_plan_mode"]) {
+		t.Fatalf("is_plan_mode=%v want true", runtimeContext["is_plan_mode"])
+	}
+	if boolFromAny(runtimeContext["subagent_enabled"]) {
+		t.Fatalf("subagent_enabled=%v want false", runtimeContext["subagent_enabled"])
+	}
+	if got := stringFromAny(runtimeContext["agent_name"]); got != "context-agent" {
+		t.Fatalf("agent_name=%q want context-agent", got)
+	}
+	if got, ok := runtimeContext["max_concurrent_subagents"].(int); !ok || got != 4 {
+		t.Fatalf("max_concurrent_subagents=%#v want 4", runtimeContext["max_concurrent_subagents"])
+	}
+}
+
 func TestResolveRunConfigDisablesTaskToolWhenSubagentsDisabled(t *testing.T) {
 	s, _ := newCompatTestServer(t)
 	s.tools = newRuntimeToolRegistry(t)

@@ -139,7 +139,7 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 	messages, _ := input["messages"].([]any)
 	newMessages := s.convertToMessages(threadID, messages)
 
-	runtimeContext := cloneRuntimeContext(req.Context)
+	runtimeContext := runtimeContextFromRequest(req)
 	runCfg := parseRunConfig(req.Config)
 	runCfg.IsBootstrap = runCfg.IsBootstrap || boolFromAny(runtimeContext["is_bootstrap"])
 	if runCfg.IsBootstrap && strings.TrimSpace(stringFromAny(runtimeContext["agent_name"])) == "" {
@@ -878,6 +878,34 @@ func cloneRuntimeContext(runtimeContext map[string]any) map[string]any {
 		cloned[key] = value
 	}
 	return cloned
+}
+
+func runtimeContextFromRequest(req RunCreateRequest) map[string]any {
+	runtimeContext := cloneRuntimeContext(req.Context)
+	configurable, _ := req.Config["configurable"].(map[string]any)
+	if len(configurable) == 0 {
+		return runtimeContext
+	}
+
+	// Match deerflow-ui's request shape, where runtime toggles live under
+	// config.configurable while allowing explicit request context to win.
+	for _, key := range []string{
+		"thread_id",
+		"thinking_enabled",
+		"is_plan_mode",
+		"subagent_enabled",
+		"max_concurrent_subagents",
+		"agent_name",
+		"is_bootstrap",
+	} {
+		if _, exists := runtimeContext[key]; exists {
+			continue
+		}
+		if value, ok := configurable[key]; ok {
+			runtimeContext[key] = value
+		}
+	}
+	return runtimeContext
 }
 
 func inferBootstrapAgentName(messages []models.Message) string {
