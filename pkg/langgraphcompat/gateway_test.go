@@ -758,6 +758,55 @@ func TestResolveRunConfigKeepsViewImageForVisionModel(t *testing.T) {
 	}
 }
 
+func TestResolveRunConfigUsesConfiguredVisionSupport(t *testing.T) {
+	t.Setenv("DEERFLOW_MODELS_JSON", `[
+		{"name":"custom-multimodal","model":"acme/custom-mm","supports_vision":true},
+		{"name":"gpt-4o","model":"openai/gpt-4o","supports_vision":false}
+	]`)
+
+	newRegistry := func(t *testing.T) *tools.Registry {
+		t.Helper()
+		registry := tools.NewRegistry()
+		for _, tool := range []models.Tool{
+			{Name: "bash", Groups: []string{"builtin"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
+			{Name: "view_image", Groups: []string{"builtin"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
+		} {
+			if err := registry.Register(tool); err != nil {
+				t.Fatalf("register tool %q: %v", tool.Name, err)
+			}
+		}
+		return registry
+	}
+
+	t.Run("configured true keeps tool even when heuristic misses", func(t *testing.T) {
+		s, _ := newCompatTestServer(t)
+		s.defaultModel = "deepseek-reasoner"
+		s.tools = newRegistry(t)
+
+		cfg, err := s.resolveRunConfig(runConfig{ModelName: "custom-multimodal"}, nil)
+		if err != nil {
+			t.Fatalf("resolveRunConfig error: %v", err)
+		}
+		if tool := cfg.Tools.Get("view_image"); tool == nil {
+			t.Fatal("expected view_image to remain available for configured vision model")
+		}
+	})
+
+	t.Run("configured false removes tool even when heuristic matches", func(t *testing.T) {
+		s, _ := newCompatTestServer(t)
+		s.defaultModel = "gpt-4o"
+		s.tools = newRegistry(t)
+
+		cfg, err := s.resolveRunConfig(runConfig{ModelName: "gpt-4o"}, nil)
+		if err != nil {
+			t.Fatalf("resolveRunConfig error: %v", err)
+		}
+		if tool := cfg.Tools.Get("view_image"); tool != nil {
+			t.Fatalf("expected view_image to be removed when configured model disables vision, got %+v", tool)
+		}
+	})
+}
+
 func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-gateway-1"
@@ -1669,7 +1718,8 @@ func TestModelsEndpointSupportsConfiguredModelCatalogJSON(t *testing.T) {
 			"display_name": "GPT-5",
 			"description": "Primary reasoning model",
 			"supports_thinking": true,
-			"supports_reasoning_effort": true
+			"supports_reasoning_effort": true,
+			"supports_vision": true
 		},
 		{
 			"name": "deepseek-v3",
@@ -1701,6 +1751,9 @@ func TestModelsEndpointSupportsConfiguredModelCatalogJSON(t *testing.T) {
 	}
 	if !payload.Models[0].SupportsThinking {
 		t.Fatalf("expected explicit thinking support for %#v", payload.Models[0])
+	}
+	if !payload.Models[0].SupportsVision {
+		t.Fatalf("expected explicit vision support for %#v", payload.Models[0])
 	}
 
 	modelResp := performCompatRequest(t, handler, http.MethodGet, "/api/models/gpt-5", nil, nil)

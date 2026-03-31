@@ -864,7 +864,7 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 		}
 		cfg.SystemPrompt = joinPromptSections(cfg.SystemPrompt, bootstrapAgentPrompt)
 		cfg.Tools = resolveRuntimeToolRegistry(s.tools, runtimeContext)
-		cfg.Tools = resolveModelToolRegistry(cfg.Tools, firstNonEmpty(cfg.ModelName, s.defaultModel))
+		cfg.Tools = s.resolveModelToolRegistry(cfg.Tools, firstNonEmpty(cfg.ModelName, s.defaultModel))
 		return cfg, nil
 	}
 	if cfg.AgentName == "" {
@@ -872,7 +872,7 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 			cfg.Tools = s.tools
 		}
 		cfg.Tools = resolveRuntimeToolRegistry(cfg.Tools, runtimeContext)
-		cfg.Tools = resolveModelToolRegistry(cfg.Tools, firstNonEmpty(cfg.ModelName, s.defaultModel))
+		cfg.Tools = s.resolveModelToolRegistry(cfg.Tools, firstNonEmpty(cfg.ModelName, s.defaultModel))
 		return cfg, nil
 	}
 
@@ -903,7 +903,7 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 		cfg.Tools = s.tools
 	}
 	cfg.Tools = resolveRuntimeToolRegistry(cfg.Tools, runtimeContext)
-	cfg.Tools = resolveModelToolRegistry(cfg.Tools, firstNonEmpty(cfg.ModelName, s.defaultModel))
+	cfg.Tools = s.resolveModelToolRegistry(cfg.Tools, firstNonEmpty(cfg.ModelName, s.defaultModel))
 	return cfg, nil
 }
 
@@ -1170,11 +1170,17 @@ func resolveRuntimeToolRegistry(base *tools.Registry, runtimeContext map[string]
 	return base.Restrict(allowed)
 }
 
-func resolveModelToolRegistry(base *tools.Registry, modelName string) *tools.Registry {
+func (s *Server) resolveModelToolRegistry(base *tools.Registry, modelName string) *tools.Registry {
 	if base == nil {
 		return nil
 	}
-	if agent.ModelLikelySupportsVision(modelName) {
+	supportsVision := agent.ModelLikelySupportsVision(modelName)
+	if s != nil {
+		if model, ok := findConfiguredGatewayModelByNameOrID(s.defaultModel, modelName); ok {
+			supportsVision = model.SupportsVision
+		}
+	}
+	if supportsVision {
 		return base
 	}
 

@@ -23,6 +23,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -36,6 +37,7 @@ type gatewayModel struct {
 	Description             string `json:"description,omitempty"`
 	SupportsThinking        bool   `json:"supports_thinking,omitempty"`
 	SupportsReasoningEffort bool   `json:"supports_reasoning_effort,omitempty"`
+	SupportsVision          bool   `json:"supports_vision,omitempty"`
 }
 
 type gatewaySkill struct {
@@ -1836,6 +1838,7 @@ type rawGatewayModel struct {
 	Description             string `json:"description"`
 	SupportsThinking        *bool  `json:"supports_thinking"`
 	SupportsReasoningEffort *bool  `json:"supports_reasoning_effort"`
+	SupportsVision          *bool  `json:"supports_vision"`
 }
 
 func configuredGatewayModels(defaultModel string) []gatewayModel {
@@ -1927,6 +1930,7 @@ func defaultGatewayModel(defaultModel string) gatewayModel {
 		Description:             "Default model configured by deerflow-go",
 		SupportsThinking:        thinking,
 		SupportsReasoningEffort: reasoning,
+		SupportsVision:          inferGatewayModelVisionSupport(name),
 	}
 }
 
@@ -1960,6 +1964,10 @@ func normalizeGatewayModel(raw rawGatewayModel, defaultModel string) gatewayMode
 	if raw.SupportsReasoningEffort != nil {
 		reasoning = *raw.SupportsReasoningEffort
 	}
+	vision := inferGatewayModelVisionSupport(firstNonEmpty(modelID, name))
+	if raw.SupportsVision != nil {
+		vision = *raw.SupportsVision
+	}
 
 	return gatewayModel{
 		ID:                      id,
@@ -1969,7 +1977,12 @@ func normalizeGatewayModel(raw rawGatewayModel, defaultModel string) gatewayMode
 		Description:             strings.TrimSpace(raw.Description),
 		SupportsThinking:        thinking,
 		SupportsReasoningEffort: reasoning,
+		SupportsVision:          vision,
 	}
+}
+
+func inferGatewayModelVisionSupport(name string) bool {
+	return agent.ModelLikelySupportsVision(name)
 }
 
 func inferGatewayModelCapabilities(name string) (supportsThinking bool, supportsReasoningEffort bool) {
@@ -1995,6 +2008,19 @@ func findConfiguredGatewayModel(defaultModel, modelName string) (gatewayModel, b
 	}
 	for _, model := range configuredGatewayModels(defaultModel) {
 		if model.Name == target {
+			return model, true
+		}
+	}
+	return gatewayModel{}, false
+}
+
+func findConfiguredGatewayModelByNameOrID(defaultModel, modelName string) (gatewayModel, bool) {
+	target := strings.TrimSpace(modelName)
+	if target == "" {
+		return gatewayModel{}, false
+	}
+	for _, model := range configuredGatewayModels(defaultModel) {
+		if strings.EqualFold(model.Name, target) || strings.EqualFold(model.Model, target) {
 			return model, true
 		}
 	}
