@@ -11,6 +11,8 @@ import (
 	toolctx "github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
+const transientTodoReminderMetadataKey = "transient_todo_reminder"
+
 var allowedTodoStatuses = map[string]struct{}{
 	"pending":     {},
 	"in_progress": {},
@@ -179,4 +181,65 @@ func todosToAny(todos []Todo) []map[string]any {
 		})
 	}
 	return out
+}
+
+func injectTodoReminder(threadID string, messages []models.Message, todos []Todo) []models.Message {
+	if len(todos) == 0 || todoWriteVisible(messages) || todoReminderVisible(messages) {
+		return messages
+	}
+	out := append([]models.Message(nil), messages...)
+	out = append(out, todoReminderMessage(threadID, todos))
+	return out
+}
+
+func todoWriteVisible(messages []models.Message) bool {
+	for _, msg := range messages {
+		if msg.Role != models.RoleAI || len(msg.ToolCalls) == 0 {
+			continue
+		}
+		for _, call := range msg.ToolCalls {
+			if call.Name == "write_todos" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func todoReminderVisible(messages []models.Message) bool {
+	for _, msg := range messages {
+		if isTransientTodoReminderMessage(msg) {
+			return true
+		}
+	}
+	return false
+}
+
+func todoReminderMessage(threadID string, todos []Todo) models.Message {
+	return models.Message{
+		ID:        fmt.Sprintf("todo-reminder-%d", time.Now().UTC().UnixNano()),
+		SessionID: threadID,
+		Role:      models.RoleHuman,
+		Content: "<system_reminder>\n" +
+			"Your todo list from earlier is no longer visible in the current context window, but it is still active. Here is the current state:\n\n" +
+			formatTodosForReminder(todos) +
+			"\n\nContinue tracking and updating this todo list as you work. Call `write_todos` whenever the status of any item changes.\n" +
+			"</system_reminder>",
+		Metadata: map[string]string{transientTodoReminderMetadataKey: "true"},
+	}
+}
+
+func formatTodosForReminder(todos []Todo) string {
+	if len(todos) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(todos))
+	for _, todo := range todos {
+		status := strings.TrimSpace(todo.Status)
+		if status == "" {
+			status = "pending"
+		}
+		lines = append(lines, fmt.Sprintf("- [%s] %s", status, strings.TrimSpace(todo.Content)))
+	}
+	return strings.Join(lines, "\n")
 }

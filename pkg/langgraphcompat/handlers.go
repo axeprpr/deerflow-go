@@ -172,6 +172,7 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 	if strings.TrimSpace(historySummary) != "" {
 		deerMessages = append([]models.Message{conversationSummaryMessage(threadID, historySummary)}, deerMessages...)
 	}
+	deerMessages = injectTodoReminder(threadID, deerMessages, session.Todos)
 
 	run := &Run{
 		RunID:       uuid.New().String(),
@@ -911,7 +912,7 @@ func filterTransientMessages(messages []models.Message) []models.Message {
 	}
 	filtered := make([]models.Message, 0, len(messages))
 	for _, msg := range messages {
-		if isTransientViewedImagesMessage(msg) || isInjectedSummaryMessage(msg) {
+		if isTransientViewedImagesMessage(msg) || isInjectedSummaryMessage(msg) || isTransientTodoReminderMessage(msg) {
 			continue
 		}
 		filtered = append(filtered, msg)
@@ -924,6 +925,13 @@ func isTransientViewedImagesMessage(msg models.Message) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(msg.Metadata["transient_viewed_images"]), "true")
+}
+
+func isTransientTodoReminderMessage(msg models.Message) bool {
+	if msg.Role != models.RoleHuman || len(msg.Metadata) == 0 {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(msg.Metadata[transientTodoReminderMetadataKey]), "true")
 }
 
 func (s *Server) scheduleMemoryUpdate(threadID string, messages []models.Message) {

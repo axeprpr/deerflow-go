@@ -758,6 +758,58 @@ func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 	}
 }
 
+func TestUploadsEndpointIgnoresMarkdownConversionFailures(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-upload-conversion-failure"
+	s.ensureSession(threadID, nil)
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	part, err := w.CreateFormFile("files", "broken.docx")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("not a zip archive")); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/"+threadID+"/uploads", &body, map[string]string{"Content-Type": w.FormDataContentType()})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("upload status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var uploaded struct {
+		Success bool             `json:"success"`
+		Files   []map[string]any `json:"files"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&uploaded); err != nil {
+		t.Fatalf("decode upload response: %v", err)
+	}
+	if !uploaded.Success {
+		t.Fatal("expected upload success")
+	}
+	if len(uploaded.Files) != 1 {
+		t.Fatalf("files=%d want=1", len(uploaded.Files))
+	}
+	if got := asString(uploaded.Files[0]["filename"]); got != "broken.docx" {
+		t.Fatalf("filename=%q want=broken.docx", got)
+	}
+	if _, ok := uploaded.Files[0]["markdown_file"]; ok {
+		t.Fatalf("markdown_file=%v want omitted on conversion failure", uploaded.Files[0]["markdown_file"])
+	}
+
+	artifactResp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/broken.docx", nil, nil)
+	if artifactResp.Code != http.StatusOK {
+		t.Fatalf("artifact status=%d body=%s", artifactResp.Code, artifactResp.Body.String())
+	}
+	if got := artifactResp.Body.String(); got != "not a zip archive" {
+		t.Fatalf("artifact body=%q want original file content", got)
+	}
+}
+
 func TestArtifactEndpointForcesDownloadForHTML(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-active-artifact"

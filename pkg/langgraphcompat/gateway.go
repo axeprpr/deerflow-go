@@ -694,8 +694,9 @@ func (s *Server) handleUploadsCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if mdPath, err := generateUploadMarkdownCompanion(filepath.Join(uploadDir, name)); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
-			return
+			if s.logger != nil {
+				s.logger.Printf("upload markdown conversion failed for %s/%s: %v", threadID, name, err)
+			}
 		} else if mdPath != "" {
 			mdName := filepath.Base(mdPath)
 			info["markdown_file"] = mdName
