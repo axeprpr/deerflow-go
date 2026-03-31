@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"crypto/md5"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +23,12 @@ import (
 
 const defaultMaxTurns = 8
 const defaultRequestTimeout = 10 * time.Minute
+const defaultLoopWarnThreshold = 3
+const defaultLoopHardLimit = 5
+const defaultLoopWindowSize = 20
+
+const loopWarningMessage = "[LOOP DETECTED] You are repeating the same tool calls. Stop calling tools and produce your final answer now. If you cannot complete the task, summarize what you accomplished so far."
+const loopHardStopMessage = "[FORCED STOP] Repeated tool calls exceeded the safety limit. Producing final answer with results collected so far."
 
 var messageSeq uint64
 var agentRequestSeq uint64
@@ -143,6 +151,8 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 
 	runMessages := append([]models.Message(nil), messages...)
 	usage := &Usage{}
+	loopHistory := make([]string, 0, defaultLoopWindowSize)
+	loopWarned := make(map[string]struct{})
 
 	for turn := 0; turn < a.maxTurns; turn++ {
 		req := llm.ChatRequest{
@@ -242,6 +252,118 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			}, nil
 		}
 
+		warning, hardStop, nextLoopHistory := detectToolCallLoop(loopHistory, toolCalls, loopWarned)
+		loopHistory = nextLoopHistory
+		if warning != "" || hardStop {
+			if hardStop {
+				finalOutput := strings.TrimSpace(assistantMessage.Content)
+				if finalOutput != "" {
+					finalOutput += "\n\n"
+				}
+				finalOutput += loopHardStopMessage
+				assistantMessage.Content = finalOutput
+				assistantMessage.ToolCalls = nil
+				if len(runMessages) > 0 {
+					runMessages[len(runMessages)-1] = assistantMessage
+				}
+				emit(AgentEvent{
+					Type:      AgentEventEnd,
+					MessageID: aiMessageID,
+					Text:      finalOutput,
+					Usage:     cloneUsage(usage),
+				})
+				return &RunResult{
+					Messages:    runMessages,
+					FinalOutput: finalOutput,
+					Usage:       usage,
+				}, nil
+			}
+
+			viewedImages := make([]viewedImage, 0)
+			for _, call := range toolCalls {
+				emit(AgentEvent{
+					Type:      AgentEventToolCall,
+					MessageID: aiMessageID,
+					ToolCall:  &call,
+					ToolEvent: newToolCallEvent(call, nil),
+				})
+				startedAt := time.Now().UTC()
+				runningCall := call
+				runningCall.Status = models.CallStatusRunning
+				runningCall.StartedAt = startedAt
+				emit(AgentEvent{
+					Type:      AgentEventToolCallStart,
+					ToolCall:  &runningCall,
+					ToolEvent: newToolCallEvent(runningCall, nil),
+				})
+
+				toolStarted := time.Now().UTC()
+				toolCtx := tools.WithSandbox(ctx, a.sandbox)
+				toolCtx = tools.WithThreadID(toolCtx, sessionID)
+				result, err := a.tools.Execute(toolCtx, call)
+				if err != nil {
+					err = normalizeRunError(ctx, err, a.requestTimeout)
+					result = models.ToolResult{
+						CallID:      call.ID,
+						ToolName:    call.Name,
+						Status:      models.CallStatusFailed,
+						Error:       err.Error(),
+						CompletedAt: time.Now().UTC(),
+					}
+				}
+				result.Duration = time.Since(toolStarted)
+				if result.CompletedAt.IsZero() {
+					result.CompletedAt = time.Now().UTC()
+				}
+
+				viewedImages = append(viewedImages, collectViewedImages(result)...)
+				result = sanitizedToolResult(result)
+				runMessages = append(runMessages, models.Message{
+					ID:         newMessageID("tool"),
+					SessionID:  sessionID,
+					Role:       models.RoleTool,
+					Content:    toolMessageContent(result),
+					ToolResult: &result,
+					CreatedAt:  time.Now().UTC(),
+				})
+				toolMessage := runMessages[len(runMessages)-1]
+				emit(AgentEvent{
+					Type:      AgentEventToolResult,
+					MessageID: toolMessage.ID,
+					Result:    &result,
+					ToolEvent: newToolEventFromResult(call, result),
+				})
+				completedCall := runningCall
+				completedCall.Status = result.Status
+				completedCall.CompletedAt = result.CompletedAt
+				emit(AgentEvent{
+					Type:      AgentEventToolCallEnd,
+					MessageID: toolMessage.ID,
+					ToolCall:  &completedCall,
+					Result:    &result,
+					ToolEvent: newToolEventFromResult(completedCall, result),
+				})
+
+				if err := ctx.Err(); err != nil {
+					err = normalizeRunError(ctx, err, a.requestTimeout)
+					emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
+					return nil, err
+				}
+			}
+			if len(viewedImages) > 0 {
+				runMessages = append(runMessages, viewedImagesMessage(sessionID, viewedImages, modelLikelySupportsVision(a.model)))
+			}
+			runMessages = append(runMessages, models.Message{
+				ID:        newMessageID("human"),
+				SessionID: sessionID,
+				Role:      models.RoleHuman,
+				Content:   warning,
+				CreatedAt: time.Now().UTC(),
+			})
+			continue
+		}
+
+		viewedImages := make([]viewedImage, 0)
 		for _, call := range toolCalls {
 			emit(AgentEvent{
 				Type:      AgentEventToolCall,
@@ -278,6 +400,8 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 				result.CompletedAt = time.Now().UTC()
 			}
 
+			viewedImages = append(viewedImages, collectViewedImages(result)...)
+			result = sanitizedToolResult(result)
 			runMessages = append(runMessages, models.Message{
 				ID:         newMessageID("tool"),
 				SessionID:  sessionID,
@@ -310,11 +434,81 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 				return nil, err
 			}
 		}
+		if len(viewedImages) > 0 {
+			runMessages = append(runMessages, viewedImagesMessage(sessionID, viewedImages, modelLikelySupportsVision(a.model)))
+		}
 	}
 
 	err := fmt.Errorf("agent exceeded max turns (%d)", a.maxTurns)
 	emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
 	return nil, err
+}
+
+func detectToolCallLoop(history []string, calls []models.ToolCall, warned map[string]struct{}) (string, bool, []string) {
+	callHash := hashToolCalls(calls)
+	if callHash == "" {
+		return "", false, history
+	}
+	history = append(history, callHash)
+	if len(history) > defaultLoopWindowSize {
+		history = history[len(history)-defaultLoopWindowSize:]
+	}
+	count := 0
+	for _, previous := range history {
+		if previous == callHash {
+			count++
+		}
+	}
+	if count >= defaultLoopHardLimit {
+		return "", true, history
+	}
+	if count >= defaultLoopWarnThreshold {
+		if _, ok := warned[callHash]; !ok {
+			warned[callHash] = struct{}{}
+			return loopWarningMessage, false, history
+		}
+	}
+	return "", false, history
+}
+
+func hashToolCalls(calls []models.ToolCall) string {
+	if len(calls) == 0 {
+		return ""
+	}
+	type normalizedToolCall struct {
+		Name string         `json:"name"`
+		Args map[string]any `json:"args,omitempty"`
+	}
+	normalized := make([]normalizedToolCall, 0, len(calls))
+	for _, call := range calls {
+		normalized = append(normalized, normalizedToolCall{
+			Name: call.Name,
+			Args: call.Arguments,
+		})
+	}
+	sort.Slice(normalized, func(i, j int) bool {
+		if normalized[i].Name != normalized[j].Name {
+			return normalized[i].Name < normalized[j].Name
+		}
+		return marshalLoopArgs(normalized[i].Args) < marshalLoopArgs(normalized[j].Args)
+	})
+	raw, err := json.Marshal(normalized)
+	if err != nil {
+		return ""
+	}
+	sum := md5.Sum(raw)
+	return fmt.Sprintf("%x", sum[:6])
+}
+
+func marshalLoopArgs(args map[string]any) string {
+	if len(args) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
 func (a *Agent) BuildSystemPrompt(_ context.Context, _ string) string {

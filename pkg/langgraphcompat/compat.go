@@ -158,6 +158,7 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 	for _, tool := range builtin.FileTools() {
 		registry.Register(tool)
 	}
+	registry.Register(builtin.ViewImageTool())
 	registry.Register(clarification.AskClarificationTool(clarifyManager))
 	var sb *sandbox.Sandbox
 	sb, err := sandbox.New("langgraph", filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox"))

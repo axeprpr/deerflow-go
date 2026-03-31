@@ -79,12 +79,7 @@ const (
 
 var skillInstallSeq uint64
 var agentNameRE = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
-var activeArtifactMIMETypes = map[string]struct{}{
-	"text/html":             {},
-	"application/xhtml+xml": {},
-	"image/svg+xml":         {},
-}
-
+var threadIDRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 type gatewayAgent struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
@@ -365,7 +360,18 @@ func (s *Server) handleAgentCreate(w http.ResponseWriter, r *http.Request) {
 	req.Name = name
 	agents[name] = req
 	s.uiStateMu.Unlock()
+	if err := s.persistAgentFiles(req); err != nil {
+		s.uiStateMu.Lock()
+		delete(s.getAgentsLocked(), name)
+		s.uiStateMu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist agent files"})
+		return
+	}
 	if err := s.persistGatewayState(); err != nil {
+		s.uiStateMu.Lock()
+		delete(s.getAgentsLocked(), name)
+		s.uiStateMu.Unlock()
+		_ = s.deleteAgentFiles(name)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
 		return
 	}
@@ -397,6 +403,7 @@ func (s *Server) handleAgentUpdate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Agent '%s' not found", name)})
 		return
 	}
+	previous := agent
 	if req.Description != nil {
 		agent.Description = *req.Description
 	}
@@ -411,7 +418,20 @@ func (s *Server) handleAgentUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	agents[name] = agent
 	s.uiStateMu.Unlock()
+	if err := s.persistAgentFiles(agent); err != nil {
+		s.uiStateMu.Lock()
+		agents := s.getAgentsLocked()
+		agents[name] = previous
+		s.uiStateMu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist agent files"})
+		return
+	}
 	if err := s.persistGatewayState(); err != nil {
+		s.uiStateMu.Lock()
+		agents := s.getAgentsLocked()
+		agents[name] = previous
+		s.uiStateMu.Unlock()
+		_ = s.persistAgentFiles(previous)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
 		return
 	}
@@ -426,14 +446,26 @@ func (s *Server) handleAgentDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	s.uiStateMu.Lock()
 	agents := s.getAgentsLocked()
-	if _, exists := agents[name]; !exists {
+	agent, exists := agents[name]
+	if !exists {
 		s.uiStateMu.Unlock()
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Agent '%s' not found", name)})
 		return
 	}
 	delete(agents, name)
 	s.uiStateMu.Unlock()
+	if err := s.deleteAgentFiles(name); err != nil {
+		s.uiStateMu.Lock()
+		s.getAgentsLocked()[name] = agent
+		s.uiStateMu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to delete agent files"})
+		return
+	}
 	if err := s.persistGatewayState(); err != nil {
+		s.uiStateMu.Lock()
+		s.getAgentsLocked()[name] = agent
+		s.uiStateMu.Unlock()
+		_ = s.persistAgentFiles(agent)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
 		return
 	}
@@ -578,8 +610,8 @@ func (s *Server) handleChannelRestart(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGatewayThreadDelete(w http.ResponseWriter, r *http.Request) {
 	threadID := strings.TrimSpace(r.PathValue("thread_id"))
-	if threadID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "thread_id is required"})
+	if err := validateThreadID(threadID); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": err.Error()})
 		return
 	}
 	if err := os.RemoveAll(s.threadRoot(threadID)); err != nil {
@@ -598,8 +630,8 @@ func (s *Server) handleGatewayThreadDelete(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) handleUploadsCreate(w http.ResponseWriter, r *http.Request) {
 	threadID := strings.TrimSpace(r.PathValue("thread_id"))
-	if threadID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "thread_id is required"})
+	if err := validateThreadID(threadID); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": err.Error()})
 		return
 	}
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
@@ -638,13 +670,13 @@ func (s *Server) handleUploadsCreate(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
 			return
 		}
-		if mdPath, err := generateUploadMarkdownCompanion(asString(info["path"])); err != nil {
+		if mdPath, err := generateUploadMarkdownCompanion(filepath.Join(uploadDir, name)); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
 			return
 		} else if mdPath != "" {
 			mdName := filepath.Base(mdPath)
 			info["markdown_file"] = mdName
-			info["markdown_path"] = mdPath
+			info["markdown_path"] = "/mnt/user-data/uploads/" + mdName
 			info["markdown_virtual_path"] = "/mnt/user-data/uploads/" + mdName
 			info["markdown_artifact_url"] = uploadArtifactURL(threadID, mdName)
 		}
@@ -660,8 +692,8 @@ func (s *Server) handleUploadsCreate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUploadsList(w http.ResponseWriter, r *http.Request) {
 	threadID := strings.TrimSpace(r.PathValue("thread_id"))
-	if threadID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "thread_id is required"})
+	if err := validateThreadID(threadID); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": err.Error()})
 		return
 	}
 
@@ -708,7 +740,11 @@ func (s *Server) handleUploadsList(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUploadsDelete(w http.ResponseWriter, r *http.Request) {
 	threadID := strings.TrimSpace(r.PathValue("thread_id"))
 	filename := sanitizeFilename(r.PathValue("filename"))
-	if threadID == "" || filename == "" {
+	if err := validateThreadID(threadID); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": err.Error()})
+		return
+	}
+	if filename == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid request"})
 		return
 	}
@@ -731,7 +767,11 @@ func (s *Server) handleUploadsDelete(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	threadID := strings.TrimSpace(r.PathValue("thread_id"))
 	artifactPath := strings.TrimSpace(r.PathValue("artifact_path"))
-	if threadID == "" || artifactPath == "" {
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if artifactPath == "" {
 		http.NotFound(w, r)
 		return
 	}
@@ -741,9 +781,9 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	absPath := s.resolveArtifactPath(threadID, artifactPath)
-	if !s.artifactAllowed(threadID, absPath) {
-		http.NotFound(w, r)
+	absPath, err := s.resolveArtifactPath(threadID, artifactPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	info, err := os.Stat(absPath)
@@ -776,9 +816,9 @@ func (s *Server) handleSkillArchiveArtifactGet(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	archivePath := s.resolveArtifactPath(threadID, skillPath)
-	if !s.artifactAllowed(threadID, archivePath) {
-		http.NotFound(w, r)
+	archivePath, err := s.resolveArtifactPath(threadID, skillPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	content, err := extractSkillArchiveFile(archivePath, internalPath)
@@ -858,7 +898,7 @@ func (s *Server) uploadInfo(threadID, fullPath, name string, size int64, modifie
 	return map[string]any{
 		"filename":     name,
 		"size":         size,
-		"path":         fullPath,
+		"path":         virtualPath,
 		"virtual_path": virtualPath,
 		"artifact_url": uploadArtifactURL(threadID, name),
 		"extension":    strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), "."),
@@ -945,13 +985,8 @@ func extractSkillArchiveFile(archivePath, internalPath string) ([]byte, error) {
 	return nil, os.ErrNotExist
 }
 
-func (s *Server) resolveArtifactPath(threadID, artifactPath string) string {
-	clean := filepath.Clean("/" + strings.TrimSpace(artifactPath))
-	if strings.HasPrefix(clean, "/mnt/user-data/") {
-		suffix := strings.TrimPrefix(clean, "/mnt/user-data/")
-		return filepath.Join(s.threadRoot(threadID), filepath.FromSlash(suffix))
-	}
-	return clean
+func (s *Server) resolveArtifactPath(threadID, artifactPath string) (string, error) {
+	return s.resolveThreadVirtualPath(threadID, artifactPath)
 }
 
 func serveArtifactContent(w http.ResponseWriter, filename, mimeType string, data []byte, download bool) {
@@ -962,7 +997,7 @@ func serveArtifactContent(w http.ResponseWriter, filename, mimeType string, data
 		mimeType = http.DetectContentType(data)
 	}
 
-	if download || isActiveArtifactMIMEType(mimeType) {
+	if download {
 		if w.Header().Get("Content-Disposition") == "" {
 			w.Header().Set("Content-Disposition", contentDisposition("attachment", filename))
 		}
@@ -999,13 +1034,7 @@ func downloadRequested(r *http.Request) bool {
 }
 
 func shouldForceAttachment(r *http.Request, mimeType string) bool {
-	return downloadRequested(r) || isActiveArtifactMIMEType(mimeType)
-}
-
-func isActiveArtifactMIMEType(mimeType string) bool {
-	base := strings.TrimSpace(strings.SplitN(mimeType, ";", 2)[0])
-	_, ok := activeArtifactMIMETypes[base]
-	return ok
+	return downloadRequested(r)
 }
 
 func isTextMIMEType(mimeType string) bool {
@@ -1044,6 +1073,17 @@ func contentDisposition(kind, filename string) string {
 	filename = strings.ReplaceAll(filename, "\r", "")
 	filename = strings.ReplaceAll(filename, "\n", "")
 	return fmt.Sprintf("%s; filename*=UTF-8''%s", kind, url.PathEscape(filename))
+}
+
+func validateThreadID(threadID string) error {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return errors.New("thread_id is required")
+	}
+	if !threadIDRE.MatchString(threadID) {
+		return fmt.Errorf("invalid thread_id %q: only alphanumeric characters, hyphens, and underscores are allowed", threadID)
+	}
+	return nil
 }
 
 func (s *Server) threadRoot(threadID string) string {
@@ -1293,17 +1333,36 @@ func asString(v any) string {
 func (s *Server) resolveSkillArchivePath(threadID, path string) (string, error) {
 	threadID = strings.TrimSpace(threadID)
 	path = strings.TrimSpace(path)
-	if threadID == "" || path == "" {
+	if err := validateThreadID(threadID); err != nil {
+		return "", err
+	}
+	if path == "" {
 		return "", errors.New("thread_id and path are required")
 	}
-	if strings.HasPrefix(path, "/mnt/user-data/") {
-		suffix := strings.TrimPrefix(path, "/mnt/user-data/")
-		return filepath.Join(s.threadRoot(threadID), filepath.FromSlash(suffix)), nil
+	return s.resolveThreadVirtualPath(threadID, path)
+}
+
+func (s *Server) resolveThreadVirtualPath(threadID, virtualPath string) (string, error) {
+	if err := validateThreadID(threadID); err != nil {
+		return "", err
 	}
-	if filepath.IsAbs(path) {
-		return filepath.Clean(path), nil
+	stripped := strings.TrimLeft(strings.TrimSpace(virtualPath), "/")
+	const prefix = "mnt/user-data"
+	if stripped != prefix && !strings.HasPrefix(stripped, prefix+"/") {
+		return "", fmt.Errorf("path must start with /%s", prefix)
 	}
-	return filepath.Join(s.uploadsDir(threadID), filepath.Base(path)), nil
+
+	relative := strings.TrimLeft(strings.TrimPrefix(stripped, prefix), "/")
+	base := filepath.Clean(s.threadRoot(threadID))
+	actual := filepath.Clean(filepath.Join(base, filepath.FromSlash(relative)))
+	rel, err := filepath.Rel(base, actual)
+	if err != nil {
+		return "", errors.New("access denied: path traversal detected")
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", errors.New("access denied: path traversal detected")
+	}
+	return actual, nil
 }
 
 func (s *Server) installSkillArchive(archivePath string) (gatewaySkill, error) {

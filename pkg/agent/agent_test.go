@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -245,6 +247,107 @@ func TestApplyAgentType(t *testing.T) {
 	}
 }
 
+func TestAgentRunWarnsAndRecoversFromRepeatedToolCalls(t *testing.T) {
+	var toolExecutions atomic.Int32
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name: "repeat_tool",
+		Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) {
+			toolExecutions.Add(1)
+			return models.ToolResult{
+				CallID:   "repeat-call",
+				ToolName: "repeat_tool",
+				Status:   models.CallStatusCompleted,
+				Content:  "tool ok",
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
+
+	provider := &scriptedStreamProvider{
+		steps: []streamStep{
+			{toolCalls: []models.ToolCall{{ID: "repeat-call-1", Name: "repeat_tool", Arguments: map[string]any{"path": "a.txt"}}}},
+			{toolCalls: []models.ToolCall{{ID: "repeat-call-2", Name: "repeat_tool", Arguments: map[string]any{"path": "a.txt"}}}},
+			{toolCalls: []models.ToolCall{{ID: "repeat-call-3", Name: "repeat_tool", Arguments: map[string]any{"path": "a.txt"}}}},
+			{check: func(t *testing.T, req llm.ChatRequest) {
+				if got := req.Messages[len(req.Messages)-1].Content; got != loopWarningMessage {
+					t.Fatalf("last message = %q want %q", got, loopWarningMessage)
+				}
+			}, content: "Final answer after warning."},
+		},
+		t: t,
+	}
+
+	agent := New(AgentConfig{
+		LLMProvider: provider,
+		Tools:       registry,
+		MaxTurns:    6,
+	})
+
+	result, err := agent.Run(context.Background(), "session-loop-warning", []models.Message{
+		{ID: "m1", SessionID: "session-loop-warning", Role: models.RoleHuman, Content: "Do the thing"},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "Final answer after warning." {
+		t.Fatalf("FinalOutput = %q", result.FinalOutput)
+	}
+	if got := toolExecutions.Load(); got != 3 {
+		t.Fatalf("tool executions = %d want 3", got)
+	}
+}
+
+func TestAgentRunForceStopsRepeatedToolCalls(t *testing.T) {
+	var toolExecutions atomic.Int32
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name: "repeat_tool",
+		Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) {
+			toolExecutions.Add(1)
+			return models.ToolResult{
+				CallID:   "repeat-call",
+				ToolName: "repeat_tool",
+				Status:   models.CallStatusCompleted,
+				Content:  "tool ok",
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
+
+	provider := &scriptedStreamProvider{
+		steps: []streamStep{
+			{toolCalls: []models.ToolCall{{ID: "repeat-call-1", Name: "repeat_tool", Arguments: map[string]any{"path": "a.txt"}}}},
+			{toolCalls: []models.ToolCall{{ID: "repeat-call-2", Name: "repeat_tool", Arguments: map[string]any{"path": "a.txt"}}}},
+			{toolCalls: []models.ToolCall{{ID: "repeat-call-3", Name: "repeat_tool", Arguments: map[string]any{"path": "a.txt"}}}},
+			{toolCalls: []models.ToolCall{{ID: "repeat-call-4", Name: "repeat_tool", Arguments: map[string]any{"path": "a.txt"}}}},
+			{toolCalls: []models.ToolCall{{ID: "repeat-call-5", Name: "repeat_tool", Arguments: map[string]any{"path": "a.txt"}}}},
+		},
+		t: t,
+	}
+
+	agent := New(AgentConfig{
+		LLMProvider: provider,
+		Tools:       registry,
+		MaxTurns:    8,
+	})
+
+	result, err := agent.Run(context.Background(), "session-loop-hard-stop", []models.Message{
+		{ID: "m1", SessionID: "session-loop-hard-stop", Role: models.RoleHuman, Content: "Do the thing"},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !strings.Contains(result.FinalOutput, loopHardStopMessage) {
+		t.Fatalf("FinalOutput = %q want hard stop message", result.FinalOutput)
+	}
+	if got := toolExecutions.Load(); got != 4 {
+		t.Fatalf("tool executions = %d want 4", got)
+	}
+}
+
 type timeoutProvider struct{}
 
 func (timeoutProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
@@ -257,6 +360,48 @@ func (timeoutProvider) Stream(ctx context.Context, req llm.ChatRequest) (<-chan 
 		defer close(ch)
 		<-ctx.Done()
 		ch <- llm.StreamChunk{Err: ctx.Err(), Done: true}
+	}()
+	return ch, nil
+}
+
+type streamStep struct {
+	content   string
+	toolCalls []models.ToolCall
+	check     func(*testing.T, llm.ChatRequest)
+}
+
+type scriptedStreamProvider struct {
+	t     *testing.T
+	steps []streamStep
+	index atomic.Int32
+}
+
+func (p *scriptedStreamProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, nil
+}
+
+func (p *scriptedStreamProvider) Stream(_ context.Context, req llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	stepIndex := int(p.index.Add(1)) - 1
+	if stepIndex >= len(p.steps) {
+		p.t.Fatalf("unexpected Stream() call %d", stepIndex+1)
+	}
+	step := p.steps[stepIndex]
+	if step.check != nil {
+		step.check(p.t, req)
+	}
+	ch := make(chan llm.StreamChunk, 1)
+	go func() {
+		defer close(ch)
+		ch <- llm.StreamChunk{
+			Message: &models.Message{
+				Role:      models.RoleAI,
+				Content:   step.content,
+				ToolCalls: step.toolCalls,
+			},
+			ToolCalls: step.toolCalls,
+			Stop:      "stop",
+			Done:      true,
+		}
 	}()
 	return ch, nil
 }

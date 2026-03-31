@@ -24,6 +24,7 @@ func BashHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, 
 		timeout = time.Duration(t) * time.Second
 	}
 
+	cmd = resolveVirtualCommand(ctx, cmd)
 	result, err := sandbox.ExecDirect(ctx, cmd, timeout)
 	if err != nil {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("bash failed: %w", err)
@@ -59,4 +60,16 @@ func BashTool() models.Tool {
 		},
 		Handler: BashHandler,
 	}
+}
+
+func resolveVirtualCommand(ctx context.Context, cmd string) string {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" || !strings.Contains(cmd, "/mnt/user-data/") {
+		return cmd
+	}
+	threadRoot := threadDataRootFromContext(ctx)
+	if threadRoot == "" {
+		return cmd
+	}
+	return strings.ReplaceAll(cmd, "/mnt/user-data/", threadRoot+"/")
 }

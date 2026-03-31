@@ -18,8 +18,8 @@ import (
 
 func (s *Server) handleThreadGet(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
-	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -44,6 +44,9 @@ func (s *Server) handleThreadCreate(w http.ResponseWriter, r *http.Request) {
 	threadID, _ := req["thread_id"].(string)
 	if threadID == "" {
 		threadID = uuid.New().String()
+	} else if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 	metadata, _ := req["metadata"].(map[string]any)
 
@@ -53,8 +56,8 @@ func (s *Server) handleThreadCreate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleThreadUpdate(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
-	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -88,8 +91,8 @@ func (s *Server) handleThreadUpdate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
-	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -165,8 +168,8 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleThreadFiles(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
-	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -190,8 +193,8 @@ func (s *Server) handleThreadFiles(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleThreadStateGet(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
-	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -206,8 +209,8 @@ func (s *Server) handleThreadStateGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleThreadStatePost(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
-	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -244,8 +247,8 @@ func (s *Server) handleThreadStatePost(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleThreadStatePatch(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
-	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -281,8 +284,8 @@ func (s *Server) handleThreadStatePatch(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
-	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -329,8 +332,8 @@ func (s *Server) handleRunGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleThreadRunsList(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
-	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if s.getThreadState(threadID) == nil {
@@ -372,8 +375,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleThreadClarificationCreate(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
-	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if s.getThreadState(threadID) == nil {
@@ -385,8 +388,8 @@ func (s *Server) handleThreadClarificationCreate(w http.ResponseWriter, r *http.
 
 func (s *Server) handleThreadClarificationGet(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
-	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	s.clarifyAPI.HandleGet(w, r, threadID, r.PathValue("id"))
@@ -394,8 +397,8 @@ func (s *Server) handleThreadClarificationGet(w http.ResponseWriter, r *http.Req
 
 func (s *Server) handleThreadClarificationResolve(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
-	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	s.clarifyAPI.HandleResolve(w, r, threadID, r.PathValue("id"))

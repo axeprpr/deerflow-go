@@ -231,6 +231,10 @@ func toEinoMessage(msg models.Message) *einoSchema.Message {
 	switch msg.Role {
 	case models.RoleHuman:
 		out.Role = einoSchema.User
+		if multi := userInputMultiContent(msg.Metadata); len(multi) > 0 {
+			out.Content = ""
+			out.UserInputMultiContent = multi
+		}
 	case models.RoleSystem:
 		out.Role = einoSchema.System
 	case models.RoleTool:
@@ -252,6 +256,57 @@ func toEinoMessage(msg models.Message) *einoSchema.Message {
 	}
 
 	return out
+}
+
+func userInputMultiContent(metadata map[string]string) []einoSchema.MessageInputPart {
+	if len(metadata) == 0 {
+		return nil
+	}
+	raw := strings.TrimSpace(metadata["multi_content"])
+	if raw == "" {
+		return nil
+	}
+	var parts []map[string]any
+	if err := json.Unmarshal([]byte(raw), &parts); err != nil {
+		return nil
+	}
+	out := make([]einoSchema.MessageInputPart, 0, len(parts))
+	for _, part := range parts {
+		partType := strings.TrimSpace(stringFromAny(part["type"]))
+		switch partType {
+		case "text":
+			text := stringFromAny(part["text"])
+			if strings.TrimSpace(text) == "" {
+				continue
+			}
+			out = append(out, einoSchema.MessageInputPart{
+				Type: einoSchema.ChatMessagePartTypeText,
+				Text: text,
+			})
+		case "image_url":
+			imageURL, _ := part["image_url"].(map[string]any)
+			url := stringFromAny(imageURL["url"])
+			if strings.TrimSpace(url) == "" {
+				continue
+			}
+			out = append(out, einoSchema.MessageInputPart{
+				Type: einoSchema.ChatMessagePartTypeImageURL,
+				Image: &einoSchema.MessageInputImage{
+					MessagePartCommon: einoSchema.MessagePartCommon{URL: ptr(url)},
+				},
+			})
+		}
+	}
+	return out
+}
+
+func stringFromAny(v any) string {
+	switch value := v.(type) {
+	case string:
+		return value
+	default:
+		return ""
+	}
 }
 
 func fromEinoMessage(msg *einoSchema.Message) models.Message {

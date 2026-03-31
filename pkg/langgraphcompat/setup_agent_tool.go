@@ -11,6 +11,7 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
+	"gopkg.in/yaml.v3"
 )
 
 func (s *Server) setupAgentTool() models.Tool {
@@ -143,7 +144,25 @@ func (s *Server) persistAgentFiles(agent gatewayAgent) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "agent.json"), data, 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "agent.json"), data, 0o644); err != nil {
+		return err
+	}
+
+	yamlData, err := yaml.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "config.yaml"), yamlData, 0o644)
+}
+
+func (s *Server) deleteAgentFiles(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return nil
+	}
+	if err := os.RemoveAll(s.agentDir(name)); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Server) agentDir(name string) string {

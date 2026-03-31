@@ -481,6 +481,41 @@ func TestResolveRunConfigAddsPlanModeTodoPrompt(t *testing.T) {
 	}
 }
 
+func TestResolveRunConfigDisablesTaskToolWhenSubagentsDisabled(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	s.tools = newRuntimeToolRegistry(t)
+
+	cfg, err := s.resolveRunConfig(runConfig{}, map[string]any{"subagent_enabled": false})
+	if err != nil {
+		t.Fatalf("resolveRunConfig error: %v", err)
+	}
+	if cfg.Tools == nil {
+		t.Fatal("expected tool registry")
+	}
+	if tool := cfg.Tools.Get("task"); tool != nil {
+		t.Fatalf("expected task tool to be removed, got %+v", tool)
+	}
+	if tool := cfg.Tools.Get("bash"); tool == nil {
+		t.Fatal("expected unrelated tools to remain available")
+	}
+}
+
+func TestResolveRunConfigKeepsTaskToolWhenSubagentsEnabled(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	s.tools = newRuntimeToolRegistry(t)
+
+	cfg, err := s.resolveRunConfig(runConfig{}, map[string]any{"subagent_enabled": true})
+	if err != nil {
+		t.Fatalf("resolveRunConfig error: %v", err)
+	}
+	if cfg.Tools == nil {
+		t.Fatal("expected tool registry")
+	}
+	if tool := cfg.Tools.Get("task"); tool == nil {
+		t.Fatal("expected task tool to remain available")
+	}
+}
+
 func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-gateway-1"
@@ -518,6 +553,9 @@ func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 	if listed.Count != 1 {
 		t.Fatalf("count=%d want=1", listed.Count)
 	}
+	if got := asString(listed.Files[0]["path"]); got != "/mnt/user-data/uploads/hello.txt" {
+		t.Fatalf("path=%q want=/mnt/user-data/uploads/hello.txt", got)
+	}
 
 	artifactResp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/hello.txt", nil, nil)
 	if artifactResp.Code != http.StatusOK {
@@ -528,7 +566,7 @@ func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 	}
 }
 
-func TestArtifactEndpointForcesDownloadForActiveContent(t *testing.T) {
+func TestArtifactEndpointServesHTMLInlineByDefault(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-active-artifact"
 	artifactPath := filepath.Join(s.threadRoot(threadID), "outputs", "page.html")
@@ -543,8 +581,8 @@ func TestArtifactEndpointForcesDownloadForActiveContent(t *testing.T) {
 	if resp.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
 	}
-	if got := resp.Header().Get("Content-Disposition"); !strings.HasPrefix(got, "attachment;") {
-		t.Fatalf("content-disposition=%q want attachment", got)
+	if got := resp.Header().Get("Content-Disposition"); got != "" {
+		t.Fatalf("content-disposition=%q want empty", got)
 	}
 }
 
@@ -614,7 +652,7 @@ func TestArtifactEndpointReadsSkillArchiveWithTopLevelDirectory(t *testing.T) {
 	}
 }
 
-func TestArtifactEndpointForcesDownloadForActiveContentInSkillArchive(t *testing.T) {
+func TestArtifactEndpointServesSkillArchiveHTMLInlineByDefault(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-skill-active"
 	archivePath := filepath.Join(s.threadRoot(threadID), "outputs", "sample.skill")
@@ -629,8 +667,8 @@ func TestArtifactEndpointForcesDownloadForActiveContentInSkillArchive(t *testing
 	if resp.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
 	}
-	if got := resp.Header().Get("Content-Disposition"); !strings.HasPrefix(got, "attachment;") {
-		t.Fatalf("content-disposition=%q want attachment", got)
+	if got := resp.Header().Get("Content-Disposition"); got != "" {
+		t.Fatalf("content-disposition=%q want empty", got)
 	}
 }
 
@@ -667,6 +705,12 @@ func TestUploadConvertibleDocumentCreatesMarkdownCompanion(t *testing.T) {
 	}
 	if got := asString(uploaded.Files[0]["markdown_file"]); got != "report.md" {
 		t.Fatalf("markdown_file=%q want=report.md", got)
+	}
+	if got := asString(uploaded.Files[0]["path"]); got != "/mnt/user-data/uploads/report.docx" {
+		t.Fatalf("path=%q want=/mnt/user-data/uploads/report.docx", got)
+	}
+	if got := asString(uploaded.Files[0]["markdown_path"]); got != "/mnt/user-data/uploads/report.md" {
+		t.Fatalf("markdown_path=%q want=/mnt/user-data/uploads/report.md", got)
 	}
 
 	mdResp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/report.md", nil, nil)
@@ -762,6 +806,39 @@ func TestUploadsCreateDoesNotOverwriteExistingFile(t *testing.T) {
 	}
 	if string(newData) != "new" {
 		t.Fatalf("deduplicated=%q want=new", newData)
+	}
+}
+
+func TestGatewayRejectsInvalidThreadIDForFileEndpoints(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+	const badThreadID = "bad.id"
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	part, err := w.CreateFormFile("files", "hello.txt")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("hello")); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	uploadResp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/"+badThreadID+"/uploads", &body, map[string]string{"Content-Type": w.FormDataContentType()})
+	if uploadResp.Code != http.StatusBadRequest {
+		t.Fatalf("upload status=%d body=%s", uploadResp.Code, uploadResp.Body.String())
+	}
+
+	artifactResp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+badThreadID+"/artifacts/mnt/user-data/uploads/hello.txt", nil, nil)
+	if artifactResp.Code != http.StatusBadRequest {
+		t.Fatalf("artifact status=%d body=%s", artifactResp.Code, artifactResp.Body.String())
+	}
+
+	deleteResp := performCompatRequest(t, handler, http.MethodDelete, "/api/threads/"+badThreadID, nil, nil)
+	if deleteResp.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("delete status=%d body=%s", deleteResp.Code, deleteResp.Body.String())
 	}
 }
 
@@ -1237,6 +1314,54 @@ func TestSkillInstallFromArchive(t *testing.T) {
 	target := filepath.Join(s.dataRoot, "skills", "custom", "demo-skill", "SKILL.md")
 	if _, err := os.Stat(target); err != nil {
 		t.Fatalf("expected installed skill file: %v", err)
+	}
+}
+
+func TestSkillInstallRejectsNonVirtualAndTraversalPaths(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-skill-paths"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir upload dir: %v", err)
+	}
+	archivePath := filepath.Join(uploadDir, "demo.skill")
+	if err := writeSkillArchive(archivePath, "demo-skill"); err != nil {
+		t.Fatalf("write skill archive: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "host absolute path",
+			path: archivePath,
+			want: "path must start with /mnt/user-data",
+		},
+		{
+			name: "path traversal",
+			path: "/mnt/user-data/uploads/../workspace/demo.skill",
+			want: "skill file not found",
+		},
+		{
+			name: "escape user data",
+			path: "/mnt/user-data/../../etc/passwd",
+			want: "access denied: path traversal detected",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"thread_id":"` + threadID + `","path":"` + tc.path + `"}`
+			resp := performCompatRequest(t, handler, http.MethodPost, "/api/skills/install", strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
+			if resp.Code != http.StatusBadRequest && resp.Code != http.StatusNotFound {
+				t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+			}
+			if !strings.Contains(strings.ToLower(resp.Body.String()), tc.want) {
+				t.Fatalf("body=%q want substring %q", resp.Body.String(), tc.want)
+			}
+		})
 	}
 }
 

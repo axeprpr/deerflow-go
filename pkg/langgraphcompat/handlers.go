@@ -122,6 +122,9 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 	if threadID == "" {
 		threadID = uuid.New().String()
 	}
+	if err := validateThreadID(threadID); err != nil {
+		return nil, nil, err, http.StatusBadRequest
+	}
 
 	session := s.ensureSession(threadID, nil)
 	if session.PresentFiles != nil {
@@ -750,10 +753,14 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 			basePrompt = agent.GetAgentTypeConfig(cfg.AgentType).SystemPrompt
 		}
 		cfg.SystemPrompt = joinPromptSections(basePrompt, bootstrapAgentPrompt)
-		cfg.Tools = s.tools
+		cfg.Tools = resolveRuntimeToolRegistry(s.tools, runtimeContext)
 		return cfg, nil
 	}
 	if cfg.AgentName == "" {
+		if cfg.Tools == nil {
+			cfg.Tools = s.tools
+		}
+		cfg.Tools = resolveRuntimeToolRegistry(cfg.Tools, runtimeContext)
 		return cfg, nil
 	}
 
@@ -784,6 +791,10 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 	if len(customAgent.ToolGroups) > 0 {
 		cfg.Tools = resolveAgentToolRegistry(s.tools, customAgent.ToolGroups)
 	}
+	if cfg.Tools == nil {
+		cfg.Tools = s.tools
+	}
+	cfg.Tools = resolveRuntimeToolRegistry(cfg.Tools, runtimeContext)
 	return cfg, nil
 }
 
@@ -949,6 +960,29 @@ func resolveAgentToolRegistry(base *tools.Registry, toolGroups []string) *tools.
 		names = append(names, name)
 	}
 	return base.Restrict(names)
+}
+
+func resolveRuntimeToolRegistry(base *tools.Registry, runtimeContext map[string]any) *tools.Registry {
+	if base == nil {
+		return nil
+	}
+	if len(runtimeContext) == 0 {
+		return base
+	}
+
+	raw, ok := runtimeContext["subagent_enabled"]
+	if !ok || boolFromAny(raw) {
+		return base
+	}
+
+	allowed := make([]string, 0, len(base.List()))
+	for _, tool := range base.List() {
+		if tool.Name == "task" {
+			continue
+		}
+		allowed = append(allowed, tool.Name)
+	}
+	return base.Restrict(allowed)
 }
 
 func firstNonEmpty(values ...string) string {
