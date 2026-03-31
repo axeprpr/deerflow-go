@@ -23,10 +23,13 @@ func ConnectStdio(ctx context.Context, name, command string, env []string, args 
 	return initializeClient(ctx, name, client)
 }
 
-func ConnectSSE(ctx context.Context, name, baseURL string, headers map[string]string) (*Client, error) {
+func ConnectSSE(ctx context.Context, name, baseURL string, headers map[string]string, headerFunc func(context.Context) map[string]string) (*Client, error) {
 	options := make([]mcptransport.ClientOption, 0, 1)
 	if len(headers) > 0 {
 		options = append(options, mcptransport.WithHeaders(cloneStringMap(headers)))
+	}
+	if headerFunc != nil {
+		options = append(options, mcptransport.WithHeaderFunc(headerFunc))
 	}
 
 	client, err := mcpclient.NewSSEMCPClient(baseURL, options...)
@@ -36,10 +39,13 @@ func ConnectSSE(ctx context.Context, name, baseURL string, headers map[string]st
 	return initializeClient(ctx, name, client)
 }
 
-func ConnectHTTP(ctx context.Context, name, baseURL string, headers map[string]string) (*Client, error) {
+func ConnectHTTP(ctx context.Context, name, baseURL string, headers map[string]string, headerFunc func(context.Context) map[string]string) (*Client, error) {
 	options := []mcptransport.StreamableHTTPCOption{mcptransport.WithContinuousListening()}
 	if len(headers) > 0 {
 		options = append(options, mcptransport.WithHTTPHeaders(cloneStringMap(headers)))
+	}
+	if headerFunc != nil {
+		options = append(options, mcptransport.WithHTTPHeaderFunc(headerFunc))
 	}
 
 	client, err := mcpclient.NewStreamableHttpClient(baseURL, options...)

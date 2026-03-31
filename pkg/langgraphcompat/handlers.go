@@ -151,6 +151,7 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 	if err != nil {
 		return nil, nil, err, http.StatusNotFound
 	}
+	s.setThreadConfig(threadID, threadConfigFromRuntimeContext(threadID, runtimeContext, resolvedRunCfg))
 	resolvedRunCfg.SystemPrompt = joinPromptSections(resolvedRunCfg.SystemPrompt, s.memoryInjectionPrompt(ctx, threadID))
 
 	s.sessionsMu.RLock()
@@ -1011,6 +1012,29 @@ func resolveRuntimeToolRegistry(base *tools.Registry, runtimeContext map[string]
 		allowed = append(allowed, tool.Name)
 	}
 	return base.Restrict(allowed)
+}
+
+func threadConfigFromRuntimeContext(threadID string, runtimeContext map[string]any, cfg runConfig) map[string]any {
+	configurable := defaultThreadConfig(threadID)
+	modelName := firstNonEmpty(stringFromAny(runtimeContext["model_name"]), cfg.ModelName)
+	if modelName != "" {
+		configurable["model_name"] = modelName
+	}
+	for _, key := range []string{"thinking_enabled", "is_plan_mode", "subagent_enabled", "max_concurrent_subagents", "is_bootstrap"} {
+		if value, ok := runtimeContext[key]; ok {
+			configurable[key] = value
+		}
+	}
+	if effort := firstNonEmpty(stringFromAny(runtimeContext["reasoning_effort"]), cfg.ReasoningEffort); effort != "" {
+		configurable["reasoning_effort"] = effort
+	}
+	if agentName := firstNonEmpty(stringFromAny(runtimeContext["agent_name"]), cfg.AgentName); agentName != "" {
+		configurable["agent_name"] = agentName
+	}
+	if cfg.AgentType != "" {
+		configurable["agent_type"] = string(cfg.AgentType)
+	}
+	return configurable
 }
 
 func firstNonEmpty(values ...string) string {

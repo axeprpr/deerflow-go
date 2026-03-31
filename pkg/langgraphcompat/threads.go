@@ -16,6 +16,18 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
+type threadSearchRequest struct {
+	Limit     *int           `json:"limit"`
+	Offset    *int           `json:"offset"`
+	SortBy    string         `json:"-"`
+	SortOrder string         `json:"-"`
+	Query     string         `json:"query"`
+	Status    string         `json:"status"`
+	Metadata  map[string]any `json:"metadata"`
+	Values    map[string]any `json:"values"`
+	Select    []string       `json:"select"`
+}
+
 func (s *Server) handleThreadGet(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if err := validateThreadID(threadID); err != nil {
@@ -108,31 +120,33 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Limit     int    `json:"limit"`
-		Offset    int    `json:"offset"`
-		SortBy    string `json:"sort_by"`
-		SortOrder string `json:"sort_order"`
-	}
-	if r.Body != nil {
-		defer r.Body.Close()
-		_ = json.NewDecoder(r.Body).Decode(&req)
-	}
+	req := parseThreadSearchRequest(r)
 
-	if req.Limit <= 0 {
-		req.Limit = 10
+	limit := 50
+	if req.Limit != nil {
+		limit = *req.Limit
+		if limit < 0 {
+			limit = 0
+		}
 	}
-	if req.SortBy == "" {
-		req.SortBy = "updated_at"
+	offset := 0
+	if req.Offset != nil {
+		offset = *req.Offset
+		if offset < 0 {
+			offset = 0
+		}
 	}
-	if req.SortOrder == "" {
-		req.SortOrder = "desc"
-	}
+	sortBy := normalizeThreadSortBy(req.SortBy)
+	sortOrder := normalizeThreadSortOrder(req.SortOrder)
 
 	s.sessionsMu.RLock()
 	threads := make([]map[string]any, 0, len(s.sessions))
 	for _, session := range s.sessions {
-		threads = append(threads, s.threadResponse(session))
+		thread := s.threadResponse(session)
+		if !threadMatchesSearch(thread, req) {
+			continue
+		}
+		threads = append(threads, selectThreadFields(thread, req.Select))
 	}
 	s.sessionsMu.RUnlock()
 
@@ -140,30 +154,206 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 		left := threads[i]
 		right := threads[j]
 		var less bool
-		switch req.SortBy {
+		switch sortBy {
 		case "created_at":
-			less = left["created_at"].(string) < right["created_at"].(string)
+			less = compareThreadSortValue(left["created_at"], right["created_at"])
 		case "thread_id":
-			less = left["thread_id"].(string) < right["thread_id"].(string)
+			less = compareThreadSortValue(left["thread_id"], right["thread_id"])
 		default:
-			less = left["updated_at"].(string) < right["updated_at"].(string)
+			less = compareThreadSortValue(left["updated_at"], right["updated_at"])
 		}
-		if strings.EqualFold(req.SortOrder, "asc") {
+		if sortOrder == "asc" {
 			return less
 		}
 		return !less
 	})
 
-	start := req.Offset
+	start := offset
 	if start > len(threads) {
 		start = len(threads)
 	}
-	end := start + req.Limit
+	end := start + limit
 	if end > len(threads) {
 		end = len(threads)
 	}
+	if limit == 0 {
+		end = start
+	}
 
 	writeJSON(w, http.StatusOK, threads[start:end])
+}
+
+func parseThreadSearchRequest(r *http.Request) threadSearchRequest {
+	req := threadSearchRequest{}
+	if r == nil || r.Body == nil {
+		return req
+	}
+	defer r.Body.Close()
+
+	var raw map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+		return req
+	}
+
+	req.Limit = intPointerFromAny(raw["limit"])
+	req.Offset = intPointerFromAny(raw["offset"])
+	req.SortBy = firstNonEmpty(stringFromAny(raw["sort_by"]), stringFromAny(raw["sortBy"]))
+	req.SortOrder = firstNonEmpty(stringFromAny(raw["sort_order"]), stringFromAny(raw["sortOrder"]))
+	req.Query = stringFromAny(raw["query"])
+	req.Status = stringFromAny(raw["status"])
+	req.Metadata, _ = raw["metadata"].(map[string]any)
+	req.Values, _ = raw["values"].(map[string]any)
+	req.Select = stringSliceFromAny(raw["select"])
+	return req
+}
+
+func normalizeThreadSortBy(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "created_at", "createdat":
+		return "created_at"
+	case "thread_id", "threadid":
+		return "thread_id"
+	default:
+		return "updated_at"
+	}
+}
+
+func normalizeThreadSortOrder(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), "asc") {
+		return "asc"
+	}
+	return "desc"
+}
+
+func compareThreadSortValue(left, right any) bool {
+	return stringFromAnyValue(left) < stringFromAnyValue(right)
+}
+
+func stringFromAnyValue(v any) string {
+	switch value := v.(type) {
+	case string:
+		return value
+	default:
+		return ""
+	}
+}
+
+func threadMatchesSearch(thread map[string]any, req threadSearchRequest) bool {
+	if len(req.Metadata) > 0 {
+		threadMetadata, _ := thread["metadata"].(map[string]any)
+		if !mapContainsSubset(threadMetadata, req.Metadata) {
+			return false
+		}
+	}
+	if len(req.Values) > 0 {
+		threadValues, _ := thread["values"].(map[string]any)
+		if !mapContainsSubset(threadValues, req.Values) {
+			return false
+		}
+	}
+	if req.Status != "" && !strings.EqualFold(stringFromAnyValue(thread["status"]), req.Status) {
+		return false
+	}
+	query := strings.ToLower(strings.TrimSpace(req.Query))
+	if query == "" {
+		return true
+	}
+	title := ""
+	if values, _ := thread["values"].(map[string]any); values != nil {
+		title = strings.ToLower(stringFromAnyValue(values["title"]))
+	}
+	threadID := strings.ToLower(stringFromAnyValue(thread["thread_id"]))
+	if strings.Contains(threadID, query) || strings.Contains(title, query) {
+		return true
+	}
+	return false
+}
+
+func mapContainsSubset(target map[string]any, subset map[string]any) bool {
+	if len(subset) == 0 {
+		return true
+	}
+	if len(target) == 0 {
+		return false
+	}
+	for key, want := range subset {
+		got, exists := target[key]
+		if !exists {
+			return false
+		}
+		wantMap, wantIsMap := want.(map[string]any)
+		if wantIsMap {
+			gotMap, _ := got.(map[string]any)
+			if !mapContainsSubset(gotMap, wantMap) {
+				return false
+			}
+			continue
+		}
+		if !valuesEqual(got, want) {
+			return false
+		}
+	}
+	return true
+}
+
+func valuesEqual(left, right any) bool {
+	switch l := left.(type) {
+	case string:
+		return l == stringFromAnyValue(right)
+	case bool:
+		r, ok := right.(bool)
+		return ok && l == r
+	case float64:
+		r, ok := right.(float64)
+		return ok && l == r
+	case int:
+		r, ok := right.(int)
+		return ok && l == r
+	case nil:
+		return right == nil
+	default:
+		return left == right
+	}
+}
+
+func selectThreadFields(thread map[string]any, fields []string) map[string]any {
+	if len(fields) == 0 {
+		return thread
+	}
+
+	selected := make(map[string]any, len(fields))
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		if value, ok := thread[field]; ok {
+			selected[field] = value
+		}
+	}
+	if _, ok := selected["thread_id"]; !ok {
+		selected["thread_id"] = thread["thread_id"]
+	}
+	return selected
+}
+
+func stringSliceFromAny(v any) []string {
+	items, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		value, ok := item.(string)
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func (s *Server) handleThreadFiles(w http.ResponseWriter, r *http.Request) {
@@ -215,7 +405,8 @@ func (s *Server) handleThreadStatePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Values map[string]any `json:"values"`
+		Values   map[string]any `json:"values"`
+		Metadata map[string]any `json:"metadata"`
 	}
 	defer r.Body.Close()
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -230,13 +421,7 @@ func (s *Server) handleThreadStatePost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "thread not found", http.StatusNotFound)
 		return
 	}
-
-	if title, ok := req.Values["title"].(string); ok {
-		if session.Metadata == nil {
-			session.Metadata = make(map[string]any)
-		}
-		session.Metadata["title"] = title
-	}
+	applyThreadStateUpdate(session, req.Values, req.Metadata)
 	session.UpdatedAt = time.Now().UTC()
 	snapshot := cloneSession(session)
 	s.sessionsMu.Unlock()
@@ -253,6 +438,7 @@ func (s *Server) handleThreadStatePatch(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req struct {
+		Values   map[string]any `json:"values"`
 		Metadata map[string]any `json:"metadata"`
 	}
 	defer r.Body.Close()
@@ -268,18 +454,28 @@ func (s *Server) handleThreadStatePatch(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "thread not found", http.StatusNotFound)
 		return
 	}
-	if session.Metadata == nil {
-		session.Metadata = make(map[string]any)
-	}
-	for k, v := range req.Metadata {
-		session.Metadata[k] = v
-	}
+	applyThreadStateUpdate(session, req.Values, req.Metadata)
 	session.UpdatedAt = time.Now().UTC()
 	snapshot := cloneSession(session)
 	s.sessionsMu.Unlock()
 	_ = s.persistSessionSnapshot(snapshot)
 
 	writeJSON(w, http.StatusOK, s.getThreadState(threadID))
+}
+
+func applyThreadStateUpdate(session *Session, values map[string]any, metadata map[string]any) {
+	if session == nil {
+		return
+	}
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]any)
+	}
+	if title, ok := values["title"].(string); ok {
+		session.Metadata["title"] = title
+	}
+	for k, v := range metadata {
+		session.Metadata[k] = v
+	}
 }
 
 func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
@@ -508,6 +704,13 @@ func cloneToolArguments(args map[string]any) map[string]any {
 }
 
 func (s *Server) threadResponse(session *Session) map[string]any {
+	configurable := copyMetadataMap(session.Configurable)
+	if configurable == nil {
+		configurable = map[string]any{}
+	}
+	if _, ok := configurable["agent_type"]; !ok {
+		configurable["agent_type"] = stringValue(session.Metadata["agent_type"])
+	}
 	return map[string]any{
 		"thread_id":  session.ThreadID,
 		"created_at": session.CreatedAt.Format(time.RFC3339Nano),
@@ -515,14 +718,13 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 		"metadata":   session.Metadata,
 		"status":     session.Status,
 		"config": map[string]any{
-			"configurable": map[string]any{
-				"agent_type": stringValue(session.Metadata["agent_type"]),
-			},
+			"configurable": configurable,
 		},
 		"values": map[string]any{
-			"title":     session.Metadata["title"],
-			"artifacts": s.sessionArtifactPaths(session),
-			"todos":     todosToAny(session.Todos),
+			"title":       session.Metadata["title"],
+			"artifacts":   s.sessionArtifactPaths(session),
+			"todos":       todosToAny(session.Todos),
+			"thread_data": s.threadDataState(session.ThreadID),
 		},
 	}
 }
@@ -554,10 +756,18 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 	}
 
 	values := map[string]any{
-		"messages":  s.messagesToLangChain(session.Messages),
-		"title":     stringValue(session.Metadata["title"]),
-		"artifacts": s.sessionArtifactPaths(session),
-		"todos":     todosToAny(session.Todos),
+		"messages":    s.messagesToLangChain(session.Messages),
+		"title":       stringValue(session.Metadata["title"]),
+		"artifacts":   s.sessionArtifactPaths(session),
+		"todos":       todosToAny(session.Todos),
+		"thread_data": s.threadDataState(threadID),
+	}
+	configurable := copyMetadataMap(session.Configurable)
+	if configurable == nil {
+		configurable = map[string]any{}
+	}
+	if _, ok := configurable["agent_type"]; !ok {
+		configurable["agent_type"] = stringValue(session.Metadata["agent_type"])
 	}
 
 	return &ThreadState{
@@ -568,6 +778,9 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 		Metadata: map[string]any{
 			"thread_id": threadID,
 			"step":      0,
+		},
+		Config: map[string]any{
+			"configurable": configurable,
 		},
 		CreatedAt: session.UpdatedAt.Format(time.RFC3339Nano),
 	}
@@ -600,6 +813,7 @@ func (s *Server) ensureSession(threadID string, metadata map[string]any) *Sessio
 		Messages:     []models.Message{},
 		Todos:        nil,
 		Metadata:     metadata,
+		Configurable: defaultThreadConfig(threadID),
 		Status:       "idle",
 		PresentFiles: tools.NewPresentFileRegistry(),
 		CreatedAt:    now,
@@ -632,6 +846,26 @@ func (s *Server) setThreadMetadata(threadID string, key string, value any) {
 			session.Metadata = make(map[string]any)
 		}
 		session.Metadata[key] = value
+		session.UpdatedAt = time.Now().UTC()
+		snapshot = cloneSession(session)
+	}
+	s.sessionsMu.Unlock()
+	_ = s.persistSessionSnapshot(snapshot)
+}
+
+func (s *Server) setThreadConfig(threadID string, values map[string]any) {
+	if len(values) == 0 {
+		return
+	}
+	s.sessionsMu.Lock()
+	var snapshot *Session
+	if session, exists := s.sessions[threadID]; exists {
+		if session.Configurable == nil {
+			session.Configurable = defaultThreadConfig(threadID)
+		}
+		for key, value := range values {
+			session.Configurable[key] = value
+		}
 		session.UpdatedAt = time.Now().UTC()
 		snapshot = cloneSession(session)
 	}
@@ -791,13 +1025,30 @@ func cloneSession(session *Session) *Session {
 		return nil
 	}
 	return &Session{
-		ThreadID:  session.ThreadID,
-		Messages:  append([]models.Message(nil), session.Messages...),
-		Todos:     append([]Todo(nil), session.Todos...),
-		Metadata:  copyMetadataMap(session.Metadata),
-		Status:    session.Status,
-		CreatedAt: session.CreatedAt,
-		UpdatedAt: session.UpdatedAt,
+		ThreadID:     session.ThreadID,
+		Messages:     append([]models.Message(nil), session.Messages...),
+		Todos:        append([]Todo(nil), session.Todos...),
+		Metadata:     copyMetadataMap(session.Metadata),
+		Configurable: copyMetadataMap(session.Configurable),
+		Status:       session.Status,
+		CreatedAt:    session.CreatedAt,
+		UpdatedAt:    session.UpdatedAt,
+	}
+}
+
+func defaultThreadConfig(threadID string) map[string]any {
+	cfg := map[string]any{}
+	if strings.TrimSpace(threadID) != "" {
+		cfg["thread_id"] = threadID
+	}
+	return cfg
+}
+
+func (s *Server) threadDataState(threadID string) map[string]any {
+	return map[string]any{
+		"workspace_path": filepath.Join(s.threadRoot(threadID), "workspace"),
+		"uploads_path":   s.uploadsDir(threadID),
+		"outputs_path":   filepath.Join(s.threadRoot(threadID), "outputs"),
 	}
 }
 

@@ -1183,7 +1183,7 @@ func TestModelsSkillsMCPConfigEndpoints(t *testing.T) {
 func TestMCPConfigRoundTripsExtendedFields(t *testing.T) {
 	_, handler := newCompatTestServer(t)
 
-	body := `{"mcp_servers":{"github":{"enabled":true,"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-github"],"env":{"GITHUB_TOKEN":"$TOKEN"},"headers":{"X-Test":"1"},"url":"https://example.com/mcp","description":"GitHub tools"}}}`
+	body := `{"mcp_servers":{"github":{"enabled":true,"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-github"],"env":{"GITHUB_TOKEN":"$TOKEN"},"headers":{"X-Test":"1"},"url":"https://example.com/mcp","oauth":{"enabled":true,"token_url":"https://auth.example.com/token","grant_type":"client_credentials","client_id":"demo-client","client_secret":"demo-secret","scope":"repo","audience":"mcp","token_field":"access_token","token_type_field":"token_type","expires_in_field":"expires_in","default_token_type":"Bearer","refresh_skew_seconds":45,"extra_token_params":{"resource":"github"}},"description":"GitHub tools"}}}`
 	resp := performCompatRequest(t, handler, http.MethodPut, "/api/mcp/config", strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
 	if resp.Code != http.StatusOK {
 		t.Fatalf("put status=%d body=%s", resp.Code, resp.Body.String())
@@ -1207,6 +1207,12 @@ func TestMCPConfigRoundTripsExtendedFields(t *testing.T) {
 	}
 	if server.Headers["X-Test"] != "1" {
 		t.Fatalf("headers=%#v", server.Headers)
+	}
+	if server.OAuth == nil || server.OAuth.TokenURL != "https://auth.example.com/token" {
+		t.Fatalf("oauth=%#v", server.OAuth)
+	}
+	if server.OAuth.ExtraTokenParams["resource"] != "github" {
+		t.Fatalf("oauth extra params=%#v", server.OAuth.ExtraTokenParams)
 	}
 }
 

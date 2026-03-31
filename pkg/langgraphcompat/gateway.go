@@ -47,18 +47,36 @@ type gatewaySkill struct {
 }
 
 type gatewayMCPServerConfig struct {
-	Type        string            `json:"type,omitempty"`
-	Enabled     bool              `json:"enabled"`
-	Command     string            `json:"command,omitempty"`
-	Args        []string          `json:"args,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
-	URL         string            `json:"url,omitempty"`
-	Headers     map[string]string `json:"headers,omitempty"`
-	Description string            `json:"description"`
+	Type        string                 `json:"type,omitempty"`
+	Enabled     bool                   `json:"enabled"`
+	Command     string                 `json:"command,omitempty"`
+	Args        []string               `json:"args,omitempty"`
+	Env         map[string]string      `json:"env,omitempty"`
+	URL         string                 `json:"url,omitempty"`
+	Headers     map[string]string      `json:"headers,omitempty"`
+	OAuth       *gatewayMCPOAuthConfig `json:"oauth,omitempty"`
+	Description string                 `json:"description"`
 }
 
 type gatewayMCPConfig struct {
 	MCPServers map[string]gatewayMCPServerConfig `json:"mcp_servers"`
+}
+
+type gatewayMCPOAuthConfig struct {
+	Enabled            bool              `json:"enabled"`
+	TokenURL           string            `json:"token_url,omitempty"`
+	GrantType          string            `json:"grant_type,omitempty"`
+	ClientID           string            `json:"client_id,omitempty"`
+	ClientSecret       string            `json:"client_secret,omitempty"`
+	RefreshToken       string            `json:"refresh_token,omitempty"`
+	Scope              string            `json:"scope,omitempty"`
+	Audience           string            `json:"audience,omitempty"`
+	TokenField         string            `json:"token_field,omitempty"`
+	TokenTypeField     string            `json:"token_type_field,omitempty"`
+	ExpiresInField     string            `json:"expires_in_field,omitempty"`
+	DefaultTokenType   string            `json:"default_token_type,omitempty"`
+	RefreshSkewSeconds int               `json:"refresh_skew_seconds,omitempty"`
+	ExtraTokenParams   map[string]string `json:"extra_token_params,omitempty"`
 }
 
 type gatewayPersistedState struct {

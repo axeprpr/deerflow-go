@@ -73,6 +73,7 @@ type Session struct {
 	Messages     []models.Message
 	Todos        []Todo
 	Metadata     map[string]any
+	Configurable map[string]any
 	Status       string
 	PresentFiles *tools.PresentFileRegistry
 	CreatedAt    time.Time
@@ -90,6 +91,7 @@ type ThreadState struct {
 	Next         []string       `json:"next"`
 	Tasks        []any          `json:"tasks"`
 	Metadata     map[string]any `json:"metadata"`
+	Config       map[string]any `json:"config,omitempty"`
 	CreatedAt    string         `json:"created_at,omitempty"`
 }
 

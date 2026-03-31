@@ -1,0 +1,134 @@
+package langgraphcompat
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestThreadSearchAcceptsCamelCaseAndSelectsRequestedFields(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	alpha := s.ensureSession("thread-alpha", map[string]any{
+		"title":      "Alpha title",
+		"agent_type": "coder",
+	})
+	alpha.Status = "busy"
+	alpha.CreatedAt = time.Date(2026, 3, 30, 10, 0, 0, 0, time.UTC)
+	alpha.UpdatedAt = alpha.CreatedAt.Add(2 * time.Hour)
+	alpha.Configurable["model_name"] = "gpt-5"
+
+	beta := s.ensureSession("thread-beta", map[string]any{
+		"title": "Beta title",
+	})
+	beta.Status = "idle"
+	beta.CreatedAt = time.Date(2026, 3, 31, 9, 0, 0, 0, time.UTC)
+	beta.UpdatedAt = beta.CreatedAt.Add(1 * time.Hour)
+
+	body := `{"sortBy":"created_at","sortOrder":"asc","limit":1,"select":["thread_id","values","config"]}`
+	resp := performCompatRequest(t, handler, http.MethodPost, "/threads/search", strings.NewReader(body), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var threads []map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(threads) != 1 {
+		t.Fatalf("threads=%d want=1", len(threads))
+	}
+	if got := asString(threads[0]["thread_id"]); got != "thread-alpha" {
+		t.Fatalf("thread_id=%q want=thread-alpha", got)
+	}
+	if _, ok := threads[0]["status"]; ok {
+		t.Fatalf("unexpected status field in selected response: %#v", threads[0])
+	}
+	values, ok := threads[0]["values"].(map[string]any)
+	if !ok {
+		t.Fatalf("values=%#v", threads[0]["values"])
+	}
+	if got := asString(values["title"]); got != "Alpha title" {
+		t.Fatalf("title=%q want=Alpha title", got)
+	}
+	config, ok := threads[0]["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("config=%#v", threads[0]["config"])
+	}
+	configurable, ok := config["configurable"].(map[string]any)
+	if !ok {
+		t.Fatalf("configurable=%#v", config["configurable"])
+	}
+	if got := asString(configurable["model_name"]); got != "gpt-5" {
+		t.Fatalf("model_name=%q want=gpt-5", got)
+	}
+}
+
+func TestThreadSearchFiltersByQueryStatusMetadataAndValues(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	matching := s.ensureSession("thread-reporting", map[string]any{
+		"title":      "Quarterly report",
+		"agent_type": "coder",
+	})
+	matching.Status = "busy"
+	matching.Todos = []Todo{{Content: "draft", Status: "in_progress"}}
+	matching.UpdatedAt = time.Date(2026, 3, 31, 10, 0, 0, 0, time.UTC)
+
+	other := s.ensureSession("thread-notes", map[string]any{
+		"title":      "Meeting notes",
+		"agent_type": "researcher",
+	})
+	other.Status = "idle"
+	other.Todos = []Todo{{Content: "archive", Status: "completed"}}
+	other.UpdatedAt = time.Date(2026, 3, 31, 11, 0, 0, 0, time.UTC)
+
+	body := `{
+		"query":"report",
+		"status":"busy",
+		"metadata":{"agent_type":"coder"},
+		"values":{"title":"Quarterly report"}
+	}`
+	resp := performCompatRequest(t, handler, http.MethodPost, "/threads/search", strings.NewReader(body), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var threads []map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(threads) != 1 {
+		t.Fatalf("threads=%d want=1 body=%s", len(threads), resp.Body.String())
+	}
+	if got := asString(threads[0]["thread_id"]); got != "thread-reporting" {
+		t.Fatalf("thread_id=%q want=thread-reporting", got)
+	}
+}
+
+func TestThreadSearchHonorsZeroLimit(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	s.ensureSession("thread-a", map[string]any{"title": "A"})
+	s.ensureSession("thread-b", map[string]any{"title": "B"})
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/threads/search", strings.NewReader(`{"limit":0}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var threads []map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(threads) != 0 {
+		t.Fatalf("threads=%d want=0", len(threads))
+	}
+}

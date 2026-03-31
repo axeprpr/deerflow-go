@@ -19,6 +19,7 @@ type persistedSession struct {
 	Messages  []models.Message `json:"messages"`
 	Todos     []Todo           `json:"todos,omitempty"`
 	Metadata  map[string]any   `json:"metadata,omitempty"`
+	Config    map[string]any   `json:"config,omitempty"`
 	Status    string           `json:"status"`
 	CreatedAt time.Time        `json:"created_at"`
 	UpdatedAt time.Time        `json:"updated_at"`
@@ -77,6 +78,9 @@ func (s *Server) readPersistedSession(threadID string) (*Session, error) {
 	if stored.Metadata == nil {
 		stored.Metadata = map[string]any{}
 	}
+	if stored.Config == nil {
+		stored.Config = defaultThreadConfig(stored.ThreadID)
+	}
 	if stored.Status == "" {
 		stored.Status = "idle"
 	}
@@ -92,6 +96,7 @@ func (s *Server) readPersistedSession(threadID string) (*Session, error) {
 		Messages:     append([]models.Message(nil), stored.Messages...),
 		Todos:        append([]Todo(nil), stored.Todos...),
 		Metadata:     copyMetadataMap(stored.Metadata),
+		Configurable: copyMetadataMap(stored.Config),
 		Status:       stored.Status,
 		PresentFiles: tools.NewPresentFileRegistry(),
 		CreatedAt:    stored.CreatedAt,
@@ -114,6 +119,7 @@ func (s *Server) persistSessionSnapshot(session *Session) error {
 		Messages:  append([]models.Message(nil), session.Messages...),
 		Todos:     append([]Todo(nil), session.Todos...),
 		Metadata:  copyMetadataMap(session.Metadata),
+		Config:    copyMetadataMap(session.Configurable),
 		Status:    session.Status,
 		CreatedAt: session.CreatedAt,
 		UpdatedAt: session.UpdatedAt,

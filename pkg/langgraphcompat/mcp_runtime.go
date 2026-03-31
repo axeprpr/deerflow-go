@@ -23,11 +23,11 @@ var (
 	gatewayMCPConnectStdio = func(ctx context.Context, name, command string, env []string, args ...string) (gatewayMCPClient, error) {
 		return deerflowmcp.ConnectStdio(ctx, name, command, env, args...)
 	}
-	gatewayMCPConnectSSE = func(ctx context.Context, name, baseURL string, headers map[string]string) (gatewayMCPClient, error) {
-		return deerflowmcp.ConnectSSE(ctx, name, baseURL, headers)
+	gatewayMCPConnectSSE = func(ctx context.Context, name, baseURL string, headers map[string]string, headerFunc func(context.Context) map[string]string) (gatewayMCPClient, error) {
+		return deerflowmcp.ConnectSSE(ctx, name, baseURL, headers, headerFunc)
 	}
-	gatewayMCPConnectHTTP = func(ctx context.Context, name, baseURL string, headers map[string]string) (gatewayMCPClient, error) {
-		return deerflowmcp.ConnectHTTP(ctx, name, baseURL, headers)
+	gatewayMCPConnectHTTP = func(ctx context.Context, name, baseURL string, headers map[string]string, headerFunc func(context.Context) map[string]string) (gatewayMCPClient, error) {
+		return deerflowmcp.ConnectHTTP(ctx, name, baseURL, headers, headerFunc)
 	}
 )
 
@@ -48,16 +48,60 @@ func defaultGatewayMCPConnector(ctx context.Context, name string, cfg gatewayMCP
 		if baseURL == "" {
 			return nil, fmt.Errorf("sse MCP server %q requires url", name)
 		}
-		return gatewayMCPConnectSSE(ctx, name, baseURL, cfg.Headers)
+		headers, headerFunc, err := gatewayMCPHeaders(ctx, cfg)
+		if err != nil {
+			return nil, fmt.Errorf("sse MCP server %q oauth: %w", name, err)
+		}
+		return gatewayMCPConnectSSE(ctx, name, baseURL, headers, headerFunc)
 	case "http", "streamable_http":
 		baseURL := strings.TrimSpace(cfg.URL)
 		if baseURL == "" {
 			return nil, fmt.Errorf("http MCP server %q requires url", name)
 		}
-		return gatewayMCPConnectHTTP(ctx, name, baseURL, cfg.Headers)
+		headers, headerFunc, err := gatewayMCPHeaders(ctx, cfg)
+		if err != nil {
+			return nil, fmt.Errorf("http MCP server %q oauth: %w", name, err)
+		}
+		return gatewayMCPConnectHTTP(ctx, name, baseURL, headers, headerFunc)
 	default:
 		return nil, fmt.Errorf("unsupported MCP transport type %q", transportType)
 	}
+}
+
+func gatewayMCPHeaders(ctx context.Context, cfg gatewayMCPServerConfig) (map[string]string, func(context.Context) map[string]string, error) {
+	headers := cloneGatewayMCPHeaders(cfg.Headers)
+	provider, err := newGatewayMCPOAuthProvider(cfg.OAuth)
+	if err != nil || provider == nil {
+		return headers, nil, err
+	}
+
+	authHeader, err := provider.HeaderValue(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if headers == nil {
+		headers = map[string]string{}
+	}
+	headers["Authorization"] = authHeader
+
+	return headers, func(ctx context.Context) map[string]string {
+		authHeader, err := provider.HeaderValue(ctx)
+		if err != nil || strings.TrimSpace(authHeader) == "" {
+			return nil
+		}
+		return map[string]string{"Authorization": authHeader}
+	}, nil
+}
+
+func cloneGatewayMCPHeaders(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]string, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
 }
 
 func gatewayMCPEnv(values map[string]string) []string {
