@@ -148,6 +148,7 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 	if err != nil {
 		return nil, nil, err, http.StatusNotFound
 	}
+	resolvedRunCfg.SystemPrompt = joinPromptSections(resolvedRunCfg.SystemPrompt, s.memoryInjectionPrompt(ctx, threadID))
 
 	s.sessionsMu.RLock()
 	existingMessages := append([]models.Message(nil), session.Messages...)
@@ -222,6 +223,7 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 	}
 
 	s.saveSession(threadID, result.Messages)
+	s.scheduleMemoryUpdate(threadID, result.Messages)
 	s.maybeGenerateThreadTitle(ctx, threadID, resolvedRunCfg.ModelName, result.Messages)
 	state := s.getThreadState(threadID)
 	if state != nil {
@@ -805,6 +807,42 @@ func joinPromptSections(parts ...string) string {
 		}
 	}
 	return strings.Join(trimmed, "\n\n")
+}
+
+func (s *Server) memoryInjectionPrompt(ctx context.Context, threadID string) string {
+	if s == nil || s.memorySvc == nil || strings.TrimSpace(threadID) == "" {
+		return ""
+	}
+	return strings.TrimSpace(s.memorySvc.Inject(ctx, threadID))
+}
+
+func (s *Server) scheduleMemoryUpdate(threadID string, messages []models.Message) {
+	if s == nil || s.memorySvc == nil || len(messages) == 0 || strings.TrimSpace(threadID) == "" {
+		return
+	}
+	cloned := append([]models.Message(nil), messages...)
+	go func() {
+		if err := s.memorySvc.Update(context.Background(), threadID, cloned); err != nil {
+			if s.logger != nil {
+				s.logger.Printf("memory update failed for %s: %v", threadID, err)
+			}
+			return
+		}
+		doc, err := s.memorySvc.Load(context.Background(), threadID)
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Printf("memory load failed for %s: %v", threadID, err)
+			}
+			return
+		}
+		if err := s.replaceGatewayMemoryDocument(context.Background(), doc); err != nil && s.logger != nil {
+			s.logger.Printf("memory cache refresh failed for %s: %v", threadID, err)
+			return
+		}
+		if err := s.persistGatewayState(); err != nil && s.logger != nil {
+			s.logger.Printf("persist gateway state after memory update failed for %s: %v", threadID, err)
+		}
+	}()
 }
 
 func cloneRuntimeContext(runtimeContext map[string]any) map[string]any {

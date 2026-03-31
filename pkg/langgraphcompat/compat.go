@@ -15,6 +15,7 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/checkpoint"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
+	"github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/sandbox"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
@@ -26,35 +27,39 @@ import (
 // Implements the endpoints expected by @langchain/langgraph-sdk
 
 type Server struct {
-	httpServer   *http.Server
-	logger       *log.Logger
-	llmProvider  llm.LLMProvider
-	tools        *tools.Registry
-	sandbox      *sandbox.Sandbox
-	subagents    *subagent.Pool
-	clarify      *clarification.Manager
-	clarifyAPI   *clarification.API
-	defaultModel string
-	maxTurns     int
-	store        *checkpoint.PostgresStore
-	startedAt    time.Time
-	sessions     map[string]*Session
-	sessionsMu   sync.RWMutex
-	runs         map[string]*Run
-	runsMu       sync.RWMutex
-	runStreams   map[string]map[uint64]chan StreamEvent
-	runStreamSeq uint64
-	dataRoot     string
-	uiStateMu    sync.RWMutex
-	skills       map[string]gatewaySkill
-	mcpConfig    gatewayMCPConfig
-	agents       map[string]gatewayAgent
-	userProfile  string
-	memory       gatewayMemoryResponse
-	mcpMu        sync.Mutex
-	mcpClients   map[string]gatewayMCPClient
-	mcpToolNames map[string]struct{}
-	mcpConnector gatewayMCPConnector
+	httpServer        *http.Server
+	logger            *log.Logger
+	llmProvider       llm.LLMProvider
+	tools             *tools.Registry
+	sandbox           *sandbox.Sandbox
+	subagents         *subagent.Pool
+	clarify           *clarification.Manager
+	clarifyAPI        *clarification.API
+	defaultModel      string
+	maxTurns          int
+	store             *checkpoint.PostgresStore
+	startedAt         time.Time
+	sessions          map[string]*Session
+	sessionsMu        sync.RWMutex
+	runs              map[string]*Run
+	runsMu            sync.RWMutex
+	runStreams        map[string]map[uint64]chan StreamEvent
+	runStreamSeq      uint64
+	dataRoot          string
+	uiStateMu         sync.RWMutex
+	skills            map[string]gatewaySkill
+	mcpConfig         gatewayMCPConfig
+	agents            map[string]gatewayAgent
+	userProfile       string
+	memory            gatewayMemoryResponse
+	memoryStore       memory.Storage
+	memoryStoreCloser interface{ Close() }
+	memorySvc         *memory.Service
+	memoryThread      string
+	mcpMu             sync.Mutex
+	mcpClients        map[string]gatewayMCPClient
+	mcpToolNames      map[string]struct{}
+	mcpConnector      gatewayMCPConnector
 }
 
 type HealthStatus struct {
@@ -172,6 +177,29 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 			logger.Printf("Warning: failed to create Postgres store: %v", err)
 		}
 	}
+	var memoryStore memory.Storage
+	var memoryStoreCloser interface{ Close() }
+	var memorySvc *memory.Service
+	if dbURL != "" {
+		postgresMemoryStore, err := memory.NewPostgresStore(ctx, dbURL)
+		if err != nil {
+			logger.Printf("Warning: failed to create memory store: %v", err)
+		} else {
+			memoryStore = postgresMemoryStore
+			memoryStoreCloser = postgresMemoryStore
+			timeout := 30 * time.Second
+			if raw := strings.TrimSpace(os.Getenv("MEMORY_UPDATE_TIMEOUT")); raw != "" {
+				if parsed, parseErr := time.ParseDuration(raw); parseErr == nil && parsed > 0 {
+					timeout = parsed
+				}
+			}
+			memoryModel := strings.TrimSpace(os.Getenv("MEMORY_LLM_MODEL"))
+			if memoryModel == "" {
+				memoryModel = defaultModel
+			}
+			memorySvc = memory.NewService(memoryStore, memory.NewLLMClient(provider, memoryModel)).WithUpdateTimeout(timeout)
+		}
+	}
 
 	dataRoot := strings.TrimSpace(os.Getenv("DEERFLOW_DATA_ROOT"))
 	if dataRoot == "" {
@@ -186,28 +214,31 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 	}
 
 	s := &Server{
-		logger:       logger,
-		llmProvider:  provider,
-		tools:        registry,
-		sandbox:      sb,
-		subagents:    subagentPool,
-		clarify:      clarifyManager,
-		clarifyAPI:   clarification.NewAPI(clarifyManager),
-		defaultModel: defaultModel,
-		maxTurns:     8,
-		store:        store,
-		startedAt:    time.Now().UTC(),
-		sessions:     make(map[string]*Session),
-		runs:         make(map[string]*Run),
-		runStreams:   make(map[string]map[uint64]chan StreamEvent),
-		dataRoot:     dataRootAbs,
-		skills:       defaultGatewaySkills(),
-		mcpConfig:    defaultGatewayMCPConfig(),
-		agents:       map[string]gatewayAgent{},
-		memory:       defaultGatewayMemory(),
-		mcpClients:   map[string]gatewayMCPClient{},
-		mcpToolNames: map[string]struct{}{},
-		mcpConnector: defaultGatewayMCPConnector,
+		logger:            logger,
+		llmProvider:       provider,
+		tools:             registry,
+		sandbox:           sb,
+		subagents:         subagentPool,
+		clarify:           clarifyManager,
+		clarifyAPI:        clarification.NewAPI(clarifyManager),
+		defaultModel:      defaultModel,
+		maxTurns:          8,
+		store:             store,
+		startedAt:         time.Now().UTC(),
+		sessions:          make(map[string]*Session),
+		runs:              make(map[string]*Run),
+		runStreams:        make(map[string]map[uint64]chan StreamEvent),
+		dataRoot:          dataRootAbs,
+		skills:            defaultGatewaySkills(),
+		mcpConfig:         defaultGatewayMCPConfig(),
+		agents:            map[string]gatewayAgent{},
+		memory:            defaultGatewayMemory(),
+		memoryStore:       memoryStore,
+		memoryStoreCloser: memoryStoreCloser,
+		memorySvc:         memorySvc,
+		mcpClients:        map[string]gatewayMCPClient{},
+		mcpToolNames:      map[string]struct{}{},
+		mcpConnector:      defaultGatewayMCPConnector,
 	}
 	registry.Register(s.setupAgentTool())
 	registry.Register(s.todoTool())
@@ -302,6 +333,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	if s.store != nil {
 		s.store.Close()
+	}
+	if s.memoryStoreCloser != nil {
+		s.memoryStoreCloser.Close()
 	}
 	s.closeGatewayMCPClients()
 	if s.sandbox != nil {

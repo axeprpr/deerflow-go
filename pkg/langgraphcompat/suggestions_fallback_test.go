@@ -1,0 +1,58 @@
+package langgraphcompat
+
+import (
+	"strings"
+	"testing"
+	"unicode/utf8"
+)
+
+func TestLocalizedFallbackSuggestionsChinese(t *testing.T) {
+	got := localizedFallbackSuggestions("请帮我分析部署方案", 2)
+	if len(got) != 2 {
+		t.Fatalf("len=%d want=2", len(got))
+	}
+	if !strings.Contains(got[0], "部署方案") {
+		t.Fatalf("first suggestion=%q missing subject", got[0])
+	}
+	if strings.Contains(got[0], "step-by-step") {
+		t.Fatalf("first suggestion=%q unexpectedly English", got[0])
+	}
+}
+
+func TestLocalizedFallbackSuggestionsEnglish(t *testing.T) {
+	got := localizedFallbackSuggestions("Help me plan the migration rollout", 2)
+	if len(got) != 2 {
+		t.Fatalf("len=%d want=2", len(got))
+	}
+	if !strings.Contains(got[0], "migration rollout") {
+		t.Fatalf("first suggestion=%q missing subject", got[0])
+	}
+	if strings.Contains(got[0], "请") {
+		t.Fatalf("first suggestion=%q unexpectedly Chinese", got[0])
+	}
+}
+
+func TestCompactSubjectTruncatesRunesSafely(t *testing.T) {
+	input := strings.Repeat("迁", 60)
+	got := compactSubject(input)
+	if len([]rune(got)) != 48 {
+		t.Fatalf("runes=%d want=48", len([]rune(got)))
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("got invalid UTF-8: %q", got)
+	}
+}
+
+func TestDetectSuggestionLanguage(t *testing.T) {
+	tests := map[string]string{
+		"请帮我分析这份方案":             "zh",
+		"この内容を整理して":             "ja",
+		"이 계획을 검토해 줘":           "ko",
+		"Summarize the rollout": "en",
+	}
+	for input, want := range tests {
+		if got := detectSuggestionLanguage(input); got != want {
+			t.Fatalf("detectSuggestionLanguage(%q)=%q want=%q", input, got, want)
+		}
+	}
+}

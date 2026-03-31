@@ -24,6 +24,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axeprpr/deerflow-go/pkg/llm"
+	"github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
@@ -61,11 +62,12 @@ type gatewayMCPConfig struct {
 }
 
 type gatewayPersistedState struct {
-	Skills      map[string]gatewaySkill `json:"skills"`
-	MCPConfig   gatewayMCPConfig        `json:"mcp_config"`
-	Agents      map[string]gatewayAgent `json:"agents,omitempty"`
-	UserProfile string                  `json:"user_profile,omitempty"`
-	Memory      gatewayMemoryResponse   `json:"memory"`
+	Skills       map[string]gatewaySkill `json:"skills"`
+	MCPConfig    gatewayMCPConfig        `json:"mcp_config"`
+	Agents       map[string]gatewayAgent `json:"agents,omitempty"`
+	UserProfile  string                  `json:"user_profile,omitempty"`
+	MemoryThread string                  `json:"memory_thread,omitempty"`
+	Memory       gatewayMemoryResponse   `json:"memory"`
 }
 
 const maxSkillArchiveSize int64 = 512 << 20
@@ -470,6 +472,7 @@ func (s *Server) handleUserProfilePut(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMemoryGet(w http.ResponseWriter, r *http.Request) {
+	s.refreshGatewayMemoryCache(r.Context())
 	s.uiStateMu.RLock()
 	m := s.getMemoryLocked()
 	s.uiStateMu.RUnlock()
@@ -477,13 +480,18 @@ func (s *Server) handleMemoryGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMemoryReload(w http.ResponseWriter, r *http.Request) {
+	s.refreshGatewayMemoryCache(r.Context())
 	s.handleMemoryGet(w, r)
 }
 
 func (s *Server) handleMemoryClear(w http.ResponseWriter, r *http.Request) {
-	s.uiStateMu.Lock()
-	s.setMemoryLocked(defaultGatewayMemory())
-	s.uiStateMu.Unlock()
+	if err := s.replaceGatewayMemoryDocument(r.Context(), memory.Document{
+		SessionID: strings.TrimSpace(s.memoryThread),
+		Source:    strings.TrimSpace(s.memoryThread),
+	}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to clear memory"})
+		return
+	}
 	if err := s.persistGatewayState(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
 		return
@@ -493,11 +501,14 @@ func (s *Server) handleMemoryClear(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleMemoryFactDelete(w http.ResponseWriter, r *http.Request) {
 	factID := strings.TrimSpace(r.PathValue("fact_id"))
-	s.uiStateMu.Lock()
-	mem := s.getMemoryLocked()
-	newFacts := make([]memoryFact, 0, len(mem.Facts))
+	doc, err := s.loadGatewayMemoryDocument(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to load memory"})
+		return
+	}
+	newFacts := make([]memory.Fact, 0, len(doc.Facts))
 	found := false
-	for _, fact := range mem.Facts {
+	for _, fact := range doc.Facts {
 		if fact.ID == factID {
 			found = true
 			continue
@@ -505,45 +516,47 @@ func (s *Server) handleMemoryFactDelete(w http.ResponseWriter, r *http.Request) 
 		newFacts = append(newFacts, fact)
 	}
 	if !found {
-		s.uiStateMu.Unlock()
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Memory fact '%s' not found", factID)})
 		return
 	}
-	mem.Facts = newFacts
-	mem.LastUpdated = time.Now().UTC().Format(time.RFC3339)
-	s.setMemoryLocked(mem)
-	s.uiStateMu.Unlock()
+	doc.Facts = newFacts
+	doc.UpdatedAt = time.Now().UTC()
+	if err := s.replaceGatewayMemoryDocument(r.Context(), doc); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist memory"})
+		return
+	}
 	if err := s.persistGatewayState(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
 		return
 	}
-	writeJSON(w, http.StatusOK, mem)
+	s.handleMemoryGet(w, r)
 }
 
 func (s *Server) handleMemoryConfigGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled":                   true,
-		"storage_path":              filepath.Join(s.dataRoot, "memory.json"),
+		"enabled":                   s.memorySvc != nil,
+		"storage_path":              s.gatewayMemoryStoragePath(),
 		"debounce_seconds":          30,
 		"max_facts":                 100,
 		"fact_confidence_threshold": 0.7,
-		"injection_enabled":         true,
+		"injection_enabled":         s.memorySvc != nil,
 		"max_injection_tokens":      2000,
 	})
 }
 
 func (s *Server) handleMemoryStatusGet(w http.ResponseWriter, r *http.Request) {
+	s.refreshGatewayMemoryCache(r.Context())
 	s.uiStateMu.RLock()
 	mem := s.getMemoryLocked()
 	s.uiStateMu.RUnlock()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"config": map[string]any{
-			"enabled":                   true,
-			"storage_path":              filepath.Join(s.dataRoot, "memory.json"),
+			"enabled":                   s.memorySvc != nil,
+			"storage_path":              s.gatewayMemoryStoragePath(),
 			"debounce_seconds":          30,
 			"max_facts":                 100,
 			"fact_confidence_threshold": 0.7,
-			"injection_enabled":         true,
+			"injection_enabled":         s.memorySvc != nil,
 			"max_injection_tokens":      2000,
 		},
 		"data": mem,
@@ -782,6 +795,7 @@ func (s *Server) handleSkillArchiveArtifactGet(w http.ResponseWriter, r *http.Re
 
 	name := filepath.Base(internalPath)
 	mimeType := mime.TypeByExtension(strings.ToLower(filepath.Ext(name)))
+	w.Header().Set("Cache-Control", "private, max-age=300")
 	if shouldForceAttachment(r, mimeType) {
 		w.Header().Set("Content-Disposition", contentDisposition("attachment", name))
 	}
@@ -900,15 +914,30 @@ func extractSkillArchiveFile(archivePath, internalPath string) ([]byte, error) {
 	}
 	defer reader.Close()
 
+	var prefixedMatch *zip.File
 	for _, file := range reader.File {
 		name := filepath.ToSlash(filepath.Clean(file.Name))
-		if strings.TrimPrefix(name, "./") != internalPath {
-			continue
+		name = strings.TrimPrefix(name, "./")
+		if name == internalPath {
+			if file.FileInfo().IsDir() {
+				return nil, os.ErrNotExist
+			}
+			rc, err := file.Open()
+			if err != nil {
+				return nil, err
+			}
+			defer rc.Close()
+			return io.ReadAll(rc)
 		}
-		if file.FileInfo().IsDir() {
+		if strings.HasSuffix(name, "/"+internalPath) {
+			prefixedMatch = file
+		}
+	}
+	if prefixedMatch != nil {
+		if prefixedMatch.FileInfo().IsDir() {
 			return nil, os.ErrNotExist
 		}
-		rc, err := file.Open()
+		rc, err := prefixedMatch.Open()
 		if err != nil {
 			return nil, err
 		}
@@ -1087,8 +1116,9 @@ func uploadArtifactURL(threadID, filename string) string {
 
 func compactSubject(text string) string {
 	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
-	if len(text) > 48 {
-		return text[:48]
+	runes := []rune(text)
+	if len(runes) > 48 {
+		return string(runes[:48])
 	}
 	return text
 }
@@ -1235,21 +1265,7 @@ func fallbackSuggestions(messages []struct {
 	if lastUser == "" {
 		return []string{}
 	}
-
-	subject := compactSubject(lastUser)
-	candidates := []string{
-		"请基于以上内容给出一个可执行的分步计划。",
-		"请总结关键结论，并标注不确定性。",
-		"请给出 3 个下一步可选方案并比较利弊。",
-	}
-	if subject != "" {
-		candidates[0] = "围绕“" + subject + "”给出一个可执行的分步计划。"
-		candidates[1] = "继续深入“" + subject + "”：请总结关键结论并标注不确定性。"
-	}
-	if n < len(candidates) {
-		candidates = candidates[:n]
-	}
-	return candidates
+	return localizedFallbackSuggestions(lastUser, n)
 }
 
 func nowUnix() int64 { return time.Now().UTC().Unix() }
@@ -1523,6 +1539,7 @@ func (s *Server) loadGatewayState() error {
 		s.setAgentsLocked(state.Agents)
 	}
 	s.setUserProfileLocked(state.UserProfile)
+	s.memoryThread = strings.TrimSpace(state.MemoryThread)
 	if state.Memory.Version != "" {
 		s.setMemoryLocked(state.Memory)
 	}
@@ -1532,11 +1549,12 @@ func (s *Server) loadGatewayState() error {
 func (s *Server) persistGatewayState() error {
 	s.uiStateMu.RLock()
 	state := gatewayPersistedState{
-		Skills:      s.skills,
-		MCPConfig:   s.mcpConfig,
-		Agents:      s.getAgentsLocked(),
-		UserProfile: s.getUserProfileLocked(),
-		Memory:      s.getMemoryLocked(),
+		Skills:       s.skills,
+		MCPConfig:    s.mcpConfig,
+		Agents:       s.getAgentsLocked(),
+		UserProfile:  s.getUserProfileLocked(),
+		MemoryThread: s.memoryThread,
+		Memory:       s.getMemoryLocked(),
 	}
 	s.uiStateMu.RUnlock()
 	data, err := json.MarshalIndent(state, "", "  ")
@@ -1762,7 +1780,6 @@ func configuredGatewayModelsFromJSON(defaultModel string) []gatewayModel {
 		seen[model.Name] = struct{}{}
 		models = append(models, model)
 	}
-	sort.Slice(models, func(i, j int) bool { return models[i].Name < models[j].Name })
 	return models
 }
 
@@ -1801,7 +1818,6 @@ func configuredGatewayModelsFromList(defaultModel string) []gatewayModel {
 		seen[model.Name] = struct{}{}
 		models = append(models, model)
 	}
-	sort.Slice(models, func(i, j int) bool { return models[i].Name < models[j].Name })
 	return models
 }
 
@@ -1936,4 +1952,101 @@ func (s *Server) getMemoryLocked() gatewayMemoryResponse {
 
 func (s *Server) setMemoryLocked(memory gatewayMemoryResponse) {
 	s.memory = memory
+}
+
+func (s *Server) gatewayMemoryStoragePath() string {
+	if s.memoryStore != nil {
+		return "postgres://memories"
+	}
+	return filepath.Join(s.dataRoot, "memory.json")
+}
+
+func (s *Server) refreshGatewayMemoryCache(ctx context.Context) {
+	doc, err := s.loadGatewayMemoryDocument(ctx)
+	if err != nil {
+		return
+	}
+	s.uiStateMu.Lock()
+	s.memoryThread = strings.TrimSpace(doc.SessionID)
+	s.setMemoryLocked(gatewayMemoryFromDocument(doc))
+	s.uiStateMu.Unlock()
+}
+
+func (s *Server) loadGatewayMemoryDocument(ctx context.Context) (memory.Document, error) {
+	if s == nil || s.memoryStore == nil {
+		return memory.Document{}, memory.ErrNotFound
+	}
+	threadID := strings.TrimSpace(s.memoryThread)
+	if threadID == "" {
+		return memory.Document{}, memory.ErrNotFound
+	}
+	return s.memoryStore.Load(ctx, threadID)
+}
+
+func (s *Server) replaceGatewayMemoryDocument(ctx context.Context, doc memory.Document) error {
+	if s == nil {
+		return errors.New("server is nil")
+	}
+	threadID := strings.TrimSpace(doc.SessionID)
+	if threadID == "" {
+		threadID = strings.TrimSpace(s.memoryThread)
+	}
+	if s.memoryStore != nil && threadID != "" {
+		doc.SessionID = threadID
+		if strings.TrimSpace(doc.Source) == "" {
+			doc.Source = threadID
+		}
+		if doc.UpdatedAt.IsZero() {
+			doc.UpdatedAt = time.Now().UTC()
+		}
+		if err := s.memoryStore.Save(ctx, doc); err != nil {
+			return err
+		}
+	}
+	s.uiStateMu.Lock()
+	if threadID != "" {
+		s.memoryThread = threadID
+	}
+	s.setMemoryLocked(gatewayMemoryFromDocument(doc))
+	s.uiStateMu.Unlock()
+	return nil
+}
+
+func gatewayMemoryFromDocument(doc memory.Document) gatewayMemoryResponse {
+	resp := defaultGatewayMemory()
+	if !doc.UpdatedAt.IsZero() {
+		resp.LastUpdated = doc.UpdatedAt.UTC().Format(time.RFC3339)
+	}
+	resp.User.WorkContext = gatewayMemorySection(doc.User.WorkContext, doc.UpdatedAt)
+	resp.User.PersonalContext = gatewayMemorySection(doc.User.PersonalContext, doc.UpdatedAt)
+	resp.User.TopOfMind = gatewayMemorySection(doc.User.TopOfMind, doc.UpdatedAt)
+	resp.History.RecentMonths = gatewayMemorySection(doc.History.RecentMonths, doc.UpdatedAt)
+	resp.History.EarlierContext = gatewayMemorySection(doc.History.EarlierContext, doc.UpdatedAt)
+	resp.History.LongTermBackground = gatewayMemorySection("", time.Time{})
+	resp.Facts = make([]memoryFact, 0, len(doc.Facts))
+	for _, fact := range doc.Facts {
+		resp.Facts = append(resp.Facts, memoryFact{
+			ID:         fact.ID,
+			Content:    fact.Content,
+			Category:   fact.Category,
+			Confidence: fact.Confidence,
+			CreatedAt:  formatMemoryTime(fact.CreatedAt),
+			Source:     doc.SessionID,
+		})
+	}
+	return resp
+}
+
+func gatewayMemorySection(summary string, updatedAt time.Time) memorySection {
+	return memorySection{
+		Summary:   strings.TrimSpace(summary),
+		UpdatedAt: formatMemoryTime(updatedAt),
+	}
+}
+
+func formatMemoryTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }

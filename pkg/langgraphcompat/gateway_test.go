@@ -18,6 +18,7 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
+	"github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 	toolctx "github.com/axeprpr/deerflow-go/pkg/tools"
@@ -552,6 +553,29 @@ func TestArtifactEndpointDownloadTrueForSkillArchive(t *testing.T) {
 	}
 }
 
+func TestArtifactEndpointReadsSkillArchiveWithTopLevelDirectory(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-skill-prefixed"
+	archivePath := filepath.Join(s.threadRoot(threadID), "outputs", "sample.skill")
+	if err := os.MkdirAll(filepath.Dir(archivePath), 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	writeArtifactSkillArchive(t, archivePath, map[string]string{
+		"sample-skill/SKILL.md": "# Prefixed Skill\n\nWorks.",
+	})
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/sample.skill/SKILL.md", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if body := resp.Body.String(); !strings.Contains(body, "Prefixed Skill") {
+		t.Fatalf("body=%q missing prefixed skill content", body)
+	}
+	if got := resp.Header().Get("Cache-Control"); got != "private, max-age=300" {
+		t.Fatalf("cache-control=%q want private, max-age=300", got)
+	}
+}
+
 func TestArtifactEndpointForcesDownloadForActiveContentInSkillArchive(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-skill-active"
@@ -1053,14 +1077,14 @@ func TestModelsEndpointSupportsConfiguredModelCatalogJSON(t *testing.T) {
 	if len(payload.Models) != 2 {
 		t.Fatalf("models=%d want=2", len(payload.Models))
 	}
-	if payload.Models[1].Name != "gpt-5" {
+	if payload.Models[0].Name != "gpt-5" {
 		t.Fatalf("unexpected models ordering/content: %#v", payload.Models)
 	}
-	if payload.Models[1].Model != "openai/gpt-5" {
-		t.Fatalf("model=%q want=%q", payload.Models[1].Model, "openai/gpt-5")
+	if payload.Models[0].Model != "openai/gpt-5" {
+		t.Fatalf("model=%q want=%q", payload.Models[0].Model, "openai/gpt-5")
 	}
-	if !payload.Models[1].SupportsThinking {
-		t.Fatalf("expected explicit thinking support for %#v", payload.Models[1])
+	if !payload.Models[0].SupportsThinking {
+		t.Fatalf("expected explicit thinking support for %#v", payload.Models[0])
 	}
 
 	modelResp := performCompatRequest(t, handler, http.MethodGet, "/api/models/gpt-5", nil, nil)
@@ -1087,14 +1111,14 @@ func TestModelsEndpointSupportsConfiguredModelCatalogList(t *testing.T) {
 	if len(payload.Models) != 2 {
 		t.Fatalf("models=%d want=2", len(payload.Models))
 	}
-	if payload.Models[0].Name != "claude-3-7-sonnet" {
+	if payload.Models[0].Name != "gpt-5" {
 		t.Fatalf("unexpected first model: %#v", payload.Models[0])
 	}
-	if payload.Models[0].DisplayName != "claude-3-7-sonnet" {
-		t.Fatalf("display_name=%q want=%q", payload.Models[0].DisplayName, "claude-3-7-sonnet")
+	if payload.Models[0].DisplayName != "gpt-5" {
+		t.Fatalf("display_name=%q want=%q", payload.Models[0].DisplayName, "gpt-5")
 	}
-	if !payload.Models[0].SupportsReasoningEffort {
-		t.Fatalf("expected reasoning support for %#v", payload.Models[0])
+	if !payload.Models[1].SupportsReasoningEffort {
+		t.Fatalf("expected reasoning support for %#v", payload.Models[1])
 	}
 }
 
@@ -1304,6 +1328,62 @@ func TestRunsStreamAppliesCustomAgentRuntimeConfig(t *testing.T) {
 	}
 }
 
+func TestRunsStreamInjectsStoredMemoryIntoSystemPrompt(t *testing.T) {
+	provider := &streamSpyProvider{}
+	store := &fakeGatewayMemoryStore{
+		docs: map[string]memory.Document{
+			"thread-memory": {
+				SessionID: "thread-memory",
+				User: memory.UserMemory{
+					WorkContext: "Maintains deerflow-go.",
+				},
+				Facts: []memory.Fact{{
+					ID:        "fact-1",
+					Content:   "Prefers concise technical answers.",
+					Category:  "preference",
+					CreatedAt: time.Now().Add(-time.Hour).UTC(),
+					UpdatedAt: time.Now().Add(-time.Hour).UTC(),
+				}},
+				Source:    "thread-memory",
+				UpdatedAt: time.Now().UTC(),
+			},
+		},
+	}
+	s := &Server{
+		llmProvider:  provider,
+		defaultModel: "default-model",
+		tools:        newRuntimeToolRegistry(t),
+		sessions:     make(map[string]*Session),
+		runs:         make(map[string]*Run),
+		runStreams:   make(map[string]map[uint64]chan StreamEvent),
+		dataRoot:     t.TempDir(),
+		memoryStore:  store,
+		memorySvc:    memory.NewService(store, fakeMemoryExtractor{}),
+		agents:       map[string]gatewayAgent{},
+	}
+
+	body := `{"thread_id":"thread-memory","input":{"messages":[{"role":"user","content":"Hello"}]}}`
+	req := httptest.NewRequest(http.MethodPost, "/runs/stream", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleRunsStream(rec, req)
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(payload))
+	}
+	if !strings.Contains(provider.lastReq.SystemPrompt, "## User Memory") {
+		t.Fatalf("system prompt missing memory injection: %q", provider.lastReq.SystemPrompt)
+	}
+	if !strings.Contains(provider.lastReq.SystemPrompt, "Maintains deerflow-go.") {
+		t.Fatalf("system prompt missing work context: %q", provider.lastReq.SystemPrompt)
+	}
+	if !strings.Contains(provider.lastReq.SystemPrompt, "Prefers concise technical answers.") {
+		t.Fatalf("system prompt missing fact: %q", provider.lastReq.SystemPrompt)
+	}
+}
+
 func TestRunsStreamRejectsMissingCustomAgent(t *testing.T) {
 	s := &Server{
 		sessions: make(map[string]*Session),
@@ -1415,6 +1495,64 @@ func TestThreadRunsCreateAndList(t *testing.T) {
 	}
 }
 
+func TestMemoryEndpointsReadAndMutateStoredDocument(t *testing.T) {
+	store := &fakeGatewayMemoryStore{
+		docs: map[string]memory.Document{
+			"thread-memory-api": {
+				SessionID: "thread-memory-api",
+				User: memory.UserMemory{
+					TopOfMind: "Ship the memory integration.",
+				},
+				Facts: []memory.Fact{{
+					ID:        "fact-1",
+					Content:   "User is rebuilding the Go gateway.",
+					Category:  "project",
+					CreatedAt: time.Now().Add(-2 * time.Hour).UTC(),
+					UpdatedAt: time.Now().Add(-2 * time.Hour).UTC(),
+				}},
+				Source:    "thread-memory-api",
+				UpdatedAt: time.Now().Add(-time.Minute).UTC(),
+			},
+		},
+	}
+	s, handler := newCompatTestServer(t)
+	s.memoryStore = store
+	s.memorySvc = memory.NewService(store, fakeMemoryExtractor{})
+	s.memoryThread = "thread-memory-api"
+
+	getResp := performCompatRequest(t, handler, http.MethodGet, "/api/memory", nil, nil)
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("get memory status=%d body=%s", getResp.Code, getResp.Body.String())
+	}
+	if !strings.Contains(getResp.Body.String(), "Ship the memory integration.") {
+		t.Fatalf("memory body=%q", getResp.Body.String())
+	}
+
+	deleteResp := performCompatRequest(t, handler, http.MethodDelete, "/api/memory/facts/fact-1", nil, nil)
+	if deleteResp.Code != http.StatusOK {
+		t.Fatalf("delete fact status=%d body=%s", deleteResp.Code, deleteResp.Body.String())
+	}
+	doc, err := store.Load(context.Background(), "thread-memory-api")
+	if err != nil {
+		t.Fatalf("reload store doc: %v", err)
+	}
+	if len(doc.Facts) != 0 {
+		t.Fatalf("facts=%d want=0", len(doc.Facts))
+	}
+
+	clearResp := performCompatRequest(t, handler, http.MethodDelete, "/api/memory", nil, nil)
+	if clearResp.Code != http.StatusOK {
+		t.Fatalf("clear memory status=%d body=%s", clearResp.Code, clearResp.Body.String())
+	}
+	doc, err = store.Load(context.Background(), "thread-memory-api")
+	if err != nil {
+		t.Fatalf("reload cleared doc: %v", err)
+	}
+	if doc.User.TopOfMind != "" || len(doc.Facts) != 0 {
+		t.Fatalf("cleared doc=%#v", doc)
+	}
+}
+
 func TestInferBootstrapAgentNameFromBootstrapMessages(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1489,6 +1627,36 @@ func (p *streamSpyProvider) Stream(_ context.Context, req llm.ChatRequest) (<-ch
 	}
 	close(ch)
 	return ch, nil
+}
+
+type fakeGatewayMemoryStore struct {
+	docs map[string]memory.Document
+}
+
+func (f *fakeGatewayMemoryStore) AutoMigrate(context.Context) error {
+	return nil
+}
+
+func (f *fakeGatewayMemoryStore) Load(_ context.Context, sessionID string) (memory.Document, error) {
+	doc, ok := f.docs[sessionID]
+	if !ok {
+		return memory.Document{}, memory.ErrNotFound
+	}
+	return doc, nil
+}
+
+func (f *fakeGatewayMemoryStore) Save(_ context.Context, doc memory.Document) error {
+	if f.docs == nil {
+		f.docs = map[string]memory.Document{}
+	}
+	f.docs[doc.SessionID] = doc
+	return nil
+}
+
+type fakeMemoryExtractor struct{}
+
+func (fakeMemoryExtractor) ExtractUpdate(context.Context, memory.Document, []models.Message) (memory.Update, error) {
+	return memory.Update{}, nil
 }
 
 func writeSkillArchive(path, name string) error {
