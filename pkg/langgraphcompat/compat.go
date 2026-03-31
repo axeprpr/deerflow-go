@@ -42,6 +42,8 @@ type Server struct {
 	sessionsMu   sync.RWMutex
 	runs         map[string]*Run
 	runsMu       sync.RWMutex
+	runStreams   map[string]map[uint64]chan StreamEvent
+	runStreamSeq uint64
 	dataRoot     string
 	uiStateMu    sync.RWMutex
 	skills       map[string]gatewaySkill
@@ -193,12 +195,14 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		startedAt:    time.Now().UTC(),
 		sessions:     make(map[string]*Session),
 		runs:         make(map[string]*Run),
+		runStreams:   make(map[string]map[uint64]chan StreamEvent),
 		dataRoot:     dataRootAbs,
 		skills:       defaultGatewaySkills(),
 		mcpConfig:    defaultGatewayMCPConfig(),
 		agents:       map[string]gatewayAgent{},
 		memory:       defaultGatewayMemory(),
 	}
+	registry.Register(s.setupAgentTool())
 	registry.Register(s.todoTool())
 	if err := s.loadGatewayState(); err != nil {
 		logger.Printf("Warning: failed to load gateway state: %v", err)

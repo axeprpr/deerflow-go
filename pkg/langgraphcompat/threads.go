@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -590,10 +591,21 @@ func (s *Server) saveRun(run *Run) {
 
 func (s *Server) appendRunEvent(runID string, event StreamEvent) {
 	s.runsMu.Lock()
-	defer s.runsMu.Unlock()
+	subscribers := make([]chan StreamEvent, 0)
 	if run, exists := s.runs[runID]; exists {
 		run.Events = append(run.Events, event)
 		run.UpdatedAt = time.Now().UTC()
+		for _, ch := range s.runStreams[runID] {
+			subscribers = append(subscribers, ch)
+		}
+	}
+	s.runsMu.Unlock()
+
+	for _, ch := range subscribers {
+		select {
+		case ch <- event:
+		default:
+		}
 	}
 }
 
@@ -634,6 +646,50 @@ func (s *Server) getLatestRunForThread(threadID string) *Run {
 		}
 	}
 	return latest
+}
+
+func (s *Server) subscribeRun(runID string) (*Run, <-chan StreamEvent) {
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
+
+	run, exists := s.runs[runID]
+	if !exists {
+		return nil, nil
+	}
+
+	copyRun := *run
+	copyRun.Events = append([]StreamEvent(nil), run.Events...)
+	if run.Status != "running" {
+		return &copyRun, nil
+	}
+
+	streamID := atomic.AddUint64(&s.runStreamSeq, 1)
+	ch := make(chan StreamEvent, 64)
+	if s.runStreams[runID] == nil {
+		s.runStreams[runID] = make(map[uint64]chan StreamEvent)
+	}
+	s.runStreams[runID][streamID] = ch
+	return &copyRun, ch
+}
+
+func (s *Server) unsubscribeRun(runID string, stream <-chan StreamEvent) {
+	if stream == nil {
+		return
+	}
+
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
+
+	subscribers := s.runStreams[runID]
+	for id, ch := range subscribers {
+		if (<-chan StreamEvent)(ch) == stream {
+			delete(subscribers, id)
+			break
+		}
+	}
+	if len(subscribers) == 0 {
+		delete(s.runStreams, runID)
+	}
 }
 
 func stringValue(v any) string {

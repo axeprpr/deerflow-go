@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +26,7 @@ type runConfig struct {
 	ReasoningEffort string
 	AgentType       agent.AgentType
 	AgentName       string
+	IsBootstrap     bool
 	SystemPrompt    string
 	Tools           *tools.Registry
 	Temperature     *float64
@@ -33,6 +35,10 @@ type runConfig struct {
 
 const planModeTodoPrompt = `When the task is multi-step or likely to take several actions, maintain a concise todo list with the write_todos tool.
 Write the initial todo list early, keep exactly one item in_progress when work is active, update statuses immediately after progress, and clear or complete the list when finished.`
+
+const bootstrapAgentPrompt = `You are helping the user create a brand-new custom agent.
+Focus on clarifying the agent's purpose, behavior, tool needs, and boundaries.
+When you have enough information, call the setup_agent tool exactly once to save the agent's description and full SOUL content.`
 
 func (s *Server) handleRunsStream(w http.ResponseWriter, r *http.Request) {
 	s.handleStreamRequest(w, r, "")
@@ -66,13 +72,6 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		threadID = uuid.New().String()
 	}
 
-	runCfg := parseRunConfig(req.Config)
-	resolvedRunCfg, err := s.resolveRunConfig(runCfg, req.Context)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
 	session := s.ensureSession(threadID, nil)
 	if session.PresentFiles != nil {
 		session.PresentFiles.Clear()
@@ -85,6 +84,20 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	}
 	messages, _ := input["messages"].([]any)
 	newMessages := s.convertToMessages(threadID, messages)
+
+	runtimeContext := cloneRuntimeContext(req.Context)
+	runCfg := parseRunConfig(req.Config)
+	runCfg.IsBootstrap = runCfg.IsBootstrap || boolFromAny(runtimeContext["is_bootstrap"])
+	if runCfg.IsBootstrap && strings.TrimSpace(stringFromAny(runtimeContext["agent_name"])) == "" {
+		if inferred := inferBootstrapAgentName(newMessages); inferred != "" {
+			runtimeContext["agent_name"] = inferred
+		}
+	}
+	resolvedRunCfg, err := s.resolveRunConfig(runCfg, runtimeContext)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
 
 	s.sessionsMu.RLock()
 	existingMessages := append([]models.Message(nil), session.Messages...)
@@ -137,6 +150,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		s.forwardTaskEvent(w, flusher, run, evt)
 	})
 	ctx = tools.WithThreadID(ctx, threadID)
+	ctx = tools.WithRuntimeContext(ctx, runtimeContext)
 	ctx = clarification.WithThreadID(ctx, threadID)
 	ctx = clarification.WithEventSink(ctx, func(item *clarification.Clarification) {
 		if item == nil {
@@ -155,6 +169,11 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	result, err := runAgent.Run(ctx, threadID, deerMessages)
 	<-eventsDone
 	if err != nil {
+		s.recordAndSendEvent(w, flusher, run, "error", map[string]any{
+			"error":   "RunError",
+			"name":    "RunError",
+			"message": err.Error(),
+		})
 		run.Status = "error"
 		run.Error = err.Error()
 		run.UpdatedAt = time.Now().UTC()
@@ -216,18 +235,7 @@ func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	for _, event := range run.Events {
-		if event.ID != "" {
-			fmt.Fprintf(w, "id: %s\n", event.ID)
-		}
-		jsonData, err := json.Marshal(event.Data)
-		if err != nil {
-			continue
-		}
-		fmt.Fprintf(w, "event: %s\n", event.Event)
-		fmt.Fprintf(w, "data: %s\n\n", jsonData)
-	}
-	flusher.Flush()
+	s.streamRunEvents(w, r, flusher, run.RunID)
 }
 
 func (s *Server) streamRecordedRun(w http.ResponseWriter, r *http.Request, threadID string, runID string) {
@@ -253,8 +261,39 @@ func (s *Server) streamRecordedRun(w http.ResponseWriter, r *http.Request, threa
 		return
 	}
 
+	s.streamRunEvents(w, r, flusher, runID)
+}
+
+func (s *Server) streamRunEvents(w http.ResponseWriter, r *http.Request, flusher http.Flusher, runID string) {
+	run, stream := s.subscribeRun(runID)
+	if run == nil {
+		http.Error(w, "run not found", http.StatusNotFound)
+		return
+	}
+	if stream != nil {
+		defer s.unsubscribeRun(runID, stream)
+	}
+
 	for _, event := range run.Events {
 		s.sendSSEEvent(w, flusher, event)
+	}
+	if stream == nil {
+		return
+	}
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event, ok := <-stream:
+			if !ok {
+				return
+			}
+			s.sendSSEEvent(w, flusher, event)
+			if event.Event == "end" || event.Event == "error" {
+				return
+			}
+		}
 	}
 }
 
@@ -640,6 +679,7 @@ func parseRunConfig(raw map[string]any) runConfig {
 		ReasoningEffort: firstNonEmpty(stringFromAny(raw["reasoning_effort"]), stringFromAny(configurable["reasoning_effort"])),
 		AgentType:       agent.AgentType(firstNonEmpty(stringFromAny(raw["agent_type"]), stringFromAny(configurable["agent_type"]))),
 		AgentName:       firstNonEmpty(stringFromAny(raw["agent_name"]), stringFromAny(configurable["agent_name"])),
+		IsBootstrap:     boolFromAny(firstNonNil(raw["is_bootstrap"], configurable["is_bootstrap"])),
 		Temperature:     floatPointerFromAny(firstNonNil(raw["temperature"], configurable["temperature"])),
 		MaxTokens:       intPointerFromAny(firstNonNil(raw["max_tokens"], configurable["max_tokens"])),
 	}
@@ -650,7 +690,24 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 	if boolFromAny(runtimeContext["is_plan_mode"]) {
 		cfg.SystemPrompt = joinPromptSections(cfg.SystemPrompt, planModeTodoPrompt)
 	}
+	cfg.IsBootstrap = cfg.IsBootstrap || boolFromAny(runtimeContext["is_bootstrap"])
 	cfg.AgentName = firstNonEmpty(stringFromAny(runtimeContext["agent_name"]), cfg.AgentName)
+	if cfg.IsBootstrap {
+		if cfg.AgentName != "" {
+			name, ok := normalizeAgentName(cfg.AgentName)
+			if !ok {
+				return runConfig{}, fmt.Errorf("invalid agent name")
+			}
+			cfg.AgentName = name
+		}
+		basePrompt := strings.TrimSpace(cfg.SystemPrompt)
+		if basePrompt == "" {
+			basePrompt = agent.GetAgentTypeConfig(cfg.AgentType).SystemPrompt
+		}
+		cfg.SystemPrompt = joinPromptSections(basePrompt, bootstrapAgentPrompt)
+		cfg.Tools = s.tools
+		return cfg, nil
+	}
 	if cfg.AgentName == "" {
 		return cfg, nil
 	}
@@ -705,6 +762,46 @@ func joinPromptSections(parts ...string) string {
 		}
 	}
 	return strings.Join(trimmed, "\n\n")
+}
+
+func cloneRuntimeContext(runtimeContext map[string]any) map[string]any {
+	if len(runtimeContext) == 0 {
+		return map[string]any{}
+	}
+	cloned := make(map[string]any, len(runtimeContext))
+	for key, value := range runtimeContext {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func inferBootstrapAgentName(messages []models.Message) string {
+	patterns := []string{
+		`(?i)\bnew custom agent name is\s+([A-Za-z0-9-]+)\b`,
+		`(?i)\bagent name is\s+([A-Za-z0-9-]+)\b`,
+		`名称是\s*([A-Za-z0-9-]+)`,
+		`名字是\s*([A-Za-z0-9-]+)`,
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role != models.RoleHuman {
+			continue
+		}
+		content := strings.TrimSpace(messages[i].Content)
+		if content == "" {
+			continue
+		}
+		for _, pattern := range patterns {
+			re := regexp.MustCompile(pattern)
+			matches := re.FindStringSubmatch(content)
+			if len(matches) < 2 {
+				continue
+			}
+			if name, ok := normalizeAgentName(matches[1]); ok {
+				return name
+			}
+		}
+	}
+	return ""
 }
 
 func resolveAgentToolRegistry(base *tools.Registry, toolGroups []string) *tools.Registry {

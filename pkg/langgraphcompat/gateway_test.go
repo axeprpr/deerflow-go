@@ -26,14 +26,15 @@ func newCompatTestServer(t *testing.T) (*Server, http.Handler) {
 	t.Helper()
 	root := t.TempDir()
 	s := &Server{
-		sessions:  make(map[string]*Session),
-		runs:      make(map[string]*Run),
-		dataRoot:  root,
-		startedAt: time.Now().UTC(),
-		skills:    defaultGatewaySkills(),
-		mcpConfig: defaultGatewayMCPConfig(),
-		agents:    map[string]gatewayAgent{},
-		memory:    defaultGatewayMemory(),
+		sessions:   make(map[string]*Session),
+		runs:       make(map[string]*Run),
+		runStreams: make(map[string]map[uint64]chan StreamEvent),
+		dataRoot:   root,
+		startedAt:  time.Now().UTC(),
+		skills:     defaultGatewaySkills(),
+		mcpConfig:  defaultGatewayMCPConfig(),
+		agents:     map[string]gatewayAgent{},
+		memory:     defaultGatewayMemory(),
 	}
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
@@ -49,6 +50,21 @@ func performCompatRequest(t *testing.T, handler http.Handler, method, target str
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	return rec
+}
+
+func waitForRunSubscriber(t *testing.T, s *Server, runID string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		s.runsMu.RLock()
+		count := len(s.runStreams[runID])
+		s.runsMu.RUnlock()
+		if count > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for run subscriber on %q", runID)
 }
 
 func TestMessagesToLangChainPreservesToolCallsAndUsageMetadata(t *testing.T) {
@@ -152,6 +168,115 @@ func TestForwardAgentEventEmitsCompatibleMessagesTuplePayloads(t *testing.T) {
 	}
 	if !strings.Contains(body, `"id":"tool-msg-1"`) || !strings.Contains(body, `"content":"full artifact"`) {
 		t.Fatalf("expected full tool result payload in %q", body)
+	}
+}
+
+func TestThreadRunStreamContinuesWithLiveEvents(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	run := &Run{
+		RunID:     "run-live",
+		ThreadID:  "thread-live",
+		Status:    "running",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+		Events: []StreamEvent{{
+			ID:       "run-live:1",
+			Event:    "metadata",
+			Data:     map[string]any{"run_id": "run-live"},
+			RunID:    "run-live",
+			ThreadID: "thread-live",
+		}},
+	}
+	s.saveRun(run)
+
+	bodyCh := make(chan string, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodGet, "/threads/thread-live/runs/run-live/stream", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		bodyCh <- rec.Body.String()
+	}()
+
+	waitForRunSubscriber(t, s, "run-live")
+	s.appendRunEvent("run-live", StreamEvent{
+		ID:       "run-live:2",
+		Event:    "updates",
+		Data:     map[string]any{"agent": map[string]any{"title": "Still running"}},
+		RunID:    "run-live",
+		ThreadID: "thread-live",
+	})
+	s.appendRunEvent("run-live", StreamEvent{
+		ID:       "run-live:3",
+		Event:    "end",
+		Data:     map[string]any{"run_id": "run-live"},
+		RunID:    "run-live",
+		ThreadID: "thread-live",
+	})
+
+	select {
+	case body := <-bodyCh:
+		if !strings.Contains(body, "event: metadata") {
+			t.Fatalf("expected metadata event in %q", body)
+		}
+		if !strings.Contains(body, "event: updates") {
+			t.Fatalf("expected updates event in %q", body)
+		}
+		if !strings.Contains(body, "event: end") {
+			t.Fatalf("expected end event in %q", body)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for stream response")
+	}
+}
+
+func TestThreadJoinStreamFollowsLatestRun(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	run := &Run{
+		RunID:     "run-join",
+		ThreadID:  "thread-join",
+		Status:    "running",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	s.saveRun(run)
+
+	bodyCh := make(chan string, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodGet, "/threads/thread-join/stream", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		bodyCh <- rec.Body.String()
+	}()
+
+	waitForRunSubscriber(t, s, "run-join")
+	s.appendRunEvent("run-join", StreamEvent{
+		ID:       "run-join:1",
+		Event:    "messages-tuple",
+		Data:     Message{Type: "ai", ID: "msg-1", Role: "assistant", Content: "hello"},
+		RunID:    "run-join",
+		ThreadID: "thread-join",
+	})
+	s.appendRunEvent("run-join", StreamEvent{
+		ID:       "run-join:2",
+		Event:    "error",
+		Data:     map[string]any{"message": "boom"},
+		RunID:    "run-join",
+		ThreadID: "thread-join",
+	})
+
+	select {
+	case body := <-bodyCh:
+		if !strings.Contains(body, "event: messages-tuple") {
+			t.Fatalf("expected messages-tuple event in %q", body)
+		}
+		if !strings.Contains(body, `"content":"hello"`) {
+			t.Fatalf("expected live message payload in %q", body)
+		}
+		if !strings.Contains(body, "event: error") {
+			t.Fatalf("expected error event in %q", body)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for join stream response")
 	}
 }
 
@@ -932,6 +1057,63 @@ func TestRunsStreamRejectsMissingCustomAgent(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		payload, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status=%d body=%s", resp.StatusCode, string(payload))
+	}
+}
+
+func TestResolveRunConfigAllowsBootstrapForNewAgent(t *testing.T) {
+	s := &Server{
+		tools:  newRuntimeToolRegistry(t),
+		agents: map[string]gatewayAgent{},
+	}
+
+	cfg, err := s.resolveRunConfig(runConfig{}, map[string]any{
+		"is_bootstrap": true,
+		"agent_name":   "code-reviewer",
+	})
+	if err != nil {
+		t.Fatalf("resolveRunConfig error: %v", err)
+	}
+	if cfg.AgentName != "code-reviewer" {
+		t.Fatalf("agent name=%q want=%q", cfg.AgentName, "code-reviewer")
+	}
+	if cfg.Tools != s.tools {
+		t.Fatal("expected bootstrap flow to use server tool registry")
+	}
+	if !strings.Contains(cfg.SystemPrompt, "create a brand-new custom agent") {
+		t.Fatalf("system prompt missing bootstrap guidance: %q", cfg.SystemPrompt)
+	}
+}
+
+func TestInferBootstrapAgentNameFromBootstrapMessages(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		expected string
+	}{
+		{
+			name:     "english",
+			content:  "The new custom agent name is code-reviewer. Let's bootstrap it's SOUL.",
+			expected: "code-reviewer",
+		},
+		{
+			name:     "chinese",
+			content:  "新智能体的名称是 code-reviewer，现在开始为它生成 SOUL。",
+			expected: "code-reviewer",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := inferBootstrapAgentName([]models.Message{{
+				ID:        "msg-1",
+				SessionID: "thread-1",
+				Role:      models.RoleHuman,
+				Content:   tc.content,
+			}})
+			if got != tc.expected {
+				t.Fatalf("inferred agent name=%q want=%q", got, tc.expected)
+			}
+		})
 	}
 }
 
