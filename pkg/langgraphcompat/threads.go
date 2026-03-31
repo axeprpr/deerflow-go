@@ -3,6 +3,7 @@ package langgraphcompat
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -108,10 +109,7 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.sessionsMu.Lock()
-	delete(s.sessions, threadID)
-	s.sessionsMu.Unlock()
-	if err := s.deletePersistedSession(threadID); err != nil {
+	if err := s.deleteThreadResources(threadID, true); err != nil {
 		http.Error(w, "failed to delete thread", http.StatusInternalServerError)
 		return
 	}
@@ -1147,6 +1145,33 @@ func defaultThreadConfig(threadID string) map[string]any {
 		cfg["thread_id"] = threadID
 	}
 	return cfg
+}
+
+func (s *Server) deleteThreadResources(threadID string, removeLocalData bool) error {
+	s.sessionsMu.Lock()
+	delete(s.sessions, threadID)
+	s.sessionsMu.Unlock()
+
+	s.runsMu.Lock()
+	for runID, run := range s.runs {
+		if run == nil || run.ThreadID != threadID {
+			continue
+		}
+		delete(s.runs, runID)
+		delete(s.runStreams, runID)
+	}
+	s.runsMu.Unlock()
+
+	if err := s.deletePersistedSession(threadID); err != nil {
+		return err
+	}
+	if !removeLocalData {
+		return nil
+	}
+	if err := os.RemoveAll(s.threadDir(threadID)); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Server) threadDataState(threadID string) map[string]any {

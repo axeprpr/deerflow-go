@@ -640,11 +640,7 @@ func (s *Server) handleGatewayThreadDelete(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	s.sessionsMu.Lock()
-	delete(s.sessions, threadID)
-	s.sessionsMu.Unlock()
-
-	if err := os.RemoveAll(s.threadDir(threadID)); err != nil {
+	if err := s.deleteThreadResources(threadID, true); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to delete local thread data"})
 		return
 	}

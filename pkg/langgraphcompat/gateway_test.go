@@ -1295,6 +1295,15 @@ func TestGatewayThreadDeleteRemovesLocalDataAndInMemorySession(t *testing.T) {
 	if err := os.WriteFile(workspaceFile, []byte("cleanup"), 0o644); err != nil {
 		t.Fatalf("write workspace file: %v", err)
 	}
+	runID := "run-delete-local"
+	s.saveRun(&Run{
+		RunID:       runID,
+		ThreadID:    threadID,
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	})
 
 	resp := performCompatRequest(t, handler, http.MethodDelete, "/api/threads/"+threadID, nil, nil)
 	if resp.Code != http.StatusOK {
@@ -1323,6 +1332,11 @@ func TestGatewayThreadDeleteRemovesLocalDataAndInMemorySession(t *testing.T) {
 	if getResp.Code != http.StatusNotFound {
 		t.Fatalf("get status=%d body=%s", getResp.Code, getResp.Body.String())
 	}
+
+	runResp := performCompatRequest(t, handler, http.MethodGet, "/runs/"+runID, nil, nil)
+	if runResp.Code != http.StatusNotFound {
+		t.Fatalf("run status=%d body=%s", runResp.Code, runResp.Body.String())
+	}
 }
 
 func TestGatewayThreadDeleteIsIdempotentForMissingThreadData(t *testing.T) {
@@ -1337,6 +1351,48 @@ func TestGatewayThreadDeleteIsIdempotentForMissingThreadData(t *testing.T) {
 	resp = performCompatRequest(t, handler, http.MethodDelete, "/api/threads/"+threadID, nil, nil)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("second delete status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestThreadDeleteRemovesRunsAndLocalThreadData(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-delete-all"
+	s.ensureSession(threadID, map[string]any{"title": "Delete everything"})
+	runID := "run-thread-delete"
+	s.saveRun(&Run{
+		RunID:       runID,
+		ThreadID:    threadID,
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	})
+
+	workspaceFile := filepath.Join(s.threadRoot(threadID), "workspace", "notes.txt")
+	if err := os.MkdirAll(filepath.Dir(workspaceFile), 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	if err := os.WriteFile(workspaceFile, []byte("cleanup"), 0o644); err != nil {
+		t.Fatalf("write workspace file: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodDelete, "/threads/"+threadID, nil, nil)
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	if _, err := os.Stat(s.threadDir(threadID)); !os.IsNotExist(err) {
+		t.Fatalf("expected thread dir removed, stat err=%v", err)
+	}
+
+	getResp := performCompatRequest(t, handler, http.MethodGet, "/threads/"+threadID, nil, nil)
+	if getResp.Code != http.StatusNotFound {
+		t.Fatalf("get status=%d body=%s", getResp.Code, getResp.Body.String())
+	}
+
+	runResp := performCompatRequest(t, handler, http.MethodGet, "/runs/"+runID, nil, nil)
+	if runResp.Code != http.StatusNotFound {
+		t.Fatalf("run status=%d body=%s", runResp.Code, runResp.Body.String())
 	}
 }
 
