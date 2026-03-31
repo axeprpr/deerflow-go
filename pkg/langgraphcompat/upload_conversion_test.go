@@ -1,6 +1,7 @@
 package langgraphcompat
 
 import (
+	"archive/zip"
 	"bytes"
 	"compress/flate"
 	"compress/zlib"
@@ -95,6 +96,93 @@ func TestConvertUploadedDocumentToMarkdownExtractsLegacyOfficeText(t *testing.T)
 	}
 }
 
+func TestConvertDOCXToMarkdownPreservesParagraphsAndTables(t *testing.T) {
+	path := writeTempFile(t, "report.docx", minimalZipArchive(t, map[string]string{
+		"word/document.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>Project Phoenix</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Launch checklist</w:t></w:r></w:p>
+    <w:tbl>
+      <w:tr>
+        <w:tc><w:p><w:r><w:t>Owner</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>Status</w:t></w:r></w:p></w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc><w:p><w:r><w:t>Ops</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>Ready</w:t></w:r></w:p></w:tc>
+      </w:tr>
+    </w:tbl>
+  </w:body>
+</w:document>`,
+	}))
+
+	md, err := convertDOCXToMarkdown(path)
+	if err != nil {
+		t.Fatalf("convert docx: %v", err)
+	}
+	for _, want := range []string{
+		"Project Phoenix",
+		"Launch checklist",
+		"| Owner | Status |",
+		"| --- | --- |",
+		"| Ops | Ready |",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown missing %q: %q", want, md)
+		}
+	}
+}
+
+func TestConvertXLSXToMarkdownUsesSheetNamesAndMarkdownTables(t *testing.T) {
+	path := writeTempFile(t, "forecast.xlsx", minimalZipArchive(t, map[string]string{
+		"xl/workbook.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Forecast" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>`,
+		"xl/_rels/workbook.xml.rels": `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`,
+		"xl/sharedStrings.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <si><t>Quarter</t></si>
+  <si><t>Revenue</t></si>
+  <si><t>Q1</t></si>
+</sst>`,
+		"xl/worksheets/sheet1.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="s"><v>0</v></c>
+      <c r="B1" t="s"><v>1</v></c>
+    </row>
+    <row r="2">
+      <c r="A2" t="s"><v>2</v></c>
+      <c r="B2"><v>120</v></c>
+    </row>
+  </sheetData>
+</worksheet>`,
+	}))
+
+	md, err := convertXLSXToMarkdown(path)
+	if err != nil {
+		t.Fatalf("convert xlsx: %v", err)
+	}
+	for _, want := range []string{
+		"## Forecast",
+		"| Quarter | Revenue |",
+		"| --- | --- |",
+		"| Q1 | 120 |",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown missing %q: %q", want, md)
+		}
+	}
+}
+
 type pdfCompressionMode int
 
 const (
@@ -167,4 +255,23 @@ func utf16LEText(text string) []byte {
 	}
 	out = append(out, 0x00, 0x00)
 	return out
+}
+
+func minimalZipArchive(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range files {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("create zip entry %s: %v", name, err)
+		}
+		if _, err := io.WriteString(w, content); err != nil {
+			t.Fatalf("write zip entry %s: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip writer: %v", err)
+	}
+	return buf.Bytes()
 }

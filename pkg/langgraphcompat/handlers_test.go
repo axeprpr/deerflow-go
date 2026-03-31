@@ -202,3 +202,59 @@ func TestForwardAgentEventEmitsLangChainToolStartEvent(t *testing.T) {
 		t.Fatal("missing on_tool_start events payload")
 	}
 }
+
+func TestForwardAgentEventEmitsFinalAssistantMessageTupleWithUsage(t *testing.T) {
+	s := &Server{
+		runs:       map[string]*Run{},
+		runStreams: map[string]map[uint64]chan StreamEvent{},
+	}
+	run := &Run{
+		RunID:       "run-3",
+		ThreadID:    "thread-3",
+		AssistantID: "lead_agent",
+		Status:      "running",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.saveRun(run)
+
+	s.forwardAgentEvent(nil, nil, run, agent.AgentEvent{
+		Type:      agent.AgentEventEnd,
+		MessageID: "msg-ai-final",
+		Text:      "Final answer",
+		Usage: &agent.Usage{
+			InputTokens:  21,
+			OutputTokens: 13,
+			TotalTokens:  34,
+		},
+	})
+
+	stored := s.getRun(run.RunID)
+	if stored == nil {
+		t.Fatal("stored run missing")
+	}
+
+	var found bool
+	for _, evt := range stored.Events {
+		if evt.Event != "messages-tuple" {
+			continue
+		}
+		payload, ok := evt.Data.(Message)
+		if !ok {
+			t.Fatalf("payload type=%T want Message", evt.Data)
+		}
+		if payload.ID != "msg-ai-final" {
+			continue
+		}
+		if payload.Content != "Final answer" {
+			t.Fatalf("content=%v want Final answer", payload.Content)
+		}
+		if payload.UsageMetadata["total_tokens"] != 34 {
+			t.Fatalf("usage=%#v want total_tokens=34", payload.UsageMetadata)
+		}
+		found = true
+	}
+	if !found {
+		t.Fatal("missing final assistant messages-tuple payload")
+	}
+}

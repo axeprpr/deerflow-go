@@ -900,6 +900,20 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 				})
 			}
 		}
+	case agent.AgentEventEnd:
+		if strings.TrimSpace(evt.Text) == "" && evt.Usage == nil {
+			return
+		}
+		msg := Message{
+			Type:    "ai",
+			ID:      evt.MessageID,
+			Role:    "assistant",
+			Content: evt.Text,
+		}
+		if usage := usageMetadataFromAgentUsage(evt.Usage); len(usage) > 0 {
+			msg.UsageMetadata = usage
+		}
+		s.recordAndSendEvent(w, flusher, run, "messages-tuple", msg)
 	case agent.AgentEventError:
 		errData := map[string]any{
 			"error":   "RunError",
@@ -912,6 +926,17 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 			errData["retryable"] = evt.Error.Retryable
 		}
 		s.recordAndSendEvent(w, flusher, run, "error", errData)
+	}
+}
+
+func usageMetadataFromAgentUsage(usage *agent.Usage) map[string]int {
+	if usage == nil {
+		return nil
+	}
+	return map[string]int{
+		"input_tokens":  usage.InputTokens,
+		"output_tokens": usage.OutputTokens,
+		"total_tokens":  usage.TotalTokens,
 	}
 }
 

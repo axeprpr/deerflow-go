@@ -114,7 +114,7 @@ func convertDOCXToMarkdown(path string) (string, error) {
 		return "", fmt.Errorf("word/document.xml not found")
 	}
 
-	text, err := extractXMLText(file)
+	text, err := extractDOCXText(file)
 	if err != nil {
 		return "", err
 	}
@@ -176,20 +176,17 @@ func convertXLSXToMarkdown(path string) (string, error) {
 		return "", err
 	}
 
-	sheetNames := make([]string, 0)
-	for _, f := range rc.File {
-		if strings.HasPrefix(f.Name, "xl/worksheets/sheet") && strings.HasSuffix(f.Name, ".xml") {
-			sheetNames = append(sheetNames, f.Name)
-		}
+	sheets, err := readWorkbookSheets(&rc.Reader)
+	if err != nil {
+		return "", err
 	}
-	sort.Slice(sheetNames, func(i, j int) bool { return naturalLess(sheetNames[i], sheetNames[j]) })
-	if len(sheetNames) == 0 {
+	if len(sheets) == 0 {
 		return "", fmt.Errorf("no worksheet xml found")
 	}
 
 	var sections []string
-	for idx, name := range sheetNames {
-		file := zipEntry(&rc.Reader, name)
+	for idx, sheet := range sheets {
+		file := zipEntry(&rc.Reader, sheet.Path)
 		if file == nil {
 			continue
 		}
@@ -200,10 +197,11 @@ func convertXLSXToMarkdown(path string) (string, error) {
 		if len(rows) == 0 {
 			continue
 		}
-		lines := []string{fmt.Sprintf("## Sheet %d", idx+1), ""}
-		for _, row := range rows {
-			lines = append(lines, "| "+strings.Join(row, " | ")+" |")
+		title := strings.TrimSpace(sheet.Name)
+		if title == "" {
+			title = fmt.Sprintf("Sheet %d", idx+1)
 		}
+		lines := []string{"## " + title, "", renderMarkdownTable(rows)}
 		sections = append(sections, strings.Join(lines, "\n"))
 	}
 	if len(sections) == 0 {
@@ -248,6 +246,128 @@ func extractXMLText(file *zip.File) (string, error) {
 		}
 	}
 	return strings.Join(parts, "\n"), nil
+}
+
+func extractDOCXText(file *zip.File) (string, error) {
+	r, err := file.Open()
+	if err != nil {
+		return "", err
+	}
+	defer r.Close()
+
+	decoder := xml.NewDecoder(r)
+	var sections []string
+	var currentParagraph strings.Builder
+	var currentCellParagraphs []string
+	var currentRow []string
+	var currentTable [][]string
+	insideParagraph := false
+	insideTable := false
+	insideCell := false
+
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", err
+		}
+		switch tok := token.(type) {
+		case xml.StartElement:
+			switch tok.Name.Local {
+			case "tbl":
+				insideTable = true
+				currentTable = nil
+			case "tr":
+				if insideTable {
+					currentRow = nil
+				}
+			case "tc":
+				if insideTable {
+					insideCell = true
+					currentCellParagraphs = nil
+				}
+			case "p":
+				insideParagraph = true
+				currentParagraph.Reset()
+			case "tab":
+				if insideParagraph {
+					currentParagraph.WriteByte('\t')
+				}
+			case "br", "cr":
+				if insideParagraph {
+					currentParagraph.WriteByte('\n')
+				}
+			}
+		case xml.EndElement:
+			switch tok.Name.Local {
+			case "p":
+				if !insideParagraph {
+					continue
+				}
+				insideParagraph = false
+				paragraph := normalizeDOCXBlock(currentParagraph.String())
+				if paragraph == "" {
+					continue
+				}
+				if insideCell {
+					currentCellParagraphs = append(currentCellParagraphs, paragraph)
+					continue
+				}
+				sections = append(sections, paragraph)
+			case "tc":
+				if !insideTable || !insideCell {
+					continue
+				}
+				insideCell = false
+				currentRow = append(currentRow, strings.Join(currentCellParagraphs, "\n\n"))
+			case "tr":
+				if insideTable && len(currentRow) > 0 {
+					currentTable = append(currentTable, trimTrailingEmpty(currentRow))
+				}
+			case "tbl":
+				if !insideTable {
+					continue
+				}
+				insideTable = false
+				if len(currentTable) > 0 {
+					sections = append(sections, renderMarkdownTable(currentTable))
+				}
+			}
+		case xml.CharData:
+			if insideParagraph {
+				currentParagraph.WriteString(string(tok))
+			}
+		}
+	}
+
+	return strings.Join(compactSections(sections), "\n\n"), nil
+}
+
+func normalizeDOCXBlock(text string) string {
+	lines := strings.Split(text, "\n")
+	cleaned := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.Join(strings.Fields(strings.TrimSpace(line)), " ")
+		if line == "" {
+			continue
+		}
+		cleaned = append(cleaned, line)
+	}
+	return strings.Join(cleaned, "\n")
+}
+
+func compactSections(sections []string) []string {
+	out := make([]string, 0, len(sections))
+	for _, section := range sections {
+		section = strings.TrimSpace(section)
+		if section == "" {
+			continue
+		}
+		out = append(out, section)
+	}
+	return out
 }
 
 func readSharedStrings(rc *zip.Reader) ([]string, error) {
@@ -384,6 +504,16 @@ type cell struct {
 	inline string
 }
 
+type workbookSheet struct {
+	Name string
+	Path string
+}
+
+type workbookSheetMeta struct {
+	Name string
+	Rel  string
+}
+
 func columnIndex(ref string) int {
 	letters := strings.Map(func(r rune) rune {
 		if r >= 'A' && r <= 'Z' {
@@ -418,6 +548,53 @@ func trimTrailingEmpty(values []string) []string {
 	return values[:last+1]
 }
 
+func renderMarkdownTable(rows [][]string) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	width := 0
+	for _, row := range rows {
+		if len(row) > width {
+			width = len(row)
+		}
+	}
+	if width == 0 {
+		return ""
+	}
+
+	normalized := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		current := make([]string, width)
+		for i := 0; i < width; i++ {
+			if i < len(row) {
+				current[i] = escapeMarkdownTableCell(row[i])
+			}
+		}
+		normalized = append(normalized, current)
+	}
+
+	lines := make([]string, 0, len(normalized)+1)
+	lines = append(lines, "| "+strings.Join(normalized[0], " | ")+" |")
+	separators := make([]string, width)
+	for i := range separators {
+		separators[i] = "---"
+	}
+	lines = append(lines, "| "+strings.Join(separators, " | ")+" |")
+	for _, row := range normalized[1:] {
+		lines = append(lines, "| "+strings.Join(row, " | ")+" |")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func escapeMarkdownTableCell(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "|", `\|`)
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	value = strings.ReplaceAll(value, "\n", "<br>")
+	return value
+}
+
 var naturalNumberRE = regexp.MustCompile(`\d+`)
 
 func naturalLess(left string, right string) bool {
@@ -431,6 +608,129 @@ func naturalLess(left string, right string) bool {
 		}
 	}
 	return left < right
+}
+
+func readWorkbookSheets(rc *zip.Reader) ([]workbookSheet, error) {
+	sheetMetas, err := readWorkbookSheetMetadata(rc)
+	if err != nil {
+		return nil, err
+	}
+	relTargets, err := readWorkbookRelationships(rc)
+	if err != nil {
+		return nil, err
+	}
+
+	sheets := make([]workbookSheet, 0, len(sheetMetas))
+	for _, meta := range sheetMetas {
+		path := relTargets[meta.Rel]
+		if path == "" {
+			continue
+		}
+		sheets = append(sheets, workbookSheet{
+			Name: meta.Name,
+			Path: path,
+		})
+	}
+	if len(sheets) > 0 {
+		return sheets, nil
+	}
+
+	var fallback []workbookSheet
+	for _, f := range rc.File {
+		if strings.HasPrefix(f.Name, "xl/worksheets/sheet") && strings.HasSuffix(f.Name, ".xml") {
+			fallback = append(fallback, workbookSheet{
+				Name: strings.TrimSuffix(filepath.Base(f.Name), filepath.Ext(f.Name)),
+				Path: f.Name,
+			})
+		}
+	}
+	sort.Slice(fallback, func(i, j int) bool { return naturalLess(fallback[i].Path, fallback[j].Path) })
+	return fallback, nil
+}
+
+func readWorkbookSheetMetadata(rc *zip.Reader) ([]workbookSheetMeta, error) {
+	file := zipEntry(rc, "xl/workbook.xml")
+	if file == nil {
+		return nil, nil
+	}
+	r, err := file.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	decoder := xml.NewDecoder(r)
+	var sheets []workbookSheetMeta
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		start, ok := token.(xml.StartElement)
+		if !ok || start.Name.Local != "sheet" {
+			continue
+		}
+		var meta workbookSheetMeta
+		for _, attr := range start.Attr {
+			switch attr.Name.Local {
+			case "name":
+				meta.Name = attr.Value
+			case "id":
+				meta.Rel = attr.Value
+			}
+		}
+		if meta.Rel != "" {
+			sheets = append(sheets, meta)
+		}
+	}
+	return sheets, nil
+}
+
+func readWorkbookRelationships(rc *zip.Reader) (map[string]string, error) {
+	file := zipEntry(rc, "xl/_rels/workbook.xml.rels")
+	if file == nil {
+		return nil, nil
+	}
+	r, err := file.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	decoder := xml.NewDecoder(r)
+	targets := map[string]string{}
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		start, ok := token.(xml.StartElement)
+		if !ok || start.Name.Local != "Relationship" {
+			continue
+		}
+		var id string
+		var target string
+		for _, attr := range start.Attr {
+			switch attr.Name.Local {
+			case "Id":
+				id = attr.Value
+			case "Target":
+				target = attr.Value
+			}
+		}
+		if id == "" || target == "" {
+			continue
+		}
+		target = strings.TrimPrefix(filepath.ToSlash(filepath.Clean("xl/"+target)), "./")
+		targets[id] = target
+	}
+	return targets, nil
 }
 
 func extractPDFText(data []byte) string {
