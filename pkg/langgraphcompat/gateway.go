@@ -617,17 +617,15 @@ func (s *Server) handleMemoryStatusGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleChannelsGet(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"service_running": false,
-		"channels":        map[string]any{},
-	})
+	writeJSON(w, http.StatusOK, s.gatewayChannelStatus())
 }
 
 func (s *Server) handleChannelRestart(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.PathValue("name"))
+	success, message := s.restartGatewayChannel(name)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"success": false,
-		"message": fmt.Sprintf("Channel %s is not running in deerflow-go", name),
+		"success": success,
+		"message": fmt.Sprintf("Channel %s: %s", name, message),
 	})
 }
 

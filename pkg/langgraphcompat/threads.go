@@ -508,7 +508,10 @@ func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	history := []ThreadState{*state}
+	history := s.threadHistory(threadID)
+	if len(history) == 0 {
+		history = []ThreadState{*state}
+	}
 	if req.Limit == 0 || req.Limit > len(history) {
 		req.Limit = len(history)
 	}
@@ -755,12 +758,45 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 		return nil
 	}
 
+	return s.threadStateFromSession(session, uuid.New().String(), session.UpdatedAt)
+}
+
+func (s *Server) threadHistory(threadID string) []ThreadState {
+	entries, err := s.readPersistedHistory(threadID)
+	if err != nil {
+		return nil
+	}
+	history := make([]ThreadState, 0, len(entries))
+	for i := len(entries) - 1; i >= 0; i-- {
+		entry := entries[i]
+		session := &Session{
+			ThreadID:     entry.ThreadID,
+			Messages:     append([]models.Message(nil), entry.Messages...),
+			Todos:        append([]Todo(nil), entry.Todos...),
+			Metadata:     copyMetadataMap(entry.Metadata),
+			Configurable: copyMetadataMap(entry.Config),
+			Status:       entry.Status,
+			CreatedAt:    entry.CreatedAt,
+			UpdatedAt:    entry.UpdatedAt,
+		}
+		state := s.threadStateFromSession(session, entry.CheckpointID, entry.UpdatedAt)
+		if state != nil {
+			history = append(history, *state)
+		}
+	}
+	return history
+}
+
+func (s *Server) threadStateFromSession(session *Session, checkpointID string, createdAt time.Time) *ThreadState {
+	if session == nil {
+		return nil
+	}
 	values := map[string]any{
 		"messages":    s.messagesToLangChain(session.Messages),
 		"title":       stringValue(session.Metadata["title"]),
 		"artifacts":   s.sessionArtifactPaths(session),
 		"todos":       todosToAny(session.Todos),
-		"thread_data": s.threadDataState(threadID),
+		"thread_data": s.threadDataState(session.ThreadID),
 	}
 	configurable := copyMetadataMap(session.Configurable)
 	if configurable == nil {
@@ -771,18 +807,18 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 	}
 
 	return &ThreadState{
-		CheckpointID: uuid.New().String(),
+		CheckpointID: checkpointID,
 		Values:       values,
 		Next:         []string{},
 		Tasks:        []any{},
 		Metadata: map[string]any{
-			"thread_id": threadID,
+			"thread_id": session.ThreadID,
 			"step":      0,
 		},
 		Config: map[string]any{
 			"configurable": configurable,
 		},
-		CreatedAt: session.UpdatedAt.Format(time.RFC3339Nano),
+		CreatedAt: createdAt.Format(time.RFC3339Nano),
 	}
 }
 

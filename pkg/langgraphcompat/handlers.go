@@ -41,6 +41,10 @@ const bootstrapAgentPrompt = `You are helping the user create a brand-new custom
 Focus on clarifying the agent's purpose, behavior, tool needs, and boundaries.
 When you have enough information, call the setup_agent tool exactly once to save the agent's description and full SOUL content.`
 
+const fallbackSkillCreatorPrompt = `You are operating in skill creation mode.
+Help the user design a new SKILL.md workflow, ask targeted questions about trigger conditions and outputs, then draft or refine the skill instructions.
+If the user is iterating on an existing skill, help compare the current draft against the intended behavior and improve it step by step.`
+
 func (s *Server) handleRunsStream(w http.ResponseWriter, r *http.Request) {
 	s.handleStreamRequest(w, r, "")
 }
@@ -739,6 +743,7 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 	if boolFromAny(runtimeContext["is_plan_mode"]) {
 		cfg.SystemPrompt = joinPromptSections(cfg.SystemPrompt, planModeTodoPrompt)
 	}
+	cfg.SystemPrompt = joinPromptSections(cfg.SystemPrompt, s.runtimeModePrompt(runtimeContext))
 	cfg.IsBootstrap = cfg.IsBootstrap || boolFromAny(runtimeContext["is_bootstrap"])
 	cfg.AgentName = firstNonEmpty(stringFromAny(runtimeContext["agent_name"]), cfg.AgentName)
 	if cfg.IsBootstrap {
@@ -797,6 +802,22 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 	}
 	cfg.Tools = resolveRuntimeToolRegistry(cfg.Tools, runtimeContext)
 	return cfg, nil
+}
+
+func (s *Server) runtimeModePrompt(runtimeContext map[string]any) string {
+	mode := strings.ToLower(strings.TrimSpace(stringFromAny(runtimeContext["mode"])))
+	switch mode {
+	case "skill":
+		if body, ok := s.loadGatewaySkillBody("skill-creator", skillCategoryPublic); ok {
+			return "Loaded skill instructions (skill-creator):\n" + body
+		}
+		if body, ok := s.loadGatewaySkillBody("skill-creator", ""); ok {
+			return "Loaded skill instructions (skill-creator):\n" + body
+		}
+		return fallbackSkillCreatorPrompt
+	default:
+		return ""
+	}
 }
 
 func buildCustomAgentPrompt(customAgent gatewayAgent, userProfile string) string {

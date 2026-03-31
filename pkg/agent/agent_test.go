@@ -348,6 +348,128 @@ func TestAgentRunForceStopsRepeatedToolCalls(t *testing.T) {
 	}
 }
 
+func TestPatchDanglingToolCallsInsertsMissingToolResults(t *testing.T) {
+	sessionID := "session-dangling"
+	messages := []models.Message{
+		{ID: "m1", SessionID: sessionID, Role: models.RoleHuman, Content: "Do the thing"},
+		{
+			ID:        "m2",
+			SessionID: sessionID,
+			Role:      models.RoleAI,
+			Content:   "",
+			ToolCalls: []models.ToolCall{
+				{ID: "call-1", Name: "bash", Status: models.CallStatusPending},
+			},
+		},
+		{
+			ID:        "m3",
+			SessionID: sessionID,
+			Role:      models.RoleAI,
+			Content:   "next step",
+		},
+	}
+
+	patched := patchDanglingToolCalls(messages)
+	if len(patched) != 4 {
+		t.Fatalf("messages len=%d want 4", len(patched))
+	}
+	if patched[2].Role != models.RoleTool {
+		t.Fatalf("patched message role=%q want tool", patched[2].Role)
+	}
+	if patched[2].ToolResult == nil {
+		t.Fatal("expected synthetic tool result")
+	}
+	if patched[2].ToolResult.CallID != "call-1" {
+		t.Fatalf("call id=%q want call-1", patched[2].ToolResult.CallID)
+	}
+	if patched[2].ToolResult.Status != models.CallStatusFailed {
+		t.Fatalf("status=%q want failed", patched[2].ToolResult.Status)
+	}
+	if patched[2].Content != "[Tool call was interrupted and did not return a result.]" {
+		t.Fatalf("content=%q", patched[2].Content)
+	}
+}
+
+func TestPatchDanglingToolCallsSkipsCompletedToolResults(t *testing.T) {
+	sessionID := "session-complete"
+	messages := []models.Message{
+		{
+			ID:        "m1",
+			SessionID: sessionID,
+			Role:      models.RoleAI,
+			ToolCalls: []models.ToolCall{
+				{ID: "call-1", Name: "bash", Status: models.CallStatusCompleted},
+			},
+		},
+		{
+			ID:        "m2",
+			SessionID: sessionID,
+			Role:      models.RoleTool,
+			Content:   "ok",
+			ToolResult: &models.ToolResult{
+				CallID:   "call-1",
+				ToolName: "bash",
+				Status:   models.CallStatusCompleted,
+				Content:  "ok",
+			},
+		},
+	}
+
+	patched := patchDanglingToolCalls(messages)
+	if len(patched) != len(messages) {
+		t.Fatalf("messages len=%d want %d", len(patched), len(messages))
+	}
+}
+
+func TestAgentRunPatchesDanglingToolCallsBeforeModelInvocation(t *testing.T) {
+	provider := &scriptedStreamProvider{
+		steps: []streamStep{
+			{
+				check: func(t *testing.T, req llm.ChatRequest) {
+					if len(req.Messages) != 3 {
+						t.Fatalf("messages len=%d want 3", len(req.Messages))
+					}
+					toolMsg := req.Messages[2]
+					if toolMsg.Role != models.RoleTool {
+						t.Fatalf("role=%q want tool", toolMsg.Role)
+					}
+					if toolMsg.ToolResult == nil {
+						t.Fatal("expected synthetic tool result")
+					}
+					if toolMsg.ToolResult.CallID != "call-1" {
+						t.Fatalf("call id=%q want call-1", toolMsg.ToolResult.CallID)
+					}
+				},
+				content: "Recovered after patch.",
+			},
+		},
+		t: t,
+	}
+
+	agent := New(AgentConfig{
+		LLMProvider: provider,
+		MaxTurns:    2,
+	})
+
+	result, err := agent.Run(context.Background(), "session-dangling-run", []models.Message{
+		{ID: "m1", SessionID: "session-dangling-run", Role: models.RoleHuman, Content: "Continue"},
+		{
+			ID:        "m2",
+			SessionID: "session-dangling-run",
+			Role:      models.RoleAI,
+			ToolCalls: []models.ToolCall{
+				{ID: "call-1", Name: "bash", Status: models.CallStatusPending},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "Recovered after patch." {
+		t.Fatalf("FinalOutput=%q", result.FinalOutput)
+	}
+}
+
 type timeoutProvider struct{}
 
 func (timeoutProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {

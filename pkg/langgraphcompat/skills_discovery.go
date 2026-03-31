@@ -4,7 +4,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -19,14 +18,23 @@ func (s *Server) currentGatewaySkills() map[string]gatewaySkill {
 }
 
 func (s *Server) gatewaySkillRoots() []string {
-	roots := make([]string, 0, 3)
-	for _, raw := range filepath.SplitList(strings.TrimSpace(os.Getenv("DEERFLOW_SKILLS_ROOT"))) {
+	roots := make([]string, 0, 8)
+	explicitRoots := filepath.SplitList(strings.TrimSpace(os.Getenv("DEERFLOW_SKILLS_ROOT")))
+	for _, raw := range explicitRoots {
 		if trimmed := strings.TrimSpace(raw); trimmed != "" {
 			roots = append(roots, trimmed)
 		}
 	}
-	if cwd, err := os.Getwd(); err == nil {
-		roots = append(roots, filepath.Join(cwd, "skills"))
+	if len(roots) == 0 {
+		roots = append(roots, filepath.Join(os.TempDir(), "deerflow-ui", "skills"))
+		if uiRoot := strings.TrimSpace(os.Getenv("DEERFLOW_UI_ROOT")); uiRoot != "" {
+			roots = append(roots, filepath.Join(uiRoot, "skills"))
+		}
+		if cwd, err := os.Getwd(); err == nil {
+			roots = append(roots, filepath.Join(cwd, "skills"))
+			roots = append(roots, filepath.Join(cwd, "..", "deerflow-ui", "skills"))
+			roots = append(roots, filepath.Join(cwd, "..", "..", "deerflow-ui", "skills"))
+		}
 	}
 	roots = append(roots, filepath.Join(s.dataRoot, "skills"))
 	return uniqueCleanPaths(roots)
@@ -68,6 +76,78 @@ func scanGatewaySkillCategory(root, category string) map[string]gatewaySkill {
 		return nil
 	})
 	return skills
+}
+
+func (s *Server) loadGatewaySkillBody(name, category string) (string, bool) {
+	normalizedName := sanitizeSkillName(name)
+	if normalizedName == "" {
+		return "", false
+	}
+
+	var (
+		body  string
+		found bool
+	)
+	for _, root := range s.gatewaySkillRoots() {
+		for _, candidateCategory := range preferredSkillCategories(category) {
+			content, ok := loadGatewaySkillBodyFromCategory(filepath.Join(root, candidateCategory), normalizedName)
+			if ok {
+				body = content
+				found = true
+			}
+		}
+	}
+	return body, found
+}
+
+func preferredSkillCategories(category string) []string {
+	if normalized := normalizeSkillCategory(category); normalized != "" {
+		return []string{normalized}
+	}
+	return []string{skillCategoryPublic, skillCategoryCustom}
+}
+
+func loadGatewaySkillBodyFromCategory(root, skillName string) (string, bool) {
+	var body string
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d == nil {
+			return nil
+		}
+		if d.IsDir() {
+			if path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "__MACOSX") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "SKILL.md" {
+			return nil
+		}
+		skill, ok := parseGatewaySkillFile(path, "")
+		if !ok || skill.Name != skillName {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		body = stripSkillFrontmatter(string(content))
+		return fs.SkipAll
+	})
+	body = strings.TrimSpace(body)
+	return body, body != ""
+}
+
+func stripSkillFrontmatter(content string) string {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	if !strings.HasPrefix(content, "---\n") {
+		return strings.TrimSpace(content)
+	}
+	rest := strings.TrimPrefix(content, "---\n")
+	idx := strings.Index(rest, "\n---\n")
+	if idx < 0 {
+		return strings.TrimSpace(content)
+	}
+	return strings.TrimSpace(rest[idx+len("\n---\n"):])
 }
 
 func parseGatewaySkillFile(path, category string) (gatewaySkill, bool) {
@@ -127,6 +207,5 @@ func uniqueCleanPaths(paths []string) []string {
 		seen[clean] = struct{}{}
 		out = append(out, clean)
 	}
-	sort.Strings(out)
 	return out
 }

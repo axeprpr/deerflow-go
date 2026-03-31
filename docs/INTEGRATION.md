@@ -480,7 +480,7 @@ Merge metadata into thread state.
 
 ### POST /threads/{thread_id}/history
 
-Return thread state history. Current implementation returns the latest state snapshot.
+Return persisted thread state history snapshots, newest first.
 
 **Request:**
 

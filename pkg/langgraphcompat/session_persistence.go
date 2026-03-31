@@ -1,6 +1,7 @@
 package langgraphcompat
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
+	"github.com/google/uuid"
 )
 
 type persistedSession struct {
@@ -23,6 +25,11 @@ type persistedSession struct {
 	Status    string           `json:"status"`
 	CreatedAt time.Time        `json:"created_at"`
 	UpdatedAt time.Time        `json:"updated_at"`
+}
+
+type persistedHistoryEntry struct {
+	CheckpointID string `json:"checkpoint_id"`
+	persistedSession
 }
 
 func (s *Server) loadPersistedSessions() error {
@@ -128,11 +135,18 @@ func (s *Server) persistSessionSnapshot(session *Session) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return err
+	}
+	return s.appendPersistedHistory(session)
 }
 
 func (s *Server) deletePersistedSession(threadID string) error {
 	err := os.Remove(s.sessionStatePath(threadID))
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	err = os.Remove(s.sessionHistoryPath(threadID))
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -141,6 +155,90 @@ func (s *Server) deletePersistedSession(threadID string) error {
 
 func (s *Server) sessionStatePath(threadID string) string {
 	return filepath.Join(s.dataRoot, "threads", threadID, "session.json")
+}
+
+func (s *Server) sessionHistoryPath(threadID string) string {
+	return filepath.Join(s.dataRoot, "threads", threadID, "history.jsonl")
+}
+
+func (s *Server) appendPersistedHistory(session *Session) error {
+	entry := persistedHistoryEntry{
+		CheckpointID: uuid.New().String(),
+		persistedSession: persistedSession{
+			ThreadID:  session.ThreadID,
+			Messages:  append([]models.Message(nil), session.Messages...),
+			Todos:     append([]Todo(nil), session.Todos...),
+			Metadata:  copyMetadataMap(session.Metadata),
+			Config:    copyMetadataMap(session.Configurable),
+			Status:    session.Status,
+			CreatedAt: session.CreatedAt,
+			UpdatedAt: session.UpdatedAt,
+		},
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+
+	path := s.sessionHistoryPath(session.ThreadID)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Server) readPersistedHistory(threadID string) ([]persistedHistoryEntry, error) {
+	f, err := os.Open(s.sessionHistoryPath(threadID))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+
+	entries := make([]persistedHistoryEntry, 0)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var entry persistedHistoryEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(entry.ThreadID) == "" {
+			entry.ThreadID = threadID
+		}
+		if strings.TrimSpace(entry.CheckpointID) == "" {
+			entry.CheckpointID = uuid.New().String()
+		}
+		if entry.Metadata == nil {
+			entry.Metadata = map[string]any{}
+		}
+		if entry.Config == nil {
+			entry.Config = defaultThreadConfig(entry.ThreadID)
+		}
+		if entry.Status == "" {
+			entry.Status = "idle"
+		}
+		if entry.CreatedAt.IsZero() {
+			entry.CreatedAt = entry.UpdatedAt
+		}
+		if entry.UpdatedAt.IsZero() {
+			entry.UpdatedAt = entry.CreatedAt
+		}
+		entries = append(entries, entry)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return entries, nil
 }
 
 func collectArtifactPaths(root string) []string {

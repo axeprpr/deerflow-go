@@ -131,6 +131,38 @@ func TestMessagesToLangChainPreservesToolCallsAndUsageMetadata(t *testing.T) {
 	}
 }
 
+func TestResolveRunConfigInjectsSkillCreatorPromptForSkillMode(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+
+	skillRoot := filepath.Join(t.TempDir(), "skills")
+	skillDir := filepath.Join(skillRoot, "public", "skill-creator")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: skill-creator
+description: Create new skills.
+---
+# Skill Creator
+
+Interview the user before drafting the skill.
+`), 0o644); err != nil {
+		t.Fatalf("write skill creator: %v", err)
+	}
+	t.Setenv("DEERFLOW_SKILLS_ROOT", skillRoot)
+
+	cfg, err := s.resolveRunConfig(runConfig{}, map[string]any{"mode": "skill"})
+	if err != nil {
+		t.Fatalf("resolveRunConfig error: %v", err)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "Loaded skill instructions (skill-creator):") {
+		t.Fatalf("system prompt missing skill header: %q", cfg.SystemPrompt)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "Interview the user before drafting the skill.") {
+		t.Fatalf("system prompt missing skill body: %q", cfg.SystemPrompt)
+	}
+}
+
 func TestForwardAgentEventEmitsCompatibleMessagesTuplePayloads(t *testing.T) {
 	s, _ := newCompatTestServer(t)
 	rec := httptest.NewRecorder()
@@ -329,6 +361,81 @@ func TestThreadHistorySupportsGETLimitQuery(t *testing.T) {
 	}
 	if got := asString(history[0].Values["title"]); got != "Saved thread" {
 		t.Fatalf("title=%q want Saved thread", got)
+	}
+}
+
+func TestThreadHistoryReturnsPersistedSnapshotsNewestFirst(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-history-multi"
+
+	session := s.ensureSession(threadID, map[string]any{"title": "First title"})
+	session.UpdatedAt = time.Date(2026, 3, 31, 9, 0, 0, 0, time.UTC)
+	if err := s.persistSessionSnapshot(cloneSession(session)); err != nil {
+		t.Fatalf("persist first snapshot: %v", err)
+	}
+
+	session.Metadata["title"] = "Second title"
+	session.Messages = []models.Message{{
+		ID:        "msg-1",
+		SessionID: threadID,
+		Role:      models.RoleHuman,
+		Content:   "hello history",
+	}}
+	session.UpdatedAt = time.Date(2026, 3, 31, 10, 0, 0, 0, time.UTC)
+	if err := s.persistSessionSnapshot(cloneSession(session)); err != nil {
+		t.Fatalf("persist second snapshot: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/threads/"+threadID+"/history", strings.NewReader(`{"limit":2}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var history []ThreadState
+	if err := json.Unmarshal(resp.Body.Bytes(), &history); err != nil {
+		t.Fatalf("unmarshal history: %v", err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("history len=%d want=2", len(history))
+	}
+	if got := asString(history[0].Values["title"]); got != "Second title" {
+		t.Fatalf("latest title=%q want Second title", got)
+	}
+	if got := asString(history[1].Values["title"]); got != "First title" {
+		t.Fatalf("older title=%q want First title", got)
+	}
+	if history[0].CheckpointID == "" || history[1].CheckpointID == "" {
+		t.Fatalf("checkpoint ids must be present: %#v", history)
+	}
+}
+
+func TestThreadHistorySurvivesServerReload(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	threadID := "thread-history-reload"
+	session := s.ensureSession(threadID, map[string]any{"title": "Before reload"})
+	session.UpdatedAt = time.Date(2026, 3, 31, 11, 0, 0, 0, time.UTC)
+	if err := s.persistSessionSnapshot(cloneSession(session)); err != nil {
+		t.Fatalf("persist snapshot: %v", err)
+	}
+
+	reloaded := &Server{
+		sessions:   make(map[string]*Session),
+		runs:       make(map[string]*Run),
+		runStreams: make(map[string]map[uint64]chan StreamEvent),
+		dataRoot:   s.dataRoot,
+	}
+	if err := reloaded.loadPersistedSessions(); err != nil {
+		t.Fatalf("load persisted sessions: %v", err)
+	}
+
+	history := reloaded.threadHistory(threadID)
+	if len(history) == 0 {
+		t.Fatal("expected persisted history after reload")
+	}
+	if got := asString(history[0].Values["title"]); got != "Before reload" {
+		t.Fatalf("title=%q want Before reload", got)
 	}
 }
 
@@ -1692,6 +1799,7 @@ func TestRunsStreamAppliesCustomAgentRuntimeConfig(t *testing.T) {
 		t.Fatalf("tools=%q want=%q", strings.Join(gotTools, ","), "ask_clarification,bash,glob,present_file,read_file")
 	}
 }
+
 
 func TestRunsStreamInjectsUserProfileIntoCustomAgentPrompt(t *testing.T) {
 	provider := &streamSpyProvider{}

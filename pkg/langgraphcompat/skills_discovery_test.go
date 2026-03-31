@@ -55,3 +55,52 @@ license: MIT
 		t.Fatal("expected default public skill to remain enabled")
 	}
 }
+
+func TestGatewaySkillRootsDiscoversSiblingDeerflowUISkills(t *testing.T) {
+	projectRoot := t.TempDir()
+	uiSkillDir := filepath.Join(projectRoot, "..", "deerflow-ui", "skills", "public", "skill-creator")
+	if err := os.MkdirAll(uiSkillDir, 0o755); err != nil {
+		t.Fatalf("mkdir sibling skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uiSkillDir, "SKILL.md"), []byte(`---
+name: skill-creator
+description: Create and refine skills.
+license: MIT
+---
+# Skill Creator
+
+Ask focused questions before drafting the skill.
+`), 0o644); err != nil {
+		t.Fatalf("write sibling skill: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(projectRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(wd)
+	}()
+
+	s, _ := newCompatTestServer(t)
+	skills := s.currentGatewaySkills()
+
+	skill, ok := skills[skillStorageKey(skillCategoryPublic, "skill-creator")]
+	if !ok {
+		t.Fatalf("expected sibling deerflow-ui skill discovery, got %#v", skills)
+	}
+	if skill.Description != "Create and refine skills." {
+		t.Fatalf("description=%q want=%q", skill.Description, "Create and refine skills.")
+	}
+
+	body, ok := s.loadGatewaySkillBody("skill-creator", skillCategoryPublic)
+	if !ok {
+		t.Fatal("expected to load sibling skill body")
+	}
+	if got, want := body, "# Skill Creator\n\nAsk focused questions before drafting the skill."; got != want {
+		t.Fatalf("skill body=%q want=%q", got, want)
+	}
+}

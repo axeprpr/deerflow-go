@@ -150,6 +150,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 	}
 
 	runMessages := append([]models.Message(nil), messages...)
+	runMessages = patchDanglingToolCalls(runMessages)
 	usage := &Usage{}
 	loopHistory := make([]string, 0, defaultLoopWindowSize)
 	loopWarned := make(map[string]struct{})
@@ -605,6 +606,70 @@ func mergeToolCalls(existing, incoming []models.ToolCall) []models.ToolCall {
 	}
 
 	return existing
+}
+
+func patchDanglingToolCalls(messages []models.Message) []models.Message {
+	if len(messages) == 0 {
+		return messages
+	}
+
+	existingResults := make(map[string]struct{})
+	for _, msg := range messages {
+		if msg.Role != models.RoleTool || msg.ToolResult == nil {
+			continue
+		}
+		callID := strings.TrimSpace(msg.ToolResult.CallID)
+		if callID != "" {
+			existingResults[callID] = struct{}{}
+		}
+	}
+
+	patched := make([]models.Message, 0, len(messages))
+	inserted := make(map[string]struct{})
+	needsPatch := false
+
+	for _, msg := range messages {
+		patched = append(patched, msg)
+		if msg.Role != models.RoleAI || len(msg.ToolCalls) == 0 {
+			continue
+		}
+
+		for _, call := range msg.ToolCalls {
+			callID := strings.TrimSpace(call.ID)
+			if callID == "" {
+				continue
+			}
+			if _, ok := existingResults[callID]; ok {
+				continue
+			}
+			if _, ok := inserted[callID]; ok {
+				continue
+			}
+
+			needsPatch = true
+			inserted[callID] = struct{}{}
+			result := models.ToolResult{
+				CallID:      callID,
+				ToolName:    call.Name,
+				Status:      models.CallStatusFailed,
+				Error:       "[Tool call was interrupted and did not return a result.]",
+				CompletedAt: time.Now().UTC(),
+			}
+			patched = append(patched, models.Message{
+				ID:         newMessageID("tool"),
+				SessionID:  msg.SessionID,
+				Role:       models.RoleTool,
+				Content:    toolMessageContent(result),
+				ToolResult: &result,
+				CreatedAt:  result.CompletedAt,
+			})
+		}
+	}
+
+	if !needsPatch {
+		return messages
+	}
+	return patched
 }
 
 func accumulateUsage(dst *Usage, src *llm.Usage) {
