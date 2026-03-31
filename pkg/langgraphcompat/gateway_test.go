@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -65,6 +66,20 @@ func waitForRunSubscriber(t *testing.T, s *Server, runID string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for run subscriber on %q", runID)
+}
+
+type fakeGatewayMCPClient struct {
+	tools  []models.Tool
+	closed bool
+}
+
+func (f *fakeGatewayMCPClient) Tools(ctx context.Context) ([]models.Tool, error) {
+	return append([]models.Tool(nil), f.tools...), nil
+}
+
+func (f *fakeGatewayMCPClient) Close() error {
+	f.closed = true
+	return nil
 }
 
 func TestMessagesToLangChainPreservesToolCallsAndUsageMetadata(t *testing.T) {
@@ -893,6 +908,12 @@ func TestModelsSkillsMCPConfigEndpoints(t *testing.T) {
 	if len(skillsData.Skills) == 0 {
 		t.Fatal("expected at least one skill")
 	}
+	for _, skill := range skillsData.Skills {
+		category, _ := skill["category"].(string)
+		if category != skillCategoryPublic && category != skillCategoryCustom {
+			t.Fatalf("unexpected skill category %q", category)
+		}
+	}
 
 	setResp := performCompatRequest(t, handler, http.MethodPut, "/api/skills/deep-research", strings.NewReader(`{"enabled":false}`), map[string]string{"Content-Type": "application/json"})
 	if setResp.Code != http.StatusOK {
@@ -908,10 +929,94 @@ func TestModelsSkillsMCPConfigEndpoints(t *testing.T) {
 	if putMCPResp.Code != http.StatusOK {
 		t.Fatalf("mcp put status=%d", putMCPResp.Code)
 	}
+	var mcpData struct {
+		MCPServers map[string]gatewayMCPServerConfig `json:"mcp_servers"`
+	}
+	if err := json.NewDecoder(putMCPResp.Body).Decode(&mcpData); err != nil {
+		t.Fatalf("decode mcp config: %v", err)
+	}
+	if !mcpData.MCPServers["foo"].Enabled {
+		t.Fatal("expected foo MCP server to remain enabled")
+	}
 
 	modelGetResp := performCompatRequest(t, handler, http.MethodGet, "/api/models/qwen/Qwen3.5-9B", nil, nil)
 	if modelGetResp.Code != http.StatusOK {
 		t.Fatalf("model get status=%d", modelGetResp.Code)
+	}
+}
+
+func TestMCPConfigRoundTripsExtendedFields(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	body := `{"mcp_servers":{"github":{"enabled":true,"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-github"],"env":{"GITHUB_TOKEN":"$TOKEN"},"headers":{"X-Test":"1"},"url":"https://example.com/mcp","description":"GitHub tools"}}}`
+	resp := performCompatRequest(t, handler, http.MethodPut, "/api/mcp/config", strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("put status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		MCPServers map[string]gatewayMCPServerConfig `json:"mcp_servers"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode put payload: %v", err)
+	}
+	server := payload.MCPServers["github"]
+	if server.Type != "stdio" || server.Command != "npx" || server.URL != "https://example.com/mcp" {
+		t.Fatalf("unexpected MCP server payload: %#v", server)
+	}
+	if len(server.Args) != 2 || server.Args[1] != "@modelcontextprotocol/server-github" {
+		t.Fatalf("args=%#v", server.Args)
+	}
+	if server.Env["GITHUB_TOKEN"] != "$TOKEN" {
+		t.Fatalf("env=%#v", server.Env)
+	}
+	if server.Headers["X-Test"] != "1" {
+		t.Fatalf("headers=%#v", server.Headers)
+	}
+}
+
+func TestApplyGatewayMCPConfigRegistersConnectedTools(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	s.tools = tools.NewRegistry()
+	s.mcpConnector = func(ctx context.Context, name string, cfg gatewayMCPServerConfig) (gatewayMCPClient, error) {
+		if name != "github" {
+			return nil, errors.New("unexpected server")
+		}
+		return &fakeGatewayMCPClient{tools: []models.Tool{{
+			Name:        "github.search_repos",
+			Description: "Search repositories",
+			Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+				return models.ToolResult{CallID: call.ID, ToolName: call.Name, Status: models.CallStatusCompleted, Content: "ok"}, nil
+			},
+		}}}, nil
+	}
+
+	s.applyGatewayMCPConfig(context.Background(), gatewayMCPConfig{
+		MCPServers: map[string]gatewayMCPServerConfig{
+			"github": {
+				Enabled: true,
+				Type:    "stdio",
+				Command: "npx",
+			},
+		},
+	})
+
+	if tool := s.tools.Get("github.search_repos"); tool == nil {
+		t.Fatal("expected MCP tool to be registered")
+	}
+
+	s.applyGatewayMCPConfig(context.Background(), gatewayMCPConfig{
+		MCPServers: map[string]gatewayMCPServerConfig{
+			"github": {
+				Enabled: false,
+				Type:    "stdio",
+				Command: "npx",
+			},
+		},
+	})
+
+	if tool := s.tools.Get("github.search_repos"); tool != nil {
+		t.Fatal("expected MCP tool to be removed when server is disabled")
 	}
 }
 
@@ -1021,8 +1126,8 @@ func TestSkillInstallFromArchive(t *testing.T) {
 	if !payload.Success || payload.SkillName != "demo-skill" {
 		t.Fatalf("unexpected install payload: %#v", payload)
 	}
-	if payload.Skill["category"] != "productivity" {
-		t.Fatalf("skill category=%v want productivity", payload.Skill["category"])
+	if payload.Skill["category"] != skillCategoryCustom {
+		t.Fatalf("skill category=%v want %s", payload.Skill["category"], skillCategoryCustom)
 	}
 	if payload.Skill["license"] != "MIT" {
 		t.Fatalf("skill license=%v want MIT", payload.Skill["license"])
@@ -1031,6 +1136,75 @@ func TestSkillInstallFromArchive(t *testing.T) {
 	target := filepath.Join(s.dataRoot, "skills", "custom", "demo-skill", "SKILL.md")
 	if _, err := os.Stat(target); err != nil {
 		t.Fatalf("expected installed skill file: %v", err)
+	}
+}
+
+func TestSkillEndpointsKeepPublicAndCustomVariantsSeparate(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-skill-conflict"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir upload dir: %v", err)
+	}
+	archivePath := filepath.Join(uploadDir, "deep-research.skill")
+	if err := writeSkillArchive(archivePath, "deep-research"); err != nil {
+		t.Fatalf("write skill archive: %v", err)
+	}
+
+	body := `{"thread_id":"` + threadID + `","path":"/mnt/user-data/uploads/deep-research.skill"}`
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/skills/install", strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("install status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	listResp := performCompatRequest(t, handler, http.MethodGet, "/api/skills", nil, nil)
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("list status=%d", listResp.Code)
+	}
+
+	var listPayload struct {
+		Skills []gatewaySkill `json:"skills"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&listPayload); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	var categories []string
+	for _, skill := range listPayload.Skills {
+		if skill.Name == "deep-research" {
+			categories = append(categories, skill.Category)
+		}
+	}
+	if strings.Join(categories, ",") != "custom,public" {
+		t.Fatalf("categories=%q want=%q", strings.Join(categories, ","), "custom,public")
+	}
+
+	getCustom := performCompatRequest(t, handler, http.MethodGet, "/api/skills/deep-research?category=custom", nil, nil)
+	if getCustom.Code != http.StatusOK {
+		t.Fatalf("get custom status=%d", getCustom.Code)
+	}
+	var custom gatewaySkill
+	if err := json.NewDecoder(getCustom.Body).Decode(&custom); err != nil {
+		t.Fatalf("decode custom skill: %v", err)
+	}
+	if custom.Category != skillCategoryCustom {
+		t.Fatalf("custom category=%q", custom.Category)
+	}
+
+	updateResp := performCompatRequest(t, handler, http.MethodPut, "/api/skills/deep-research?category=custom", strings.NewReader(`{"enabled":false}`), map[string]string{"Content-Type": "application/json"})
+	if updateResp.Code != http.StatusOK {
+		t.Fatalf("update custom status=%d body=%s", updateResp.Code, updateResp.Body.String())
+	}
+
+	publicResp := performCompatRequest(t, handler, http.MethodGet, "/api/skills/deep-research?category=public", nil, nil)
+	if publicResp.Code != http.StatusOK {
+		t.Fatalf("get public status=%d", publicResp.Code)
+	}
+	var public gatewaySkill
+	if err := json.NewDecoder(publicResp.Body).Decode(&public); err != nil {
+		t.Fatalf("decode public skill: %v", err)
+	}
+	if !public.Enabled {
+		t.Fatal("expected public skill to remain enabled")
 	}
 }
 

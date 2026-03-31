@@ -51,6 +51,10 @@ type Server struct {
 	agents       map[string]gatewayAgent
 	userProfile  string
 	memory       gatewayMemoryResponse
+	mcpMu        sync.Mutex
+	mcpClients   map[string]gatewayMCPClient
+	mcpToolNames map[string]struct{}
+	mcpConnector gatewayMCPConnector
 }
 
 type HealthStatus struct {
@@ -201,12 +205,16 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		mcpConfig:    defaultGatewayMCPConfig(),
 		agents:       map[string]gatewayAgent{},
 		memory:       defaultGatewayMemory(),
+		mcpClients:   map[string]gatewayMCPClient{},
+		mcpToolNames: map[string]struct{}{},
+		mcpConnector: defaultGatewayMCPConnector,
 	}
 	registry.Register(s.setupAgentTool())
 	registry.Register(s.todoTool())
 	if err := s.loadGatewayState(); err != nil {
 		logger.Printf("Warning: failed to load gateway state: %v", err)
 	}
+	s.applyGatewayMCPConfig(ctx, s.mcpConfig)
 	if err := s.loadPersistedSessions(); err != nil {
 		logger.Printf("Warning: failed to load persisted sessions: %v", err)
 	}
@@ -295,6 +303,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.store != nil {
 		s.store.Close()
 	}
+	s.closeGatewayMCPClients()
 	if s.sandbox != nil {
 		if err := s.sandbox.Close(); err != nil && shutdownErr == nil {
 			shutdownErr = err

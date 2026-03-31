@@ -46,8 +46,14 @@ type gatewaySkill struct {
 }
 
 type gatewayMCPServerConfig struct {
-	Enabled     bool   `json:"enabled"`
-	Description string `json:"description"`
+	Type        string            `json:"type,omitempty"`
+	Enabled     bool              `json:"enabled"`
+	Command     string            `json:"command,omitempty"`
+	Args        []string          `json:"args,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+	URL         string            `json:"url,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	Description string            `json:"description"`
 }
 
 type gatewayMCPConfig struct {
@@ -63,6 +69,11 @@ type gatewayPersistedState struct {
 }
 
 const maxSkillArchiveSize int64 = 512 << 20
+
+const (
+	skillCategoryPublic = "public"
+	skillCategoryCustom = "custom"
+)
 
 var skillInstallSeq uint64
 var agentNameRE = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
@@ -169,15 +180,19 @@ func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
 		skills = append(skills, skill)
 	}
 	sort.Slice(skills, func(i, j int) bool {
-		return skills[i].Name < skills[j].Name
+		if skills[i].Category == skills[j].Category {
+			return skills[i].Name < skills[j].Name
+		}
+		return skills[i].Category < skills[j].Category
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"skills": skills})
 }
 
 func (s *Server) handleSkillGet(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.PathValue("skill_name"))
+	category := strings.TrimSpace(r.URL.Query().Get("category"))
 	s.uiStateMu.RLock()
-	skill, ok := s.skills[name]
+	skill, ok := findGatewaySkill(s.skills, name, category)
 	s.uiStateMu.RUnlock()
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Skill '%s' not found", name)})
@@ -192,6 +207,7 @@ func (s *Server) handleSkillSetEnabled(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "skill_name is required"})
 		return
 	}
+	category := strings.TrimSpace(r.URL.Query().Get("category"))
 	var req struct {
 		Enabled bool `json:"enabled"`
 	}
@@ -201,14 +217,14 @@ func (s *Server) handleSkillSetEnabled(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.uiStateMu.Lock()
-	skill, ok := s.skills[name]
+	key, skill, ok := findGatewaySkillEntry(s.skills, name, category)
 	if !ok {
 		s.uiStateMu.Unlock()
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": "skill not found"})
 		return
 	}
 	skill.Enabled = req.Enabled
-	s.skills[name] = skill
+	s.skills[key] = skill
 	s.uiStateMu.Unlock()
 	if err := s.persistGatewayState(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
@@ -277,6 +293,7 @@ func (s *Server) handleMCPConfigPut(w http.ResponseWriter, r *http.Request) {
 	s.uiStateMu.Lock()
 	s.mcpConfig = req
 	s.uiStateMu.Unlock()
+	s.applyGatewayMCPConfig(r.Context(), req)
 	if err := s.persistGatewayState(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
 		return
@@ -1360,7 +1377,7 @@ func (s *Server) installSkillArchive(archivePath string) (gatewaySkill, error) {
 	skill := gatewaySkill{
 		Name:        skillName,
 		Description: firstNonEmpty(metadata["description"], "Installed from .skill archive"),
-		Category:    firstNonEmpty(metadata["category"], "custom"),
+		Category:    resolveSkillCategory(metadata["category"], skillCategoryCustom),
 		License:     firstNonEmpty(metadata["license"], "Unknown"),
 		Enabled:     true,
 	}
@@ -1369,7 +1386,7 @@ func (s *Server) installSkillArchive(archivePath string) (gatewaySkill, error) {
 	if s.skills == nil {
 		s.skills = map[string]gatewaySkill{}
 	}
-	s.skills[skillName] = skill
+	s.skills[skillStorageKey(skill.Category, skill.Name)] = skill
 	s.uiStateMu.Unlock()
 	if err := s.persistGatewayState(); err != nil {
 		return gatewaySkill{}, err
@@ -1497,7 +1514,7 @@ func (s *Server) loadGatewayState() error {
 	s.uiStateMu.Lock()
 	defer s.uiStateMu.Unlock()
 	if state.Skills != nil {
-		s.skills = state.Skills
+		s.skills = mergeGatewaySkills(defaultGatewaySkills(), normalizePersistedSkills(state.Skills))
 	}
 	if state.MCPConfig.MCPServers != nil {
 		s.mcpConfig = state.MCPConfig
@@ -1531,28 +1548,150 @@ func (s *Server) persistGatewayState() error {
 
 func defaultGatewaySkills() map[string]gatewaySkill {
 	return map[string]gatewaySkill{
-		"deep-research": {
+		skillStorageKey(skillCategoryPublic, "deep-research"): {
 			Name:        "deep-research",
 			Description: "Research and summarize a topic with structured outputs.",
-			Category:    "research",
+			Category:    skillCategoryPublic,
 			License:     "MIT",
 			Enabled:     true,
 		},
-		"code-assist": {
+		skillStorageKey(skillCategoryPublic, "code-assist"): {
 			Name:        "code-assist",
 			Description: "Code reading, patching, and debugging workflows.",
-			Category:    "engineering",
+			Category:    skillCategoryPublic,
 			License:     "MIT",
 			Enabled:     true,
 		},
 	}
 }
 
+func findGatewaySkill(skills map[string]gatewaySkill, name, category string) (gatewaySkill, bool) {
+	_, skill, ok := findGatewaySkillEntry(skills, name, category)
+	return skill, ok
+}
+
+func findGatewaySkillEntry(skills map[string]gatewaySkill, name, category string) (string, gatewaySkill, bool) {
+	normalizedName := sanitizeSkillName(name)
+	if normalizedName == "" {
+		return "", gatewaySkill{}, false
+	}
+
+	if normalizedCategory := normalizeSkillCategory(category); normalizedCategory != "" {
+		key := skillStorageKey(normalizedCategory, normalizedName)
+		skill, ok := skills[key]
+		return key, skill, ok
+	}
+
+	publicKey := skillStorageKey(skillCategoryPublic, normalizedName)
+	if skill, ok := skills[publicKey]; ok {
+		return publicKey, skill, true
+	}
+
+	customKey := skillStorageKey(skillCategoryCustom, normalizedName)
+	if skill, ok := skills[customKey]; ok {
+		return customKey, skill, true
+	}
+
+	if skill, ok := skills[normalizedName]; ok {
+		return normalizedName, normalizeGatewaySkill(skill, normalizedName, ""), true
+	}
+	return "", gatewaySkill{}, false
+}
+
+func normalizePersistedSkills(skills map[string]gatewaySkill) map[string]gatewaySkill {
+	if len(skills) == 0 {
+		return map[string]gatewaySkill{}
+	}
+
+	normalized := make(map[string]gatewaySkill, len(skills))
+	for key, skill := range skills {
+		fallbackCategory, fallbackName := splitSkillStorageKey(key)
+		out := normalizeGatewaySkill(skill, fallbackName, fallbackCategory)
+		normalized[skillStorageKey(out.Category, out.Name)] = out
+	}
+	return normalized
+}
+
+func mergeGatewaySkills(base, overlay map[string]gatewaySkill) map[string]gatewaySkill {
+	merged := make(map[string]gatewaySkill, len(base)+len(overlay))
+	for key, skill := range base {
+		merged[key] = skill
+	}
+	for key, skill := range overlay {
+		merged[key] = skill
+	}
+	return merged
+}
+
+func normalizeGatewaySkill(skill gatewaySkill, fallbackName, fallbackCategory string) gatewaySkill {
+	skill.Name = sanitizeSkillName(firstNonEmpty(skill.Name, fallbackName))
+	if fallbackCategory == "" {
+		fallbackCategory = inferSkillCategory(skill.Name)
+	}
+	skill.Category = resolveSkillCategory(skill.Category, fallbackCategory)
+	if skill.Category == "" {
+		skill.Category = skillCategoryPublic
+	}
+	return skill
+}
+
+func normalizeSkillCategory(category string) string {
+	switch strings.ToLower(strings.TrimSpace(category)) {
+	case "":
+		return ""
+	case skillCategoryPublic:
+		return skillCategoryPublic
+	case skillCategoryCustom:
+		return skillCategoryCustom
+	default:
+		return ""
+	}
+}
+
+func resolveSkillCategory(category, fallback string) string {
+	if normalized := normalizeSkillCategory(category); normalized != "" {
+		return normalized
+	}
+	if normalizedFallback := normalizeSkillCategory(fallback); normalizedFallback != "" {
+		return normalizedFallback
+	}
+	return ""
+}
+
+func inferSkillCategory(name string) string {
+	key := skillStorageKey(skillCategoryPublic, name)
+	if _, ok := defaultGatewaySkills()[key]; ok {
+		return skillCategoryPublic
+	}
+	return skillCategoryCustom
+}
+
+func skillStorageKey(category, name string) string {
+	category = normalizeSkillCategory(category)
+	name = sanitizeSkillName(name)
+	if name == "" {
+		return ""
+	}
+	if category == "" {
+		category = skillCategoryPublic
+	}
+	return category + ":" + name
+}
+
+func splitSkillStorageKey(key string) (string, string) {
+	key = strings.TrimSpace(key)
+	if category, name, ok := strings.Cut(key, ":"); ok {
+		return normalizeSkillCategory(category), sanitizeSkillName(name)
+	}
+	return "", sanitizeSkillName(key)
+}
+
 func defaultGatewayMCPConfig() gatewayMCPConfig {
 	return gatewayMCPConfig{
 		MCPServers: map[string]gatewayMCPServerConfig{
 			"default": {
-				Enabled:     true,
+				Type:        "stdio",
+				Enabled:     false,
 				Description: "Default MCP server placeholder for deerflow-go.",
 			},
 		},

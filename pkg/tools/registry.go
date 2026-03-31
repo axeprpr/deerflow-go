@@ -49,6 +49,23 @@ func (r *Registry) Register(tool models.Tool) error {
 	return nil
 }
 
+func (r *Registry) Unregister(name string) bool {
+	if r == nil {
+		return false
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.tools[name]; !exists {
+		return false
+	}
+	delete(r.tools, name)
+	return true
+}
+
 func (r *Registry) Get(name string) *models.Tool {
 	if r == nil {
 		return nil
