@@ -123,7 +123,7 @@ type Message struct {
 	Type             string         `json:"type"`
 	ID               string         `json:"id"`
 	Role             string         `json:"role,omitempty"`
-	Content          string         `json:"content,omitempty"`
+	Content          any            `json:"content,omitempty"`
 	Name             string         `json:"name,omitempty"`
 	Data             map[string]any `json:"data,omitempty"`
 	AdditionalKwargs map[string]any `json:"additional_kwargs,omitempty"`
@@ -318,6 +318,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	s.registerLangGraphRoutes(mux, "")
 	s.registerLangGraphRoutes(mux, "/api/langgraph")
 	s.registerGatewayRoutes(mux)
+	s.registerDocsRoutes(mux)
 
 	// Health check
 	mux.HandleFunc("GET /health", s.handleHealth)

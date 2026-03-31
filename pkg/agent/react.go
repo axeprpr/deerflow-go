@@ -96,13 +96,13 @@ func cloneRegistryWithPresentFileTool(base *tools.Registry, presentFiles *tools.
 	cloned := tools.NewRegistry()
 	if base != nil {
 		for _, tool := range base.List() {
-			if tool.Name == "present_file" {
+			if tool.Name == "present_file" || tool.Name == "present_files" {
 				continue
 			}
 			_ = cloned.Register(tool)
 		}
 	}
-	_ = cloned.Register(tools.PresentFileTool(presentFiles))
+	_ = cloned.Register(tools.PresentFilesTool(presentFiles))
 	return cloned
 }
 

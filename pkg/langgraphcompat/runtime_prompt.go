@@ -14,14 +14,14 @@ const workingDirectoryPrompt = "<working_directory existed=\"true\">\n" +
 	"- Use available file tools to inspect uploaded files using their listed paths\n" +
 	"- For PDF, PPT, Excel, and Word files, converted Markdown versions (`*.md`) may be available alongside originals\n" +
 	"- All temporary work happens in `/mnt/user-data/workspace`\n" +
-	"- Final deliverables must be copied to `/mnt/user-data/outputs` and presented using `present_file` tool\n" +
+	"- Final deliverables must be copied to `/mnt/user-data/outputs` and presented using `present_files` tool\n" +
 	"</working_directory>"
 
 const acpAgentPrompt = "**ACP Agent Tasks (`invoke_acp_agent`):**\n" +
 	"- ACP agents run in their own independent workspace, not in `/mnt/user-data/`\n" +
 	"- When writing prompts for ACP agents, describe the task only and do not reference `/mnt/user-data` paths\n" +
 	"- ACP agent results are accessible at `/mnt/acp-workspace/` (read-only) and can be inspected with file tools or `bash cp`\n" +
-	"- To deliver ACP output to the user: copy from `/mnt/acp-workspace/<file>` to `/mnt/user-data/outputs/<file>`, then use `present_file`"
+	"- To deliver ACP output to the user: copy from `/mnt/acp-workspace/<file>` to `/mnt/user-data/outputs/<file>`, then use `present_files`"
 
 func (s *Server) environmentPrompt() string {
 	parts := make([]string, 0, 3)

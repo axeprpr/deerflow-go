@@ -155,75 +155,149 @@ func (r *PresentFileRegistry) findByPathLocked(path string) (string, PresentFile
 }
 
 func PresentFileTool(registry *PresentFileRegistry) models.Tool {
-	return models.Tool{
-		Name:        "present_file",
-		Description: "Register a file as a generated artifact for the UI to display.",
-		Groups:      []string{"builtin", "file_ops"},
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"path":        map[string]any{"type": "string", "description": "Path to the generated file"},
-				"description": map[string]any{"type": "string", "description": "Short description shown in the UI"},
-				"mime_type":   map[string]any{"type": "string", "description": "Optional MIME type override"},
-			},
-			"required": []any{"path"},
+	return buildPresentFileTool(registry, "present_file", false)
+}
+
+func PresentFilesTool(registry *PresentFileRegistry) models.Tool {
+	return buildPresentFileTool(registry, "present_files", true)
+}
+
+func buildPresentFileTool(registry *PresentFileRegistry, name string, multiple bool) models.Tool {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"description": map[string]any{"type": "string", "description": "Short description shown in the UI"},
+			"mime_type":   map[string]any{"type": "string", "description": "Optional MIME type override"},
 		},
+	}
+	if multiple {
+		schema["properties"].(map[string]any)["filepaths"] = map[string]any{
+			"type":        "array",
+			"description": "Paths to generated files",
+			"items":       map[string]any{"type": "string"},
+		}
+		schema["required"] = []any{"filepaths"}
+	} else {
+		schema["properties"].(map[string]any)["path"] = map[string]any{"type": "string", "description": "Path to the generated file"}
+		schema["required"] = []any{"path"}
+	}
+
+	return models.Tool{
+		Name:        name,
+		Description: "Register generated output files so the UI can display them.",
+		Groups:      []string{"builtin", "file_ops"},
+		InputSchema: schema,
 		Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
 			_ = ctx
-			if registry == nil {
-				err := fmt.Errorf("present file registry is required")
-				return models.ToolResult{
-					CallID:   call.ID,
-					ToolName: call.Name,
-					Status:   models.CallStatusFailed,
-					Error:    err.Error(),
-				}, err
-			}
+			return presentFiles(registry, call)
+		},
+	}
+}
 
-			path, _ := call.Arguments["path"].(string)
-			description, _ := call.Arguments["description"].(string)
-			mimeType, _ := call.Arguments["mime_type"].(string)
+func presentFiles(registry *PresentFileRegistry, call models.ToolCall) (models.ToolResult, error) {
+	if registry == nil {
+		err := fmt.Errorf("present file registry is required")
+		return models.ToolResult{
+			CallID:   call.ID,
+			ToolName: call.Name,
+			Status:   models.CallStatusFailed,
+			Error:    err.Error(),
+		}, err
+	}
 
-			file := PresentFile{
-				Path:        path,
-				Description: description,
-				MimeType:    mimeType,
-			}
-			if err := registry.Register(file); err != nil {
-				return models.ToolResult{
-					CallID:   call.ID,
-					ToolName: call.Name,
-					Status:   models.CallStatusFailed,
-					Error:    err.Error(),
-				}, err
-			}
+	filepaths := extractPresentFilePaths(call.Arguments)
+	if len(filepaths) == 0 {
+		err := fmt.Errorf("at least one file path is required")
+		return models.ToolResult{
+			CallID:   call.ID,
+			ToolName: call.Name,
+			Status:   models.CallStatusFailed,
+			Error:    err.Error(),
+		}, err
+	}
 
-			registered, ok := latestRegisteredFile(registry, path)
-			if !ok {
-				err := fmt.Errorf("registered file not found")
-				return models.ToolResult{
-					CallID:   call.ID,
-					ToolName: call.Name,
-					Status:   models.CallStatusFailed,
-					Error:    err.Error(),
-				}, err
-			}
-
+	description, _ := call.Arguments["description"].(string)
+	mimeType, _ := call.Arguments["mime_type"].(string)
+	registeredFiles := make([]PresentFile, 0, len(filepaths))
+	for _, path := range filepaths {
+		file := PresentFile{
+			Path:        path,
+			Description: description,
+			MimeType:    mimeType,
+		}
+		if err := registry.Register(file); err != nil {
 			return models.ToolResult{
 				CallID:   call.ID,
 				ToolName: call.Name,
-				Status:   models.CallStatusCompleted,
-				Content:  fmt.Sprintf("Registered file %s", registered.Path),
-				Data: map[string]any{
-					"id":          registered.ID,
-					"path":        registered.Path,
-					"description": registered.Description,
-					"mime_type":   registered.MimeType,
-					"created_at":  registered.CreatedAt.Format(time.RFC3339Nano),
-				},
-			}, nil
-		},
+				Status:   models.CallStatusFailed,
+				Error:    err.Error(),
+			}, err
+		}
+
+		registered, ok := latestRegisteredFile(registry, path)
+		if !ok {
+			err := fmt.Errorf("registered file not found")
+			return models.ToolResult{
+				CallID:   call.ID,
+				ToolName: call.Name,
+				Status:   models.CallStatusFailed,
+				Error:    err.Error(),
+			}, err
+		}
+		registeredFiles = append(registeredFiles, registered)
 	}
+
+	resultData := map[string]any{
+		"filepaths": presentRegistryPaths(registeredFiles),
+	}
+	content := fmt.Sprintf("Presented %d file(s)", len(registeredFiles))
+	if len(registeredFiles) == 1 {
+		registered := registeredFiles[0]
+		content = fmt.Sprintf("Registered file %s", registered.Path)
+		resultData["id"] = registered.ID
+		resultData["path"] = registered.Path
+		resultData["description"] = registered.Description
+		resultData["mime_type"] = registered.MimeType
+		resultData["created_at"] = registered.CreatedAt.Format(time.RFC3339Nano)
+	}
+
+	return models.ToolResult{
+		CallID:   call.ID,
+		ToolName: call.Name,
+		Status:   models.CallStatusCompleted,
+		Content:  content,
+		Data:     resultData,
+	}, nil
+}
+
+func extractPresentFilePaths(args map[string]any) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	if path, _ := args["path"].(string); strings.TrimSpace(path) != "" {
+		return []string{strings.TrimSpace(path)}
+	}
+	rawPaths, _ := args["filepaths"].([]any)
+	paths := make([]string, 0, len(rawPaths))
+	for _, raw := range rawPaths {
+		path, _ := raw.(string)
+		path = strings.TrimSpace(path)
+		if path != "" {
+			paths = append(paths, path)
+		}
+	}
+	return paths
+}
+
+func presentRegistryPaths(files []PresentFile) []string {
+	if len(files) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		paths = append(paths, file.Path)
+	}
+	return paths
 }
 
 func latestRegisteredFile(registry *PresentFileRegistry, path string) (PresentFile, bool) {

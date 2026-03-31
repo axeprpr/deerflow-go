@@ -186,3 +186,41 @@ func TestPresentFileToolMissingPath(t *testing.T) {
 		t.Errorf("Status = %q, want %q", result.Status, models.CallStatusFailed)
 	}
 }
+
+func TestPresentFilesTool(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "report.md")
+	second := filepath.Join(dir, "chart.csv")
+	if err := os.WriteFile(first, []byte("# report\n"), 0644); err != nil {
+		t.Fatalf("write first file: %v", err)
+	}
+	if err := os.WriteFile(second, []byte("x,y\n1,2\n"), 0644); err != nil {
+		t.Fatalf("write second file: %v", err)
+	}
+
+	registry := NewPresentFileRegistry()
+	tool := PresentFilesTool(registry)
+	result, err := tool.Handler(context.Background(), models.ToolCall{
+		ID:   "call_3",
+		Name: "present_files",
+		Arguments: map[string]any{
+			"filepaths": []any{first, second},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Handler failed: %v", err)
+	}
+	if result.Status != models.CallStatusCompleted {
+		t.Fatalf("Status = %q, want %q", result.Status, models.CallStatusCompleted)
+	}
+	filepaths, ok := result.Data["filepaths"].([]string)
+	if !ok {
+		t.Fatalf("filepaths type = %T, want []string", result.Data["filepaths"])
+	}
+	if len(filepaths) != 2 {
+		t.Fatalf("filepaths len = %d, want 2", len(filepaths))
+	}
+	if len(registry.List()) != 2 {
+		t.Fatalf("registry len = %d, want 2", len(registry.List()))
+	}
+}

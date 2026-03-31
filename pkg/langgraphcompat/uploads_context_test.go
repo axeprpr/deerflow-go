@@ -39,11 +39,11 @@ func TestConvertToMessagesInjectsUploadedFilesBlockAndPreservesKwargs(t *testing
 			"additional_kwargs": map[string]any{
 				"files": []any{
 					map[string]any{
-						"filename":    "report.pdf",
-						"size":       3.0,
-						"path":       "/tmp/ignored/report.pdf",
+						"filename":     "report.pdf",
+						"size":         3.0,
+						"path":         "/tmp/ignored/report.pdf",
 						"virtual_path": "/mnt/user-data/uploads/report.pdf",
-						"status":    "uploaded",
+						"status":       "uploaded",
 					},
 				},
 				"element": "task",
@@ -78,6 +78,74 @@ func TestConvertToMessagesInjectsUploadedFilesBlockAndPreservesKwargs(t *testing
 	if len(files) != 1 {
 		t.Fatalf("files len=%d want=1", len(files))
 	}
+	multi := decodeMultiContent(messages[0].Metadata)
+	if len(multi) < 2 {
+		t.Fatalf("multi_content len=%d want>=2", len(multi))
+	}
+	if got := multi[0]["type"]; got != "text" {
+		t.Fatalf("multi_content[0].type=%v want text", got)
+	}
+	if text, _ := multi[0]["text"].(string); !strings.Contains(text, "<uploaded_files>") {
+		t.Fatalf("multi_content missing upload context: %#v", multi[0])
+	}
+}
+
+func TestConvertToMessagesNormalizesUploadedFilePathAndSkipsMissingFiles(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{
+		sessions: make(map[string]*Session),
+		runs:     make(map[string]*Run),
+		dataRoot: root,
+	}
+
+	threadID := "thread-upload-normalize"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "report.pdf"), []byte("pdf"), 0o644); err != nil {
+		t.Fatalf("write current upload: %v", err)
+	}
+
+	input := []any{
+		map[string]any{
+			"role":    "user",
+			"content": "analyse upload",
+			"additional_kwargs": map[string]any{
+				"files": []any{
+					map[string]any{
+						"filename": "report.pdf",
+						"size":     "2048",
+						"path":     "/tmp/arbitrary/report.pdf",
+					},
+					map[string]any{
+						"filename": "missing.pdf",
+						"size":     99,
+						"path":     "/tmp/arbitrary/missing.pdf",
+					},
+				},
+			},
+		},
+	}
+
+	messages := s.convertToMessages(threadID, input)
+	if len(messages) != 1 {
+		t.Fatalf("messages len=%d want=1", len(messages))
+	}
+
+	content := messages[0].Content
+	if !strings.Contains(content, "/mnt/user-data/uploads/report.pdf") {
+		t.Fatalf("expected normalized upload path in %q", content)
+	}
+	if strings.Contains(content, "/tmp/arbitrary/report.pdf") {
+		t.Fatalf("unexpected unnormalized path in %q", content)
+	}
+	if strings.Contains(content, "missing.pdf") {
+		t.Fatalf("unexpected missing file in %q", content)
+	}
+	if !strings.Contains(content, "2.0 KB") {
+		t.Fatalf("expected parsed size in %q", content)
+	}
 }
 
 func TestMessagesToLangChainReturnsAdditionalKwargs(t *testing.T) {
@@ -109,5 +177,56 @@ func TestMessagesToLangChainReturnsAdditionalKwargs(t *testing.T) {
 	files, _ := out[0].AdditionalKwargs["files"].([]any)
 	if len(files) != 1 {
 		t.Fatalf("files len=%d want=1", len(files))
+	}
+}
+
+func TestConvertToMessagesPreservesMultimodalContent(t *testing.T) {
+	server := &Server{}
+	messages := server.convertToMessages("thread-vision", []any{
+		map[string]any{
+			"role": "user",
+			"content": []any{
+				map[string]any{"type": "text", "text": "describe this image"},
+				map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,abc"}},
+			},
+		},
+	})
+	if len(messages) != 1 {
+		t.Fatalf("messages len=%d want=1", len(messages))
+	}
+	multi := decodeMultiContent(messages[0].Metadata)
+	if len(multi) != 2 {
+		t.Fatalf("multi_content len=%d want=2", len(multi))
+	}
+	if got := multi[1]["type"]; got != "image_url" {
+		t.Fatalf("multi_content[1].type=%v want image_url", got)
+	}
+}
+
+func TestMessagesToLangChainReturnsMultiContentWhenAvailable(t *testing.T) {
+	server := &Server{}
+	out := server.messagesToLangChain([]models.Message{
+		{
+			ID:        "m1",
+			SessionID: "thread-1",
+			Role:      models.RoleHuman,
+			Content:   "describe this image",
+			Metadata: map[string]string{
+				"multi_content": `[{"type":"text","text":"describe this image"},{"type":"image_url","image_url":{"url":"data:image/png;base64,abc"}}]`,
+			},
+		},
+	})
+	if len(out) != 1 {
+		t.Fatalf("messages len=%d want=1", len(out))
+	}
+	parts, ok := out[0].Content.([]map[string]any)
+	if !ok {
+		t.Fatalf("content type=%T want []map[string]any", out[0].Content)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("content len=%d want=2", len(parts))
+	}
+	if got := parts[1]["type"]; got != "image_url" {
+		t.Fatalf("content[1].type=%v want image_url", got)
 	}
 }

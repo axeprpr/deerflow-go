@@ -44,6 +44,56 @@ func newCompatTestServer(t *testing.T) (*Server, http.Handler) {
 	return s, mux
 }
 
+func TestGatewayOpenAPIDocumentationEndpoints(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	openAPIResp := performCompatRequest(t, handler, http.MethodGet, "/openapi.json", nil, nil)
+	if openAPIResp.Code != http.StatusOK {
+		t.Fatalf("openapi status=%d", openAPIResp.Code)
+	}
+	var spec struct {
+		OpenAPI string         `json:"openapi"`
+		Info    map[string]any `json:"info"`
+		Paths   map[string]any `json:"paths"`
+	}
+	if err := json.NewDecoder(openAPIResp.Body).Decode(&spec); err != nil {
+		t.Fatalf("decode openapi: %v", err)
+	}
+	if spec.OpenAPI != "3.1.0" {
+		t.Fatalf("openapi=%q want=3.1.0", spec.OpenAPI)
+	}
+	if spec.Info["title"] != "DeerFlow API Gateway" {
+		t.Fatalf("title=%v want %q", spec.Info["title"], "DeerFlow API Gateway")
+	}
+	for _, path := range []string{"/api/models", "/api/threads/{thread_id}/uploads", "/runs/stream"} {
+		if _, ok := spec.Paths[path]; !ok {
+			t.Fatalf("missing path %q in openapi spec", path)
+		}
+	}
+
+	docsResp := performCompatRequest(t, handler, http.MethodGet, "/docs", nil, nil)
+	if docsResp.Code != http.StatusOK {
+		t.Fatalf("docs status=%d", docsResp.Code)
+	}
+	if got := docsResp.Header().Get("Content-Type"); !strings.Contains(got, "text/html") {
+		t.Fatalf("docs content-type=%q want html", got)
+	}
+	if !strings.Contains(docsResp.Body.String(), "SwaggerUIBundle") {
+		t.Fatalf("docs body missing swagger ui bootstrap: %q", docsResp.Body.String())
+	}
+
+	redocResp := performCompatRequest(t, handler, http.MethodGet, "/redoc", nil, nil)
+	if redocResp.Code != http.StatusOK {
+		t.Fatalf("redoc status=%d", redocResp.Code)
+	}
+	if got := redocResp.Header().Get("Content-Type"); !strings.Contains(got, "text/html") {
+		t.Fatalf("redoc content-type=%q want html", got)
+	}
+	if !strings.Contains(redocResp.Body.String(), "<redoc ") && !strings.Contains(redocResp.Body.String(), "<redoc>") {
+		t.Fatalf("redoc body missing redoc element: %q", redocResp.Body.String())
+	}
+}
+
 func performCompatRequest(t *testing.T, handler http.Handler, method, target string, body io.Reader, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, target, body)
@@ -1102,7 +1152,7 @@ func TestUploadsCreateDoesNotOverwriteExistingFile(t *testing.T) {
 
 func TestGatewayRejectsInvalidThreadIDForFileEndpoints(t *testing.T) {
 	_, handler := newCompatTestServer(t)
-	const badThreadID = "bad.id"
+	const badThreadID = "bad!id"
 
 	var body bytes.Buffer
 	w := multipart.NewWriter(&body)
@@ -1130,6 +1180,72 @@ func TestGatewayRejectsInvalidThreadIDForFileEndpoints(t *testing.T) {
 	deleteResp := performCompatRequest(t, handler, http.MethodDelete, "/api/threads/"+badThreadID, nil, nil)
 	if deleteResp.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("delete status=%d body=%s", deleteResp.Code, deleteResp.Body.String())
+	}
+}
+
+func TestGatewayThreadDeleteRemovesLocalDataAndInMemorySession(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-delete-local"
+	session := s.ensureSession(threadID, map[string]any{"title": "Delete me"})
+	session.Messages = []models.Message{{
+		ID:        "msg-1",
+		SessionID: threadID,
+		Role:      models.RoleHuman,
+		Content:   "hello",
+	}}
+	if err := s.persistSessionSnapshot(cloneSession(session)); err != nil {
+		t.Fatalf("persist session: %v", err)
+	}
+
+	workspaceFile := filepath.Join(s.threadRoot(threadID), "workspace", "notes.txt")
+	if err := os.MkdirAll(filepath.Dir(workspaceFile), 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	if err := os.WriteFile(workspaceFile, []byte("cleanup"), 0o644); err != nil {
+		t.Fatalf("write workspace file: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodDelete, "/api/threads/"+threadID, nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload.Success {
+		t.Fatal("expected delete success")
+	}
+	if payload.Message != "Deleted local thread data for "+threadID {
+		t.Fatalf("message=%q", payload.Message)
+	}
+
+	if _, err := os.Stat(s.threadDir(threadID)); !os.IsNotExist(err) {
+		t.Fatalf("expected thread dir removed, stat err=%v", err)
+	}
+
+	getResp := performCompatRequest(t, handler, http.MethodGet, "/threads/"+threadID, nil, nil)
+	if getResp.Code != http.StatusNotFound {
+		t.Fatalf("get status=%d body=%s", getResp.Code, getResp.Body.String())
+	}
+}
+
+func TestGatewayThreadDeleteIsIdempotentForMissingThreadData(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+	threadID := "thread-delete-missing"
+
+	resp := performCompatRequest(t, handler, http.MethodDelete, "/api/threads/"+threadID, nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("first delete status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	resp = performCompatRequest(t, handler, http.MethodDelete, "/api/threads/"+threadID, nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("second delete status=%d body=%s", resp.Code, resp.Body.String())
 	}
 }
 
@@ -1971,8 +2087,8 @@ func TestRunsStreamAppliesCustomAgentRuntimeConfig(t *testing.T) {
 	for _, tool := range provider.lastReq.Tools {
 		gotTools = append(gotTools, tool.Name)
 	}
-	if strings.Join(gotTools, ",") != "ask_clarification,bash,glob,present_file,read_file" {
-		t.Fatalf("tools=%q want=%q", strings.Join(gotTools, ","), "ask_clarification,bash,glob,present_file,read_file")
+	if strings.Join(gotTools, ",") != "ask_clarification,bash,glob,present_files,read_file" {
+		t.Fatalf("tools=%q want=%q", strings.Join(gotTools, ","), "ask_clarification,bash,glob,present_files,read_file")
 	}
 }
 

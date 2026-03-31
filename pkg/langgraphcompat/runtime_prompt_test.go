@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
@@ -22,7 +23,7 @@ func TestResolveRunConfigIncludesWorkingDirectoryGuidance(t *testing.T) {
 	if !strings.Contains(cfg.SystemPrompt, "/mnt/user-data/outputs") {
 		t.Fatalf("system prompt missing outputs guidance: %q", cfg.SystemPrompt)
 	}
-	if !strings.Contains(cfg.SystemPrompt, "presented using `present_file` tool") {
+	if !strings.Contains(cfg.SystemPrompt, "presented using `present_files` tool") {
 		t.Fatalf("system prompt missing present_file guidance: %q", cfg.SystemPrompt)
 	}
 	if strings.Contains(cfg.SystemPrompt, "ACP Agent Tasks") {
@@ -95,5 +96,40 @@ description: Demo workflow
 	}
 	if !strings.Contains(cfg.SystemPrompt, "Demo workflow") {
 		t.Fatalf("system prompt missing skill description: %q", cfg.SystemPrompt)
+	}
+}
+
+func TestResolveRunConfigKeepsBuiltinAgentBasePrompt(t *testing.T) {
+	s := &Server{
+		tools: newRuntimeToolRegistry(t),
+	}
+
+	cfg, err := s.resolveRunConfig(runConfig{AgentType: agent.AgentTypeCoder}, nil)
+	if err != nil {
+		t.Fatalf("resolveRunConfig error: %v", err)
+	}
+	if !strings.Contains(cfg.SystemPrompt, agent.GetAgentTypeConfig(agent.AgentTypeCoder).SystemPrompt) {
+		t.Fatalf("system prompt missing builtin coder prompt: %q", cfg.SystemPrompt)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "/mnt/user-data/outputs") {
+		t.Fatalf("system prompt missing runtime guidance: %q", cfg.SystemPrompt)
+	}
+}
+
+func TestResolveRunConfigInjectsUserProfileForBuiltinAgents(t *testing.T) {
+	s := &Server{
+		tools:       newRuntimeToolRegistry(t),
+		userProfile: "Prefers terse answers and Go examples.",
+	}
+
+	cfg, err := s.resolveRunConfig(runConfig{}, nil)
+	if err != nil {
+		t.Fatalf("resolveRunConfig error: %v", err)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "USER.md:") {
+		t.Fatalf("system prompt missing user profile header: %q", cfg.SystemPrompt)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "Prefers terse answers and Go examples.") {
+		t.Fatalf("system prompt missing user profile content: %q", cfg.SystemPrompt)
 	}
 }

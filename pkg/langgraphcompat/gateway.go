@@ -103,7 +103,7 @@ var activeContentMIMETypes = map[string]struct{}{
 
 var skillInstallSeq uint64
 var agentNameRE = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
-var threadIDRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+var threadIDRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 type gatewayAgent struct {
 	Name        string   `json:"name"`
@@ -637,17 +637,18 @@ func (s *Server) handleGatewayThreadDelete(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": err.Error()})
 		return
 	}
+
+	s.sessionsMu.Lock()
+	delete(s.sessions, threadID)
+	s.sessionsMu.Unlock()
+
 	if err := os.RemoveAll(s.threadDir(threadID)); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to delete local thread data"})
 		return
 	}
-	if err := s.deletePersistedSession(threadID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to delete thread session"})
-		return
-	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success": true,
-		"message": "local thread data deleted",
+		"message": fmt.Sprintf("Deleted local thread data for %s", threadID),
 	})
 }
 
@@ -1110,7 +1111,7 @@ func validateThreadID(threadID string) error {
 		return errors.New("thread_id is required")
 	}
 	if !threadIDRE.MatchString(threadID) {
-		return fmt.Errorf("invalid thread_id %q: only alphanumeric characters, hyphens, and underscores are allowed", threadID)
+		return fmt.Errorf("invalid thread_id %q: only alphanumeric characters, dots, hyphens, and underscores are allowed", threadID)
 	}
 	return nil
 }

@@ -669,7 +669,7 @@ func (s *Server) messagesToLangChain(messages []models.Message) []Message {
 			Type:             msgType,
 			ID:               msg.ID,
 			Role:             role,
-			Content:          msg.Content,
+			Content:          messageContent(msg.Content, msg.Metadata),
 			AdditionalKwargs: decodeAdditionalKwargs(msg.Metadata),
 			UsageMetadata:    decodeUsageMetadata(msg.Metadata),
 		}
@@ -704,6 +704,31 @@ func decodeAdditionalKwargs(metadata map[string]string) map[string]any {
 		return nil
 	}
 	return out
+}
+
+func decodeMultiContent(metadata map[string]string) []map[string]any {
+	if len(metadata) == 0 {
+		return nil
+	}
+	raw := strings.TrimSpace(metadata["multi_content"])
+	if raw == "" {
+		return nil
+	}
+	var out []map[string]any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func messageContent(content string, metadata map[string]string) any {
+	if multi := decodeMultiContent(metadata); len(multi) > 0 {
+		return multi
+	}
+	return content
 }
 
 func decodeUsageMetadata(metadata map[string]string) map[string]int {

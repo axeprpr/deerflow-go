@@ -381,15 +381,18 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 			role, _ = msgMap["type"].(string)
 		}
 
-		content := extractMessageContent(msgMap["content"])
+		content, multiContent := extractMessageContent(msgMap["content"])
 		if role == "" || content == "" {
 			continue
 		}
 
 		additionalKwargs, _ := msgMap["additional_kwargs"].(map[string]any)
-		files := extractUploadedFiles(additionalKwargs)
+		files := extractUploadedFiles(additionalKwargs, s.uploadsDir(threadID))
 		if len(files) > 0 || hasHistoricalUploads(s.uploadsDir(threadID), files) {
-			content = injectUploadedFilesBlock(content, files, listHistoricalUploads(s.uploadsDir(threadID), files))
+			historical := listHistoricalUploads(s.uploadsDir(threadID), files)
+			uploadsBlock := buildUploadedFilesBlock(files, historical)
+			content = injectUploadedFilesBlock(content, files, historical)
+			multiContent = prependTextPart(multiContent, uploadsBlock)
 		}
 
 		msgSeq++
@@ -399,10 +402,19 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 			Role:      s.convertRole(role),
 			Content:   content,
 		}
+		metadata := map[string]string{}
 		if len(additionalKwargs) > 0 {
 			if raw, err := json.Marshal(additionalKwargs); err == nil {
-				msg.Metadata = map[string]string{"additional_kwargs": string(raw)}
+				metadata["additional_kwargs"] = string(raw)
 			}
+		}
+		if len(multiContent) > 0 {
+			if raw, err := json.Marshal(multiContent); err == nil {
+				metadata["multi_content"] = string(raw)
+			}
+		}
+		if len(metadata) > 0 {
+			msg.Metadata = metadata
 		}
 		messages = append(messages, msg)
 	}
@@ -416,7 +428,7 @@ type uploadedFile struct {
 	Path     string `json:"path"`
 }
 
-func extractUploadedFiles(additionalKwargs map[string]any) []uploadedFile {
+func extractUploadedFiles(additionalKwargs map[string]any, uploadDir string) []uploadedFile {
 	if len(additionalKwargs) == 0 {
 		return nil
 	}
@@ -428,14 +440,19 @@ func extractUploadedFiles(additionalKwargs map[string]any) []uploadedFile {
 			continue
 		}
 		filename := sanitizeFilename(stringFromAny(item["filename"]))
-		path := strings.TrimSpace(firstNonEmpty(stringFromAny(item["virtual_path"]), stringFromAny(item["path"])))
-		if filename == "" || path == "" {
+		if filename == "" {
 			continue
+		}
+		if strings.TrimSpace(uploadDir) != "" {
+			info, err := os.Stat(filepath.Join(uploadDir, filename))
+			if err != nil || !info.Mode().IsRegular() {
+				continue
+			}
 		}
 		files = append(files, uploadedFile{
 			Filename: filename,
 			Size:     int64FromAny(item["size"]),
-			Path:     path,
+			Path:     "/mnt/user-data/uploads/" + filepath.ToSlash(filename),
 		})
 	}
 	return files
@@ -480,6 +497,15 @@ func listHistoricalUploads(uploadDir string, current []uploadedFile) []uploadedF
 }
 
 func injectUploadedFilesBlock(content string, current []uploadedFile, historical []uploadedFile) string {
+	block := buildUploadedFilesBlock(current, historical)
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return block
+	}
+	return block + "\n\n" + content
+}
+
+func buildUploadedFilesBlock(current []uploadedFile, historical []uploadedFile) string {
 	var b strings.Builder
 	b.WriteString("<uploaded_files>\n")
 	b.WriteString("The following files were uploaded in this message:\n\n")
@@ -512,11 +538,7 @@ func injectUploadedFilesBlock(content string, current []uploadedFile, historical
 	}
 	b.WriteString("You can read these files using the `read_file` tool with the paths shown above.\n")
 	b.WriteString("</uploaded_files>")
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return b.String()
-	}
-	return b.String() + "\n\n" + content
+	return b.String()
 }
 
 func formatUploadSize(size int64) string {
@@ -542,31 +564,68 @@ func int64FromAny(v any) int64 {
 		if parsed, err := value.Int64(); err == nil {
 			return parsed
 		}
+	case string:
+		if parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil {
+			return parsed
+		}
 	}
 	return 0
 }
 
-func extractMessageContent(raw any) string {
+func extractMessageContent(raw any) (string, []map[string]any) {
 	switch v := raw.(type) {
 	case string:
-		return v
+		return v, nil
 	case []any:
 		parts := make([]string, 0, len(v))
+		multiContent := make([]map[string]any, 0, len(v))
 		for _, item := range v {
 			part, ok := item.(map[string]any)
 			if !ok {
 				continue
 			}
-			if partType, _ := part["type"].(string); partType == "text" {
+			partType, _ := part["type"].(string)
+			switch partType {
+			case "text":
 				if text, _ := part["text"].(string); text != "" {
 					parts = append(parts, text)
+					multiContent = append(multiContent, map[string]any{
+						"type": "text",
+						"text": text,
+					})
 				}
+			case "image_url":
+				imageURL, _ := part["image_url"].(map[string]any)
+				url := stringFromAny(imageURL["url"])
+				if strings.TrimSpace(url) == "" {
+					continue
+				}
+				multiContent = append(multiContent, map[string]any{
+					"type": "image_url",
+					"image_url": map[string]any{
+						"url": url,
+					},
+				})
 			}
 		}
-		return strings.Join(parts, "\n")
+		return strings.Join(parts, "\n"), multiContent
 	default:
-		return ""
+		return "", nil
 	}
+}
+
+func prependTextPart(parts []map[string]any, text string) []map[string]any {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return parts
+	}
+	out := make([]map[string]any, 0, len(parts)+1)
+	out = append(out, map[string]any{
+		"type": "text",
+		"text": text,
+	})
+	out = append(out, parts...)
+	return out
 }
 
 func (s *Server) convertRole(langchainRole string) models.Role {
@@ -780,13 +839,21 @@ func parseRunConfig(raw map[string]any) runConfig {
 }
 
 func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) (runConfig, error) {
+	cfg.IsBootstrap = cfg.IsBootstrap || boolFromAny(runtimeContext["is_bootstrap"])
+	cfg.AgentName = firstNonEmpty(stringFromAny(runtimeContext["agent_name"]), cfg.AgentName)
+	basePrompt := strings.TrimSpace(cfg.SystemPrompt)
+	if basePrompt == "" {
+		basePrompt = agent.GetAgentTypeConfig(cfg.AgentType).SystemPrompt
+	}
+	cfg.SystemPrompt = joinPromptSections(
+		basePrompt,
+		s.userProfilePromptSection(),
+		s.runtimeModePrompt(runtimeContext),
+		s.environmentPrompt(),
+	)
 	if boolFromAny(runtimeContext["is_plan_mode"]) {
 		cfg.SystemPrompt = joinPromptSections(cfg.SystemPrompt, planModeTodoPrompt)
 	}
-	cfg.SystemPrompt = joinPromptSections(cfg.SystemPrompt, s.runtimeModePrompt(runtimeContext))
-	cfg.SystemPrompt = joinPromptSections(cfg.SystemPrompt, s.environmentPrompt())
-	cfg.IsBootstrap = cfg.IsBootstrap || boolFromAny(runtimeContext["is_bootstrap"])
-	cfg.AgentName = firstNonEmpty(stringFromAny(runtimeContext["agent_name"]), cfg.AgentName)
 	if cfg.IsBootstrap {
 		if cfg.AgentName != "" {
 			name, ok := normalizeAgentName(cfg.AgentName)
@@ -795,11 +862,7 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 			}
 			cfg.AgentName = name
 		}
-		basePrompt := strings.TrimSpace(cfg.SystemPrompt)
-		if basePrompt == "" {
-			basePrompt = agent.GetAgentTypeConfig(cfg.AgentType).SystemPrompt
-		}
-		cfg.SystemPrompt = joinPromptSections(basePrompt, bootstrapAgentPrompt)
+		cfg.SystemPrompt = joinPromptSections(cfg.SystemPrompt, bootstrapAgentPrompt)
 		cfg.Tools = resolveRuntimeToolRegistry(s.tools, runtimeContext)
 		cfg.Tools = resolveModelToolRegistry(cfg.Tools, firstNonEmpty(cfg.ModelName, s.defaultModel))
 		return cfg, nil
@@ -830,12 +893,8 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 		cfg.ModelName = strings.TrimSpace(*customAgent.Model)
 	}
 
-	customPrompt := buildCustomAgentPrompt(customAgent, s.userProfilePrompt())
-	basePrompt := strings.TrimSpace(cfg.SystemPrompt)
-	if basePrompt == "" {
-		basePrompt = agent.GetAgentTypeConfig(cfg.AgentType).SystemPrompt
-	}
-	cfg.SystemPrompt = joinPromptSections(basePrompt, customPrompt)
+	customPrompt := buildCustomAgentPrompt(customAgent)
+	cfg.SystemPrompt = joinPromptSections(cfg.SystemPrompt, customPrompt)
 
 	if len(customAgent.ToolGroups) > 0 {
 		cfg.Tools = resolveAgentToolRegistry(s.tools, customAgent.ToolGroups)
@@ -864,11 +923,8 @@ func (s *Server) runtimeModePrompt(runtimeContext map[string]any) string {
 	}
 }
 
-func buildCustomAgentPrompt(customAgent gatewayAgent, userProfile string) string {
-	parts := make([]string, 0, 3)
-	if profile := strings.TrimSpace(userProfile); profile != "" {
-		parts = append(parts, "USER.md:\n"+profile)
-	}
+func buildCustomAgentPrompt(customAgent gatewayAgent) string {
+	parts := make([]string, 0, 2)
 	if desc := strings.TrimSpace(customAgent.Description); desc != "" {
 		parts = append(parts, "Agent description:\n"+desc)
 	}
@@ -886,6 +942,13 @@ func (s *Server) userProfilePrompt() string {
 	s.uiStateMu.RLock()
 	defer s.uiStateMu.RUnlock()
 	return strings.TrimSpace(s.getUserProfileLocked())
+}
+
+func (s *Server) userProfilePromptSection() string {
+	if profile := strings.TrimSpace(s.userProfilePrompt()); profile != "" {
+		return "USER.md:\n" + profile
+	}
+	return ""
 }
 
 func joinPromptSections(parts ...string) string {
@@ -1053,13 +1116,13 @@ func resolveAgentToolRegistry(base *tools.Registry, toolGroups []string) *tools.
 			addTool("read_file")
 			addTool("write_file")
 			addTool("glob")
-			addTool("present_file")
+			addTool("present_files")
 		case "file:read":
 			addTool("read_file")
 			addTool("glob")
 		case "file:write":
 			addTool("write_file")
-			addTool("present_file")
+			addTool("present_files")
 		case "interaction":
 			addTool("ask_clarification")
 		case "agent", "task":
