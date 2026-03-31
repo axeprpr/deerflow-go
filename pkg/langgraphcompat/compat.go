@@ -256,6 +256,9 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 	if err := s.loadGatewayState(); err != nil {
 		logger.Printf("Warning: failed to load gateway state: %v", err)
 	}
+	if err := s.loadGatewayCompatFiles(); err != nil {
+		logger.Printf("Warning: failed to load gateway compatibility files: %v", err)
+	}
 	s.applyGatewayMCPConfig(ctx, s.mcpConfig)
 	if err := s.loadPersistedSessions(); err != nil {
 		logger.Printf("Warning: failed to load persisted sessions: %v", err)

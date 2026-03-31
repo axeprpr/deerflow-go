@@ -521,6 +521,14 @@ func (s *Server) handleUserProfilePut(w http.ResponseWriter, r *http.Request) {
 	s.uiStateMu.Lock()
 	s.setUserProfileLocked(req.Content)
 	s.uiStateMu.Unlock()
+	if err := os.MkdirAll(s.dataRoot, 0o755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist user profile"})
+		return
+	}
+	if err := os.WriteFile(s.userProfilePath(), []byte(req.Content), 0o644); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist user profile"})
+		return
+	}
 	if err := s.persistGatewayState(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
 		return
