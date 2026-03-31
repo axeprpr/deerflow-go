@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -288,7 +289,16 @@ func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Limit int `json:"limit"`
 	}
-	if r.Body != nil {
+	if r.Method == http.MethodGet {
+		if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+			limit, err := strconv.Atoi(raw)
+			if err != nil {
+				http.Error(w, "invalid limit", http.StatusBadRequest)
+				return
+			}
+			req.Limit = limit
+		}
+	} else if r.Body != nil {
 		defer r.Body.Close()
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}

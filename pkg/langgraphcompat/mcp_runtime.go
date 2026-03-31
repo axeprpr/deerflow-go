@@ -19,21 +19,45 @@ type gatewayMCPClient interface {
 
 type gatewayMCPConnector func(ctx context.Context, name string, cfg gatewayMCPServerConfig) (gatewayMCPClient, error)
 
+var (
+	gatewayMCPConnectStdio = func(ctx context.Context, name, command string, env []string, args ...string) (gatewayMCPClient, error) {
+		return deerflowmcp.ConnectStdio(ctx, name, command, env, args...)
+	}
+	gatewayMCPConnectSSE = func(ctx context.Context, name, baseURL string, headers map[string]string) (gatewayMCPClient, error) {
+		return deerflowmcp.ConnectSSE(ctx, name, baseURL, headers)
+	}
+	gatewayMCPConnectHTTP = func(ctx context.Context, name, baseURL string, headers map[string]string) (gatewayMCPClient, error) {
+		return deerflowmcp.ConnectHTTP(ctx, name, baseURL, headers)
+	}
+)
+
 func defaultGatewayMCPConnector(ctx context.Context, name string, cfg gatewayMCPServerConfig) (gatewayMCPClient, error) {
 	transportType := strings.TrimSpace(cfg.Type)
 	if transportType == "" {
 		transportType = "stdio"
 	}
-	if transportType != "stdio" {
+	switch transportType {
+	case "stdio":
+		command := strings.TrimSpace(cfg.Command)
+		if command == "" {
+			return nil, fmt.Errorf("stdio MCP server %q requires command", name)
+		}
+		return gatewayMCPConnectStdio(ctx, name, command, gatewayMCPEnv(cfg.Env), cfg.Args...)
+	case "sse":
+		baseURL := strings.TrimSpace(cfg.URL)
+		if baseURL == "" {
+			return nil, fmt.Errorf("sse MCP server %q requires url", name)
+		}
+		return gatewayMCPConnectSSE(ctx, name, baseURL, cfg.Headers)
+	case "http", "streamable_http":
+		baseURL := strings.TrimSpace(cfg.URL)
+		if baseURL == "" {
+			return nil, fmt.Errorf("http MCP server %q requires url", name)
+		}
+		return gatewayMCPConnectHTTP(ctx, name, baseURL, cfg.Headers)
+	default:
 		return nil, fmt.Errorf("unsupported MCP transport type %q", transportType)
 	}
-
-	command := strings.TrimSpace(cfg.Command)
-	if command == "" {
-		return nil, fmt.Errorf("stdio MCP server %q requires command", name)
-	}
-
-	return deerflowmcp.ConnectStdio(ctx, name, command, gatewayMCPEnv(cfg.Env), cfg.Args...)
 }
 
 func gatewayMCPEnv(values map[string]string) []string {

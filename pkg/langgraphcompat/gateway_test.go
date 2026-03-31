@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -300,6 +301,43 @@ func TestAPILangGraphPrefixCreateThread(t *testing.T) {
 	_, handler := newCompatTestServer(t)
 	resp := performCompatRequest(t, handler, http.MethodPost, "/api/langgraph/threads", strings.NewReader(`{}`), map[string]string{"Content-Type": "application/json"})
 	if resp.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestThreadHistorySupportsGETLimitQuery(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	session := s.ensureSession("thread-history", map[string]any{"title": "Saved thread"})
+	session.Messages = []models.Message{{
+		ID:        "msg-1",
+		SessionID: "thread-history",
+		Role:      models.RoleHuman,
+		Content:   "hello",
+	}}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/langgraph/threads/thread-history/history?limit=1", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var history []ThreadState
+	if err := json.Unmarshal(resp.Body.Bytes(), &history); err != nil {
+		t.Fatalf("unmarshal history: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len=%d want=1", len(history))
+	}
+	if got := asString(history[0].Values["title"]); got != "Saved thread" {
+		t.Fatalf("title=%q want Saved thread", got)
+	}
+}
+
+func TestThreadHistoryRejectsInvalidGETLimit(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	s.ensureSession("thread-history", nil)
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/threads/thread-history/history?limit=abc", nil, nil)
+	if resp.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
 	}
 }
@@ -760,6 +798,45 @@ func TestUploadArtifactURLPercentEncodesFilename(t *testing.T) {
 	}
 	if got := asString(uploaded.Files[0]["artifact_url"]); got != "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/report%20%231%3F.txt" {
 		t.Fatalf("artifact_url=%q", got)
+	}
+}
+
+func TestContentDispositionEncodesUTF8Filename(t *testing.T) {
+	filename := "报告 2026 #1?.pdf"
+	want := "attachment; filename*=UTF-8''" + url.PathEscape(filename)
+	if got := contentDisposition("attachment", filename); got != want {
+		t.Fatalf("content-disposition=%q want %q", got, want)
+	}
+}
+
+func TestArtifactDownloadEncodesContentDispositionFilename(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-download-filename"
+	outputDir := filepath.Join(s.threadRoot(threadID), "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+
+	filename := "报告 2026 #1?.txt"
+	if err := os.WriteFile(filepath.Join(outputDir, filename), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+
+	resp := performCompatRequest(
+		t,
+		handler,
+		http.MethodGet,
+		"/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/"+url.PathEscape(filename)+"?download=true",
+		nil,
+		nil,
+	)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	want := "attachment; filename*=UTF-8''" + url.PathEscape(filename)
+	if got := resp.Header().Get("Content-Disposition"); got != want {
+		t.Fatalf("content-disposition=%q want %q", got, want)
 	}
 }
 
@@ -1232,6 +1309,106 @@ func TestSkillEndpointsKeepPublicAndCustomVariantsSeparate(t *testing.T) {
 	}
 }
 
+func TestSkillsEndpointDiscoversSkillsFromDiskRecursively(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	publicDir := filepath.Join(s.dataRoot, "skills", "public", "nested", "frontend-design")
+	customDir := filepath.Join(s.dataRoot, "skills", "custom", "team", "release-helper")
+	for _, dir := range []string{publicDir, customDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(publicDir, "SKILL.md"), []byte(`---
+name: frontend-design
+description: Design distinctive product interfaces.
+license: Apache-2.0
+---
+# Frontend Design
+`), 0o644); err != nil {
+		t.Fatalf("write public skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(customDir, "SKILL.md"), []byte(`---
+name: release-helper
+description: Prepare release checklists.
+license: MIT
+---
+# Release Helper
+`), 0o644); err != nil {
+		t.Fatalf("write custom skill: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/skills", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d", resp.Code)
+	}
+
+	var payload struct {
+		Skills []gatewaySkill `json:"skills"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	found := map[string]gatewaySkill{}
+	for _, skill := range payload.Skills {
+		found[skillStorageKey(skill.Category, skill.Name)] = skill
+	}
+
+	publicSkill, ok := found[skillStorageKey(skillCategoryPublic, "frontend-design")]
+	if !ok {
+		t.Fatalf("missing discovered public skill: %#v", payload.Skills)
+	}
+	if publicSkill.License != "Apache-2.0" {
+		t.Fatalf("public license=%q want %q", publicSkill.License, "Apache-2.0")
+	}
+
+	customSkill, ok := found[skillStorageKey(skillCategoryCustom, "release-helper")]
+	if !ok {
+		t.Fatalf("missing discovered custom skill: %#v", payload.Skills)
+	}
+	if customSkill.Description != "Prepare release checklists." {
+		t.Fatalf("custom description=%q", customSkill.Description)
+	}
+}
+
+func TestSkillSetEnabledPersistsDiscoveredSkillState(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	skillDir := filepath.Join(s.dataRoot, "skills", "public", "frontend-design")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: frontend-design
+description: Design distinctive product interfaces.
+license: MIT
+---
+# Frontend Design
+`), 0o644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+
+	updateResp := performCompatRequest(t, handler, http.MethodPut, "/api/skills/frontend-design", strings.NewReader(`{"enabled":false}`), map[string]string{"Content-Type": "application/json"})
+	if updateResp.Code != http.StatusOK {
+		t.Fatalf("update status=%d body=%s", updateResp.Code, updateResp.Body.String())
+	}
+
+	getResp := performCompatRequest(t, handler, http.MethodGet, "/api/skills/frontend-design", nil, nil)
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("get status=%d", getResp.Code)
+	}
+
+	var skill gatewaySkill
+	if err := json.NewDecoder(getResp.Body).Decode(&skill); err != nil {
+		t.Fatalf("decode skill: %v", err)
+	}
+	if skill.Enabled {
+		t.Fatal("expected discovered skill to remain disabled after update")
+	}
+}
+
 func TestAgentsAndMemoryEndpoints(t *testing.T) {
 	_, handler := newCompatTestServer(t)
 
@@ -1325,6 +1502,49 @@ func TestRunsStreamAppliesCustomAgentRuntimeConfig(t *testing.T) {
 	}
 	if strings.Join(gotTools, ",") != "ask_clarification,bash,glob,present_file,read_file" {
 		t.Fatalf("tools=%q want=%q", strings.Join(gotTools, ","), "ask_clarification,bash,glob,present_file,read_file")
+	}
+}
+
+func TestRunsStreamInjectsUserProfileIntoCustomAgentPrompt(t *testing.T) {
+	provider := &streamSpyProvider{}
+	s := &Server{
+		llmProvider:  provider,
+		defaultModel: "default-model",
+		tools:        newRuntimeToolRegistry(t),
+		sessions:     make(map[string]*Session),
+		runs:         make(map[string]*Run),
+		dataRoot:     t.TempDir(),
+		agents:       map[string]gatewayAgent{},
+		userProfile:  "User prefers terse code-review summaries and Go-first examples.",
+	}
+	s.ensureSession("thread-custom-agent-profile", map[string]any{"title": "Existing title"})
+	s.agents["code-reviewer"] = gatewayAgent{
+		Name:        "code-reviewer",
+		Description: "Review code changes carefully.",
+		Soul:        "You are a meticulous code reviewer.",
+	}
+
+	body := `{
+		"thread_id":"thread-custom-agent-profile",
+		"input":{"messages":[{"role":"user","content":"Review this patch"}]},
+		"context":{"agent_name":"code-reviewer"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/runs/stream", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleRunsStream(rec, req)
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(payload))
+	}
+
+	if !strings.Contains(provider.lastReq.SystemPrompt, "USER.md:") {
+		t.Fatalf("system prompt missing user profile header: %q", provider.lastReq.SystemPrompt)
+	}
+	if !strings.Contains(provider.lastReq.SystemPrompt, "User prefers terse code-review summaries and Go-first examples.") {
+		t.Fatalf("system prompt missing user profile content: %q", provider.lastReq.SystemPrompt)
 	}
 }
 

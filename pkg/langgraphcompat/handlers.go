@@ -774,7 +774,7 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 		cfg.ModelName = strings.TrimSpace(*customAgent.Model)
 	}
 
-	customPrompt := buildCustomAgentPrompt(customAgent)
+	customPrompt := buildCustomAgentPrompt(customAgent, s.userProfilePrompt())
 	basePrompt := strings.TrimSpace(cfg.SystemPrompt)
 	if basePrompt == "" {
 		basePrompt = agent.GetAgentTypeConfig(cfg.AgentType).SystemPrompt
@@ -787,8 +787,11 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 	return cfg, nil
 }
 
-func buildCustomAgentPrompt(customAgent gatewayAgent) string {
-	parts := make([]string, 0, 2)
+func buildCustomAgentPrompt(customAgent gatewayAgent, userProfile string) string {
+	parts := make([]string, 0, 3)
+	if profile := strings.TrimSpace(userProfile); profile != "" {
+		parts = append(parts, "USER.md:\n"+profile)
+	}
 	if desc := strings.TrimSpace(customAgent.Description); desc != "" {
 		parts = append(parts, "Agent description:\n"+desc)
 	}
@@ -796,6 +799,16 @@ func buildCustomAgentPrompt(customAgent gatewayAgent) string {
 		parts = append(parts, "SOUL.md:\n"+soul)
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+func (s *Server) userProfilePrompt() string {
+	if s == nil {
+		return ""
+	}
+
+	s.uiStateMu.RLock()
+	defer s.uiStateMu.RUnlock()
+	return strings.TrimSpace(s.getUserProfileLocked())
 }
 
 func joinPromptSections(parts ...string) string {

@@ -175,10 +175,9 @@ func (s *Server) handleModelGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
-	s.uiStateMu.RLock()
-	defer s.uiStateMu.RUnlock()
-	skills := make([]gatewaySkill, 0, len(s.skills))
-	for _, skill := range s.skills {
+	currentSkills := s.currentGatewaySkills()
+	skills := make([]gatewaySkill, 0, len(currentSkills))
+	for _, skill := range currentSkills {
 		skills = append(skills, skill)
 	}
 	sort.Slice(skills, func(i, j int) bool {
@@ -193,9 +192,7 @@ func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSkillGet(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.PathValue("skill_name"))
 	category := strings.TrimSpace(r.URL.Query().Get("category"))
-	s.uiStateMu.RLock()
-	skill, ok := findGatewaySkill(s.skills, name, category)
-	s.uiStateMu.RUnlock()
+	skill, ok := findGatewaySkill(s.currentGatewaySkills(), name, category)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Skill '%s' not found", name)})
 		return
@@ -218,8 +215,9 @@ func (s *Server) handleSkillSetEnabled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	currentSkills := s.currentGatewaySkills()
 	s.uiStateMu.Lock()
-	key, skill, ok := findGatewaySkillEntry(s.skills, name, category)
+	key, skill, ok := findGatewaySkillEntry(currentSkills, name, category)
 	if !ok {
 		s.uiStateMu.Unlock()
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": "skill not found"})
@@ -1043,8 +1041,9 @@ func withUTF8Charset(mimeType string) string {
 }
 
 func contentDisposition(kind, filename string) string {
-	filename = strings.ReplaceAll(filename, `"`, "")
-	return fmt.Sprintf(`%s; filename="%s"`, kind, filename)
+	filename = strings.ReplaceAll(filename, "\r", "")
+	filename = strings.ReplaceAll(filename, "\n", "")
+	return fmt.Sprintf("%s; filename*=UTF-8''%s", kind, url.PathEscape(filename))
 }
 
 func (s *Server) threadRoot(threadID string) string {
