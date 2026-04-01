@@ -42,7 +42,7 @@ func newCompatTestServer(t *testing.T) (*Server, http.Handler) {
 	}
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
-	return s, mux
+	return s, wrapTrailingSlashCompat(mux)
 }
 
 func TestGatewayOpenAPIDocumentationEndpoints(t *testing.T) {
@@ -98,6 +98,34 @@ func TestGatewayOpenAPIDocumentationEndpoints(t *testing.T) {
 	}
 	if !strings.Contains(redocResp.Body.String(), "<redoc ") && !strings.Contains(redocResp.Body.String(), "<redoc>") {
 		t.Fatalf("redoc body missing redoc element: %q", redocResp.Body.String())
+	}
+}
+
+func TestTrailingSlashCompatibilityForGatewayRoutes(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/channels/", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("GET /api/channels/ status=%d want=%d", resp.Code, http.StatusOK)
+	}
+
+	resp = performCompatRequest(t, handler, http.MethodGet, "/api/skills/", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("GET /api/skills/ status=%d want=%d", resp.Code, http.StatusOK)
+	}
+}
+
+func TestTrailingSlashCompatibilityForLangGraphRoutes(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/threads/", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("GET /threads/ status=%d want=%d", resp.Code, http.StatusOK)
+	}
+
+	resp = performCompatRequest(t, handler, http.MethodGet, "/api/langgraph/threads/", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("GET /api/langgraph/threads/ status=%d want=%d", resp.Code, http.StatusOK)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -339,10 +340,51 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 
 	s.httpServer = &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: wrapTrailingSlashCompat(mux),
 	}
 
 	return s, nil
+}
+
+func wrapTrailingSlashCompat(next http.Handler) http.Handler {
+	if next == nil {
+		return http.NotFoundHandler()
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r == nil || r.URL == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		path := r.URL.Path
+		if path == "" || path == "/" || !strings.HasSuffix(path, "/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		trimmedPath := strings.TrimRight(path, "/")
+		if trimmedPath == "" {
+			trimmedPath = "/"
+		}
+
+		cloned := r.Clone(r.Context())
+		cloned.URL = cloneURL(r.URL)
+		cloned.URL.Path = trimmedPath
+		if rawPath := cloned.URL.RawPath; rawPath != "" {
+			cloned.URL.RawPath = strings.TrimRight(rawPath, "/")
+			if cloned.URL.RawPath == "" {
+				cloned.URL.RawPath = "/"
+			}
+		}
+		next.ServeHTTP(w, cloned)
+	})
+}
+
+func cloneURL(src *url.URL) *url.URL {
+	if src == nil {
+		return &url.URL{}
+	}
+	dst := *src
+	return &dst
 }
 
 func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {

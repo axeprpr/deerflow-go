@@ -47,6 +47,8 @@ const fallbackSkillCreatorPrompt = `You are operating in skill creation mode.
 Help the user design a new SKILL.md workflow, ask targeted questions about trigger conditions and outputs, then draft or refine the skill instructions.
 If the user is iterating on an existing skill, help compare the current draft against the intended behavior and improve it step by step.`
 
+const maxUploadedImageParts = 6
+
 func (s *Server) handleRunsStream(w http.ResponseWriter, r *http.Request) {
 	s.handleStreamRequest(w, r, "")
 }
@@ -431,14 +433,15 @@ func (s *Server) convertToMessages(threadID string, input []any, includeUploaded
 		}
 
 		additionalKwargs, _ := msgMap["additional_kwargs"].(map[string]any)
-		files := extractUploadedFiles(additionalKwargs, s.uploadsDir(threadID))
-		if len(files) > 0 || hasHistoricalUploads(s.uploadsDir(threadID), files) {
-			historical := listHistoricalUploads(s.uploadsDir(threadID), files)
+		uploadDir := s.uploadsDir(threadID)
+		files := extractUploadedFiles(additionalKwargs, uploadDir)
+		historical := listHistoricalUploads(uploadDir, files)
+		if len(files) > 0 || len(historical) > 0 {
 			uploadsBlock := buildUploadedFilesBlock(files, historical)
 			content = injectUploadedFilesBlock(content, files, historical)
 			multiContent = prependTextPart(multiContent, uploadsBlock)
 			if includeUploadedImages {
-				multiContent = append(multiContent, uploadedImageParts(s.uploadsDir(threadID), files)...)
+				multiContent = append(multiContent, uploadedImageParts(uploadDir, files, historical)...)
 			}
 		}
 
@@ -517,10 +520,6 @@ func extractUploadedFiles(additionalKwargs map[string]any, uploadDir string) []u
 	return files
 }
 
-func hasHistoricalUploads(uploadDir string, current []uploadedFile) bool {
-	return len(listHistoricalUploads(uploadDir, current)) > 0
-}
-
 func listHistoricalUploads(uploadDir string, current []uploadedFile) []uploadedFile {
 	entries, err := os.ReadDir(uploadDir)
 	if err != nil {
@@ -571,13 +570,20 @@ func uploadedMarkdownPath(uploadDir string, filename string) string {
 	return "/mnt/user-data/uploads/" + filepath.ToSlash(mdName)
 }
 
-func uploadedImageParts(uploadDir string, current []uploadedFile) []map[string]any {
-	if strings.TrimSpace(uploadDir) == "" || len(current) == 0 {
+func uploadedImageParts(uploadDir string, current []uploadedFile, historical []uploadedFile) []map[string]any {
+	if strings.TrimSpace(uploadDir) == "" {
 		return nil
 	}
 
-	out := make([]map[string]any, 0, len(current))
-	for _, file := range current {
+	candidates := make([]uploadedFile, 0, len(current)+len(historical))
+	candidates = append(candidates, current...)
+	candidates = append(candidates, historical...)
+
+	out := make([]map[string]any, 0, len(candidates))
+	for _, file := range candidates {
+		if len(out) >= maxUploadedImageParts {
+			break
+		}
 		dataURL, err := uploadedImageDataURL(filepath.Join(uploadDir, file.Filename))
 		if err != nil {
 			continue

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -270,6 +271,88 @@ func TestConvertToMessagesIncludesUploadedImagesForVisionModels(t *testing.T) {
 	imageURL, _ := multi[1]["image_url"].(map[string]any)
 	if got := imageURL["url"]; got != "data:image/png;base64,iVBORw0KGgo=" {
 		t.Fatalf("image_url=%v want data URL", got)
+	}
+}
+
+func TestConvertToMessagesIncludesHistoricalUploadedImagesForVisionModels(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{
+		sessions: make(map[string]*Session),
+		runs:     make(map[string]*Run),
+		dataRoot: root,
+	}
+
+	threadID := "thread-upload-image-history"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads dir: %v", err)
+	}
+	imageBytes := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
+	if err := os.WriteFile(filepath.Join(uploadDir, "old-diagram.png"), imageBytes, 0o644); err != nil {
+		t.Fatalf("write historical uploaded image: %v", err)
+	}
+
+	input := []any{
+		map[string]any{
+			"role":    "user",
+			"content": "what did I upload earlier?",
+		},
+	}
+
+	messages := s.convertToMessages(threadID, input, true)
+	if len(messages) != 1 {
+		t.Fatalf("messages len=%d want=1", len(messages))
+	}
+
+	multi := decodeMultiContent(messages[0].Metadata)
+	if len(multi) != 2 {
+		t.Fatalf("multi_content len=%d want=2", len(multi))
+	}
+	if got := multi[1]["type"]; got != "image_url" {
+		t.Fatalf("multi_content[1].type=%v want image_url", got)
+	}
+	imageURL, _ := multi[1]["image_url"].(map[string]any)
+	if got := imageURL["url"]; got != "data:image/png;base64,iVBORw0KGgo=" {
+		t.Fatalf("image_url=%v want data URL", got)
+	}
+}
+
+func TestConvertToMessagesCapsHistoricalUploadedImagesForVisionModels(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{
+		sessions: make(map[string]*Session),
+		runs:     make(map[string]*Run),
+		dataRoot: root,
+	}
+
+	threadID := "thread-upload-image-cap"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads dir: %v", err)
+	}
+	imageBytes := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
+	for i := 0; i < maxUploadedImageParts+2; i++ {
+		name := filepath.Join(uploadDir, "diagram-"+strconv.Itoa(i)+".png")
+		if err := os.WriteFile(name, imageBytes, 0o644); err != nil {
+			t.Fatalf("write uploaded image %d: %v", i, err)
+		}
+	}
+
+	input := []any{
+		map[string]any{
+			"role":    "user",
+			"content": "summarize my uploaded images",
+		},
+	}
+
+	messages := s.convertToMessages(threadID, input, true)
+	if len(messages) != 1 {
+		t.Fatalf("messages len=%d want=1", len(messages))
+	}
+
+	multi := decodeMultiContent(messages[0].Metadata)
+	if got := len(multi); got != 1+maxUploadedImageParts {
+		t.Fatalf("multi_content len=%d want=%d", got, 1+maxUploadedImageParts)
 	}
 }
 
