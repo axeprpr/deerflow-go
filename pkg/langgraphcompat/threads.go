@@ -1363,6 +1363,31 @@ func (s *Server) sessionArtifactPaths(session *Session) []string {
 		seen[path] = struct{}{}
 		paths = append(paths, path)
 	}
+	for _, path := range s.uploadArtifactPaths(session.ThreadID) {
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
+	return paths
+}
+
+func (s *Server) uploadArtifactPaths(threadID string) []string {
+	files := s.listUploadedFiles(threadID)
+	if len(files) == 0 {
+		return nil
+	}
+
+	paths := make([]string, 0, len(files)*2)
+	for _, info := range files {
+		if markdownPath := strings.TrimSpace(asString(info["markdown_virtual_path"])); markdownPath != "" {
+			paths = append(paths, markdownPath)
+		}
+		if path := strings.TrimSpace(asString(info["path"])); path != "" {
+			paths = append(paths, path)
+		}
+	}
 	return paths
 }
 

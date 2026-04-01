@@ -600,6 +600,62 @@ func TestAgentRunContinuesAfterToolPanic(t *testing.T) {
 	}
 }
 
+func TestAgentRunStopsAfterClarificationRequest(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name: "ask_clarification",
+		Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) {
+			return models.ToolResult{
+				CallID:   "call-clarify",
+				ToolName: "ask_clarification",
+				Status:   models.CallStatusCompleted,
+				Content:  "Which mode?\n1. Fast\n2. Safe",
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
+
+	provider := &scriptedStreamProvider{
+		steps: []streamStep{
+			{
+				toolCalls: []models.ToolCall{{
+					ID:        "call-clarify",
+					Name:      "ask_clarification",
+					Arguments: map[string]any{"question": "Which mode?"},
+				}},
+			},
+		},
+		t: t,
+	}
+
+	runAgent := New(AgentConfig{
+		LLMProvider: provider,
+		Tools:       registry,
+		MaxTurns:    3,
+	})
+
+	result, err := runAgent.Run(context.Background(), "session-clarify", []models.Message{
+		{ID: "m1", SessionID: "session-clarify", Role: models.RoleHuman, Content: "Help me choose a mode"},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "" {
+		t.Fatalf("FinalOutput=%q want empty", result.FinalOutput)
+	}
+	if len(result.Messages) != 3 {
+		t.Fatalf("messages len=%d want 3", len(result.Messages))
+	}
+	last := result.Messages[len(result.Messages)-1]
+	if last.Role != models.RoleTool || last.ToolResult == nil {
+		t.Fatalf("last message=%#v", last)
+	}
+	if last.Content != "Which mode?\n1. Fast\n2. Safe" {
+		t.Fatalf("tool message content=%q", last.Content)
+	}
+}
+
 func TestClampMaxConcurrentSubagents(t *testing.T) {
 	tests := []struct {
 		name  string

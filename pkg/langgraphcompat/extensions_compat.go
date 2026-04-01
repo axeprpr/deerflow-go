@@ -164,7 +164,37 @@ func cloneGatewayMCPServers(src map[string]gatewayMCPServerConfig) map[string]ga
 	}
 	dst := make(map[string]gatewayMCPServerConfig, len(src))
 	for key, value := range src {
-		dst[key] = value
+		dst[key] = cloneGatewayMCPServerConfig(value)
+	}
+	return dst
+}
+
+func cloneGatewayMCPServerConfig(src gatewayMCPServerConfig) gatewayMCPServerConfig {
+	dst := src
+	if len(src.Args) > 0 {
+		dst.Args = append([]string(nil), src.Args...)
+	}
+	if len(src.Env) > 0 {
+		dst.Env = make(map[string]string, len(src.Env))
+		for key, value := range src.Env {
+			dst.Env[key] = value
+		}
+	}
+	if len(src.Headers) > 0 {
+		dst.Headers = make(map[string]string, len(src.Headers))
+		for key, value := range src.Headers {
+			dst.Headers[key] = value
+		}
+	}
+	if src.OAuth != nil {
+		oauth := *src.OAuth
+		if len(src.OAuth.ExtraTokenParams) > 0 {
+			oauth.ExtraTokenParams = make(map[string]string, len(src.OAuth.ExtraTokenParams))
+			for key, value := range src.OAuth.ExtraTokenParams {
+				oauth.ExtraTokenParams[key] = value
+			}
+		}
+		dst.OAuth = &oauth
 	}
 	return dst
 }

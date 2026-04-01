@@ -324,9 +324,7 @@ func (s *Server) handleMCPConfigPut(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid request body"})
 		return
 	}
-	if req.MCPServers == nil {
-		req.MCPServers = map[string]gatewayMCPServerConfig{}
-	}
+	req = normalizeGatewayMCPConfig(req)
 
 	s.uiStateMu.Lock()
 	s.mcpConfig = req
@@ -2010,7 +2008,7 @@ func (s *Server) loadGatewayState() error {
 		s.skills = mergeGatewaySkills(defaultGatewaySkills(), normalizePersistedSkills(state.Skills))
 	}
 	if state.MCPConfig.MCPServers != nil {
-		s.mcpConfig = state.MCPConfig
+		s.mcpConfig = normalizeGatewayMCPConfig(state.MCPConfig)
 	}
 	if state.Agents != nil {
 		s.setAgentsLocked(state.Agents)
@@ -2186,8 +2184,44 @@ func splitSkillStorageKey(key string) (string, string) {
 
 func defaultGatewayMCPConfig() gatewayMCPConfig {
 	return gatewayMCPConfig{
-		MCPServers: map[string]gatewayMCPServerConfig{},
+		MCPServers: map[string]gatewayMCPServerConfig{
+			"filesystem": {
+				Enabled:     false,
+				Type:        "stdio",
+				Command:     "npx",
+				Args:        []string{"-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"},
+				Env:         map[string]string{},
+				Description: "Provides filesystem access within allowed directories",
+			},
+			"github": {
+				Enabled:     false,
+				Type:        "stdio",
+				Command:     "npx",
+				Args:        []string{"-y", "@modelcontextprotocol/server-github"},
+				Env:         map[string]string{"GITHUB_TOKEN": "$GITHUB_TOKEN"},
+				Description: "GitHub MCP server for repository operations",
+			},
+			"postgres": {
+				Enabled:     false,
+				Type:        "stdio",
+				Command:     "npx",
+				Args:        []string{"-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/mydb"},
+				Env:         map[string]string{},
+				Description: "PostgreSQL database access",
+			},
+		},
 	}
+}
+
+func normalizeGatewayMCPConfig(cfg gatewayMCPConfig) gatewayMCPConfig {
+	merged := defaultGatewayMCPConfig()
+	if len(cfg.MCPServers) == 0 {
+		return merged
+	}
+	for name, server := range cfg.MCPServers {
+		merged.MCPServers[name] = cloneGatewayMCPServerConfig(server)
+	}
+	return merged
 }
 
 func defaultGatewayMemory() gatewayMemoryResponse {

@@ -170,4 +170,17 @@ func TestThreadStateIncludesStructuredUploadedFiles(t *testing.T) {
 	if got := asString(uploadedFiles[0]["markdown_path"]); got != "/mnt/user-data/uploads/report.md" {
 		t.Fatalf("markdown_path=%q want=/mnt/user-data/uploads/report.md", got)
 	}
+
+	artifacts, ok := state.Values["artifacts"].([]string)
+	if !ok {
+		t.Fatalf("artifacts=%#v", state.Values["artifacts"])
+	}
+	gotArtifacts := strings.Join(artifacts, ",")
+	wantArtifacts := strings.Join([]string{
+		"/mnt/user-data/uploads/report.md",
+		"/mnt/user-data/uploads/report.pdf",
+	}, ",")
+	if gotArtifacts != wantArtifacts {
+		t.Fatalf("artifacts=%q want=%q", gotArtifacts, wantArtifacts)
+	}
 }

@@ -29,6 +29,9 @@ func TestAskClarificationTool(t *testing.T) {
 	if result.Status != models.CallStatusCompleted {
 		t.Fatalf("result status = %q", result.Status)
 	}
+	if result.Content != "Which approach should I use?\n1. Fast\n2. Thorough" {
+		t.Fatalf("content = %q", result.Content)
+	}
 
 	id, _ := result.Data["id"].(string)
 	if id == "" {

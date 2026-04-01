@@ -1,5 +1,41 @@
 {
-  "mcpServers": {},
+  "mcpServers": {
+    "filesystem": {
+      "type": "stdio",
+      "enabled": false,
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/path/to/allowed/files"
+      ],
+      "description": "Provides filesystem access within allowed directories"
+    },
+    "github": {
+      "type": "stdio",
+      "enabled": false,
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_TOKEN": "$GITHUB_TOKEN"
+      },
+      "description": "GitHub MCP server for repository operations"
+    },
+    "postgres": {
+      "type": "stdio",
+      "enabled": false,
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://localhost/mydb"
+      ],
+      "description": "PostgreSQL database access"
+    }
+  },
   "skills": {
     "code-assist": {
       "enabled": true

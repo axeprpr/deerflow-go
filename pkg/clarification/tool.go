@@ -3,6 +3,7 @@ package clarification
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -78,7 +79,7 @@ func AskClarificationTool(manager *Manager) models.Tool {
 				}, err
 			}
 
-			content := fmt.Sprintf("Clarification requested with ID %s. Ask the user to answer it before continuing with assumptions.", item.ID)
+			content := formatClarificationMessage(item)
 			return models.ToolResult{
 				CallID:   call.ID,
 				ToolName: call.Name,
@@ -97,6 +98,34 @@ func AskClarificationTool(manager *Manager) models.Tool {
 			}, nil
 		},
 	}
+}
+
+func formatClarificationMessage(item *Clarification) string {
+	if item == nil {
+		return ""
+	}
+
+	question := strings.TrimSpace(item.Question)
+	if question == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString(question)
+	for i, option := range item.Options {
+		label := strings.TrimSpace(option.Label)
+		if label == "" {
+			label = strings.TrimSpace(option.Value)
+		}
+		if label == "" {
+			continue
+		}
+		b.WriteString("\n")
+		b.WriteString(strconv.Itoa(i + 1))
+		b.WriteString(". ")
+		b.WriteString(label)
+	}
+	return b.String()
 }
 
 func parseRequest(args map[string]any) (ClarificationRequest, error) {

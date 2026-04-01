@@ -348,6 +348,13 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 					Result:    &result,
 					ToolEvent: newToolEventFromResult(completedCall, result),
 				})
+				if shouldPauseAfterToolCall(call, result) {
+					return &RunResult{
+						Messages:    runMessages,
+						FinalOutput: assistantMessage.Content,
+						Usage:       usage,
+					}, nil
+				}
 
 				if err := ctx.Err(); err != nil {
 					err = normalizeRunError(ctx, err, a.requestTimeout)
@@ -426,6 +433,13 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 				Result:    &result,
 				ToolEvent: newToolEventFromResult(completedCall, result),
 			})
+			if shouldPauseAfterToolCall(call, result) {
+				return &RunResult{
+					Messages:    runMessages,
+					FinalOutput: assistantMessage.Content,
+					Usage:       usage,
+				}, nil
+			}
 
 			if err := ctx.Err(); err != nil {
 				err = normalizeRunError(ctx, err, a.requestTimeout)
@@ -441,6 +455,10 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 	err := fmt.Errorf("agent exceeded max turns (%d)", a.maxTurns)
 	emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
 	return nil, err
+}
+
+func shouldPauseAfterToolCall(call models.ToolCall, result models.ToolResult) bool {
+	return call.Name == "ask_clarification" && result.Status != models.CallStatusFailed
 }
 
 func detectToolCallLoop(history []string, calls []models.ToolCall, warned map[string]struct{}) (string, bool, []string) {
