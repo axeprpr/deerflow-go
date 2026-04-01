@@ -11,6 +11,7 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/models"
+	"github.com/axeprpr/deerflow-go/pkg/subagent"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
@@ -258,6 +259,72 @@ func TestForwardAgentEventEmitsLangChainToolStartEvent(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("missing on_tool_start events payload")
+	}
+}
+
+func TestForwardTaskEventIncludesStructuredMessageMetadata(t *testing.T) {
+	s := &Server{
+		runs:       map[string]*Run{},
+		runStreams: map[string]map[uint64]chan StreamEvent{},
+	}
+	run := &Run{
+		RunID:       "run-task-1",
+		ThreadID:    "thread-task-1",
+		AssistantID: "lead_agent",
+		Status:      "running",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.saveRun(run)
+
+	s.forwardTaskEvent(nil, nil, run, subagent.TaskEvent{
+		Type:          "task_running",
+		TaskID:        "task-1",
+		RequestID:     "subreq-1",
+		Description:   "inspect repo",
+		Message:       map[string]any{"id": "ai-1", "type": "ai", "tool_calls": []map[string]any{{"id": "call-1", "name": "bash"}}},
+		MessageIndex:  1,
+		TotalMessages: 2,
+	})
+
+	stored := s.getRun(run.RunID)
+	if stored == nil {
+		t.Fatal("stored run missing")
+	}
+
+	var found bool
+	for _, evt := range stored.Events {
+		if evt.Event != "task_running" {
+			continue
+		}
+		payload, ok := evt.Data.(map[string]any)
+		if !ok {
+			t.Fatalf("task payload type=%T", evt.Data)
+		}
+		if payload["request_id"] != "subreq-1" {
+			t.Fatalf("request_id=%v want subreq-1", payload["request_id"])
+		}
+		if payload["message_index"] != 1 {
+			t.Fatalf("message_index=%v want 1", payload["message_index"])
+		}
+		if payload["total_messages"] != 2 {
+			t.Fatalf("total_messages=%v want 2", payload["total_messages"])
+		}
+		message, ok := payload["message"].(map[string]any)
+		if !ok {
+			t.Fatalf("message type=%T want map[string]any", payload["message"])
+		}
+		toolCalls, ok := message["tool_calls"].([]map[string]any)
+		if !ok || len(toolCalls) != 1 {
+			t.Fatalf("tool_calls=%#v want single call", message["tool_calls"])
+		}
+		if toolCalls[0]["name"] != "bash" {
+			t.Fatalf("tool name=%v want bash", toolCalls[0]["name"])
+		}
+		found = true
+	}
+	if !found {
+		t.Fatal("missing task_running event")
 	}
 }
 

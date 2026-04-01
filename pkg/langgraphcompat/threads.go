@@ -3,6 +3,7 @@ package langgraphcompat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
@@ -1524,11 +1526,44 @@ func (s *Server) deleteThreadResources(threadID string, removeLocalData bool) er
 	if err := s.deletePersistedSession(threadID); err != nil {
 		return err
 	}
+	if err := s.deleteThreadMemory(threadID); err != nil {
+		return err
+	}
 	if !removeLocalData {
 		return nil
 	}
 	if err := os.RemoveAll(s.threadDir(threadID)); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (s *Server) deleteThreadMemory(threadID string) error {
+	if s == nil || strings.TrimSpace(threadID) == "" {
+		return nil
+	}
+
+	if deleter, ok := s.memoryStore.(interface {
+		Delete(context.Context, string) error
+	}); ok {
+		if err := deleter.Delete(context.Background(), threadID); err != nil && !errors.Is(err, memory.ErrNotFound) {
+			return err
+		}
+	}
+
+	shouldPersist := false
+	s.uiStateMu.Lock()
+	if s.memoryThread == threadID {
+		s.memoryThread = ""
+		s.memory = defaultGatewayMemory()
+		shouldPersist = true
+	}
+	s.uiStateMu.Unlock()
+
+	if shouldPersist {
+		if err := s.persistGatewayState(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

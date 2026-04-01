@@ -17,10 +17,11 @@ import (
 var subagentMessageSeq uint64
 
 type SubagentExecutor struct {
-	llm     llm.LLMProvider
-	tools   *tools.Registry
-	sandbox *sandbox.Sandbox
-	model   string
+	llm             llm.LLMProvider
+	tools           *tools.Registry
+	sandbox         *sandbox.Sandbox
+	sandboxProvider func() (*sandbox.Sandbox, error)
+	model           string
 }
 
 type subagentStreamState struct {
@@ -41,6 +42,13 @@ func NewSubagentExecutor(provider llm.LLMProvider, registry *tools.Registry, sb 
 	}
 }
 
+func (e *SubagentExecutor) SetSandboxProvider(provider func() (*sandbox.Sandbox, error)) {
+	if e == nil {
+		return
+	}
+	e.sandboxProvider = provider
+}
+
 func (e *SubagentExecutor) Execute(ctx context.Context, task *subagent.Task, emit func(subagent.TaskEvent)) (subagent.ExecutionResult, error) {
 	if e == nil || e.llm == nil {
 		return subagent.ExecutionResult{}, fmt.Errorf("subagent llm provider is required")
@@ -51,12 +59,19 @@ func (e *SubagentExecutor) Execute(ctx context.Context, task *subagent.Task, emi
 		_ = registry.Register(tool)
 	}
 
+	sandboxRef := e.sandbox
+	if sandboxRef == nil && e.sandboxProvider != nil {
+		if sb, err := e.sandboxProvider(); err == nil {
+			sandboxRef = sb
+		}
+	}
+
 	runAgent := New(AgentConfig{
 		LLMProvider:    e.llm,
 		Tools:          registry,
 		MaxTurns:       task.Config.MaxTurns,
 		Model:          e.model,
-		Sandbox:        e.sandbox,
+		Sandbox:        sandboxRef,
 		RequestTimeout: task.Config.Timeout,
 	})
 
@@ -238,12 +253,14 @@ func subagentTaskEventFromAgentEvent(task *subagent.Task, evt AgentEvent, state 
 }
 
 func (s *subagentStreamState) applyChunk(messageID string, delta string) map[string]any {
-	delta = strings.TrimSpace(delta)
 	if delta == "" {
 		return nil
 	}
 	s.ensureMessage(messageID)
 	s.currentContent.WriteString(delta)
+	if strings.TrimSpace(s.currentContent.String()) == "" && len(s.currentToolCalls) == 0 {
+		return nil
+	}
 	return s.snapshot()
 }
 

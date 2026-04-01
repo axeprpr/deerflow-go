@@ -1,10 +1,16 @@
 package agent
 
 import (
+	"context"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
+	"github.com/axeprpr/deerflow-go/pkg/sandbox"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
+	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
 func TestSubagentTaskEventFromAgentEvent_EmitsStructuredMessageSnapshots(t *testing.T) {
@@ -108,5 +114,111 @@ func TestSubagentTaskEventFromAgentEvent_IgnoresTextChunkDuplicates(t *testing.T
 		Text:      "duplicate delta",
 	}, state); ok {
 		t.Fatal("text chunk should be ignored to avoid duplicate task_running updates")
+	}
+}
+
+func TestSubagentTaskEventFromAgentEvent_PreservesChunkSpacing(t *testing.T) {
+	task := &subagent.Task{ID: "task-1", Description: "inspect repo"}
+	state := &subagentStreamState{}
+
+	first, ok := subagentTaskEventFromAgentEvent(task, AgentEvent{
+		Type:      AgentEventChunk,
+		MessageID: "ai-1",
+		Text:      "hello ",
+	}, state)
+	if !ok {
+		t.Fatal("first chunk event was ignored")
+	}
+	second, ok := subagentTaskEventFromAgentEvent(task, AgentEvent{
+		Type:      AgentEventChunk,
+		MessageID: "ai-1",
+		Text:      "world",
+	}, state)
+	if !ok {
+		t.Fatal("second chunk event was ignored")
+	}
+
+	firstMessage, ok := first.Message.(map[string]any)
+	if !ok {
+		t.Fatalf("first message type=%T want map[string]any", first.Message)
+	}
+	if got := trimStringValue(firstMessage["content"]); got != "hello" {
+		t.Fatalf("first content=%q want hello", got)
+	}
+
+	secondMessage, ok := second.Message.(map[string]any)
+	if !ok {
+		t.Fatalf("second message type=%T want map[string]any", second.Message)
+	}
+	if got := trimStringValue(secondMessage["content"]); got != "hello world" {
+		t.Fatalf("second content=%q want hello world", got)
+	}
+}
+
+func TestSubagentExecutorUsesLazySandboxProvider(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name:        "inspect_sandbox",
+		Description: "Report whether a sandbox is available.",
+		InputSchema: map[string]any{"type": "object"},
+		Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+			if tools.SandboxFromContext(ctx) == nil {
+				return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: "sandbox:missing"}, nil
+			}
+			return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: "sandbox:available"}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
+
+	provider := &scriptedStreamProvider{
+		t: t,
+		steps: []streamStep{
+			{
+				toolCalls: []models.ToolCall{{
+					ID:   "call-sandbox-1",
+					Name: "inspect_sandbox",
+				}},
+			},
+			{
+				check: func(t *testing.T, req llm.ChatRequest) {
+					last := req.Messages[len(req.Messages)-1]
+					if last.Role != models.RoleTool || last.ToolResult == nil {
+						t.Fatalf("last message=%#v", last)
+					}
+					if !strings.Contains(last.Content, "sandbox:available") {
+						t.Fatalf("tool result content=%q want sandbox:available", last.Content)
+					}
+				},
+				content: "Sandbox check complete.",
+			},
+		},
+	}
+
+	executor := NewSubagentExecutor(provider, registry, nil)
+	var providerCalls int
+	executor.SetSandboxProvider(func() (*sandbox.Sandbox, error) {
+		providerCalls++
+		return &sandbox.Sandbox{}, nil
+	})
+
+	result, err := executor.Execute(context.Background(), &subagent.Task{
+		ID:          "task-sandbox-provider",
+		Description: "inspect sandbox availability",
+		Prompt:      "Check whether tools receive a sandbox.",
+		Config: subagent.SubagentConfig{
+			Type:     subagent.SubagentGeneralPurpose,
+			MaxTurns: 3,
+			Timeout:  time.Second,
+		},
+	}, func(subagent.TaskEvent) {})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if providerCalls != 1 {
+		t.Fatalf("sandbox provider calls=%d want 1", providerCalls)
+	}
+	if result.Result != "Sandbox check complete." {
+		t.Fatalf("result=%q want Sandbox check complete.", result.Result)
 	}
 }

@@ -745,7 +745,7 @@ func (s *Server) handleUploadsCreate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success": true,
 		"files":   infos,
-		"message": "files uploaded",
+		"message": fmt.Sprintf("Successfully uploaded %d file(s)", len(infos)),
 	})
 }
 
@@ -1084,7 +1084,7 @@ func (s *Server) uploadInfo(threadID, fullPath, name string, size int64, modifie
 		"path":         virtualPath,
 		"virtual_path": virtualPath,
 		"artifact_url": uploadArtifactURL(threadID, name),
-		"extension":    strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), "."),
+		"extension":    strings.ToLower(filepath.Ext(name)),
 		"modified":     modified,
 	}
 }

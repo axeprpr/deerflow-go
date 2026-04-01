@@ -304,6 +304,7 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 	}
 	s.channelService = newGatewayChannelService()
 	s.channelService.start()
+	subagentExecutor.SetSandboxProvider(s.getOrCreateSandbox)
 	registry.Register(s.setupAgentTool())
 	registry.Register(s.todoTool())
 	if err := s.loadGatewayState(); err != nil {
@@ -372,7 +373,11 @@ func cloneURL(src *url.URL) *url.URL {
 func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
 	sandboxRef := cfg.Sandbox
 	if sandboxRef == nil {
-		sandboxRef = s.sandbox
+		if sb, err := s.getOrCreateSandbox(); err == nil {
+			sandboxRef = sb
+		} else if s.logger != nil {
+			s.logger.Printf("Warning: failed to initialize sandbox: %v", err)
+		}
 	}
 	registry := cfg.Tools
 	if registry == nil {

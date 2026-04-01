@@ -1128,6 +1128,72 @@ func TestUploadsEndpointIgnoresMarkdownConversionFailures(t *testing.T) {
 	}
 }
 
+func TestUploadsEndpointReturnsListCompatibleMetadata(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-upload-metadata"
+	s.ensureSession(threadID, nil)
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	part, err := w.CreateFormFile("files", "hello.txt")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("hello")); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/"+threadID+"/uploads", &body, map[string]string{"Content-Type": w.FormDataContentType()})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("upload status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var uploaded struct {
+		Success bool             `json:"success"`
+		Files   []map[string]any `json:"files"`
+		Message string           `json:"message"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&uploaded); err != nil {
+		t.Fatalf("decode upload response: %v", err)
+	}
+	if !uploaded.Success {
+		t.Fatal("expected upload success")
+	}
+	if uploaded.Message != "Successfully uploaded 1 file(s)" {
+		t.Fatalf("message=%q want=%q", uploaded.Message, "Successfully uploaded 1 file(s)")
+	}
+	if len(uploaded.Files) != 1 {
+		t.Fatalf("files=%d want=1", len(uploaded.Files))
+	}
+	if got := asString(uploaded.Files[0]["extension"]); got != ".txt" {
+		t.Fatalf("extension=%q want=.txt", got)
+	}
+	if got := toInt64(uploaded.Files[0]["modified"]); got <= 0 {
+		t.Fatalf("modified=%d want > 0", got)
+	}
+
+	listResp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/uploads/list", nil, nil)
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", listResp.Code, listResp.Body.String())
+	}
+
+	var listed struct {
+		Files []map[string]any `json:"files"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listed.Files) != 1 {
+		t.Fatalf("listed files=%d want=1", len(listed.Files))
+	}
+	if got := asString(listed.Files[0]["extension"]); got != asString(uploaded.Files[0]["extension"]) {
+		t.Fatalf("listed extension=%q want upload response extension=%q", got, asString(uploaded.Files[0]["extension"]))
+	}
+}
+
 func TestValidateUploadedFilenameNormalizesDirectoryPathsToBasename(t *testing.T) {
 	got, err := validateUploadedFilename("nested/report.txt")
 	if err != nil {
@@ -1972,6 +2038,66 @@ func TestThreadDeleteRemovesRunsAndLocalThreadData(t *testing.T) {
 	runResp := performCompatRequest(t, handler, http.MethodGet, "/runs/"+runID, nil, nil)
 	if runResp.Code != http.StatusNotFound {
 		t.Fatalf("run status=%d body=%s", runResp.Code, runResp.Body.String())
+	}
+}
+
+func TestThreadDeleteRemovesThreadScopedMemoryAndClearsCache(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-delete-memory"
+	store := &fakeGatewayMemoryStore{
+		docs: map[string]memory.Document{
+			threadID: {
+				SessionID: threadID,
+				Source:    threadID,
+				User: memory.UserMemory{
+					TopOfMind: "Remove this memory.",
+				},
+			},
+			"agent:writer-bot": {
+				SessionID: "agent:writer-bot",
+				Source:    "agent:writer-bot",
+				User: memory.UserMemory{
+					TopOfMind: "Keep agent memory.",
+				},
+			},
+		},
+	}
+	s.memoryStore = store
+	s.memorySvc = memory.NewService(store, fakeMemoryExtractor{})
+	s.memoryThread = threadID
+	s.memory = gatewayMemoryResponse{
+		Version:     "1",
+		LastUpdated: time.Now().UTC().Format(time.RFC3339),
+		User: memoryUser{
+			TopOfMind: memorySection{
+				Summary:   "Remove this memory.",
+				UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+			},
+		},
+	}
+	s.ensureSession(threadID, map[string]any{"title": "Delete memory"})
+
+	resp := performCompatRequest(t, handler, http.MethodDelete, "/threads/"+threadID, nil, nil)
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	if _, err := store.Load(context.Background(), threadID); !errors.Is(err, memory.ErrNotFound) {
+		t.Fatalf("load deleted thread memory err=%v want ErrNotFound", err)
+	}
+	if _, err := store.Load(context.Background(), "agent:writer-bot"); err != nil {
+		t.Fatalf("agent memory should remain: %v", err)
+	}
+	if got := s.memoryThread; got != "" {
+		t.Fatalf("memoryThread=%q want empty", got)
+	}
+
+	memResp := performCompatRequest(t, handler, http.MethodGet, "/api/memory", nil, nil)
+	if memResp.Code != http.StatusOK {
+		t.Fatalf("memory status=%d body=%s", memResp.Code, memResp.Body.String())
+	}
+	if strings.Contains(memResp.Body.String(), "Remove this memory.") {
+		t.Fatalf("deleted thread memory leaked into gateway cache: %q", memResp.Body.String())
 	}
 }
 
@@ -3899,6 +4025,17 @@ func (f *fakeGatewayMemoryStore) Save(_ context.Context, doc memory.Document) er
 		f.docs = map[string]memory.Document{}
 	}
 	f.docs[doc.SessionID] = doc
+	return nil
+}
+
+func (f *fakeGatewayMemoryStore) Delete(_ context.Context, sessionID string) error {
+	if f.docs == nil {
+		return memory.ErrNotFound
+	}
+	if _, ok := f.docs[sessionID]; !ok {
+		return memory.ErrNotFound
+	}
+	delete(f.docs, sessionID)
 	return nil
 }
 

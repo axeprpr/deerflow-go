@@ -1070,12 +1070,15 @@ func langChainToolEvent(eventName string, run *Run, evt agent.AgentEvent) map[st
 
 func (s *Server) forwardTaskEvent(w http.ResponseWriter, flusher http.Flusher, run *Run, evt subagent.TaskEvent) {
 	data := map[string]any{
-		"type":        evt.Type,
-		"task_id":     evt.TaskID,
-		"description": evt.Description,
-		"message":     evt.Message,
-		"result":      evt.Result,
-		"error":       evt.Error,
+		"type":           evt.Type,
+		"task_id":        evt.TaskID,
+		"request_id":     evt.RequestID,
+		"description":    evt.Description,
+		"message":        evt.Message,
+		"message_index":  evt.MessageIndex,
+		"total_messages": evt.TotalMessages,
+		"result":         evt.Result,
+		"error":          evt.Error,
 	}
 	s.recordAndSendEvent(w, flusher, run, evt.Type, data)
 }

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/axeprpr/deerflow-go/pkg/agent"
 )
 
 func TestNewServerDefersSandboxCreation(t *testing.T) {
@@ -26,5 +28,29 @@ func TestNewServerDefersSandboxCreation(t *testing.T) {
 	}
 	if _, err := os.Stat(sandboxDir); err != nil {
 		t.Fatalf("sandbox dir missing after lazy init: %v", err)
+	}
+}
+
+func TestNewAgentLazilyInitializesSandbox(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
+
+	s, err := NewServer(":0", "", "test-model")
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	if s.sandbox != nil {
+		t.Fatal("sandbox initialized before agent creation")
+	}
+
+	_ = s.newAgent(agent.AgentConfig{})
+
+	if s.sandbox == nil {
+		t.Fatal("sandbox = nil after lazy agent initialization")
+	}
+	sandboxDir := filepath.Join(tmp, "deerflow-langgraph-sandbox", "langgraph")
+	if _, err := os.Stat(sandboxDir); err != nil {
+		t.Fatalf("sandbox dir missing after newAgent lazy init: %v", err)
 	}
 }
