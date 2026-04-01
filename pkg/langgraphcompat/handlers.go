@@ -172,7 +172,8 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 		newMessages = s.convertToMessages(threadID, messages, true)
 	}
 	s.setThreadConfig(threadID, threadConfigFromRuntimeContext(threadID, runtimeContext, resolvedRunCfg))
-	resolvedRunCfg.SystemPrompt = joinPromptSections(resolvedRunCfg.SystemPrompt, s.memoryInjectionPrompt(ctx, threadID))
+	memorySessionID := deriveMemorySessionID(threadID, firstNonEmpty(stringFromAny(runtimeContext["agent_name"]), resolvedRunCfg.AgentName))
+	resolvedRunCfg.SystemPrompt = joinPromptSections(resolvedRunCfg.SystemPrompt, s.memoryInjectionPrompt(ctx, memorySessionID))
 
 	s.sessionsMu.RLock()
 	existingMessages := append([]models.Message(nil), session.Messages...)
@@ -276,7 +277,7 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 	}
 	s.setThreadHistorySummary(threadID, historySummary)
 	s.saveSession(threadID, storedMessages)
-	s.scheduleMemoryUpdate(threadID, storedMessages)
+	s.scheduleMemoryUpdate(memorySessionID, storedMessages)
 	s.maybeGenerateThreadTitle(ctx, threadID, resolvedRunCfg.ModelName, storedMessages)
 	state := s.getThreadState(threadID)
 	if state != nil {
@@ -1177,6 +1178,13 @@ func (s *Server) memoryInjectionPrompt(ctx context.Context, threadID string) str
 		return ""
 	}
 	return strings.TrimSpace(s.memorySvc.Inject(ctx, threadID))
+}
+
+func deriveMemorySessionID(threadID, agentName string) string {
+	if normalized, ok := normalizeAgentName(agentName); ok {
+		return "agent:" + normalized
+	}
+	return strings.TrimSpace(threadID)
 }
 
 func filterTransientMessages(messages []models.Message) []models.Message {

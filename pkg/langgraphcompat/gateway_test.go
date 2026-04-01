@@ -2627,6 +2627,69 @@ func TestRunsStreamInjectsStoredMemoryIntoSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestRunsStreamUsesAgentScopedMemoryForCustomAgents(t *testing.T) {
+	provider := &streamSpyProvider{}
+	store := &fakeGatewayMemoryStore{
+		docs: map[string]memory.Document{
+			"agent:code-reviewer": {
+				SessionID: "agent:code-reviewer",
+				User: memory.UserMemory{
+					WorkContext: "Reviews Go patches across repositories.",
+				},
+				Facts: []memory.Fact{{
+					ID:        "fact-1",
+					Content:   "Prefers terse review summaries.",
+					Category:  "preference",
+					CreatedAt: time.Now().Add(-time.Hour).UTC(),
+					UpdatedAt: time.Now().Add(-time.Hour).UTC(),
+				}},
+				Source:    "agent:code-reviewer",
+				UpdatedAt: time.Now().UTC(),
+			},
+		},
+	}
+	s := &Server{
+		llmProvider:  provider,
+		defaultModel: "default-model",
+		tools:        newRuntimeToolRegistry(t),
+		sessions:     make(map[string]*Session),
+		runs:         make(map[string]*Run),
+		runStreams:   make(map[string]map[uint64]chan StreamEvent),
+		dataRoot:     t.TempDir(),
+		memoryStore:  store,
+		memorySvc:    memory.NewService(store, fakeMemoryExtractor{}),
+		agents: map[string]gatewayAgent{
+			"code-reviewer": {
+				Name:        "code-reviewer",
+				Description: "Review code changes carefully.",
+				Soul:        "You are a meticulous code reviewer.",
+			},
+		},
+	}
+
+	body := `{
+		"thread_id":"thread-custom-agent-memory",
+		"input":{"messages":[{"role":"user","content":"Review this patch"}]},
+		"context":{"agent_name":"code-reviewer"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/runs/stream", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleRunsStream(rec, req)
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(payload))
+	}
+	if !strings.Contains(provider.lastReq.SystemPrompt, "Reviews Go patches across repositories.") {
+		t.Fatalf("system prompt missing agent-scoped work context: %q", provider.lastReq.SystemPrompt)
+	}
+	if !strings.Contains(provider.lastReq.SystemPrompt, "Prefers terse review summaries.") {
+		t.Fatalf("system prompt missing agent-scoped fact: %q", provider.lastReq.SystemPrompt)
+	}
+}
+
 func TestRunsStreamRejectsMissingCustomAgent(t *testing.T) {
 	s := &Server{
 		sessions: make(map[string]*Session),
@@ -2796,6 +2859,55 @@ func TestMemoryEndpointsReadAndMutateStoredDocument(t *testing.T) {
 	}
 }
 
+func TestRunsStreamPersistsMemoryUpdatesToAgentScope(t *testing.T) {
+	provider := &streamSpyProvider{}
+	store := &fakeGatewayMemoryStore{docs: map[string]memory.Document{}}
+	s := &Server{
+		llmProvider:  provider,
+		defaultModel: "default-model",
+		tools:        newRuntimeToolRegistry(t),
+		sessions:     make(map[string]*Session),
+		runs:         make(map[string]*Run),
+		runStreams:   make(map[string]map[uint64]chan StreamEvent),
+		dataRoot:     t.TempDir(),
+		memoryStore:  store,
+		memorySvc:    memory.NewService(store, fakeStaticMemoryExtractor{update: memory.Update{User: memory.UserMemory{TopOfMind: "Track review follow-ups."}}}),
+		agents: map[string]gatewayAgent{
+			"code-reviewer": {
+				Name:        "code-reviewer",
+				Description: "Review code changes carefully.",
+			},
+		},
+	}
+
+	body := `{
+		"thread_id":"thread-custom-agent-memory-save",
+		"input":{"messages":[{"role":"user","content":"Review this patch"}]},
+		"context":{"agent_name":"code-reviewer"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/runs/stream", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleRunsStream(rec, req)
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(payload))
+	}
+
+	doc, ok := store.docs["agent:code-reviewer"]
+	if !ok {
+		t.Fatalf("expected agent-scoped memory document, got keys=%v", mapsKeys(store.docs))
+	}
+	if doc.User.TopOfMind != "Track review follow-ups" {
+		t.Fatalf("top_of_mind=%q want=%q", doc.User.TopOfMind, "Track review follow-ups")
+	}
+	if _, ok := store.docs["thread-custom-agent-memory-save"]; ok {
+		t.Fatalf("unexpected thread-scoped memory document: %#v", store.docs["thread-custom-agent-memory-save"])
+	}
+}
+
 func TestInferBootstrapAgentNameFromBootstrapMessages(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -2900,6 +3012,22 @@ type fakeMemoryExtractor struct{}
 
 func (fakeMemoryExtractor) ExtractUpdate(context.Context, memory.Document, []models.Message) (memory.Update, error) {
 	return memory.Update{}, nil
+}
+
+type fakeStaticMemoryExtractor struct {
+	update memory.Update
+}
+
+func (f fakeStaticMemoryExtractor) ExtractUpdate(context.Context, memory.Document, []models.Message) (memory.Update, error) {
+	return f.update, nil
+}
+
+func mapsKeys[K comparable, V any](in map[K]V) []K {
+	out := make([]K, 0, len(in))
+	for key := range in {
+		out = append(out, key)
+	}
+	return out
 }
 
 func writeSkillArchive(path, name string) error {
