@@ -3,13 +3,15 @@ package subagent
 import "context"
 
 type TaskEvent struct {
-	Type        string `json:"type"`
-	TaskID      string `json:"task_id"`
-	RequestID   string `json:"request_id,omitempty"`
-	Description string `json:"description,omitempty"`
-	Message     string `json:"message,omitempty"`
-	Result      string `json:"result,omitempty"`
-	Error       string `json:"error,omitempty"`
+	Type          string `json:"type"`
+	TaskID        string `json:"task_id"`
+	RequestID     string `json:"request_id,omitempty"`
+	Description   string `json:"description,omitempty"`
+	Message       any    `json:"message,omitempty"`
+	MessageIndex  int    `json:"message_index,omitempty"`
+	TotalMessages int    `json:"total_messages,omitempty"`
+	Result        string `json:"result,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
 
 type eventSinkContextKey struct{}

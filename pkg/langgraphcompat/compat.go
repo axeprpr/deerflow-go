@@ -33,6 +33,8 @@ type Server struct {
 	llmProvider       llm.LLMProvider
 	tools             *tools.Registry
 	sandbox           *sandbox.Sandbox
+	sandboxMu         sync.Mutex
+	sandboxRoot       string
 	subagents         *subagent.Pool
 	clarify           *clarification.Manager
 	clarifyAPI        *clarification.API
@@ -195,14 +197,8 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 	if acpAgents := loadACPAgentConfigs(); len(acpAgents) > 0 {
 		registry.Register(tools.InvokeACPAgentTool(acpAgents))
 	}
-	var sb *sandbox.Sandbox
-	sb, err := sandbox.New("langgraph", filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox"))
-	if err != nil {
-		logger.Printf("Warning: failed to create sandbox: %v", err)
-	}
-
 	subagentAppCfg := loadSubagentsAppConfig()
-	subagentExecutor := agent.NewSubagentExecutor(provider, registry, sb)
+	subagentExecutor := agent.NewSubagentExecutor(provider, registry, nil)
 	subagentPool := subagent.NewPool(subagentExecutor, subagent.PoolConfig{
 		MaxConcurrent: defaultGatewaySubagentMaxConcurrent,
 		Timeout:       subagentAppCfg.timeoutFor(subagent.SubagentGeneralPurpose),
@@ -283,7 +279,7 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		logger:            logger,
 		llmProvider:       provider,
 		tools:             registry,
-		sandbox:           sb,
+		sandboxRoot:       filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox"),
 		subagents:         subagentPool,
 		clarify:           clarifyManager,
 		clarifyAPI:        clarification.NewAPI(clarifyManager),
@@ -397,6 +393,32 @@ func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
 		Sandbox:         sandboxRef,
 		RequestTimeout:  cfg.RequestTimeout,
 	})
+}
+
+func (s *Server) getOrCreateSandbox() (*sandbox.Sandbox, error) {
+	if s == nil {
+		return nil, errors.New("server is nil")
+	}
+
+	s.sandboxMu.Lock()
+	defer s.sandboxMu.Unlock()
+
+	if s.sandbox != nil {
+		return s.sandbox, nil
+	}
+
+	root := strings.TrimSpace(s.sandboxRoot)
+	if root == "" {
+		root = filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
+		s.sandboxRoot = root
+	}
+
+	sb, err := sandbox.New("langgraph", root)
+	if err != nil {
+		return nil, err
+	}
+	s.sandbox = sb
+	return sb, nil
 }
 
 func (s *Server) currentDeferredMCPTools() []models.Tool {
@@ -552,10 +574,16 @@ func (s *Server) checkDatabase(ctx context.Context) string {
 }
 
 func (s *Server) checkSandbox(ctx context.Context) string {
-	if s == nil || s.sandbox == nil {
+	if s == nil {
 		return "disabled"
 	}
-	result, err := s.sandbox.Exec(ctx, "printf sandbox-ok", 2*time.Second)
+
+	sb, err := s.getOrCreateSandbox()
+	if err != nil {
+		s.logger.Printf("health check: sandbox init failed: %v", err)
+		return "down"
+	}
+	result, err := sb.Exec(ctx, "printf sandbox-ok", 2*time.Second)
 	if err != nil {
 		s.logger.Printf("health check: sandbox down: %v", err)
 		return "down"

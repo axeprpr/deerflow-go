@@ -23,6 +23,13 @@ type SubagentExecutor struct {
 	model   string
 }
 
+type subagentStreamState struct {
+	currentMessageID string
+	currentContent   strings.Builder
+	currentToolCalls []map[string]any
+	messageCount     int
+}
+
 func NewSubagentExecutor(provider llm.LLMProvider, registry *tools.Registry, sb *sandbox.Sandbox) *SubagentExecutor {
 	if registry == nil {
 		registry = tools.NewRegistry()
@@ -56,17 +63,13 @@ func (e *SubagentExecutor) Execute(ctx context.Context, task *subagent.Task, emi
 	eventsDone := make(chan struct{})
 	go func() {
 		defer close(eventsDone)
+		streamState := &subagentStreamState{}
 		for evt := range runAgent.Events() {
-			message := subagentMessageFromAgentEvent(evt)
-			if strings.TrimSpace(message) == "" {
+			taskEvent, ok := subagentTaskEventFromAgentEvent(task, evt, streamState)
+			if !ok {
 				continue
 			}
-			emit(subagent.TaskEvent{
-				Type:        "task_running",
-				TaskID:      task.ID,
-				Description: task.Description,
-				Message:     message,
-			})
+			emit(taskEvent)
 		}
 	}()
 
@@ -162,25 +165,179 @@ func filterDisallowedSubagentTools(all []models.Tool, denylist []string) []model
 	return filtered
 }
 
-func subagentMessageFromAgentEvent(evt AgentEvent) string {
+func subagentTaskEventFromAgentEvent(task *subagent.Task, evt AgentEvent, state *subagentStreamState) (subagent.TaskEvent, bool) {
+	if task == nil {
+		return subagent.TaskEvent{}, false
+	}
 	switch evt.Type {
-	case AgentEventChunk, AgentEventTextChunk:
-		return strings.TrimSpace(evt.Text)
-	case AgentEventToolCallStart:
-		if evt.ToolEvent != nil {
-			return fmt.Sprintf("calling tool %s", evt.ToolEvent.Name)
+	case AgentEventChunk:
+		snapshot := state.applyChunk(evt.MessageID, evt.Text)
+		if snapshot == nil {
+			return subagent.TaskEvent{}, false
 		}
+		return subagent.TaskEvent{
+			Type:          "task_running",
+			TaskID:        task.ID,
+			Description:   task.Description,
+			Message:       snapshot,
+			MessageIndex:  state.messageCount,
+			TotalMessages: state.messageCount,
+		}, true
+	case AgentEventToolCall:
+		if evt.ToolCall == nil {
+			return subagent.TaskEvent{}, false
+		}
+		snapshot := state.applyToolCall(evt.MessageID, evt.ToolCall)
+		if snapshot == nil {
+			return subagent.TaskEvent{}, false
+		}
+		return subagent.TaskEvent{
+			Type:          "task_running",
+			TaskID:        task.ID,
+			Description:   task.Description,
+			Message:       snapshot,
+			MessageIndex:  state.messageCount,
+			TotalMessages: state.messageCount,
+		}, true
+	case AgentEventEnd:
+		if strings.TrimSpace(evt.Text) == "" {
+			return subagent.TaskEvent{}, false
+		}
+		snapshot := state.applyFinalText(evt.MessageID, evt.Text)
+		if snapshot == nil {
+			return subagent.TaskEvent{}, false
+		}
+		return subagent.TaskEvent{
+			Type:          "task_running",
+			TaskID:        task.ID,
+			Description:   task.Description,
+			Message:       snapshot,
+			MessageIndex:  state.messageCount,
+			TotalMessages: state.messageCount,
+		}, true
 	case AgentEventToolCallEnd:
-		if evt.ToolEvent != nil {
-			if evt.ToolEvent.Error != "" {
-				return fmt.Sprintf("tool %s failed: %s", evt.ToolEvent.Name, evt.ToolEvent.Error)
-			}
-			return fmt.Sprintf("tool %s completed", evt.ToolEvent.Name)
+		if evt.ToolEvent != nil && strings.TrimSpace(evt.ToolEvent.Error) != "" {
+			return subagent.TaskEvent{
+				Type:        "task_running",
+				TaskID:      task.ID,
+				Description: task.Description,
+				Message:     fmt.Sprintf("tool %s failed: %s", evt.ToolEvent.Name, evt.ToolEvent.Error),
+			}, true
 		}
 	case AgentEventError:
-		return strings.TrimSpace(evt.Err)
+		if text := strings.TrimSpace(evt.Err); text != "" {
+			return subagent.TaskEvent{
+				Type:        "task_running",
+				TaskID:      task.ID,
+				Description: task.Description,
+				Message:     text,
+			}, true
+		}
 	}
-	return ""
+	return subagent.TaskEvent{}, false
+}
+
+func (s *subagentStreamState) applyChunk(messageID string, delta string) map[string]any {
+	delta = strings.TrimSpace(delta)
+	if delta == "" {
+		return nil
+	}
+	s.ensureMessage(messageID)
+	s.currentContent.WriteString(delta)
+	return s.snapshot()
+}
+
+func (s *subagentStreamState) applyToolCall(messageID string, call *models.ToolCall) map[string]any {
+	if call == nil {
+		return nil
+	}
+	s.ensureMessage(messageID)
+	toolCall := map[string]any{
+		"id":   call.ID,
+		"name": call.Name,
+		"args": cloneToolCallArgs(call.Arguments),
+	}
+	for i, existing := range s.currentToolCalls {
+		if trimStringValue(existing["id"]) == call.ID && call.ID != "" {
+			s.currentToolCalls[i] = toolCall
+			return s.snapshot()
+		}
+	}
+	s.currentToolCalls = append(s.currentToolCalls, toolCall)
+	return s.snapshot()
+}
+
+func (s *subagentStreamState) applyFinalText(messageID string, content string) map[string]any {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil
+	}
+	s.ensureMessage(messageID)
+	s.currentContent.Reset()
+	s.currentContent.WriteString(content)
+	return s.snapshot()
+}
+
+func (s *subagentStreamState) ensureMessage(messageID string) {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		messageID = newSubagentMessageID("ai")
+	}
+	if s.currentMessageID == messageID {
+		return
+	}
+	s.currentMessageID = messageID
+	s.currentContent.Reset()
+	s.currentToolCalls = nil
+	s.messageCount++
+}
+
+func (s *subagentStreamState) snapshot() map[string]any {
+	if s == nil || strings.TrimSpace(s.currentMessageID) == "" {
+		return nil
+	}
+	message := map[string]any{
+		"type": "ai",
+		"id":   s.currentMessageID,
+	}
+	if content := strings.TrimSpace(s.currentContent.String()); content != "" {
+		message["content"] = content
+	}
+	if len(s.currentToolCalls) > 0 {
+		toolCalls := make([]map[string]any, 0, len(s.currentToolCalls))
+		for _, call := range s.currentToolCalls {
+			toolCalls = append(toolCalls, cloneToolCallMap(call))
+		}
+		message["tool_calls"] = toolCalls
+	}
+	return message
+}
+
+func cloneToolCallArgs(args map[string]any) map[string]any {
+	if len(args) == 0 {
+		return map[string]any{}
+	}
+	cloned := make(map[string]any, len(args))
+	for key, value := range args {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func cloneToolCallMap(src map[string]any) map[string]any {
+	if len(src) == 0 {
+		return nil
+	}
+	cloned := make(map[string]any, len(src))
+	for key, value := range src {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func trimStringValue(value any) string {
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
 }
 
 func subagentSystemPrompt(task *subagent.Task) string {
