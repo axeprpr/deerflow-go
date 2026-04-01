@@ -538,13 +538,8 @@ func (s *Server) handleThreadFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	files := []tools.PresentFile{}
-	if session.PresentFiles != nil {
-		files = session.PresentFiles.List()
-	}
-
 	writeJSON(w, http.StatusOK, map[string]any{
-		"files": files,
+		"files": s.sessionFiles(session),
 	})
 }
 
@@ -1377,6 +1372,46 @@ func (s *Server) sessionArtifactPaths(session *Session) []string {
 		paths = append(paths, path)
 	}
 	return paths
+}
+
+func (s *Server) sessionFiles(session *Session) []tools.PresentFile {
+	if session == nil {
+		return []tools.PresentFile{}
+	}
+
+	seen := make(map[string]struct{})
+	files := make([]tools.PresentFile, 0)
+	if session.PresentFiles != nil {
+		for _, file := range session.PresentFiles.List() {
+			if file.Path == "" {
+				continue
+			}
+			if _, ok := seen[file.Path]; ok {
+				continue
+			}
+			seen[file.Path] = struct{}{}
+			files = append(files, file)
+		}
+	}
+
+	for _, root := range []struct {
+		path          string
+		virtualPrefix string
+	}{
+		{path: filepath.Join(s.threadRoot(session.ThreadID), "outputs"), virtualPrefix: "/mnt/user-data/outputs"},
+		{path: filepath.Join(s.threadRoot(session.ThreadID), "workspace"), virtualPrefix: "/mnt/user-data/workspace"},
+		{path: s.uploadsDir(session.ThreadID), virtualPrefix: "/mnt/user-data/uploads"},
+	} {
+		for _, file := range collectArtifactFiles(root.path, root.virtualPrefix) {
+			if _, ok := seen[file.Path]; ok {
+				continue
+			}
+			seen[file.Path] = struct{}{}
+			files = append(files, file)
+		}
+	}
+
+	return files
 }
 
 func (s *Server) uploadArtifactPaths(threadID string) []string {

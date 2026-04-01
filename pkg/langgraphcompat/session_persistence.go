@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"mime"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -288,6 +290,66 @@ func collectArtifactPaths(root string, virtualPrefix string) []string {
 		paths = append(paths, entry.path)
 	}
 	return paths
+}
+
+func collectArtifactFiles(root string, virtualPrefix string) []tools.PresentFile {
+	type artifactEntry struct {
+		file tools.PresentFile
+	}
+
+	virtualPrefix = "/" + strings.Trim(strings.TrimSpace(virtualPrefix), "/")
+	if virtualPrefix == "/" {
+		virtualPrefix = ""
+	}
+
+	entries := make([]artifactEntry, 0)
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d == nil || d.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return nil
+		}
+		info, infoErr := d.Info()
+		if infoErr != nil {
+			return nil
+		}
+		entries = append(entries, artifactEntry{
+			file: tools.PresentFile{
+				Path:      virtualPrefix + "/" + filepath.ToSlash(rel),
+				MimeType:  detectArtifactMimeType(path),
+				CreatedAt: info.ModTime(),
+			},
+		})
+		return nil
+	})
+
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].file.CreatedAt.Equal(entries[j].file.CreatedAt) {
+			return entries[i].file.Path < entries[j].file.Path
+		}
+		return entries[i].file.CreatedAt.After(entries[j].file.CreatedAt)
+	})
+
+	files := make([]tools.PresentFile, 0, len(entries))
+	for _, entry := range entries {
+		files = append(files, entry.file)
+	}
+	return files
+}
+
+func detectArtifactMimeType(path string) string {
+	if ext := strings.TrimSpace(filepath.Ext(path)); ext != "" {
+		if mimeType := mime.TypeByExtension(strings.ToLower(ext)); mimeType != "" {
+			return mimeType
+		}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return "application/octet-stream"
+	}
+	return http.DetectContentType(data)
 }
 
 func copyMetadataMap(in map[string]any) map[string]any {
