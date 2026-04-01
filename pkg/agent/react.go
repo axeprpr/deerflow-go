@@ -967,6 +967,8 @@ func accumulateUsage(dst *Usage, src *llm.Usage) {
 	dst.InputTokens += src.InputTokens
 	dst.OutputTokens += src.OutputTokens
 	dst.TotalTokens += src.TotalTokens
+	dst.ReasoningTokens += src.ReasoningTokens
+	dst.CachedInputTokens += src.CachedInputTokens
 }
 
 func cloneUsage(src *Usage) *Usage {

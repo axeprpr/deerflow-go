@@ -430,22 +430,26 @@ func TestForwardAgentEventEmitsNormalizedFinalAssistantText(t *testing.T) {
 func TestUsagePayloadFromAgentUsageDefaultsToZero(t *testing.T) {
 	got := usagePayloadFromAgentUsage(nil)
 	want := map[string]int{
-		"input_tokens":  0,
-		"output_tokens": 0,
-		"total_tokens":  0,
+		"input_tokens":        0,
+		"output_tokens":       0,
+		"total_tokens":        0,
+		"reasoning_tokens":    0,
+		"cached_input_tokens": 0,
 	}
-	if got["input_tokens"] != want["input_tokens"] || got["output_tokens"] != want["output_tokens"] || got["total_tokens"] != want["total_tokens"] {
+	if got["input_tokens"] != want["input_tokens"] || got["output_tokens"] != want["output_tokens"] || got["total_tokens"] != want["total_tokens"] || got["reasoning_tokens"] != want["reasoning_tokens"] || got["cached_input_tokens"] != want["cached_input_tokens"] {
 		t.Fatalf("usage=%#v want %#v", got, want)
 	}
 }
 
 func TestUsagePayloadFromAgentUsagePreservesCounts(t *testing.T) {
 	got := usagePayloadFromAgentUsage(&agent.Usage{
-		InputTokens:  150,
-		OutputTokens: 25,
-		TotalTokens:  175,
+		InputTokens:       150,
+		OutputTokens:      25,
+		TotalTokens:       175,
+		ReasoningTokens:   11,
+		CachedInputTokens: 42,
 	})
-	if got["input_tokens"] != 150 || got["output_tokens"] != 25 || got["total_tokens"] != 175 {
+	if got["input_tokens"] != 150 || got["output_tokens"] != 25 || got["total_tokens"] != 175 || got["reasoning_tokens"] != 11 || got["cached_input_tokens"] != 42 {
 		t.Fatalf("usage=%#v", got)
 	}
 }
@@ -461,7 +465,7 @@ func TestEndEventJSONIncludesZeroUsageWhenMissing(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 	text := string(raw)
-	if !strings.Contains(text, `"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}`) {
+	if !strings.Contains(text, `"usage":{"cached_input_tokens":0,"input_tokens":0,"output_tokens":0,"reasoning_tokens":0,"total_tokens":0}`) {
 		t.Fatalf("payload=%s", text)
 	}
 }

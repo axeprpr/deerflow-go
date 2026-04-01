@@ -484,9 +484,11 @@ func fromEinoUsage(meta *einoSchema.ResponseMeta) Usage {
 		return Usage{}
 	}
 	return Usage{
-		InputTokens:  meta.Usage.PromptTokens,
-		OutputTokens: meta.Usage.CompletionTokens,
-		TotalTokens:  meta.Usage.TotalTokens,
+		InputTokens:       meta.Usage.PromptTokens,
+		OutputTokens:      meta.Usage.CompletionTokens,
+		TotalTokens:       meta.Usage.TotalTokens,
+		ReasoningTokens:   meta.Usage.CompletionTokensDetails.ReasoningTokens,
+		CachedInputTokens: meta.Usage.PromptTokenDetails.CachedTokens,
 	}
 }
 

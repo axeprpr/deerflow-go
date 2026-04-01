@@ -12,9 +12,11 @@ import (
 
 // Usage tracks token counts for a run.
 type Usage struct {
-	InputTokens  int `json:"input_tokens,omitempty"`
-	OutputTokens int `json:"output_tokens,omitempty"`
-	TotalTokens  int `json:"total_tokens,omitempty"`
+	InputTokens       int `json:"input_tokens,omitempty"`
+	OutputTokens      int `json:"output_tokens,omitempty"`
+	TotalTokens       int `json:"total_tokens,omitempty"`
+	ReasoningTokens   int `json:"reasoning_tokens,omitempty"`
+	CachedInputTokens int `json:"cached_input_tokens,omitempty"`
 }
 
 // RunResult is the normalized outcome of an agent run.

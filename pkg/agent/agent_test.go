@@ -161,9 +161,11 @@ func TestResolveModel(t *testing.T) {
 
 func TestUsage(t *testing.T) {
 	usage := Usage{
-		InputTokens:  100,
-		OutputTokens: 50,
-		TotalTokens:  150,
+		InputTokens:       100,
+		OutputTokens:      50,
+		TotalTokens:       150,
+		ReasoningTokens:   7,
+		CachedInputTokens: 11,
 	}
 
 	if usage.InputTokens != 100 {
@@ -174,6 +176,12 @@ func TestUsage(t *testing.T) {
 	}
 	if usage.TotalTokens != 150 {
 		t.Errorf("TotalTokens = %d, want 150", usage.TotalTokens)
+	}
+	if usage.ReasoningTokens != 7 {
+		t.Errorf("ReasoningTokens = %d, want 7", usage.ReasoningTokens)
+	}
+	if usage.CachedInputTokens != 11 {
+		t.Errorf("CachedInputTokens = %d, want 11", usage.CachedInputTokens)
 	}
 }
 

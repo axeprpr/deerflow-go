@@ -48,9 +48,11 @@ type StreamChunk struct {
 
 // Usage tracks token counts when a provider returns them.
 type Usage struct {
-	InputTokens  int `json:"input_tokens,omitempty"`
-	OutputTokens int `json:"output_tokens,omitempty"`
-	TotalTokens  int `json:"total_tokens,omitempty"`
+	InputTokens       int `json:"input_tokens,omitempty"`
+	OutputTokens      int `json:"output_tokens,omitempty"`
+	TotalTokens       int `json:"total_tokens,omitempty"`
+	ReasoningTokens   int `json:"reasoning_tokens,omitempty"`
+	CachedInputTokens int `json:"cached_input_tokens,omitempty"`
 }
 
 func (r ChatRequest) Validate() error {

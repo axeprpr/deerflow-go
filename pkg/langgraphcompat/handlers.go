@@ -1005,9 +1005,11 @@ func usageMetadataFromAgentUsage(usage *agent.Usage) map[string]int {
 		return nil
 	}
 	return map[string]int{
-		"input_tokens":  usage.InputTokens,
-		"output_tokens": usage.OutputTokens,
-		"total_tokens":  usage.TotalTokens,
+		"input_tokens":        usage.InputTokens,
+		"output_tokens":       usage.OutputTokens,
+		"total_tokens":        usage.TotalTokens,
+		"reasoning_tokens":    usage.ReasoningTokens,
+		"cached_input_tokens": usage.CachedInputTokens,
 	}
 }
 
@@ -1036,15 +1038,19 @@ func resolvedToolNameForArtifacts(evt agent.AgentEvent) string {
 func usagePayloadFromAgentUsage(usage *agent.Usage) map[string]int {
 	if usage == nil {
 		return map[string]int{
-			"input_tokens":  0,
-			"output_tokens": 0,
-			"total_tokens":  0,
+			"input_tokens":        0,
+			"output_tokens":       0,
+			"total_tokens":        0,
+			"reasoning_tokens":    0,
+			"cached_input_tokens": 0,
 		}
 	}
 	return map[string]int{
-		"input_tokens":  usage.InputTokens,
-		"output_tokens": usage.OutputTokens,
-		"total_tokens":  usage.TotalTokens,
+		"input_tokens":        usage.InputTokens,
+		"output_tokens":       usage.OutputTokens,
+		"total_tokens":        usage.TotalTokens,
+		"reasoning_tokens":    usage.ReasoningTokens,
+		"cached_input_tokens": usage.CachedInputTokens,
 	}
 }
 
