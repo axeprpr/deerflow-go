@@ -26,19 +26,20 @@ type RunResult struct {
 
 // AgentConfig holds the dependencies required to construct an agent.
 type AgentConfig struct {
-	LLMProvider     llm.LLMProvider
-	Tools           *tools.Registry
-	DeferredTools   []models.Tool
-	PresentFiles    *tools.PresentFileRegistry
-	AgentType       AgentType
-	MaxTurns        int
-	Model           string
-	ReasoningEffort string
-	SystemPrompt    string
-	Temperature     *float64
-	MaxTokens       *int
-	Sandbox         *sandbox.Sandbox
-	RequestTimeout  time.Duration
+	LLMProvider            llm.LLMProvider
+	Tools                  *tools.Registry
+	DeferredTools          []models.Tool
+	PresentFiles           *tools.PresentFileRegistry
+	AgentType              AgentType
+	MaxTurns               int
+	MaxConcurrentSubagents int
+	Model                  string
+	ReasoningEffort        string
+	SystemPrompt           string
+	Temperature            *float64
+	MaxTokens              *int
+	Sandbox                *sandbox.Sandbox
+	RequestTimeout         time.Duration
 }
 
 type TimeoutError struct {

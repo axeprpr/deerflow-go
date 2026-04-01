@@ -26,6 +26,9 @@ const defaultRequestTimeout = 10 * time.Minute
 const defaultLoopWarnThreshold = 3
 const defaultLoopHardLimit = 5
 const defaultLoopWindowSize = 20
+const defaultMaxConcurrentSubagents = 3
+const minMaxConcurrentSubagents = 2
+const maxMaxConcurrentSubagents = 4
 
 const loopWarningMessage = "[LOOP DETECTED] You are repeating the same tool calls. Stop calling tools and produce your final answer now. If you cannot complete the task, summarize what you accomplished so far."
 const loopHardStopMessage = "[FORCED STOP] Repeated tool calls exceeded the safety limit. Producing final answer with results collected so far."
@@ -35,24 +38,25 @@ var agentRequestSeq uint64
 
 // Agent runs our custom ReAct loop while delegating model streaming and tool schemas to Eino.
 type Agent struct {
-	llm             llm.LLMProvider
-	tools           *tools.Registry
-	deferredTools   *tools.DeferredToolRegistry
-	sandbox         *sandbox.Sandbox
-	agentType       AgentType
-	model           string
-	reasoningEffort string
-	systemPrompt    string
-	temperature     *float64
-	maxTokens       *int
-	maxTurns        int
-	requestTimeout  time.Duration
-	events          chan AgentEvent
-	requests        sync.Map
-	runMu           sync.Mutex
-	eventsMu        sync.RWMutex
-	eventsClosed    bool
-	started         bool
+	llm                    llm.LLMProvider
+	tools                  *tools.Registry
+	deferredTools          *tools.DeferredToolRegistry
+	sandbox                *sandbox.Sandbox
+	agentType              AgentType
+	model                  string
+	reasoningEffort        string
+	systemPrompt           string
+	temperature            *float64
+	maxTokens              *int
+	maxTurns               int
+	maxConcurrentSubagents int
+	requestTimeout         time.Duration
+	events                 chan AgentEvent
+	requests               sync.Map
+	runMu                  sync.Mutex
+	eventsMu               sync.RWMutex
+	eventsClosed           bool
+	started                bool
 }
 
 func New(cfg AgentConfig) *Agent {
@@ -76,19 +80,20 @@ func New(cfg AgentConfig) *Agent {
 		requestTimeout = defaultRequestTimeout
 	}
 	return &Agent{
-		llm:             cfg.LLMProvider,
-		tools:           registry,
-		deferredTools:   tools.NewDeferredToolRegistry(cfg.DeferredTools),
-		sandbox:         cfg.Sandbox,
-		agentType:       cfg.AgentType,
-		model:           resolveModel(cfg.Model),
-		reasoningEffort: strings.TrimSpace(cfg.ReasoningEffort),
-		systemPrompt:    strings.TrimSpace(cfg.SystemPrompt),
-		temperature:     cfg.Temperature,
-		maxTokens:       cfg.MaxTokens,
-		maxTurns:        maxTurns,
-		requestTimeout:  requestTimeout,
-		events:          make(chan AgentEvent, 128),
+		llm:                    cfg.LLMProvider,
+		tools:                  registry,
+		deferredTools:          tools.NewDeferredToolRegistry(cfg.DeferredTools),
+		sandbox:                cfg.Sandbox,
+		agentType:              cfg.AgentType,
+		model:                  resolveModel(cfg.Model),
+		reasoningEffort:        strings.TrimSpace(cfg.ReasoningEffort),
+		systemPrompt:           strings.TrimSpace(cfg.SystemPrompt),
+		temperature:            cfg.Temperature,
+		maxTokens:              cfg.MaxTokens,
+		maxTurns:               maxTurns,
+		maxConcurrentSubagents: clampMaxConcurrentSubagents(cfg.MaxConcurrentSubagents),
+		requestTimeout:         requestTimeout,
+		events:                 make(chan AgentEvent, 128),
 	}
 }
 
@@ -223,6 +228,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 		if streamUsage != nil {
 			accumulateUsage(usage, streamUsage)
 		}
+		toolCalls = truncateTaskToolCalls(toolCalls, a.maxConcurrentSubagents)
 
 		assistantMetadata := map[string]string{"stop_reason": stopReason}
 		if streamUsage != nil {
@@ -462,6 +468,47 @@ func detectToolCallLoop(history []string, calls []models.ToolCall, warned map[st
 		}
 	}
 	return "", false, history
+}
+
+func clampMaxConcurrentSubagents(value int) int {
+	if value <= 0 {
+		return defaultMaxConcurrentSubagents
+	}
+	if value < minMaxConcurrentSubagents {
+		return minMaxConcurrentSubagents
+	}
+	if value > maxMaxConcurrentSubagents {
+		return maxMaxConcurrentSubagents
+	}
+	return value
+}
+
+func truncateTaskToolCalls(calls []models.ToolCall, limit int) []models.ToolCall {
+	limit = clampMaxConcurrentSubagents(limit)
+	taskCount := 0
+	for _, call := range calls {
+		if call.Name == "task" {
+			taskCount++
+		}
+	}
+	if taskCount <= limit {
+		return calls
+	}
+
+	truncated := make([]models.ToolCall, 0, len(calls)-(taskCount-limit))
+	keptTasks := 0
+	for _, call := range calls {
+		if call.Name != "task" {
+			truncated = append(truncated, call)
+			continue
+		}
+		if keptTasks >= limit {
+			continue
+		}
+		truncated = append(truncated, call)
+		keptTasks++
+	}
+	return truncated
 }
 
 func hashToolCalls(calls []models.ToolCall) string {

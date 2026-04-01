@@ -600,6 +600,105 @@ func TestAgentRunContinuesAfterToolPanic(t *testing.T) {
 	}
 }
 
+func TestClampMaxConcurrentSubagents(t *testing.T) {
+	tests := []struct {
+		name  string
+		input int
+		want  int
+	}{
+		{name: "default", input: 0, want: defaultMaxConcurrentSubagents},
+		{name: "min", input: 1, want: minMaxConcurrentSubagents},
+		{name: "within", input: 4, want: 4},
+		{name: "max", input: 8, want: maxMaxConcurrentSubagents},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := clampMaxConcurrentSubagents(tt.input); got != tt.want {
+				t.Fatalf("clampMaxConcurrentSubagents(%d)=%d want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTruncateTaskToolCalls(t *testing.T) {
+	calls := []models.ToolCall{
+		{ID: "task-1", Name: "task"},
+		{ID: "bash-1", Name: "bash"},
+		{ID: "task-2", Name: "task"},
+		{ID: "task-3", Name: "task"},
+		{ID: "task-4", Name: "task"},
+	}
+
+	got := truncateTaskToolCalls(calls, 2)
+	if len(got) != 3 {
+		t.Fatalf("len=%d want 3", len(got))
+	}
+	if got[0].ID != "task-1" || got[1].ID != "bash-1" || got[2].ID != "task-2" {
+		t.Fatalf("got ids=%v want [task-1 bash-1 task-2]", []string{got[0].ID, got[1].ID, got[2].ID})
+	}
+}
+
+func TestAgentRunTruncatesExcessTaskToolCalls(t *testing.T) {
+	var taskExecutions atomic.Int32
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name: "task",
+		Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) {
+			taskExecutions.Add(1)
+			return models.ToolResult{
+				CallID:   "task-call",
+				ToolName: "task",
+				Status:   models.CallStatusCompleted,
+				Content:  "task ok",
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register task tool: %v", err)
+	}
+
+	provider := &scriptedStreamProvider{
+		steps: []streamStep{
+			{toolCalls: []models.ToolCall{
+				{ID: "task-1", Name: "task", Arguments: map[string]any{"prompt": "one"}},
+				{ID: "task-2", Name: "task", Arguments: map[string]any{"prompt": "two"}},
+				{ID: "task-3", Name: "task", Arguments: map[string]any{"prompt": "three"}},
+				{ID: "task-4", Name: "task", Arguments: map[string]any{"prompt": "four"}},
+			}},
+			{check: func(t *testing.T, req llm.ChatRequest) {
+				lastAssistant := req.Messages[1]
+				if len(lastAssistant.ToolCalls) != 2 {
+					t.Fatalf("assistant tool calls=%d want 2", len(lastAssistant.ToolCalls))
+				}
+				if lastAssistant.ToolCalls[0].ID != "task-1" || lastAssistant.ToolCalls[1].ID != "task-2" {
+					t.Fatalf("assistant tool calls=%v", lastAssistant.ToolCalls)
+				}
+			}, content: "Done."},
+		},
+		t: t,
+	}
+
+	agent := New(AgentConfig{
+		LLMProvider:            provider,
+		Tools:                  registry,
+		MaxTurns:               3,
+		MaxConcurrentSubagents: 2,
+	})
+
+	result, err := agent.Run(context.Background(), "session-task-limit", []models.Message{
+		{ID: "m1", SessionID: "session-task-limit", Role: models.RoleHuman, Content: "Parallelize this"},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "Done." {
+		t.Fatalf("FinalOutput=%q", result.FinalOutput)
+	}
+	if got := taskExecutions.Load(); got != 2 {
+		t.Fatalf("task executions=%d want 2", got)
+	}
+}
+
 type timeoutProvider struct{}
 
 func (timeoutProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {

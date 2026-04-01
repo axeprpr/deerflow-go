@@ -1290,6 +1290,25 @@ func sanitizeFilename(name string) string {
 	return name
 }
 
+func normalizeUploadedFilename(name string) string {
+	name = sanitizeFilename(name)
+	if name == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		switch r {
+		case '#', '?', '%':
+			b.WriteByte('_')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
 func sanitizePathFilename(name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" || name == "." {
@@ -1327,9 +1346,12 @@ func validateUploadedFilename(name string) (string, error) {
 	if strings.Contains(raw, "/") || strings.Contains(raw, "\\") {
 		return "", errors.New("directory uploads are not allowed")
 	}
-	safe := sanitizeFilename(raw)
+	safe := normalizeUploadedFilename(raw)
 	if safe == "" {
 		return "", errBadFileName
+	}
+	if len([]byte(safe)) > 255 {
+		return "", errors.New("filename too long")
 	}
 	return safe, nil
 }

@@ -218,15 +218,20 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 		"thread_id": threadID,
 	})
 
+	maxConcurrentSubagents := 0
+	if value := intPointerFromAny(runtimeContext["max_concurrent_subagents"]); value != nil {
+		maxConcurrentSubagents = *value
+	}
 	runAgent := s.newAgent(agent.AgentConfig{
-		Tools:           resolvedRunCfg.Tools,
-		PresentFiles:    session.PresentFiles,
-		AgentType:       resolvedRunCfg.AgentType,
-		Model:           firstNonEmpty(resolvedRunCfg.ModelName, s.defaultModel),
-		ReasoningEffort: resolvedRunCfg.ReasoningEffort,
-		SystemPrompt:    resolvedRunCfg.SystemPrompt,
-		Temperature:     resolvedRunCfg.Temperature,
-		MaxTokens:       resolvedRunCfg.MaxTokens,
+		Tools:                  resolvedRunCfg.Tools,
+		PresentFiles:           session.PresentFiles,
+		AgentType:              resolvedRunCfg.AgentType,
+		MaxConcurrentSubagents: maxConcurrentSubagents,
+		Model:                  firstNonEmpty(resolvedRunCfg.ModelName, s.defaultModel),
+		ReasoningEffort:        resolvedRunCfg.ReasoningEffort,
+		SystemPrompt:           resolvedRunCfg.SystemPrompt,
+		Temperature:            resolvedRunCfg.Temperature,
+		MaxTokens:              resolvedRunCfg.MaxTokens,
 	})
 
 	ctx = subagent.WithEventSink(ctx, func(evt subagent.TaskEvent) {

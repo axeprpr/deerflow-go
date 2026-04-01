@@ -920,6 +920,27 @@ func TestValidateUploadedFilenameRejectsDirectoryPaths(t *testing.T) {
 	}
 }
 
+func TestValidateUploadedFilenameNormalizesURLHostileCharacters(t *testing.T) {
+	got, err := validateUploadedFilename("Q2 plan #1?.pdf")
+	if err != nil {
+		t.Fatalf("validateUploadedFilename error: %v", err)
+	}
+	if got != "Q2 plan _1_.pdf" {
+		t.Fatalf("filename=%q want=%q", got, "Q2 plan _1_.pdf")
+	}
+}
+
+func TestValidateUploadedFilenameRejectsTooLongNames(t *testing.T) {
+	name := strings.Repeat("a", 252) + ".txt"
+	_, err := validateUploadedFilename(name)
+	if err == nil {
+		t.Fatal("expected long filename to be rejected")
+	}
+	if !strings.Contains(err.Error(), "filename too long") {
+		t.Fatalf("err=%q want too long error", err)
+	}
+}
+
 func TestUploadsEndpointRollsBackWrittenFilesOnSaveFailure(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-upload-rollback"
@@ -1649,7 +1670,10 @@ func TestUploadArtifactURLPercentEncodesFilename(t *testing.T) {
 	if len(uploaded.Files) != 1 {
 		t.Fatalf("files=%d want=1", len(uploaded.Files))
 	}
-	if got := asString(uploaded.Files[0]["artifact_url"]); got != "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/report%20%231%3F.txt" {
+	if got := asString(uploaded.Files[0]["filename"]); got != "report _1_.txt" {
+		t.Fatalf("filename=%q want=%q", got, "report _1_.txt")
+	}
+	if got := asString(uploaded.Files[0]["artifact_url"]); got != "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/report%20_1_.txt" {
 		t.Fatalf("artifact_url=%q", got)
 	}
 }
