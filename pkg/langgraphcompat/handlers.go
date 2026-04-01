@@ -941,6 +941,10 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 				s.sendThreadUpdateEvent(w, flusher, run, "todos")
 			case "present_file", "present_files":
 				s.sendThreadUpdateEvent(w, flusher, run, "artifacts")
+			default:
+				if toolMayAffectArtifacts(evt.Result.ToolName) {
+					s.sendThreadUpdateEvent(w, flusher, run, "artifacts")
+				}
 			}
 		}
 	case agent.AgentEventEnd:
@@ -1004,6 +1008,16 @@ func usageMetadataFromAgentUsage(usage *agent.Usage) map[string]int {
 		"input_tokens":  usage.InputTokens,
 		"output_tokens": usage.OutputTokens,
 		"total_tokens":  usage.TotalTokens,
+	}
+}
+
+func toolMayAffectArtifacts(name string) bool {
+	name = strings.TrimSpace(strings.ToLower(name))
+	switch name {
+	case "bash", "write_file", "str_replace", "task", "invoke_acp_agent":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -407,6 +407,77 @@ func TestForwardAgentEventEmitsArtifactUpdatesWhenPresentToolCompletes(t *testin
 	}
 }
 
+func TestForwardAgentEventEmitsArtifactUpdatesWhenWriteFileCompletes(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-write-file-artifacts",
+		ThreadID:    "thread-write-file-artifacts",
+		AssistantID: "lead_agent",
+		Status:      "running",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.saveRun(run)
+	s.ensureSession(run.ThreadID, nil)
+
+	outputDir := filepath.Join(s.threadRoot(run.ThreadID), "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "report.md"), []byte("# report\n"), 0o644); err != nil {
+		t.Fatalf("write output artifact: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	s.forwardAgentEvent(rec, rec, run, agent.AgentEvent{
+		Type:      agent.AgentEventToolCallEnd,
+		MessageID: "tool-msg-write-file-artifacts",
+		ToolEvent: &agent.ToolCallEvent{
+			ID:          "call-write-file-artifacts",
+			Name:        "write_file",
+			Status:      models.CallStatusCompleted,
+			CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		},
+		Result: &models.ToolResult{
+			CallID:   "call-write-file-artifacts",
+			ToolName: "write_file",
+			Status:   models.CallStatusCompleted,
+			Content:  "wrote /mnt/user-data/outputs/report.md",
+		},
+	})
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: updates") {
+		t.Fatalf("expected updates event in %q", body)
+	}
+	if !strings.Contains(body, `"artifacts":["/mnt/user-data/outputs/report.md"]`) {
+		t.Fatalf("expected artifact update payload in %q", body)
+	}
+}
+
+func TestToolMayAffectArtifacts(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{name: "bash", want: true},
+		{name: "write_file", want: true},
+		{name: "str_replace", want: true},
+		{name: "task", want: true},
+		{name: "invoke_acp_agent", want: true},
+		{name: " present_file ", want: false},
+		{name: "write_todos", want: false},
+		{name: "web_search", want: false},
+		{name: "", want: false},
+	}
+
+	for _, tt := range tests {
+		if got := toolMayAffectArtifacts(tt.name); got != tt.want {
+			t.Fatalf("toolMayAffectArtifacts(%q)=%v want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
 func TestThreadMetadataFromRuntimeContextPrefersRuntimeAgentName(t *testing.T) {
 	metadata := threadMetadataFromRuntimeContext(map[string]any{
 		"agent_name": "release-bot",
