@@ -80,13 +80,22 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
-	run, _, execErr, statusCode := s.executeRun(r.Context(), req, routeThreadID, w, flusher)
+	run, _, execErr, statusCode := s.executeRun(streamRequestContext(r.Context()), req, routeThreadID, w, flusher)
 	if run != nil {
 		w.Header().Set("Content-Location", fmt.Sprintf("/threads/%s/runs/%s", run.ThreadID, run.RunID))
 	}
 	if execErr != nil && statusCode != 0 && run == nil {
 		http.Error(w, execErr.Error(), statusCode)
 	}
+}
+
+func streamRequestContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	// Let runs survive the initiating SSE connection so clients can reconnect
+	// with /threads/{thread_id}/stream like the original DeerFlow behavior.
+	return context.WithoutCancel(ctx)
 }
 
 func (s *Server) handleRunCreateRequest(w http.ResponseWriter, r *http.Request, routeThreadID string) {
@@ -213,6 +222,9 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 	ctx = subagent.WithEventSink(ctx, func(evt subagent.TaskEvent) {
 		s.forwardTaskEvent(w, flusher, run, evt)
 	})
+	if maxConcurrent := intPointerFromAny(runtimeContext["max_concurrent_subagents"]); maxConcurrent != nil && *maxConcurrent > 0 {
+		ctx = subagent.WithConcurrencyLimit(ctx, *maxConcurrent)
+	}
 	ctx = tools.WithThreadID(ctx, threadID)
 	ctx = tools.WithRuntimeContext(ctx, runtimeContext)
 	ctx = clarification.WithThreadID(ctx, threadID)
@@ -290,7 +302,15 @@ func (s *Server) handleThreadRunStream(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
-	run := s.getLatestRunForThread(threadID)
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if s.getThreadState(threadID) == nil {
+		http.Error(w, "thread not found", http.StatusNotFound)
+		return
+	}
+	run := s.getLatestActiveRunForThread(threadID)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -308,6 +328,7 @@ func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) 
 		flusher.Flush()
 		return
 	}
+	w.Header().Set("Content-Location", fmt.Sprintf("/threads/%s/runs/%s", run.ThreadID, run.RunID))
 
 	s.streamRunEvents(w, r, flusher, run.RunID)
 }

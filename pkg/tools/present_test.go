@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -222,5 +223,78 @@ func TestPresentFilesTool(t *testing.T) {
 	}
 	if len(registry.List()) != 2 {
 		t.Fatalf("registry len = %d, want 2", len(registry.List()))
+	}
+}
+
+func TestPresentFilesToolNormalizesThreadOutputPaths(t *testing.T) {
+	dataRoot := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", dataRoot)
+
+	threadID := "thread-present-1"
+	outputDir := filepath.Join(dataRoot, "threads", threadID, "user-data", "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	hostPath := filepath.Join(outputDir, "report.md")
+	if err := os.WriteFile(hostPath, []byte("# report\n"), 0o644); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+
+	registry := NewPresentFileRegistry()
+	tool := PresentFilesTool(registry)
+	result, err := tool.Handler(WithThreadID(context.Background(), threadID), models.ToolCall{
+		ID:   "call_outputs",
+		Name: "present_files",
+		Arguments: map[string]any{
+			"filepaths": []any{"/mnt/user-data/outputs/report.md"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Handler failed: %v", err)
+	}
+
+	if result.Data["path"] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("path = %v, want /mnt/user-data/outputs/report.md", result.Data["path"])
+	}
+	files := registry.List()
+	if len(files) != 1 {
+		t.Fatalf("registry len = %d, want 1", len(files))
+	}
+	if files[0].Path != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("registry path = %q, want virtual outputs path", files[0].Path)
+	}
+}
+
+func TestPresentFilesToolRejectsNonOutputThreadPaths(t *testing.T) {
+	dataRoot := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", dataRoot)
+
+	threadID := "thread-present-2"
+	workspaceDir := filepath.Join(dataRoot, "threads", threadID, "user-data", "workspace")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	hostPath := filepath.Join(workspaceDir, "notes.md")
+	if err := os.WriteFile(hostPath, []byte("draft"), 0o644); err != nil {
+		t.Fatalf("write notes: %v", err)
+	}
+
+	registry := NewPresentFileRegistry()
+	tool := PresentFilesTool(registry)
+	result, err := tool.Handler(WithThreadID(context.Background(), threadID), models.ToolCall{
+		ID:   "call_workspace",
+		Name: "present_files",
+		Arguments: map[string]any{
+			"filepaths": []any{hostPath},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for non-output file")
+	}
+	if result.Status != models.CallStatusFailed {
+		t.Fatalf("status = %q, want %q", result.Status, models.CallStatusFailed)
+	}
+	if !strings.Contains(result.Error, "/mnt/user-data/outputs") {
+		t.Fatalf("error = %q, want outputs contract", result.Error)
 	}
 }

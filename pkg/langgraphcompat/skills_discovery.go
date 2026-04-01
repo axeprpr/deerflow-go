@@ -1,9 +1,9 @@
 package langgraphcompat
 
 import (
-	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -55,25 +55,13 @@ func discoverGatewaySkills(roots []string) map[string]gatewaySkill {
 
 func scanGatewaySkillCategory(root, category string) map[string]gatewaySkill {
 	skills := map[string]gatewaySkill{}
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d == nil {
-			return nil
-		}
-		if d.IsDir() {
-			if path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "__MACOSX") {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.Name() != "SKILL.md" {
-			return nil
-		}
+	walkGatewaySkillFiles(root, func(path string) bool {
 		skill, ok := parseGatewaySkillFile(path, category)
 		if !ok {
-			return nil
+			return false
 		}
 		skills[skillStorageKey(skill.Category, skill.Name)] = skill
-		return nil
+		return false
 	})
 	return skills
 }
@@ -109,32 +97,76 @@ func preferredSkillCategories(category string) []string {
 
 func loadGatewaySkillBodyFromCategory(root, skillName string) (string, bool) {
 	var body string
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d == nil {
-			return nil
-		}
-		if d.IsDir() {
-			if path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "__MACOSX") {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.Name() != "SKILL.md" {
-			return nil
-		}
+	walkGatewaySkillFiles(root, func(path string) bool {
 		skill, ok := parseGatewaySkillFile(path, "")
 		if !ok || skill.Name != skillName {
-			return nil
+			return false
 		}
 		content, err := os.ReadFile(path)
 		if err != nil {
-			return nil
+			return false
 		}
 		body = stripSkillFrontmatter(string(content))
-		return fs.SkipAll
+		return true
 	})
 	body = strings.TrimSpace(body)
 	return body, body != ""
+}
+
+func walkGatewaySkillFiles(root string, visit func(path string) bool) {
+	root = filepath.Clean(strings.TrimSpace(root))
+	if root == "" || visit == nil {
+		return
+	}
+
+	visited := make(map[string]struct{})
+	var walk func(dir string) bool
+	walk = func(dir string) bool {
+		info, err := os.Stat(dir)
+		if err != nil || !info.IsDir() {
+			return false
+		}
+
+		realDir := dir
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			realDir = resolved
+		}
+		realDir = filepath.Clean(realDir)
+		if _, ok := visited[realDir]; ok {
+			return false
+		}
+		visited[realDir] = struct{}{}
+
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return false
+		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+
+		for _, entry := range entries {
+			name := entry.Name()
+			path := filepath.Join(dir, name)
+			info, err := os.Stat(path)
+			if err != nil {
+				continue
+			}
+			if info.IsDir() {
+				if strings.HasPrefix(name, ".") || name == "__MACOSX" {
+					continue
+				}
+				if walk(path) {
+					return true
+				}
+				continue
+			}
+			if name == "SKILL.md" && visit(path) {
+				return true
+			}
+		}
+		return false
+	}
+
+	_ = walk(root)
 }
 
 func stripSkillFrontmatter(content string) string {

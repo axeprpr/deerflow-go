@@ -23,6 +23,7 @@ var presentFileSeq uint64
 type PresentFile struct {
 	ID          string    `json:"id"`
 	Path        string    `json:"path"`
+	SourcePath  string    `json:"-"`
 	Description string    `json:"description,omitempty"`
 	MimeType    string    `json:"mime_type"`
 	Content     string    `json:"content,omitempty"`
@@ -50,19 +51,25 @@ func (r *PresentFileRegistry) Register(file PresentFile) error {
 		return fmt.Errorf("path is required")
 	}
 
-	absPath, err := filepath.Abs(path)
+	sourcePath := strings.TrimSpace(file.SourcePath)
+	if sourcePath == "" {
+		sourcePath = path
+	}
+
+	absSourcePath, err := filepath.Abs(sourcePath)
 	if err != nil {
 		return fmt.Errorf("resolve path: %w", err)
 	}
 
-	data, err := os.ReadFile(absPath)
+	normalizedPath := normalizePresentRegistryPath(path)
+	data, err := os.ReadFile(absSourcePath)
 	if err != nil {
 		return fmt.Errorf("read file: %w", err)
 	}
 
 	mimeType := strings.TrimSpace(file.MimeType)
 	if mimeType == "" {
-		mimeType = detectMimeType(absPath, data)
+		mimeType = detectMimeType(absSourcePath, data)
 	}
 
 	content := file.Content
@@ -77,7 +84,7 @@ func (r *PresentFileRegistry) Register(file PresentFile) error {
 
 	id := strings.TrimSpace(file.ID)
 	if id == "" {
-		if existingID, existing, ok := r.findByPathLocked(absPath); ok {
+		if existingID, existing, ok := r.findByPathLocked(normalizedPath); ok {
 			id = existingID
 			if file.CreatedAt.IsZero() {
 				file.CreatedAt = existing.CreatedAt
@@ -94,7 +101,7 @@ func (r *PresentFileRegistry) Register(file PresentFile) error {
 
 	r.files[id] = PresentFile{
 		ID:          id,
-		Path:        absPath,
+		Path:        normalizedPath,
 		Description: description,
 		MimeType:    mimeType,
 		Content:     content,
@@ -146,6 +153,7 @@ func (r *PresentFileRegistry) Clear() {
 }
 
 func (r *PresentFileRegistry) findByPathLocked(path string) (string, PresentFile, bool) {
+	path = normalizePresentRegistryPath(path)
 	for id, file := range r.files {
 		if file.Path == path {
 			return id, file, true
@@ -188,13 +196,12 @@ func buildPresentFileTool(registry *PresentFileRegistry, name string, multiple b
 		Groups:      []string{"builtin", "file_ops"},
 		InputSchema: schema,
 		Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
-			_ = ctx
-			return presentFiles(registry, call)
+			return presentFiles(ctx, registry, call)
 		},
 	}
 }
 
-func presentFiles(registry *PresentFileRegistry, call models.ToolCall) (models.ToolResult, error) {
+func presentFiles(ctx context.Context, registry *PresentFileRegistry, call models.ToolCall) (models.ToolResult, error) {
 	if registry == nil {
 		err := fmt.Errorf("present file registry is required")
 		return models.ToolResult{
@@ -220,8 +227,18 @@ func presentFiles(registry *PresentFileRegistry, call models.ToolCall) (models.T
 	mimeType, _ := call.Arguments["mime_type"].(string)
 	registeredFiles := make([]PresentFile, 0, len(filepaths))
 	for _, path := range filepaths {
+		displayPath, sourcePath, err := normalizePresentedFilePath(ctx, path)
+		if err != nil {
+			return models.ToolResult{
+				CallID:   call.ID,
+				ToolName: call.Name,
+				Status:   models.CallStatusFailed,
+				Error:    err.Error(),
+			}, err
+		}
 		file := PresentFile{
-			Path:        path,
+			Path:        displayPath,
+			SourcePath:  sourcePath,
 			Description: description,
 			MimeType:    mimeType,
 		}
@@ -234,7 +251,7 @@ func presentFiles(registry *PresentFileRegistry, call models.ToolCall) (models.T
 			}, err
 		}
 
-		registered, ok := latestRegisteredFile(registry, path)
+		registered, ok := latestRegisteredFile(registry, displayPath)
 		if !ok {
 			err := fmt.Errorf("registered file not found")
 			return models.ToolResult{
@@ -305,17 +322,62 @@ func latestRegisteredFile(registry *PresentFileRegistry, path string) (PresentFi
 		return PresentFile{}, false
 	}
 
-	absPath, err := filepath.Abs(strings.TrimSpace(path))
-	if err != nil {
-		return PresentFile{}, false
-	}
-
+	normalizedPath := normalizePresentRegistryPath(path)
 	for _, file := range registry.List() {
-		if file.Path == absPath {
+		if file.Path == normalizedPath {
 			return file, true
 		}
 	}
 	return PresentFile{}, false
+}
+
+func normalizePresentRegistryPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "/mnt/") {
+		return filepath.ToSlash(filepath.Clean(path))
+	}
+	if absPath, err := filepath.Abs(path); err == nil {
+		return filepath.Clean(absPath)
+	}
+	return filepath.Clean(path)
+}
+
+func normalizePresentedFilePath(ctx context.Context, path string) (string, string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", "", fmt.Errorf("path is required")
+	}
+
+	sourcePath := ResolveVirtualPath(ctx, path)
+	if sourcePath == "" {
+		sourcePath = path
+	}
+	absSourcePath, err := filepath.Abs(sourcePath)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve path: %w", err)
+	}
+
+	threadID := strings.TrimSpace(ThreadIDFromContext(ctx))
+	if threadID == "" {
+		return normalizePresentRegistryPath(path), absSourcePath, nil
+	}
+
+	outputsDir := filepath.Join(threadDataRootFromThreadID(threadID), "outputs")
+	relPath, err := filepath.Rel(outputsDir, absSourcePath)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve presented file: %w", err)
+	}
+	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) {
+		return "", "", fmt.Errorf("only files in /mnt/user-data/outputs can be presented: %s", path)
+	}
+	virtualPath := "/mnt/user-data/outputs"
+	if relPath != "." {
+		virtualPath += "/" + filepath.ToSlash(relPath)
+	}
+	return virtualPath, absSourcePath, nil
 }
 
 func newPresentFileID() string {

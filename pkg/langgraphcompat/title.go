@@ -10,9 +10,10 @@ import (
 )
 
 const (
-	defaultTitleMaxWords = 6
-	defaultTitleMaxChars = 60
-	titlePromptMaxChars  = 500
+	defaultTitleMaxWords  = 6
+	defaultTitleMaxChars  = 60
+	titleFallbackMaxChars = 50
+	titlePromptMaxChars   = 500
 )
 
 func (s *Server) maybeGenerateThreadTitle(ctx context.Context, threadID string, modelName string, messages []models.Message) {
@@ -140,12 +141,8 @@ func sanitizeTitle(raw string) string {
 		return ""
 	}
 
-	words := strings.Fields(title)
-	if len(words) > defaultTitleMaxWords {
-		title = strings.Join(words[:defaultTitleMaxWords], " ")
-	}
 	if utf8.RuneCountInString(title) > defaultTitleMaxChars {
-		title = truncateRunes(title, defaultTitleMaxChars)
+		title = truncateWithEllipsis(title, defaultTitleMaxChars)
 	}
 	return strings.TrimSpace(title)
 }
@@ -158,10 +155,11 @@ func fallbackTitle(userMsg string) string {
 
 	words := strings.Fields(title)
 	if len(words) > defaultTitleMaxWords {
-		title = strings.Join(words[:defaultTitleMaxWords], " ")
+		return strings.TrimSpace(strings.Join(words[:defaultTitleMaxWords], " ")) + "..."
 	}
-	if utf8.RuneCountInString(title) > defaultTitleMaxChars {
-		title = truncateRunes(title, defaultTitleMaxChars)
+
+	if utf8.RuneCountInString(title) > titleFallbackMaxChars {
+		return truncateWithEllipsis(title, titleFallbackMaxChars)
 	}
 	return strings.TrimSpace(title)
 }
@@ -176,6 +174,19 @@ func truncateRunes(value string, limit int) string {
 
 	runes := []rune(value)
 	return string(runes[:limit])
+}
+
+func truncateWithEllipsis(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	if utf8.RuneCountInString(value) <= limit {
+		return value
+	}
+	if limit <= 3 {
+		return truncateRunes(value, limit)
+	}
+	return strings.TrimSpace(truncateRunes(value, limit-3)) + "..."
 }
 
 func resolveTitleModel(values ...string) string {

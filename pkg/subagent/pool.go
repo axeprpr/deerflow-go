@@ -133,13 +133,20 @@ func (p *Pool) getTask(taskID string) (*Task, bool) {
 func (p *Pool) runTask(parentCtx context.Context, task *Task) {
 	defer close(task.done)
 
-	select {
-	case p.sem <- struct{}{}:
-	case <-parentCtx.Done():
+	if !acquireSemaphore(parentCtx, p.sem) {
 		p.finishTask(parentCtx, task, TaskStatusFailed, "", parentCtx.Err(), nil)
 		return
 	}
 	defer func() { <-p.sem }()
+
+	runSem := concurrencySemaphoreFromContext(parentCtx)
+	if runSem != nil {
+		if !acquireSemaphore(parentCtx, runSem) {
+			p.finishTask(parentCtx, task, TaskStatusFailed, "", parentCtx.Err(), nil)
+			return
+		}
+		defer func() { <-runSem }()
+	}
 
 	task.mu.Lock()
 	task.Status = TaskStatusRunning
@@ -229,6 +236,18 @@ func (p *Pool) finishTask(ctx context.Context, task *Task, status TaskStatus, re
 
 func (p *Pool) emit(ctx context.Context, evt TaskEvent) {
 	EmitEvent(ctx, evt)
+}
+
+func acquireSemaphore(ctx context.Context, sem chan struct{}) bool {
+	if sem == nil {
+		return true
+	}
+	select {
+	case sem <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 func (p *Pool) resolveConfig(cfg SubagentConfig) SubagentConfig {

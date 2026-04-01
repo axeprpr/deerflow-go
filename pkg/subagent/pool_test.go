@@ -2,6 +2,7 @@ package subagent
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -103,5 +104,57 @@ func TestPoolWaitUnknownTask(t *testing.T) {
 
 	if _, err := pool.Wait(context.Background(), "missing"); err == nil {
 		t.Fatal("Wait() expected error for missing task")
+	}
+}
+
+func TestPoolHonorsContextConcurrencyLimit(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{}, 2)
+	var current int32
+	var maxSeen int32
+
+	pool := NewPool(fakeExecutor{
+		execute: func(ctx context.Context, task *Task, emit func(TaskEvent)) (ExecutionResult, error) {
+			running := atomic.AddInt32(&current, 1)
+			for {
+				seen := atomic.LoadInt32(&maxSeen)
+				if running <= seen || atomic.CompareAndSwapInt32(&maxSeen, seen, running) {
+					break
+				}
+			}
+			started <- struct{}{}
+			defer atomic.AddInt32(&current, -1)
+			<-release
+			return ExecutionResult{Result: task.ID}, nil
+		},
+	}, PoolConfig{MaxConcurrent: 2, Timeout: time.Second})
+
+	ctx := WithConcurrencyLimit(context.Background(), 1)
+	task1, err := pool.StartTask(ctx, "task 1", "one", SubagentConfig{Type: SubagentGeneralPurpose})
+	if err != nil {
+		t.Fatalf("StartTask(task1) error = %v", err)
+	}
+	task2, err := pool.StartTask(ctx, "task 2", "two", SubagentConfig{Type: SubagentGeneralPurpose})
+	if err != nil {
+		t.Fatalf("StartTask(task2) error = %v", err)
+	}
+
+	<-started
+	select {
+	case <-started:
+		t.Fatal("second task started before first completed; expected serialized execution")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release)
+
+	if _, err := pool.Wait(context.Background(), task1.ID); err != nil {
+		t.Fatalf("Wait(task1) error = %v", err)
+	}
+	if _, err := pool.Wait(context.Background(), task2.ID); err != nil {
+		t.Fatalf("Wait(task2) error = %v", err)
+	}
+	if got := atomic.LoadInt32(&maxSeen); got != 1 {
+		t.Fatalf("max concurrent = %d, want 1", got)
 	}
 }

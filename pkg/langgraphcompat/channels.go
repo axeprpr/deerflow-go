@@ -40,17 +40,7 @@ func newGatewayChannelService() *gatewayChannelService {
 	for _, name := range supportedGatewayChannels {
 		svc.channels[name] = channelInfo{}
 	}
-
-	config, ok := loadGatewayChannelConfig()
-	if ok {
-		svc.configPresent = true
-		svc.config = config
-		for _, name := range supportedGatewayChannels {
-			info := svc.channels[name]
-			info.Enabled = config.enabled(name)
-			svc.channels[name] = info
-		}
-	}
+	svc.reloadLocked()
 	return svc
 }
 
@@ -160,17 +150,8 @@ func (s *Server) stopGatewayChannels() {
 func (s *gatewayChannelService) start() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.configPresent {
-		s.running = false
-		return
-	}
-	s.running = true
-	for _, name := range supportedGatewayChannels {
-		info := s.channels[name]
-		info.Enabled = s.config.enabled(name)
-		info.Running = info.Enabled
-		s.channels[name] = info
-	}
+	s.reloadLocked()
+	s.syncRunningStateLocked()
 }
 
 func (s *gatewayChannelService) stop() {
@@ -186,7 +167,25 @@ func (s *gatewayChannelService) stop() {
 
 func (s *gatewayChannelService) snapshot() channelStatusSnapshot {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
+	needsReload := s.shouldReloadLocked()
+	if !needsReload {
+		snap := s.snapshotLocked()
+		s.mu.RUnlock()
+		return snap
+	}
+	s.mu.RUnlock()
+	if needsReload {
+		s.mu.Lock()
+		s.reloadLocked()
+		s.syncRunningStateLocked()
+		snap := s.snapshotLocked()
+		s.mu.Unlock()
+		return snap
+	}
+	return channelStatusSnapshot{}
+}
+
+func (s *gatewayChannelService) snapshotLocked() channelStatusSnapshot {
 	status := channelStatusSnapshot{
 		ServiceRunning: s.running,
 		Channels:       make(map[string]channelInfo, len(supportedGatewayChannels)),
@@ -200,20 +199,85 @@ func (s *gatewayChannelService) snapshot() channelStatusSnapshot {
 func (s *gatewayChannelService) restart(name string) (bool, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadLocked()
 	if !s.configPresent {
 		return false, "channel config.yaml was not found"
 	}
 	if !s.config.enabled(name) {
+		info := s.channels[name]
+		info.Enabled = false
+		info.Running = false
+		s.channels[name] = info
+		s.syncRunningStateLocked()
 		return false, "channel is not enabled in config.yaml"
-	}
-	if !s.running {
-		s.running = true
 	}
 	info := s.channels[name]
 	info.Enabled = true
 	info.Running = true
 	s.channels[name] = info
+	s.syncRunningStateLocked()
 	return true, "restarted successfully"
+}
+
+func (s *gatewayChannelService) reloadLocked() {
+	config, ok := loadGatewayChannelConfig()
+	s.configPresent = ok
+	if ok {
+		s.config = config
+	} else {
+		s.config = gatewayChannelsConfig{}
+	}
+	for _, name := range supportedGatewayChannels {
+		info := s.channels[name]
+		enabled := ok && config.enabled(name)
+		info.Enabled = enabled
+		if !enabled {
+			info.Running = false
+		}
+		s.channels[name] = info
+	}
+}
+
+func (s *gatewayChannelService) syncRunningStateLocked() {
+	if !s.configPresent {
+		s.running = false
+		return
+	}
+	anyRunning := false
+	for _, name := range supportedGatewayChannels {
+		info := s.channels[name]
+		if info.Enabled && info.Running {
+			anyRunning = true
+			break
+		}
+	}
+	if !anyRunning {
+		for _, name := range supportedGatewayChannels {
+			info := s.channels[name]
+			if info.Enabled {
+				info.Running = true
+				s.channels[name] = info
+				anyRunning = true
+			}
+		}
+	}
+	s.running = anyRunning
+}
+
+func (s *gatewayChannelService) shouldReloadLocked() bool {
+	config, ok := loadGatewayChannelConfig()
+	if ok != s.configPresent {
+		return true
+	}
+	if !ok {
+		return false
+	}
+	for _, name := range supportedGatewayChannels {
+		if s.config.enabled(name) != config.enabled(name) {
+			return true
+		}
+	}
+	return false
 }
 
 func isSupportedGatewayChannel(name string) bool {

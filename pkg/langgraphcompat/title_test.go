@@ -86,8 +86,8 @@ func TestMaybeGenerateThreadTitleFallsBackWhenLLMFails(t *testing.T) {
 	server.maybeGenerateThreadTitle(context.Background(), "thread-2", "", messages)
 
 	state := server.getThreadState("thread-2")
-	if got := state.Values["title"]; got != "Summarize the incident response checklist for" {
-		t.Fatalf("fallback title = %v, want %q", got, "Summarize the incident response checklist for")
+	if got := state.Values["title"]; got != "Summarize the incident response checklist for..." {
+		t.Fatalf("fallback title = %v, want %q", got, "Summarize the incident response checklist for...")
 	}
 }
 
@@ -113,5 +113,29 @@ func TestMaybeGenerateThreadTitleDoesNotOverrideExistingTitle(t *testing.T) {
 	}
 	if provider.lastReq.Model != "" {
 		t.Fatalf("provider should not be called when title exists")
+	}
+}
+
+func TestGenerateThreadTitleTruncatesLongLLMTitleWithEllipsis(t *testing.T) {
+	provider := &titleProvider{response: "This is a very long generated conversation title that should be truncated cleanly"}
+	server := &Server{
+		llmProvider: provider,
+	}
+
+	got := server.generateThreadTitle(context.Background(), "run-model", []models.Message{
+		{ID: "u1", SessionID: "thread-4", Role: models.RoleHuman, Content: "Please summarize the deployment plan."},
+		{ID: "a1", SessionID: "thread-4", Role: models.RoleAI, Content: "Here is the rollout summary."},
+	})
+
+	if got != "This is a very long generated conversation title that sho..." {
+		t.Fatalf("title = %q, want %q", got, "This is a very long generated conversation title that sho...")
+	}
+}
+
+func TestFallbackTitleUsesEllipsisForLongSingleWordInput(t *testing.T) {
+	input := strings.Repeat("迁", 55)
+	got := fallbackTitle(input)
+	if got != strings.Repeat("迁", 47)+"..." {
+		t.Fatalf("title = %q, want %q", got, strings.Repeat("迁", 47)+"...")
 	}
 }

@@ -1025,13 +1025,16 @@ func (s *Server) getRun(runID string) *Run {
 	return &copyRun
 }
 
-func (s *Server) getLatestRunForThread(threadID string) *Run {
+func (s *Server) getLatestActiveRunForThread(threadID string) *Run {
 	s.runsMu.RLock()
 	defer s.runsMu.RUnlock()
 
 	var latest *Run
 	for _, run := range s.runs {
 		if run.ThreadID != threadID {
+			continue
+		}
+		if run.Status != "running" {
 			continue
 		}
 		if latest == nil || run.CreatedAt.After(latest.CreatedAt) {

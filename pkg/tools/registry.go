@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -270,7 +271,25 @@ func (r *Registry) executeWithSandbox(ctx context.Context, call models.ToolCall,
 	call.Status = models.CallStatusRunning
 	call.StartedAt = started
 
-	result, err := tool.Handler(WithSandbox(ctx, sandbox), call)
+	var (
+		result models.ToolResult
+		err    error
+	)
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				err = fmt.Errorf("tool %q panicked: %v", call.Name, recovered)
+				result = models.ToolResult{
+					CallID:      call.ID,
+					ToolName:    call.Name,
+					Status:      models.CallStatusFailed,
+					Error:       formatToolPanicMessage(call.Name, recovered),
+					CompletedAt: time.Now().UTC(),
+				}
+			}
+		}()
+		result, err = tool.Handler(WithSandbox(ctx, sandbox), call)
+	}()
 	if result.CallID == "" {
 		result.CallID = call.ID
 	}
@@ -296,6 +315,30 @@ func (r *Registry) executeWithSandbox(ctx context.Context, call models.ToolCall,
 		result.Status = models.CallStatusCompleted
 	}
 	return result, nil
+}
+
+func formatToolPanicMessage(toolName string, recovered any) string {
+	detail := strings.TrimSpace(fmt.Sprint(recovered))
+	if detail == "" {
+		detail = "panic"
+	}
+	if len(detail) > 500 {
+		detail = detail[:497] + "..."
+	}
+	stack := strings.TrimSpace(string(debug.Stack()))
+	if stack != "" {
+		return fmt.Sprintf(
+			"Error: Tool %q panicked: %s. Continue with available context, or choose an alternative tool.\n\nStack trace:\n%s",
+			toolName,
+			detail,
+			stack,
+		)
+	}
+	return fmt.Sprintf(
+		"Error: Tool %q panicked: %s. Continue with available context, or choose an alternative tool.",
+		toolName,
+		detail,
+	)
 }
 
 func (r *Registry) Restrict(allowed []string) *Registry {

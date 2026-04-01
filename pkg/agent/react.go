@@ -308,13 +308,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 				result, err := a.executeTool(toolCtx, call, deferredState)
 				if err != nil {
 					err = normalizeRunError(ctx, err, a.requestTimeout)
-					result = models.ToolResult{
-						CallID:      call.ID,
-						ToolName:    call.Name,
-						Status:      models.CallStatusFailed,
-						Error:       err.Error(),
-						CompletedAt: time.Now().UTC(),
-					}
+					result = preserveToolFailureResult(call, result, err)
 				}
 				result.Duration = time.Since(toolStarted)
 				if result.CompletedAt.IsZero() {
@@ -392,13 +386,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			result, err := a.executeTool(toolCtx, call, deferredState)
 			if err != nil {
 				err = normalizeRunError(ctx, err, a.requestTimeout)
-				result = models.ToolResult{
-					CallID:      call.ID,
-					ToolName:    call.Name,
-					Status:      models.CallStatusFailed,
-					Error:       err.Error(),
-					CompletedAt: time.Now().UTC(),
-				}
+				result = preserveToolFailureResult(call, result, err)
 			}
 			result.Duration = time.Since(toolStarted)
 			if result.CompletedAt.IsZero() {
@@ -821,6 +809,36 @@ func toolMessageContent(result models.ToolResult) string {
 		return result.Error
 	}
 	return result.Content
+}
+
+func preserveToolFailureResult(call models.ToolCall, result models.ToolResult, err error) models.ToolResult {
+	if result.CallID == "" && result.ToolName == "" && result.Status == "" &&
+		result.Content == "" && result.Error == "" && result.CompletedAt.IsZero() &&
+		result.Duration == 0 && len(result.Data) == 0 {
+		return models.ToolResult{
+			CallID:      call.ID,
+			ToolName:    call.Name,
+			Status:      models.CallStatusFailed,
+			Error:       err.Error(),
+			CompletedAt: time.Now().UTC(),
+		}
+	}
+	if result.CallID == "" {
+		result.CallID = call.ID
+	}
+	if result.ToolName == "" {
+		result.ToolName = call.Name
+	}
+	if result.Status == "" {
+		result.Status = models.CallStatusFailed
+	}
+	if result.Error == "" {
+		result.Error = err.Error()
+	}
+	if result.CompletedAt.IsZero() {
+		result.CompletedAt = time.Now().UTC()
+	}
+	return result
 }
 
 func newToolCallEvent(call models.ToolCall, result *models.ToolResult) *ToolCallEvent {

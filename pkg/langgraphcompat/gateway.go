@@ -27,6 +27,7 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
+	"gopkg.in/yaml.v3"
 )
 
 type gatewayModel struct {
@@ -106,6 +107,7 @@ var activeContentMIMETypes = map[string]struct{}{
 var skillInstallSeq uint64
 var agentNameRE = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
 var threadIDRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+var skillFrontmatterNameRE = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 type gatewayAgent struct {
 	Name        string   `json:"name"`
@@ -155,6 +157,8 @@ func (s *Server) registerGatewayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/skills", s.handleSkillsList)
 	mux.HandleFunc("GET /api/skills/{skill_name}", s.handleSkillGet)
 	mux.HandleFunc("PUT /api/skills/{skill_name}", s.handleSkillSetEnabled)
+	mux.HandleFunc("POST /api/skills/{skill_name}/enable", s.handleSkillEnable)
+	mux.HandleFunc("POST /api/skills/{skill_name}/disable", s.handleSkillDisable)
 	mux.HandleFunc("POST /api/skills/install", s.handleSkillInstall)
 	mux.HandleFunc("GET /api/agents", s.handleAgentsList)
 	mux.HandleFunc("POST /api/agents", s.handleAgentCreate)
@@ -223,12 +227,6 @@ func (s *Server) handleSkillGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSkillSetEnabled(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimSpace(r.PathValue("skill_name"))
-	if name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "skill_name is required"})
-		return
-	}
-	category := strings.TrimSpace(r.URL.Query().Get("category"))
 	var req struct {
 		Enabled bool `json:"enabled"`
 	}
@@ -236,6 +234,24 @@ func (s *Server) handleSkillSetEnabled(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid request body"})
 		return
 	}
+	s.updateSkillEnabled(w, r, req.Enabled)
+}
+
+func (s *Server) handleSkillEnable(w http.ResponseWriter, r *http.Request) {
+	s.updateSkillEnabled(w, r, true)
+}
+
+func (s *Server) handleSkillDisable(w http.ResponseWriter, r *http.Request) {
+	s.updateSkillEnabled(w, r, false)
+}
+
+func (s *Server) updateSkillEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
+	name := strings.TrimSpace(r.PathValue("skill_name"))
+	if name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "skill_name is required"})
+		return
+	}
+	category := strings.TrimSpace(r.URL.Query().Get("category"))
 
 	currentSkills := s.currentGatewaySkills()
 	s.uiStateMu.Lock()
@@ -245,7 +261,7 @@ func (s *Server) handleSkillSetEnabled(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": "skill not found"})
 		return
 	}
-	skill.Enabled = req.Enabled
+	skill.Enabled = enabled
 	s.skills[key] = skill
 	s.uiStateMu.Unlock()
 	if err := s.persistGatewayState(); err != nil {
@@ -812,6 +828,12 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.HasSuffix(artifactPath, ".skill") && !downloadRequested(r) {
+		if s.handleSkillArchiveRootPreview(w, r, threadID, artifactPath) {
+			return
+		}
+	}
+
 	if strings.Contains(artifactPath, ".skill/") {
 		s.handleSkillArchiveArtifactGet(w, r, threadID, artifactPath)
 		return
@@ -843,6 +865,21 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	serveArtifactContent(w, filepath.Base(absPath), mimeType, data, downloadRequested(r))
+}
+
+func (s *Server) handleSkillArchiveRootPreview(w http.ResponseWriter, r *http.Request, threadID, artifactPath string) bool {
+	archivePath, err := s.resolveArtifactPath(threadID, artifactPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return true
+	}
+	content, err := extractSkillArchiveFile(archivePath, "SKILL.md")
+	if err != nil {
+		return false
+	}
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	serveArtifactContent(w, "SKILL.md", "text/markdown", content, false)
+	return true
 }
 
 func (s *Server) handleSkillArchiveArtifactGet(w http.ResponseWriter, r *http.Request, threadID, artifactPath string) {
@@ -1529,14 +1566,11 @@ func (s *Server) installSkillArchive(archivePath string) (gatewaySkill, error) {
 	if err != nil {
 		return gatewaySkill{}, errors.New("invalid skill: missing SKILL.md")
 	}
-	metadata := parseSkillFrontmatter(string(content))
+	metadata, err := validateSkillFrontmatter(string(content))
+	if err != nil {
+		return gatewaySkill{}, err
+	}
 	skillName := metadata["name"]
-	if skillName == "" {
-		skillName = sanitizeSkillName(filepath.Base(root))
-	}
-	if skillName == "" {
-		return gatewaySkill{}, errors.New("invalid skill: missing name")
-	}
 
 	targetDir := filepath.Join(skillsRoot, skillName)
 	if _, err := os.Stat(targetDir); err == nil {
@@ -1588,17 +1622,110 @@ func resolveArchiveSkillRoot(tempDir string) (string, error) {
 	return tempDir, nil
 }
 
+func validateSkillFrontmatter(content string) (map[string]string, error) {
+	frontmatterText, ok, err := extractSkillFrontmatter(content)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("invalid skill: no YAML frontmatter found")
+	}
+
+	var raw map[string]any
+	if err := yaml.Unmarshal([]byte(frontmatterText), &raw); err != nil {
+		return nil, fmt.Errorf("invalid skill: invalid YAML frontmatter: %w", err)
+	}
+	if raw == nil {
+		return nil, errors.New("invalid skill: frontmatter must be a YAML dictionary")
+	}
+
+	allowedKeys := map[string]struct{}{
+		"name":          {},
+		"description":   {},
+		"license":       {},
+		"allowed-tools": {},
+		"metadata":      {},
+		"compatibility": {},
+		"version":       {},
+		"author":        {},
+		"category":      {},
+	}
+	for key := range raw {
+		if _, ok := allowedKeys[strings.ToLower(strings.TrimSpace(key))]; !ok {
+			return nil, fmt.Errorf("invalid skill: unexpected key %q in SKILL.md frontmatter", key)
+		}
+	}
+
+	name, ok := raw["name"].(string)
+	if !ok {
+		return nil, errors.New("invalid skill: missing name")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, errors.New("invalid skill: name cannot be empty")
+	}
+	if !skillFrontmatterNameRE.MatchString(name) || strings.HasPrefix(name, "-") || strings.HasSuffix(name, "-") || strings.Contains(name, "--") {
+		return nil, fmt.Errorf("invalid skill: name %q must be hyphen-case", name)
+	}
+	if len(name) > 64 {
+		return nil, fmt.Errorf("invalid skill: name %q is too long", name)
+	}
+
+	description, ok := raw["description"].(string)
+	if !ok {
+		return nil, errors.New("invalid skill: missing description")
+	}
+	description = strings.TrimSpace(description)
+	if strings.ContainsAny(description, "<>") {
+		return nil, errors.New("invalid skill: description cannot contain angle brackets")
+	}
+	if len(description) > 1024 {
+		return nil, errors.New("invalid skill: description is too long")
+	}
+
+	metadata := map[string]string{
+		"name":        name,
+		"description": description,
+	}
+	for _, key := range []string{"category", "license"} {
+		if value, ok := raw[key].(string); ok {
+			metadata[key] = strings.TrimSpace(value)
+		}
+	}
+	return metadata, nil
+}
+
+func extractSkillFrontmatter(content string) (string, bool, error) {
+	scanner := bufio.NewScanner(strings.NewReader(content))
+	if !scanner.Scan() {
+		return "", false, scanner.Err()
+	}
+	if strings.TrimSpace(scanner.Text()) != "---" {
+		return "", false, nil
+	}
+	var lines []string
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "---" {
+			return strings.Join(lines, "\n"), true, nil
+		}
+		lines = append(lines, line)
+	}
+	if err := scanner.Err(); err != nil {
+		return "", false, err
+	}
+	return "", false, errors.New("invalid skill: invalid frontmatter format")
+}
+
 func parseSkillFrontmatter(content string) map[string]string {
 	result := map[string]string{}
-	scanner := bufio.NewScanner(strings.NewReader(content))
-	if !scanner.Scan() || strings.TrimSpace(scanner.Text()) != "---" {
+	frontmatterText, ok, err := extractSkillFrontmatter(content)
+	if err != nil || !ok {
 		return result
 	}
+	scanner := bufio.NewScanner(strings.NewReader(frontmatterText))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line == "---" {
-			break
-		}
 		parts := strings.SplitN(line, ":", 2)
 		if len(parts) != 2 {
 			continue

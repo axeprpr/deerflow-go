@@ -106,6 +106,12 @@ func gatewayOpenAPIPaths() map[string]any {
 			"get": operation("skills", "Get Skill", "Get one skill."),
 			"put": operation("skills", "Update Skill", "Enable or disable a skill."),
 		}),
+		"/api/skills/{skill_name}/enable": pathItem(map[string]any{
+			"post": operation("skills", "Enable Skill", "Enable one skill."),
+		}),
+		"/api/skills/{skill_name}/disable": pathItem(map[string]any{
+			"post": operation("skills", "Disable Skill", "Disable one skill."),
+		}),
 		"/api/skills/install": pathItem(map[string]any{
 			"post": operation("skills", "Install Skill", "Install a skill from a .skill archive."),
 		}),

@@ -32,6 +32,32 @@ func TestLocalizedFallbackSuggestionsEnglish(t *testing.T) {
 	}
 }
 
+func TestLocalizedFallbackSuggestionsIntentAwareChineseSummary(t *testing.T) {
+	got := localizedFallbackSuggestions("请总结一下这份迁移方案", 3)
+	if len(got) != 3 {
+		t.Fatalf("len=%d want=3", len(got))
+	}
+	if !strings.Contains(got[0], "精炼摘要") {
+		t.Fatalf("first suggestion=%q want summary-specific phrasing", got[0])
+	}
+	if strings.Contains(got[0], "分步计划") {
+		t.Fatalf("first suggestion=%q unexpectedly fell back to generic planning", got[0])
+	}
+}
+
+func TestLocalizedFallbackSuggestionsIntentAwareEnglishCompare(t *testing.T) {
+	got := localizedFallbackSuggestions("Compare our cloud migration options", 3)
+	if len(got) != 3 {
+		t.Fatalf("len=%d want=3", len(got))
+	}
+	if !strings.Contains(strings.ToLower(got[0]), "compare") {
+		t.Fatalf("first suggestion=%q want compare-specific phrasing", got[0])
+	}
+	if strings.Contains(strings.ToLower(got[0]), "step-by-step plan") {
+		t.Fatalf("first suggestion=%q unexpectedly generic", got[0])
+	}
+}
+
 func TestCompactSubjectTruncatesRunesSafely(t *testing.T) {
 	input := strings.Repeat("迁", 60)
 	got := compactSubject(input)
@@ -53,6 +79,26 @@ func TestDetectSuggestionLanguage(t *testing.T) {
 	for input, want := range tests {
 		if got := detectSuggestionLanguage(input); got != want {
 			t.Fatalf("detectSuggestionLanguage(%q)=%q want=%q", input, got, want)
+		}
+	}
+}
+
+func TestDetectSuggestionIntent(t *testing.T) {
+	tests := []struct {
+		text     string
+		language string
+		want     string
+	}{
+		{text: "请总结一下这个方案", language: "zh", want: "summarize"},
+		{text: "比较一下两个实现方案", language: "zh", want: "compare"},
+		{text: "Write a reply to this customer", language: "en", want: "write"},
+		{text: "Analyze the rollout risks", language: "en", want: "analyze"},
+		{text: "Help me with this", language: "en", want: "general"},
+	}
+
+	for _, tc := range tests {
+		if got := detectSuggestionIntent(tc.text, tc.language); got != tc.want {
+			t.Fatalf("detectSuggestionIntent(%q, %q)=%q want=%q", tc.text, tc.language, got, tc.want)
 		}
 	}
 }

@@ -104,3 +104,74 @@ Ask focused questions before drafting the skill.
 		t.Fatalf("skill body=%q want=%q", got, want)
 	}
 }
+
+func TestSkillsDiscoveryFollowsSymlinkedDirectories(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+
+	sourceDir := filepath.Join(t.TempDir(), "shared-skill")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatalf("mkdir source dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "SKILL.md"), []byte(`---
+name: linked-skill
+description: Loaded through a symlinked directory.
+license: MIT
+---
+# Linked Skill
+
+This body comes from a symlink target.
+`), 0o644); err != nil {
+		t.Fatalf("write source skill: %v", err)
+	}
+
+	linkRoot := filepath.Join(s.dataRoot, "skills", "custom", "linked")
+	if err := os.MkdirAll(filepath.Dir(linkRoot), 0o755); err != nil {
+		t.Fatalf("mkdir link parent: %v", err)
+	}
+	if err := os.Symlink(sourceDir, linkRoot); err != nil {
+		t.Fatalf("symlink source dir: %v", err)
+	}
+
+	skills := s.currentGatewaySkills()
+	skill, ok := skills[skillStorageKey(skillCategoryCustom, "linked-skill")]
+	if !ok {
+		t.Fatalf("expected symlinked skill discovery, got %#v", skills)
+	}
+	if skill.Description != "Loaded through a symlinked directory." {
+		t.Fatalf("description=%q", skill.Description)
+	}
+
+	body, ok := s.loadGatewaySkillBody("linked-skill", skillCategoryCustom)
+	if !ok {
+		t.Fatal("expected to load symlinked skill body")
+	}
+	if got, want := body, "# Linked Skill\n\nThis body comes from a symlink target."; got != want {
+		t.Fatalf("skill body=%q want=%q", got, want)
+	}
+}
+
+func TestSkillsDiscoveryIgnoresSymlinkCycles(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+
+	cycleRoot := filepath.Join(s.dataRoot, "skills", "custom", "cycle")
+	if err := os.MkdirAll(cycleRoot, 0o755); err != nil {
+		t.Fatalf("mkdir cycle root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cycleRoot, "SKILL.md"), []byte(`---
+name: cycle-skill
+description: Skill inside a cyclic directory graph.
+license: MIT
+---
+# Cycle Skill
+`), 0o644); err != nil {
+		t.Fatalf("write cycle skill: %v", err)
+	}
+	if err := os.Symlink(cycleRoot, filepath.Join(cycleRoot, "loop")); err != nil {
+		t.Fatalf("symlink cycle dir: %v", err)
+	}
+
+	skills := s.currentGatewaySkills()
+	if _, ok := skills[skillStorageKey(skillCategoryCustom, "cycle-skill")]; !ok {
+		t.Fatalf("expected cyclic symlink skill discovery, got %#v", skills)
+	}
+}

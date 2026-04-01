@@ -13,6 +13,7 @@ type TaskEvent struct {
 }
 
 type eventSinkContextKey struct{}
+type concurrencyLimitContextKey struct{}
 
 type EventSink func(TaskEvent)
 
@@ -31,4 +32,19 @@ func EmitEvent(ctx context.Context, evt TaskEvent) {
 	if sink != nil {
 		sink(evt)
 	}
+}
+
+func WithConcurrencyLimit(ctx context.Context, max int) context.Context {
+	if ctx == nil || max <= 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, concurrencyLimitContextKey{}, make(chan struct{}, max))
+}
+
+func concurrencySemaphoreFromContext(ctx context.Context) chan struct{} {
+	if ctx == nil {
+		return nil
+	}
+	sem, _ := ctx.Value(concurrencyLimitContextKey{}).(chan struct{})
+	return sem
 }

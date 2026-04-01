@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -220,6 +221,48 @@ func TestRegistry_Execute(t *testing.T) {
 	}
 	if result.Content != "executed" {
 		t.Errorf("Content = %s, want 'executed'", result.Content)
+	}
+}
+
+func TestRegistry_ExecuteRecoversFromToolPanic(t *testing.T) {
+	r := NewRegistry()
+
+	if err := r.Register(models.Tool{
+		Name:        "panic_tool",
+		Description: "Panics during execution",
+		Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+			panic("boom")
+		},
+	}); err != nil {
+		t.Fatalf("register failed: %v", err)
+	}
+
+	result, err := r.Execute(context.Background(), models.ToolCall{
+		ID:     "call-panic",
+		Name:   "panic_tool",
+		Status: models.CallStatusPending,
+	})
+
+	if err == nil {
+		t.Fatal("expected panic to be converted into an error")
+	}
+	if result.Status != models.CallStatusFailed {
+		t.Fatalf("status = %q, want %q", result.Status, models.CallStatusFailed)
+	}
+	if result.CallID != "call-panic" {
+		t.Fatalf("call id = %q, want call-panic", result.CallID)
+	}
+	if result.ToolName != "panic_tool" {
+		t.Fatalf("tool name = %q, want panic_tool", result.ToolName)
+	}
+	if !strings.Contains(result.Error, `Error: Tool "panic_tool" panicked: boom.`) {
+		t.Fatalf("error = %q", result.Error)
+	}
+	if !strings.Contains(result.Error, "Continue with available context, or choose an alternative tool.") {
+		t.Fatalf("error = %q", result.Error)
+	}
+	if !strings.Contains(result.Error, "Stack trace:") {
+		t.Fatalf("error = %q", result.Error)
 	}
 }
 

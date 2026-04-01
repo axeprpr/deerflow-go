@@ -261,6 +261,8 @@ func extractDOCXText(file *zip.File) (string, error) {
 	var currentCellParagraphs []string
 	var currentRow []string
 	var currentTable [][]string
+	var currentParagraphStyle string
+	currentParagraphIsList := false
 	insideParagraph := false
 	insideTable := false
 	insideCell := false
@@ -291,6 +293,16 @@ func extractDOCXText(file *zip.File) (string, error) {
 			case "p":
 				insideParagraph = true
 				currentParagraph.Reset()
+				currentParagraphStyle = ""
+				currentParagraphIsList = false
+			case "pStyle":
+				if insideParagraph {
+					currentParagraphStyle = attrValue(tok.Attr, "val")
+				}
+			case "numPr":
+				if insideParagraph {
+					currentParagraphIsList = true
+				}
 			case "tab":
 				if insideParagraph {
 					currentParagraph.WriteByte('\t')
@@ -307,7 +319,11 @@ func extractDOCXText(file *zip.File) (string, error) {
 					continue
 				}
 				insideParagraph = false
-				paragraph := normalizeDOCXBlock(currentParagraph.String())
+				paragraph := formatDOCXParagraph(
+					normalizeDOCXBlock(currentParagraph.String()),
+					currentParagraphStyle,
+					currentParagraphIsList,
+				)
 				if paragraph == "" {
 					continue
 				}
@@ -356,6 +372,63 @@ func normalizeDOCXBlock(text string) string {
 		cleaned = append(cleaned, line)
 	}
 	return strings.Join(cleaned, "\n")
+}
+
+func formatDOCXParagraph(text string, style string, isList bool) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+
+	if level, ok := docxHeadingLevel(style); ok {
+		return strings.Repeat("#", level) + " " + text
+	}
+
+	if isList {
+		lines := strings.Split(text, "\n")
+		for i, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			lines[i] = "- " + line
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	return text
+}
+
+func docxHeadingLevel(style string) (int, bool) {
+	style = strings.TrimSpace(style)
+	if style == "" {
+		return 0, false
+	}
+
+	matches := regexp.MustCompile(`(?i)^heading([1-6])$`).FindStringSubmatch(style)
+	if len(matches) == 2 {
+		level, err := strconv.Atoi(matches[1])
+		if err == nil && level >= 1 && level <= 6 {
+			return level, true
+		}
+	}
+	switch strings.ToLower(style) {
+	case "title":
+		return 1, true
+	case "subtitle":
+		return 2, true
+	default:
+		return 0, false
+	}
+}
+
+func attrValue(attrs []xml.Attr, local string) string {
+	for _, attr := range attrs {
+		if attr.Name.Local == local {
+			return strings.TrimSpace(attr.Value)
+		}
+	}
+	return ""
 }
 
 func compactSections(sections []string) []string {

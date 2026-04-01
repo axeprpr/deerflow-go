@@ -134,6 +134,57 @@ func TestConvertDOCXToMarkdownPreservesParagraphsAndTables(t *testing.T) {
 	}
 }
 
+func TestConvertDOCXToMarkdownPreservesHeadingsAndLists(t *testing.T) {
+	path := writeTempFile(t, "brief.docx", minimalZipArchive(t, map[string]string{
+		"word/document.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+      <w:r><w:t>Launch Plan</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:pPr><w:pStyle w:val="Heading2"/></w:pPr>
+      <w:r><w:t>Milestones</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="0"/>
+          <w:numId w:val="1"/>
+        </w:numPr>
+      </w:pPr>
+      <w:r><w:t>Prepare launch assets</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="0"/>
+          <w:numId w:val="1"/>
+        </w:numPr>
+      </w:pPr>
+      <w:r><w:t>Train support team</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>`,
+	}))
+
+	md, err := convertDOCXToMarkdown(path)
+	if err != nil {
+		t.Fatalf("convert docx headings/lists: %v", err)
+	}
+	for _, want := range []string{
+		"# Launch Plan",
+		"## Milestones",
+		"- Prepare launch assets",
+		"- Train support team",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown missing %q: %q", want, md)
+		}
+	}
+}
+
 func TestConvertXLSXToMarkdownUsesSheetNamesAndMarkdownTables(t *testing.T) {
 	path := writeTempFile(t, "forecast.xlsx", minimalZipArchive(t, map[string]string{
 		"xl/workbook.xml": `<?xml version="1.0" encoding="UTF-8"?>

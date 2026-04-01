@@ -330,6 +330,7 @@ func TestThreadRunStreamContinuesWithLiveEvents(t *testing.T) {
 
 func TestThreadJoinStreamFollowsLatestRun(t *testing.T) {
 	s, handler := newCompatTestServer(t)
+	s.ensureSession("thread-join", nil)
 	run := &Run{
 		RunID:     "run-join",
 		ThreadID:  "thread-join",
@@ -1930,6 +1931,60 @@ func TestSkillInstallFromArchive(t *testing.T) {
 	}
 }
 
+func TestSkillInstallRejectsInvalidFrontmatter(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-skill-invalid-frontmatter"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir upload dir: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "missing frontmatter",
+			content: "# Demo\n",
+			want:    "no yaml frontmatter",
+		},
+		{
+			name:    "unexpected key",
+			content: "---\nname: demo-skill\ndescription: Demo skill\ncustom-field: true\n---\n# Demo\n",
+			want:    "unexpected key",
+		},
+		{
+			name:    "missing description",
+			content: "---\nname: demo-skill\n---\n# Demo\n",
+			want:    "missing description",
+		},
+		{
+			name:    "invalid name",
+			content: "---\nname: DemoSkill\ndescription: Demo skill\n---\n# Demo\n",
+			want:    "hyphen-case",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			archivePath := filepath.Join(uploadDir, strings.ReplaceAll(tc.name, " ", "-")+".skill")
+			if err := writeRawSkillArchive(archivePath, tc.content); err != nil {
+				t.Fatalf("write raw skill archive: %v", err)
+			}
+
+			body := `{"thread_id":"` + threadID + `","path":"/mnt/user-data/uploads/` + filepath.Base(archivePath) + `"}`
+			resp := performCompatRequest(t, handler, http.MethodPost, "/api/skills/install", strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
+			if resp.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+			}
+			if !strings.Contains(strings.ToLower(resp.Body.String()), tc.want) {
+				t.Fatalf("body=%q want substring %q", resp.Body.String(), tc.want)
+			}
+		})
+	}
+}
+
 func TestSkillInstallRejectsNonVirtualAndTraversalPaths(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-skill-paths"
@@ -2144,6 +2199,57 @@ license: MIT
 	}
 	if skill.Enabled {
 		t.Fatal("expected discovered skill to remain disabled after update")
+	}
+}
+
+func TestSkillEnableDisableAliasesMatchOriginalGateway(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	skillDir := filepath.Join(s.dataRoot, "skills", "public", "frontend-design")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: frontend-design
+description: Design distinctive product interfaces.
+license: MIT
+---
+# Frontend Design
+`), 0o644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+
+	disableResp := performCompatRequest(t, handler, http.MethodPost, "/api/skills/frontend-design/disable", nil, nil)
+	if disableResp.Code != http.StatusOK {
+		t.Fatalf("disable status=%d body=%s", disableResp.Code, disableResp.Body.String())
+	}
+
+	getResp := performCompatRequest(t, handler, http.MethodGet, "/api/skills/frontend-design", nil, nil)
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", getResp.Code, getResp.Body.String())
+	}
+	var skill gatewaySkill
+	if err := json.NewDecoder(getResp.Body).Decode(&skill); err != nil {
+		t.Fatalf("decode disabled skill: %v", err)
+	}
+	if skill.Enabled {
+		t.Fatal("expected skill to be disabled")
+	}
+
+	enableResp := performCompatRequest(t, handler, http.MethodPost, "/api/skills/frontend-design/enable", nil, nil)
+	if enableResp.Code != http.StatusOK {
+		t.Fatalf("enable status=%d body=%s", enableResp.Code, enableResp.Body.String())
+	}
+
+	getResp = performCompatRequest(t, handler, http.MethodGet, "/api/skills/frontend-design", nil, nil)
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", getResp.Code, getResp.Body.String())
+	}
+	if err := json.NewDecoder(getResp.Body).Decode(&skill); err != nil {
+		t.Fatalf("decode enabled skill: %v", err)
+	}
+	if !skill.Enabled {
+		t.Fatal("expected skill to be enabled")
 	}
 }
 
@@ -2690,6 +2796,11 @@ func (fakeMemoryExtractor) ExtractUpdate(context.Context, memory.Document, []mod
 }
 
 func writeSkillArchive(path, name string) error {
+	content := "---\nname: " + name + "\ndescription: Demo skill\ncategory: productivity\nlicense: MIT\n---\n# Demo\n"
+	return writeRawSkillArchive(path, content)
+}
+
+func writeRawSkillArchive(path, content string) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
@@ -2702,7 +2813,6 @@ func writeSkillArchive(path, name string) error {
 		zw.Close()
 		return err
 	}
-	content := "---\nname: " + name + "\ndescription: Demo skill\ncategory: productivity\nlicense: MIT\n---\n# Demo\n"
 	if _, err := w.Write([]byte(content)); err != nil {
 		zw.Close()
 		return err

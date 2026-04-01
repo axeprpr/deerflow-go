@@ -553,6 +553,53 @@ func TestAgentRunActivatesDeferredToolsViaToolSearch(t *testing.T) {
 	}
 }
 
+func TestAgentRunContinuesAfterToolPanic(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name: "panic_tool",
+		Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) {
+			panic("exploded")
+		},
+	}); err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
+
+	provider := &scriptedStreamProvider{
+		steps: []streamStep{
+			{toolCalls: []models.ToolCall{{ID: "panic-call-1", Name: "panic_tool"}}},
+			{check: func(t *testing.T, req llm.ChatRequest) {
+				last := req.Messages[len(req.Messages)-1]
+				if last.Role != models.RoleTool || last.ToolResult == nil {
+					t.Fatalf("last message=%#v", last)
+				}
+				if last.ToolResult.Status != models.CallStatusFailed {
+					t.Fatalf("tool result status=%q want failed", last.ToolResult.Status)
+				}
+				if !strings.Contains(last.Content, `Error: Tool "panic_tool" panicked: exploded.`) {
+					t.Fatalf("tool message content=%q", last.Content)
+				}
+			}, content: "Recovered after tool panic."},
+		},
+		t: t,
+	}
+
+	agent := New(AgentConfig{
+		LLMProvider: provider,
+		Tools:       registry,
+		MaxTurns:    3,
+	})
+
+	result, err := agent.Run(context.Background(), "session-panic-tool", []models.Message{
+		{ID: "m1", SessionID: "session-panic-tool", Role: models.RoleHuman, Content: "Use the tool"},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "Recovered after tool panic." {
+		t.Fatalf("FinalOutput=%q", result.FinalOutput)
+	}
+}
+
 type timeoutProvider struct{}
 
 func (timeoutProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
