@@ -160,6 +160,73 @@ func TestThreadSearchMatchesMessageContent(t *testing.T) {
 	}
 }
 
+func TestThreadSearchMatchesStructuredMessageMetadataAndToolCalls(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	matching := s.ensureSession("thread-structured", map[string]any{
+		"title": "Structured content",
+	})
+	matching.Todos = []Todo{{Content: "Review quarterly spreadsheet", Status: "pending"}}
+	matching.Messages = []models.Message{
+		{
+			ID:        "msg-1",
+			SessionID: "thread-structured",
+			Role:      models.RoleHuman,
+			Content:   "Please analyze this upload.",
+			Metadata: map[string]string{
+				"additional_kwargs": `{"files":[{"filename":"quarterly-report.xlsx","path":"/mnt/user-data/uploads/quarterly-report.xlsx"}]}`,
+				"multi_content":     `[{"type":"text","text":"Quarterly revenue by region"}]`,
+			},
+		},
+		{
+			ID:        "msg-2",
+			SessionID: "thread-structured",
+			Role:      models.RoleAI,
+			Content:   "Running spreadsheet analysis.",
+			ToolCalls: []models.ToolCall{
+				{
+					ID:        "call-1",
+					Name:      "python",
+					Arguments: map[string]any{"script": "summarize quarterly revenue"},
+					Status:    models.CallStatusCompleted,
+				},
+			},
+		},
+	}
+
+	other := s.ensureSession("thread-other", map[string]any{
+		"title": "Other thread",
+	})
+	other.Messages = []models.Message{
+		{
+			ID:        "msg-3",
+			SessionID: "thread-other",
+			Role:      models.RoleHuman,
+			Content:   "Draft a travel checklist.",
+		},
+	}
+
+	for _, query := range []string{"quarterly-report.xlsx", "quarterly revenue", "summarize quarterly revenue", "review quarterly spreadsheet"} {
+		resp := performCompatRequest(t, handler, http.MethodPost, "/threads/search", strings.NewReader(`{"query":"`+query+`"}`), map[string]string{
+			"Content-Type": "application/json",
+		})
+		if resp.Code != http.StatusOK {
+			t.Fatalf("query=%q status=%d body=%s", query, resp.Code, resp.Body.String())
+		}
+
+		var threads []map[string]any
+		if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+			t.Fatalf("query=%q unmarshal response: %v", query, err)
+		}
+		if len(threads) != 1 {
+			t.Fatalf("query=%q threads=%d want=1 body=%s", query, len(threads), resp.Body.String())
+		}
+		if got := asString(threads[0]["thread_id"]); got != "thread-structured" {
+			t.Fatalf("query=%q thread_id=%q want=thread-structured", query, got)
+		}
+	}
+}
+
 func TestThreadSearchHonorsZeroLimit(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	s.ensureSession("thread-a", map[string]any{"title": "A"})

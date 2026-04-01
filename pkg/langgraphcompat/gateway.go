@@ -791,18 +791,31 @@ func (s *Server) handleUploadsList(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUploadsDelete(w http.ResponseWriter, r *http.Request) {
 	threadID := strings.TrimSpace(r.PathValue("thread_id"))
-	filename := sanitizeFilename(r.PathValue("filename"))
+	filename := sanitizePathFilename(r.PathValue("filename"))
 	if err := validateThreadID(threadID); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": err.Error()})
 		return
 	}
 	if filename == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid request"})
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "Invalid path"})
 		return
 	}
 
-	target := filepath.Join(s.uploadsDir(threadID), filename)
-	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+	uploadDir := s.uploadsDir(threadID)
+	target := filepath.Join(uploadDir, filename)
+	if err := ensureResolvedPathWithinBase(uploadDir, target); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": err.Error()})
+		return
+	}
+	if _, err := os.Lstat(target); err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("File not found: %s", filename)})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to inspect file"})
+		return
+	}
+	if err := os.Remove(target); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to delete file"})
 		return
 	}
@@ -1211,6 +1224,17 @@ func sanitizeFilename(name string) string {
 	return name
 }
 
+func sanitizePathFilename(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." {
+		return ""
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return ""
+	}
+	return sanitizeFilename(name)
+}
+
 func existingUploadNames(uploadDir string) (map[string]struct{}, error) {
 	entries, err := os.ReadDir(uploadDir)
 	if err != nil {
@@ -1497,7 +1521,44 @@ func (s *Server) resolveThreadVirtualPath(threadID, virtualPath string) (string,
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", errors.New("access denied: path traversal detected")
 	}
+	if err := ensureResolvedPathWithinBase(base, actual); err != nil {
+		return "", err
+	}
 	return actual, nil
+}
+
+func ensureResolvedPathWithinBase(base, actual string) error {
+	resolvedBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return errors.New("access denied: path traversal detected")
+		}
+		resolvedBase = filepath.Clean(base)
+	}
+
+	resolvedActual, err := filepath.EvalSymlinks(actual)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return errors.New("access denied: path traversal detected")
+		}
+		parent, parentErr := filepath.EvalSymlinks(filepath.Dir(actual))
+		if parentErr != nil {
+			if !os.IsNotExist(parentErr) {
+				return errors.New("access denied: path traversal detected")
+			}
+			parent = filepath.Clean(filepath.Dir(actual))
+		}
+		resolvedActual = filepath.Join(parent, filepath.Base(actual))
+	}
+
+	rel, err := filepath.Rel(resolvedBase, resolvedActual)
+	if err != nil {
+		return errors.New("access denied: path traversal detected")
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return errors.New("access denied: path traversal detected")
+	}
+	return nil
 }
 
 func (s *Server) installSkillArchive(archivePath string) (gatewaySkill, error) {

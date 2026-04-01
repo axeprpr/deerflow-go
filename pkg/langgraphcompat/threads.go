@@ -301,15 +301,80 @@ func sessionContainsQuery(session *Session, query string) bool {
 	if session == nil || query == "" {
 		return false
 	}
+	if anyContainsQuery(session.Metadata, query) || anyContainsQuery(session.Configurable, query) || anyContainsQuery(session.Todos, query) {
+		return true
+	}
 	for _, msg := range session.Messages {
-		if strings.Contains(strings.ToLower(strings.TrimSpace(msg.Content)), query) {
-			return true
-		}
-		if msg.ToolResult != nil && strings.Contains(strings.ToLower(strings.TrimSpace(msg.ToolResult.Content)), query) {
+		if messageContainsQuery(msg, query) {
 			return true
 		}
 	}
 	return false
+}
+
+func messageContainsQuery(msg models.Message, query string) bool {
+	if containsQueryString(msg.Content, query) {
+		return true
+	}
+	if anyContainsQuery(msg.Metadata, query) {
+		return true
+	}
+	for _, call := range msg.ToolCalls {
+		if containsQueryString(call.Name, query) || anyContainsQuery(call.Arguments, query) {
+			return true
+		}
+	}
+	if msg.ToolResult == nil {
+		return false
+	}
+	return containsQueryString(msg.ToolResult.ToolName, query) ||
+		containsQueryString(msg.ToolResult.Content, query) ||
+		containsQueryString(msg.ToolResult.Error, query) ||
+		anyContainsQuery(msg.ToolResult.Data, query)
+}
+
+func anyContainsQuery(value any, query string) bool {
+	switch v := value.(type) {
+	case nil:
+		return false
+	case string:
+		return containsQueryString(v, query)
+	case []string:
+		for _, item := range v {
+			if containsQueryString(item, query) {
+				return true
+			}
+		}
+	case map[string]string:
+		for key, item := range v {
+			if containsQueryString(key, query) || containsQueryString(item, query) {
+				return true
+			}
+		}
+	case map[string]any:
+		for key, item := range v {
+			if containsQueryString(key, query) || anyContainsQuery(item, query) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range v {
+			if anyContainsQuery(item, query) {
+				return true
+			}
+		}
+	case []Todo:
+		for _, item := range v {
+			if containsQueryString(item.Content, query) || containsQueryString(item.Status, query) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func containsQueryString(value string, query string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(value)), query)
 }
 
 func mapContainsSubset(target map[string]any, subset map[string]any) bool {

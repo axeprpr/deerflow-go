@@ -1063,6 +1063,32 @@ func TestArtifactEndpointForcesDownloadForSVG(t *testing.T) {
 	}
 }
 
+func TestArtifactEndpointRejectsSymlinkEscapingThreadRoot(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-artifact-symlink"
+	outputDir := filepath.Join(s.threadRoot(threadID), "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	link := filepath.Join(outputDir, "escape.txt")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/escape.txt", nil, nil)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), "access denied: path traversal detected") {
+		t.Fatalf("body=%q", resp.Body.String())
+	}
+}
+
 func TestUploadConvertibleDocumentCreatesMarkdownCompanion(t *testing.T) {
 	_, handler := newCompatTestServer(t)
 	threadID := "thread-gateway-docx"
@@ -1180,6 +1206,45 @@ func TestDeleteConvertibleUploadRemovesMarkdownCompanion(t *testing.T) {
 	}
 	if _, err := os.Stat(companion); !os.IsNotExist(err) {
 		t.Fatalf("expected companion removed, stat err=%v", err)
+	}
+}
+
+func TestDeleteUploadReturnsNotFoundForMissingFile(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+	threadID := "thread-delete-upload-missing"
+
+	resp := performCompatRequest(t, handler, http.MethodDelete, "/api/threads/"+threadID+"/uploads/missing.txt", nil, nil)
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), "File not found: missing.txt") {
+		t.Fatalf("body=%q", resp.Body.String())
+	}
+}
+
+func TestDeleteUploadRejectsSymlinkEscapingUploadsDir(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-delete-upload-symlink"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	link := filepath.Join(uploadDir, "escape.txt")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodDelete, "/api/threads/"+threadID+"/uploads/escape.txt", nil, nil)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), "access denied: path traversal detected") {
+		t.Fatalf("body=%q", resp.Body.String())
 	}
 }
 
