@@ -942,7 +942,7 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 			case "present_file", "present_files":
 				s.sendThreadUpdateEvent(w, flusher, run, "artifacts")
 			default:
-				if toolMayAffectArtifacts(evt.Result.ToolName) {
+				if toolMayAffectArtifacts(resolvedToolNameForArtifacts(evt)) {
 					s.sendThreadUpdateEvent(w, flusher, run, "artifacts")
 				}
 			}
@@ -1019,6 +1019,18 @@ func toolMayAffectArtifacts(name string) bool {
 	default:
 		return false
 	}
+}
+
+func resolvedToolNameForArtifacts(evt agent.AgentEvent) string {
+	if evt.Result != nil {
+		if name := strings.TrimSpace(evt.Result.ToolName); name != "" {
+			return name
+		}
+	}
+	if evt.ToolEvent != nil {
+		return strings.TrimSpace(evt.ToolEvent.Name)
+	}
+	return ""
 }
 
 func usagePayloadFromAgentUsage(usage *agent.Usage) map[string]int {

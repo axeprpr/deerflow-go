@@ -455,6 +455,54 @@ func TestForwardAgentEventEmitsArtifactUpdatesWhenWriteFileCompletes(t *testing.
 	}
 }
 
+func TestForwardAgentEventEmitsArtifactUpdatesWhenBashCompletes(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-bash-artifacts",
+		ThreadID:    "thread-bash-artifacts",
+		AssistantID: "lead_agent",
+		Status:      "running",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.saveRun(run)
+	s.ensureSession(run.ThreadID, nil)
+
+	outputDir := filepath.Join(s.threadRoot(run.ThreadID), "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "site.html"), []byte("<html></html>"), 0o644); err != nil {
+		t.Fatalf("write output artifact: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	s.forwardAgentEvent(rec, rec, run, agent.AgentEvent{
+		Type:      agent.AgentEventToolCallEnd,
+		MessageID: "tool-msg-bash-artifacts",
+		ToolEvent: &agent.ToolCallEvent{
+			ID:          "call-bash-artifacts",
+			Name:        "bash",
+			Status:      models.CallStatusCompleted,
+			CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		},
+		Result: &models.ToolResult{
+			CallID:   "call-bash-artifacts",
+			ToolName: "bash",
+			Status:   models.CallStatusCompleted,
+			Content:  "generated /mnt/user-data/outputs/site.html",
+		},
+	})
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: updates") {
+		t.Fatalf("expected updates event in %q", body)
+	}
+	if !strings.Contains(body, `"artifacts":["/mnt/user-data/outputs/site.html"]`) {
+		t.Fatalf("expected artifact update payload in %q", body)
+	}
+}
+
 func TestToolMayAffectArtifacts(t *testing.T) {
 	tests := []struct {
 		name string
@@ -474,6 +522,42 @@ func TestToolMayAffectArtifacts(t *testing.T) {
 	for _, tt := range tests {
 		if got := toolMayAffectArtifacts(tt.name); got != tt.want {
 			t.Fatalf("toolMayAffectArtifacts(%q)=%v want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestResolvedToolNameForArtifactsPrefersResultNameButFallsBackToToolEvent(t *testing.T) {
+	tests := []struct {
+		name string
+		evt  agent.AgentEvent
+		want string
+	}{
+		{
+			name: "result name wins",
+			evt: agent.AgentEvent{
+				Result:    &models.ToolResult{ToolName: "write_file"},
+				ToolEvent: &agent.ToolCallEvent{Name: "bash"},
+			},
+			want: "write_file",
+		},
+		{
+			name: "tool event fallback",
+			evt: agent.AgentEvent{
+				Result:    &models.ToolResult{},
+				ToolEvent: &agent.ToolCallEvent{Name: " task "},
+			},
+			want: "task",
+		},
+		{
+			name: "empty",
+			evt:  agent.AgentEvent{},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		if got := resolvedToolNameForArtifacts(tt.evt); got != tt.want {
+			t.Fatalf("%s: resolvedToolNameForArtifacts()=%q want %q", tt.name, got, tt.want)
 		}
 	}
 }
