@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -551,6 +552,62 @@ func TestPersistedSessionsReloadMessagesTodosAndArtifacts(t *testing.T) {
 	}
 	if artifacts[0] != "/mnt/user-data/outputs/report.md" {
 		t.Fatalf("artifact=%q want /mnt/user-data/outputs/report.md", artifacts[0])
+	}
+}
+
+func TestPersistedSessionsReloadIncludesWorkspaceArtifacts(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	threadID := "thread-persisted-workspace"
+	session := s.ensureSession(threadID, map[string]any{"title": "Saved thread"})
+	session.Messages = []models.Message{{
+		ID:        "msg-1",
+		SessionID: threadID,
+		Role:      models.RoleHuman,
+		Content:   "hello",
+	}}
+	session.UpdatedAt = time.Now().UTC()
+	if err := s.persistSessionSnapshot(cloneSession(session)); err != nil {
+		t.Fatalf("persist session: %v", err)
+	}
+
+	outputPath := filepath.Join(s.threadRoot(threadID), "outputs", "report.md")
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	if err := os.WriteFile(outputPath, []byte("# report"), 0o644); err != nil {
+		t.Fatalf("write output artifact: %v", err)
+	}
+
+	workspacePath := filepath.Join(s.threadRoot(threadID), "workspace", "drafts", "notes.txt")
+	if err := os.MkdirAll(filepath.Dir(workspacePath), 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	if err := os.WriteFile(workspacePath, []byte("workspace notes"), 0o644); err != nil {
+		t.Fatalf("write workspace artifact: %v", err)
+	}
+
+	reloaded := &Server{
+		sessions: make(map[string]*Session),
+		runs:     make(map[string]*Run),
+		dataRoot: s.dataRoot,
+	}
+	if err := reloaded.loadPersistedSessions(); err != nil {
+		t.Fatalf("load persisted sessions: %v", err)
+	}
+
+	state := reloaded.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("state is nil")
+	}
+	artifacts, ok := state.Values["artifacts"].([]string)
+	if !ok {
+		t.Fatalf("artifacts=%#v", state.Values["artifacts"])
+	}
+	if !slices.Contains(artifacts, "/mnt/user-data/outputs/report.md") {
+		t.Fatalf("artifacts=%#v missing output artifact", artifacts)
+	}
+	if !slices.Contains(artifacts, "/mnt/user-data/workspace/drafts/notes.txt") {
+		t.Fatalf("artifacts=%#v missing workspace artifact", artifacts)
 	}
 }
 

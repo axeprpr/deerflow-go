@@ -241,10 +241,15 @@ func (s *Server) readPersistedHistory(threadID string) ([]persistedHistoryEntry,
 	return entries, nil
 }
 
-func collectArtifactPaths(root string) []string {
+func collectArtifactPaths(root string, virtualPrefix string) []string {
 	type artifactEntry struct {
 		path     string
 		modified time.Time
+	}
+
+	virtualPrefix = "/" + strings.Trim(strings.TrimSpace(virtualPrefix), "/")
+	if virtualPrefix == "/" {
+		virtualPrefix = ""
 	}
 
 	entries := make([]artifactEntry, 0)
@@ -261,7 +266,7 @@ func collectArtifactPaths(root string) []string {
 			return nil
 		}
 		entries = append(entries, artifactEntry{
-			path:     "/mnt/user-data/outputs/" + filepath.ToSlash(rel),
+			path:     virtualPrefix + "/" + filepath.ToSlash(rel),
 			modified: info.ModTime(),
 		})
 		return nil
