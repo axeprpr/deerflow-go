@@ -1,6 +1,7 @@
 package langgraphcompat
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -1060,6 +1061,10 @@ func (s *Server) subscribeRun(runID string) (*Run, <-chan StreamEvent) {
 	if run.Status != "running" {
 		return &copyRun, nil
 	}
+	if run.abandonTimer != nil {
+		run.abandonTimer.Stop()
+		run.abandonTimer = nil
+	}
 
 	streamID := atomic.AddUint64(&s.runStreamSeq, 1)
 	ch := make(chan StreamEvent, 64)
@@ -1078,6 +1083,7 @@ func (s *Server) unsubscribeRun(runID string, stream <-chan StreamEvent) {
 	s.runsMu.Lock()
 	defer s.runsMu.Unlock()
 
+	run := s.runs[runID]
 	subscribers := s.runStreams[runID]
 	for id, ch := range subscribers {
 		if (<-chan StreamEvent)(ch) == stream {
@@ -1087,7 +1093,76 @@ func (s *Server) unsubscribeRun(runID string, stream <-chan StreamEvent) {
 	}
 	if len(subscribers) == 0 {
 		delete(s.runStreams, runID)
+		s.armRunAbandonTimerLocked(run)
 	}
+}
+
+func (s *Server) armRunAbandonTimer(runID string) {
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
+	s.armRunAbandonTimerLocked(s.runs[runID])
+}
+
+func (s *Server) clearRunLifecycle(runID string) {
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
+
+	run, ok := s.runs[runID]
+	if !ok {
+		return
+	}
+	if run.abandonTimer != nil {
+		run.abandonTimer.Stop()
+		run.abandonTimer = nil
+	}
+	run.cancel = nil
+}
+
+func (s *Server) armRunAbandonTimerLocked(run *Run) {
+	if run == nil || run.Status != "running" || run.cancel == nil {
+		return
+	}
+	if run.abandonTimer != nil {
+		run.abandonTimer.Stop()
+	}
+
+	runID := run.RunID
+	cancel := run.cancel
+	run.abandonTimer = time.AfterFunc(runReconnectGracePeriod(), func() {
+		s.cancelAbandonedRun(runID, cancel)
+	})
+}
+
+func (s *Server) cancelAbandonedRun(runID string, cancel context.CancelFunc) {
+	s.runsMu.Lock()
+	run, ok := s.runs[runID]
+	if !ok || run.Status != "running" || run.cancel == nil {
+		s.runsMu.Unlock()
+		return
+	}
+	if len(s.runStreams[runID]) > 0 {
+		run.abandonTimer = nil
+		s.runsMu.Unlock()
+		return
+	}
+	run.abandonTimer = nil
+	run.cancel = nil
+	s.runsMu.Unlock()
+
+	cancel()
+}
+
+func runReconnectGracePeriod() time.Duration {
+	const fallback = 2 * time.Second
+	raw := strings.TrimSpace(os.Getenv("DEERFLOW_RUN_RECONNECT_GRACE"))
+	if raw == "" {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }
 
 func stringValue(v any) string {

@@ -2030,11 +2030,28 @@ type rawGatewayModel struct {
 	SupportsVision          *bool  `json:"supports_vision"`
 }
 
+type gatewayConfigFile struct {
+	Models []gatewayConfigModel `yaml:"models"`
+}
+
+type gatewayConfigModel struct {
+	Name                    string `yaml:"name"`
+	Model                   string `yaml:"model"`
+	DisplayName             string `yaml:"display_name"`
+	Description             string `yaml:"description"`
+	SupportsThinking        *bool  `yaml:"supports_thinking"`
+	SupportsReasoningEffort *bool  `yaml:"supports_reasoning_effort"`
+	SupportsVision          *bool  `yaml:"supports_vision"`
+}
+
 func configuredGatewayModels(defaultModel string) []gatewayModel {
 	if models := configuredGatewayModelsFromJSON(defaultModel); len(models) > 0 {
 		return models
 	}
 	if models := configuredGatewayModelsFromList(defaultModel); len(models) > 0 {
+		return models
+	}
+	if models := configuredGatewayModelsFromConfig(defaultModel); len(models) > 0 {
 		return models
 	}
 	return []gatewayModel{defaultGatewayModel(defaultModel)}
@@ -2103,6 +2120,58 @@ func configuredGatewayModelsFromList(defaultModel string) []gatewayModel {
 		models = append(models, model)
 	}
 	return models
+}
+
+func configuredGatewayModelsFromConfig(defaultModel string) []gatewayModel {
+	configPath := gatewayModelCatalogConfigPath()
+	if configPath == "" {
+		return nil
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil
+	}
+
+	var cfg gatewayConfigFile
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil
+	}
+
+	models := make([]gatewayModel, 0, len(cfg.Models))
+	seen := map[string]struct{}{}
+	for _, item := range cfg.Models {
+		model := normalizeGatewayModel(rawGatewayModel{
+			Name:                    item.Name,
+			Model:                   item.Model,
+			DisplayName:             item.DisplayName,
+			Description:             item.Description,
+			SupportsThinking:        item.SupportsThinking,
+			SupportsReasoningEffort: item.SupportsReasoningEffort,
+			SupportsVision:          item.SupportsVision,
+		}, defaultModel)
+		if model.Name == "" {
+			continue
+		}
+		if _, exists := seen[model.Name]; exists {
+			continue
+		}
+		seen[model.Name] = struct{}{}
+		models = append(models, model)
+	}
+	return models
+}
+
+func gatewayModelCatalogConfigPath() string {
+	if path := strings.TrimSpace(os.Getenv("DEERFLOW_CONFIG_PATH")); path != "" {
+		return path
+	}
+
+	const defaultConfigPath = "config.yaml"
+	if _, err := os.Stat(defaultConfigPath); err == nil {
+		return defaultConfigPath
+	}
+	return ""
 }
 
 func defaultGatewayModel(defaultModel string) gatewayModel {

@@ -1890,6 +1890,48 @@ func TestModelsEndpointSupportsConfiguredModelCatalogList(t *testing.T) {
 	}
 }
 
+func TestModelsEndpointSupportsConfiguredModelCatalogFile(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+models:
+  - name: gpt-5
+    model: openai/gpt-5
+    display_name: GPT-5
+    description: Primary reasoning model
+    supports_thinking: true
+    supports_reasoning_effort: true
+    supports_vision: true
+  - name: gemini-2.5-flash
+    model: google/gemini-2.5-flash
+    display_name: Gemini 2.5 Flash
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("DEERFLOW_CONFIG_PATH", configPath)
+
+	_, handler := newCompatTestServer(t)
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/models", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d", resp.Code)
+	}
+
+	var payload struct {
+		Models []gatewayModel `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Models) != 2 {
+		t.Fatalf("models=%d want=2", len(payload.Models))
+	}
+	if payload.Models[0].Name != "gpt-5" || payload.Models[1].Name != "gemini-2.5-flash" {
+		t.Fatalf("unexpected models=%#v", payload.Models)
+	}
+	if !payload.Models[0].SupportsVision || !payload.Models[0].SupportsThinking || !payload.Models[0].SupportsReasoningEffort {
+		t.Fatalf("missing explicit capabilities in %#v", payload.Models[0])
+	}
+}
+
 func TestSkillInstallFromArchive(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-skill-1"

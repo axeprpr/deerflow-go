@@ -80,7 +80,8 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
-	run, _, execErr, statusCode := s.executeRun(streamRequestContext(r.Context()), req, routeThreadID, w, flusher)
+	runCtx, runCancel := streamRequestContext(r.Context())
+	run, _, execErr, statusCode := s.executeRun(runCtx, req, routeThreadID, w, flusher, runCancel, r.Context().Done())
 	if run != nil {
 		w.Header().Set("Content-Location", fmt.Sprintf("/threads/%s/runs/%s", run.ThreadID, run.RunID))
 	}
@@ -89,13 +90,14 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	}
 }
 
-func streamRequestContext(ctx context.Context) context.Context {
+func streamRequestContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if ctx == nil {
-		return context.Background()
+		ctx = context.Background()
 	}
-	// Let runs survive the initiating SSE connection so clients can reconnect
-	// with /threads/{thread_id}/stream like the original DeerFlow behavior.
-	return context.WithoutCancel(ctx)
+	// Let runs survive the initiating SSE connection briefly so clients can
+	// reconnect, but keep a cancellation handle so abandoned runs do not keep
+	// executing in the background indefinitely.
+	return context.WithCancel(context.WithoutCancel(ctx))
 }
 
 func (s *Server) handleRunCreateRequest(w http.ResponseWriter, r *http.Request, routeThreadID string) {
@@ -105,7 +107,7 @@ func (s *Server) handleRunCreateRequest(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	run, _, execErr, statusCode := s.executeRun(r.Context(), req, routeThreadID, nil, nil)
+	run, _, execErr, statusCode := s.executeRun(r.Context(), req, routeThreadID, nil, nil, nil, nil)
 	if execErr != nil {
 		http.Error(w, execErr.Error(), statusCode)
 		return
@@ -129,7 +131,7 @@ func parseRunRequest(r *http.Request) (RunCreateRequest, error) {
 	return req, nil
 }
 
-func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThreadID string, w http.ResponseWriter, flusher http.Flusher) (*Run, *ThreadState, error, int) {
+func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThreadID string, w http.ResponseWriter, flusher http.Flusher, streamCancel context.CancelFunc, streamDisconnected <-chan struct{}) (*Run, *ThreadState, error, int) {
 	threadID := routeThreadID
 	if threadID == "" {
 		threadID = req.ThreadID
@@ -195,8 +197,15 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 		Status:      "running",
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
+		cancel:      streamCancel,
 	}
 	s.saveRun(run)
+	if streamCancel != nil && streamDisconnected != nil {
+		go func(runID string, done <-chan struct{}) {
+			<-done
+			s.armRunAbandonTimer(runID)
+		}(run.RunID, streamDisconnected)
+	}
 	if w != nil {
 		w.Header().Set("Content-Location", fmt.Sprintf("/threads/%s/runs/%s", threadID, run.RunID))
 	}
@@ -254,6 +263,7 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 		run.Error = err.Error()
 		run.UpdatedAt = time.Now().UTC()
 		s.saveRun(run)
+		s.clearRunLifecycle(run.RunID)
 		s.markThreadStatus(threadID, "error")
 		return run, nil, err, http.StatusInternalServerError
 	}
@@ -288,6 +298,7 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 	run.Status = "success"
 	run.UpdatedAt = time.Now().UTC()
 	s.saveRun(run)
+	s.clearRunLifecycle(run.RunID)
 	s.markThreadStatus(threadID, "idle")
 	return run, state, nil, http.StatusOK
 }

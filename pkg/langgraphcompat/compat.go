@@ -99,14 +99,16 @@ type ThreadState struct {
 }
 
 type Run struct {
-	RunID       string
-	ThreadID    string
-	AssistantID string
-	Status      string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	Events      []StreamEvent
-	Error       string
+	RunID        string
+	ThreadID     string
+	AssistantID  string
+	Status       string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	Events       []StreamEvent
+	Error        string
+	cancel       context.CancelFunc
+	abandonTimer *time.Timer
 }
 
 // LangGraph API types
