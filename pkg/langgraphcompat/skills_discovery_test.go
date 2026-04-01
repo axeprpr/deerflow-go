@@ -154,6 +154,64 @@ This body comes from the repo-local skills directory.
 	}
 }
 
+func TestGatewaySkillRootsDiscoversExecutableRelativeSkills(t *testing.T) {
+	installRoot := t.TempDir()
+	skillDir := filepath.Join(installRoot, "skills", "public", "install-root-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir install skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: install-root-skill
+description: Loaded relative to the server executable.
+license: MIT
+---
+# Install Root Skill
+
+This body comes from the install-root skills directory.
+`), 0o644); err != nil {
+		t.Fatalf("write install-root skill: %v", err)
+	}
+
+	restore := gatewayExecutablePath
+	gatewayExecutablePath = func() (string, error) {
+		return filepath.Join(installRoot, "bin", "deerflow-go"), nil
+	}
+	defer func() {
+		gatewayExecutablePath = restore
+	}()
+
+	projectRoot := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(projectRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(wd)
+	}()
+
+	s, _ := newCompatTestServer(t)
+	skills := s.currentGatewaySkills()
+
+	skill, ok := skills[skillStorageKey(skillCategoryPublic, "install-root-skill")]
+	if !ok {
+		t.Fatalf("expected executable-relative skill discovery, got %#v", skills)
+	}
+	if skill.Description != "Loaded relative to the server executable." {
+		t.Fatalf("description=%q want=%q", skill.Description, "Loaded relative to the server executable.")
+	}
+
+	body, ok := s.loadGatewaySkillBody("install-root-skill", skillCategoryPublic)
+	if !ok {
+		t.Fatal("expected to load executable-relative skill body")
+	}
+	if got, want := body, "# Install Root Skill\n\nThis body comes from the install-root skills directory."; got != want {
+		t.Fatalf("skill body=%q want=%q", got, want)
+	}
+}
+
 func TestLoadGatewaySkillBodyPrefersResolvedCategoryAndLatestRoot(t *testing.T) {
 	projectRoot := t.TempDir()
 	publicSkillDir := filepath.Join(projectRoot, "skills", "public", "duplicate-skill")

@@ -105,6 +105,23 @@ func (s *FileStore) Save(ctx context.Context, doc Document) error {
 	return nil
 }
 
+func (s *FileStore) Delete(ctx context.Context, sessionID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	path, err := s.documentPath(sessionID)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("delete memory %q: %w", sessionID, err)
+	}
+	return nil
+}
+
 func (s *FileStore) documentPath(sessionID string) (string, error) {
 	if s == nil || strings.TrimSpace(s.root) == "" {
 		return "", errors.New("file store is not initialized")

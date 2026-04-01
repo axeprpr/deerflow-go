@@ -113,6 +113,37 @@ func TestServiceUpdateAndInject(t *testing.T) {
 	}
 }
 
+func TestFileStoreDelete(t *testing.T) {
+	t.Parallel()
+
+	store, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore() error = %v", err)
+	}
+	if err := store.AutoMigrate(context.Background()); err != nil {
+		t.Fatalf("AutoMigrate() error = %v", err)
+	}
+
+	doc := Document{
+		SessionID: "agent:code-reviewer",
+		Source:    "agent:code-reviewer",
+		User:      UserMemory{TopOfMind: "Keep reviews terse."},
+	}
+	if err := store.Save(context.Background(), doc); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	if err := store.Delete(context.Background(), doc.SessionID); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if _, err := store.Load(context.Background(), doc.SessionID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Load() after delete error = %v want ErrNotFound", err)
+	}
+	if err := store.Delete(context.Background(), doc.SessionID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Delete() missing doc error = %v want ErrNotFound", err)
+	}
+}
+
 func TestBuildInjectionWithContextPrioritizesRelevantFacts(t *testing.T) {
 	t.Parallel()
 

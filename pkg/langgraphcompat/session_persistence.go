@@ -20,6 +20,7 @@ type persistedSession struct {
 	ThreadID  string           `json:"thread_id"`
 	Messages  []models.Message `json:"messages"`
 	Todos     []Todo           `json:"todos,omitempty"`
+	Values    map[string]any   `json:"values,omitempty"`
 	Metadata  map[string]any   `json:"metadata,omitempty"`
 	Config    map[string]any   `json:"config,omitempty"`
 	Status    string           `json:"status"`
@@ -102,6 +103,7 @@ func (s *Server) readPersistedSession(threadID string) (*Session, error) {
 		ThreadID:     stored.ThreadID,
 		Messages:     append([]models.Message(nil), stored.Messages...),
 		Todos:        append([]Todo(nil), stored.Todos...),
+		Values:       copyMetadataMap(stored.Values),
 		Metadata:     copyMetadataMap(stored.Metadata),
 		Configurable: copyMetadataMap(stored.Config),
 		Status:       stored.Status,
@@ -125,6 +127,7 @@ func (s *Server) persistSessionSnapshot(session *Session) error {
 		ThreadID:  session.ThreadID,
 		Messages:  append([]models.Message(nil), session.Messages...),
 		Todos:     append([]Todo(nil), session.Todos...),
+		Values:    copyMetadataMap(session.Values),
 		Metadata:  copyMetadataMap(session.Metadata),
 		Config:    copyMetadataMap(session.Configurable),
 		Status:    session.Status,
@@ -168,6 +171,7 @@ func (s *Server) appendPersistedHistory(session *Session) error {
 			ThreadID:  session.ThreadID,
 			Messages:  append([]models.Message(nil), session.Messages...),
 			Todos:     append([]Todo(nil), session.Todos...),
+			Values:    copyMetadataMap(session.Values),
 			Metadata:  copyMetadataMap(session.Metadata),
 			Config:    copyMetadataMap(session.Configurable),
 			Status:    session.Status,

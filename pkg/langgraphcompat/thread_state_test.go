@@ -32,7 +32,7 @@ func TestThreadStatePostMergesValuesAndMetadata(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	s.ensureSession("thread-state-post", map[string]any{"title": "Old title", "agent_type": "writer"})
 
-	resp := performCompatRequest(t, handler, http.MethodPost, "/threads/thread-state-post/state", strings.NewReader(`{"values":{"title":"Updated title"},"metadata":{"agent_type":"coder"}}`), map[string]string{
+	resp := performCompatRequest(t, handler, http.MethodPost, "/threads/thread-state-post/state", strings.NewReader(`{"values":{"title":"Updated title","view_mode":"canvas"},"metadata":{"agent_type":"coder"}}`), map[string]string{
 		"Content-Type": "application/json",
 	})
 	if resp.Code != http.StatusOK {
@@ -48,8 +48,67 @@ func TestThreadStatePostMergesValuesAndMetadata(t *testing.T) {
 	if got := asString(session.Metadata["title"]); got != "Updated title" {
 		t.Fatalf("title=%q want=Updated title", got)
 	}
+	if got := asString(session.Values["view_mode"]); got != "canvas" {
+		t.Fatalf("view_mode=%q want=canvas", got)
+	}
 	if got := asString(session.Metadata["agent_type"]); got != "coder" {
 		t.Fatalf("agent_type=%q want=coder", got)
+	}
+}
+
+func TestThreadStatePatchPersistsCustomValuesAcrossReload(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	s.ensureSession("thread-custom-values", map[string]any{"title": "Custom values"})
+
+	resp := performCompatRequest(t, handler, http.MethodPatch, "/threads/thread-custom-values/state", strings.NewReader(`{"values":{"sidebar_tab":"artifacts","draft_id":"draft-42"}}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	reloaded := &Server{
+		sessions:   make(map[string]*Session),
+		runs:       make(map[string]*Run),
+		runStreams: make(map[string]map[uint64]chan StreamEvent),
+		dataRoot:   s.dataRoot,
+	}
+	if err := reloaded.loadPersistedSessions(); err != nil {
+		t.Fatalf("loadPersistedSessions() error = %v", err)
+	}
+
+	state := reloaded.getThreadState("thread-custom-values")
+	if state == nil {
+		t.Fatal("state is nil")
+	}
+	if got := asString(state.Values["sidebar_tab"]); got != "artifacts" {
+		t.Fatalf("sidebar_tab=%q want=artifacts", got)
+	}
+	if got := asString(state.Values["draft_id"]); got != "draft-42" {
+		t.Fatalf("draft_id=%q want=draft-42", got)
+	}
+}
+
+func TestThreadHistoryPreservesCustomValues(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	s.ensureSession("thread-history-custom-values", map[string]any{"title": "History values"})
+
+	resp := performCompatRequest(t, handler, http.MethodPatch, "/threads/thread-history-custom-values/state", strings.NewReader(`{"values":{"sidebar_tab":"artifacts","draft_id":"draft-42"}}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	history := s.threadHistory("thread-history-custom-values")
+	if len(history) == 0 {
+		t.Fatal("history is empty")
+	}
+	if got := asString(history[0].Values["sidebar_tab"]); got != "artifacts" {
+		t.Fatalf("sidebar_tab=%q want=artifacts", got)
+	}
+	if got := asString(history[0].Values["draft_id"]); got != "draft-42" {
+		t.Fatalf("draft_id=%q want=draft-42", got)
 	}
 }
 

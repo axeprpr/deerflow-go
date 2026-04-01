@@ -222,6 +222,41 @@ func TestThreadSearchFiltersByQueryStatusMetadataAndValues(t *testing.T) {
 	}
 }
 
+func TestThreadSearchFiltersByPersistedCustomValues(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	matching := s.ensureSession("thread-custom-match", map[string]any{
+		"title": "Custom state",
+	})
+	matching.Values["sidebar_tab"] = "artifacts"
+	matching.Values["draft_id"] = "draft-42"
+
+	other := s.ensureSession("thread-custom-other", map[string]any{
+		"title": "Other state",
+	})
+	other.Values["sidebar_tab"] = "chat"
+	other.Values["draft_id"] = "draft-7"
+
+	body := `{"values":{"sidebar_tab":"artifacts","draft_id":"draft-42"}}`
+	resp := performCompatRequest(t, handler, http.MethodPost, "/threads/search", strings.NewReader(body), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var threads []map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(threads) != 1 {
+		t.Fatalf("threads=%d want=1 body=%s", len(threads), resp.Body.String())
+	}
+	if got := asString(threads[0]["thread_id"]); got != "thread-custom-match" {
+		t.Fatalf("thread_id=%q want=thread-custom-match", got)
+	}
+}
+
 func TestThreadSearchMatchesMessageContent(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 

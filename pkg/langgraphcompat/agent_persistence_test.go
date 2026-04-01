@@ -1,12 +1,16 @@
 package langgraphcompat
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/axeprpr/deerflow-go/pkg/memory"
 )
 
 func TestAgentCreateUpdateDeleteSyncsFiles(t *testing.T) {
@@ -69,6 +73,46 @@ func TestAgentCreateUpdateDeleteSyncsFiles(t *testing.T) {
 
 	if _, err := os.Stat(agentDir); !os.IsNotExist(err) {
 		t.Fatalf("agent directory still exists after delete: err=%v", err)
+	}
+}
+
+func TestAgentDeleteClearsScopedMemory(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	store, err := memory.NewFileStore(filepath.Join(s.dataRoot, "memory"))
+	if err != nil {
+		t.Fatalf("new file store: %v", err)
+	}
+	if err := store.AutoMigrate(context.Background()); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	s.memoryStore = store
+
+	createResp := performCompatRequest(t, handler, http.MethodPost, "/api/agents", strings.NewReader(`{
+		"name":"writer-bot",
+		"description":"Draft long-form content.",
+		"soul":"# Writer Bot\n\nStay concise."
+	}`), map[string]string{"Content-Type": "application/json"})
+	if createResp.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createResp.Code, createResp.Body.String())
+	}
+
+	sessionID := deriveMemorySessionID("", "writer-bot")
+	if err := store.Save(context.Background(), memory.Document{
+		SessionID: sessionID,
+		Source:    sessionID,
+		User:      memory.UserMemory{TopOfMind: "Remember the editorial tone."},
+	}); err != nil {
+		t.Fatalf("seed scoped memory: %v", err)
+	}
+
+	deleteResp := performCompatRequest(t, handler, http.MethodDelete, "/api/agents/writer-bot", nil, nil)
+	if deleteResp.Code != http.StatusNoContent {
+		t.Fatalf("delete status=%d body=%s", deleteResp.Code, deleteResp.Body.String())
+	}
+
+	if _, err := store.Load(context.Background(), sessionID); !errors.Is(err, memory.ErrNotFound) {
+		t.Fatalf("load deleted scoped memory err=%v want ErrNotFound", err)
 	}
 }
 

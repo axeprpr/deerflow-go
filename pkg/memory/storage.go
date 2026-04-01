@@ -230,6 +230,21 @@ func (s *PostgresStore) Save(ctx context.Context, doc Document) error {
 	return nil
 }
 
+func (s *PostgresStore) Delete(ctx context.Context, sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return errors.New("memory session_id is required")
+	}
+	tag, err := s.db.Exec(ctx, `delete from memories where session_id = $1`, sessionID)
+	if err != nil {
+		return fmt.Errorf("delete memory %q: %w", sessionID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func upsertDocument(ctx context.Context, q interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }, doc Document) error {

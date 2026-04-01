@@ -8,6 +8,8 @@ import (
 
 const skillsVirtualPath = "/mnt/skills"
 
+var skillsExecutablePath = os.Executable
+
 func resolveSkillsVirtualPath(path string) (string, bool) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -57,6 +59,7 @@ func skillRoots() []string {
 		if uiRoot := strings.TrimSpace(os.Getenv("DEERFLOW_UI_ROOT")); uiRoot != "" {
 			roots = append(roots, filepath.Join(uiRoot, "skills"))
 		}
+		roots = append(roots, executableRelativeSkillRoots(skillsExecutablePath)...)
 		if cwd, err := os.Getwd(); err == nil {
 			roots = append(roots, filepath.Join(cwd, "skills"))
 			roots = append(roots, filepath.Join(cwd, "..", "deerflow-ui", "skills"))
@@ -84,6 +87,22 @@ func skillRoots() []string {
 		out = append(out, clean)
 	}
 	return out
+}
+
+func executableRelativeSkillRoots(resolveExe func() (string, error)) []string {
+	if resolveExe == nil {
+		return nil
+	}
+	exePath, err := resolveExe()
+	if err != nil || strings.TrimSpace(exePath) == "" {
+		return nil
+	}
+	exeDir := filepath.Dir(exePath)
+	return []string{
+		filepath.Join(exeDir, "skills"),
+		filepath.Join(exeDir, "..", "skills"),
+		filepath.Join(exeDir, "..", "..", "skills"),
+	}
 }
 
 func skillPathExists(path string) bool {

@@ -840,7 +840,7 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 
 	absPath, err := s.resolveArtifactPath(threadID, artifactPath)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), gatewayPathErrorStatus(err))
 		return
 	}
 	info, err := os.Stat(absPath)
@@ -866,7 +866,7 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSkillArchiveRootPreview(w http.ResponseWriter, r *http.Request, threadID, artifactPath string) bool {
 	archivePath, err := s.resolveArtifactPath(threadID, artifactPath)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), gatewayPathErrorStatus(err))
 		return true
 	}
 	content, err := extractSkillArchiveFile(archivePath, "SKILL.md")
@@ -887,7 +887,7 @@ func (s *Server) handleSkillArchiveArtifactGet(w http.ResponseWriter, r *http.Re
 
 	archivePath, err := s.resolveArtifactPath(threadID, skillPath)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), gatewayPathErrorStatus(err))
 		return
 	}
 	content, err := extractSkillArchiveFile(archivePath, internalPath)
@@ -1210,6 +1210,16 @@ func shouldForceAttachment(r *http.Request, mimeType string) bool {
 	base := strings.TrimSpace(strings.SplitN(mimeType, ";", 2)[0])
 	_, active := activeContentMIMETypes[base]
 	return active
+}
+
+func gatewayPathErrorStatus(err error) int {
+	if err == nil {
+		return http.StatusBadRequest
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "path traversal") {
+		return http.StatusForbidden
+	}
+	return http.StatusBadRequest
 }
 
 func isTextMIMEType(mimeType string) bool {

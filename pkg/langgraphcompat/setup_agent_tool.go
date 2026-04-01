@@ -3,12 +3,14 @@ package langgraphcompat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 	"gopkg.in/yaml.v3"
@@ -161,6 +163,14 @@ func (s *Server) deleteAgentFiles(name string) error {
 	}
 	if err := os.RemoveAll(s.agentDir(name)); err != nil {
 		return err
+	}
+	if deleter, ok := s.memoryStore.(interface {
+		Delete(context.Context, string) error
+	}); ok {
+		sessionID := deriveMemorySessionID("", name)
+		if err := deleter.Delete(context.Background(), sessionID); err != nil && !errors.Is(err, memory.ErrNotFound) {
+			return err
+		}
 	}
 	return nil
 }

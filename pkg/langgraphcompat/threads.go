@@ -634,11 +634,27 @@ func applyThreadStateUpdate(session *Session, values map[string]any, metadata ma
 	if session == nil {
 		return
 	}
+	if session.Values == nil {
+		session.Values = make(map[string]any)
+	}
 	if session.Metadata == nil {
 		session.Metadata = make(map[string]any)
 	}
-	if title, ok := values["title"].(string); ok {
-		session.Metadata["title"] = title
+	for key, value := range values {
+		switch key {
+		case "title":
+			if title, ok := value.(string); ok {
+				session.Metadata["title"] = title
+			}
+		case "todos":
+			if todos, err := decodeTodos(value); err == nil {
+				session.Todos = append([]Todo(nil), todos...)
+			}
+		case "messages", "artifacts", "thread_data", "uploaded_files":
+			// These values are derived from the session and filesystem state.
+		default:
+			session.Values[key] = value
+		}
 	}
 	for k, v := range metadata {
 		session.Metadata[k] = v
@@ -939,13 +955,7 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 		"config": map[string]any{
 			"configurable": configurable,
 		},
-		"values": map[string]any{
-			"title":          session.Metadata["title"],
-			"artifacts":      s.sessionArtifactPaths(session),
-			"todos":          todosToAny(session.Todos),
-			"thread_data":    s.threadDataState(session.ThreadID),
-			"uploaded_files": s.listUploadedFiles(session.ThreadID),
-		},
+		"values": s.threadValues(session),
 	}
 }
 
@@ -990,6 +1000,7 @@ func (s *Server) threadHistory(threadID string) []ThreadState {
 			ThreadID:     entry.ThreadID,
 			Messages:     append([]models.Message(nil), entry.Messages...),
 			Todos:        append([]Todo(nil), entry.Todos...),
+			Values:       copyMetadataMap(entry.Values),
 			Metadata:     copyMetadataMap(entry.Metadata),
 			Configurable: copyMetadataMap(entry.Config),
 			Status:       entry.Status,
@@ -1008,14 +1019,8 @@ func (s *Server) threadStateFromSession(session *Session, checkpointID string, c
 	if session == nil {
 		return nil
 	}
-	values := map[string]any{
-		"messages":       s.messagesToLangChain(session.Messages),
-		"title":          stringValue(session.Metadata["title"]),
-		"artifacts":      s.sessionArtifactPaths(session),
-		"todos":          todosToAny(session.Todos),
-		"thread_data":    s.threadDataState(session.ThreadID),
-		"uploaded_files": s.listUploadedFiles(session.ThreadID),
-	}
+	values := s.threadValues(session)
+	values["messages"] = s.messagesToLangChain(session.Messages)
 	configurable := copyMetadataMap(session.Configurable)
 	if configurable == nil {
 		configurable = map[string]any{}
@@ -1069,6 +1074,7 @@ func (s *Server) ensureSession(threadID string, metadata map[string]any) *Sessio
 		ThreadID:     threadID,
 		Messages:     []models.Message{},
 		Todos:        nil,
+		Values:       map[string]any{},
 		Metadata:     metadata,
 		Configurable: defaultThreadConfig(threadID),
 		Status:       "idle",
@@ -1399,6 +1405,7 @@ func cloneSession(session *Session) *Session {
 		ThreadID:     session.ThreadID,
 		Messages:     append([]models.Message(nil), session.Messages...),
 		Todos:        append([]Todo(nil), session.Todos...),
+		Values:       copyMetadataMap(session.Values),
 		Metadata:     copyMetadataMap(session.Metadata),
 		Configurable: copyMetadataMap(session.Configurable),
 		Status:       session.Status,
@@ -1413,6 +1420,19 @@ func defaultThreadConfig(threadID string) map[string]any {
 		cfg["thread_id"] = threadID
 	}
 	return cfg
+}
+
+func (s *Server) threadValues(session *Session) map[string]any {
+	values := copyMetadataMap(session.Values)
+	if values == nil {
+		values = map[string]any{}
+	}
+	values["title"] = stringValue(session.Metadata["title"])
+	values["artifacts"] = s.sessionArtifactPaths(session)
+	values["todos"] = todosToAny(session.Todos)
+	values["thread_data"] = s.threadDataState(session.ThreadID)
+	values["uploaded_files"] = s.listUploadedFiles(session.ThreadID)
+	return values
 }
 
 func (s *Server) deleteGatewayThreadData(threadID string) error {

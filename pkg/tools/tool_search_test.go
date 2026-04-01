@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -78,6 +79,27 @@ func TestDeferredToolSearchToolReturnsSchemas(t *testing.T) {
 	}
 	if !strings.Contains(result.Content, "\"github.search_repos\"") {
 		t.Fatalf("content=%q", result.Content)
+	}
+
+	var payload []map[string]any
+	if err := json.Unmarshal([]byte(result.Content), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if len(payload) != 1 {
+		t.Fatalf("payload len=%d want 1", len(payload))
+	}
+	if payload[0]["type"] != "function" {
+		t.Fatalf("type=%v want function", payload[0]["type"])
+	}
+	fn, ok := payload[0]["function"].(map[string]any)
+	if !ok {
+		t.Fatalf("function=%T want object", payload[0]["function"])
+	}
+	if fn["name"] != "github.search_repos" {
+		t.Fatalf("function.name=%v want github.search_repos", fn["name"])
+	}
+	if fn["parameters"] == nil {
+		t.Fatal("function.parameters should not be nil")
 	}
 }
 

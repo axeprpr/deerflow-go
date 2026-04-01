@@ -201,11 +201,7 @@ func DeferredToolSearchTool(search func(string) []models.Tool, onActivate func([
 			onActivate(matched)
 			payload := make([]map[string]any, 0, len(matched))
 			for _, tool := range matched {
-				payload = append(payload, map[string]any{
-					"name":        tool.Name,
-					"description": strings.TrimSpace(tool.Description),
-					"parameters":  tool.InputSchema,
-				})
+				payload = append(payload, serializeDeferredTool(tool))
 			}
 			data, _ := json.MarshalIndent(payload, "", "  ")
 			return models.ToolResult{
@@ -214,6 +210,25 @@ func DeferredToolSearchTool(search func(string) []models.Tool, onActivate func([
 				Status:   models.CallStatusCompleted,
 				Content:  string(data),
 			}, nil
+		},
+	}
+}
+
+func serializeDeferredTool(tool models.Tool) map[string]any {
+	parameters := tool.InputSchema
+	if len(parameters) == 0 {
+		parameters = map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		}
+	}
+
+	return map[string]any{
+		"type": "function",
+		"function": map[string]any{
+			"name":        strings.TrimSpace(tool.Name),
+			"description": strings.TrimSpace(tool.Description),
+			"parameters":  parameters,
 		},
 	}
 }

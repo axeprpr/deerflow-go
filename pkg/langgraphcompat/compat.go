@@ -75,6 +75,7 @@ type Session struct {
 	ThreadID     string
 	Messages     []models.Message
 	Todos        []Todo
+	Values       map[string]any
 	Metadata     map[string]any
 	Configurable map[string]any
 	Status       string

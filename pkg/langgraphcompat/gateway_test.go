@@ -1347,7 +1347,27 @@ func TestArtifactEndpointRejectsSymlinkEscapingThreadRoot(t *testing.T) {
 	}
 
 	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/escape.txt", nil, nil)
-	if resp.Code != http.StatusBadRequest {
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), "access denied: path traversal detected") {
+		t.Fatalf("body=%q", resp.Body.String())
+	}
+}
+
+func TestArtifactEndpointRejectsPathTraversalWithForbidden(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-artifact-traversal"
+	outputDir := filepath.Join(s.threadRoot(threadID), "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "ok.txt"), []byte("visible"), 0o644); err != nil {
+		t.Fatalf("write output: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/%2e%2e/%2e%2e/secrets.txt", nil, nil)
+	if resp.Code != http.StatusForbidden {
 		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
 	}
 	if !strings.Contains(resp.Body.String(), "access denied: path traversal detected") {

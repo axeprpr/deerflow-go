@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+var gatewayExecutablePath = os.Executable
+
 func (s *Server) currentGatewaySkills() map[string]gatewaySkill {
 	discovered := mergeGatewaySkills(defaultGatewaySkills(), discoverGatewaySkills(s.gatewaySkillRoots()))
 
@@ -30,6 +32,7 @@ func (s *Server) gatewaySkillRoots() []string {
 		if uiRoot := strings.TrimSpace(os.Getenv("DEERFLOW_UI_ROOT")); uiRoot != "" {
 			roots = append(roots, filepath.Join(uiRoot, "skills"))
 		}
+		roots = append(roots, executableRelativeSkillRoots(gatewayExecutablePath)...)
 		if cwd, err := os.Getwd(); err == nil {
 			roots = append(roots, filepath.Join(cwd, "skills"))
 			roots = append(roots, filepath.Join(cwd, "..", "deerflow-ui", "skills"))
@@ -38,6 +41,22 @@ func (s *Server) gatewaySkillRoots() []string {
 	}
 	roots = append(roots, filepath.Join(s.dataRoot, "skills"))
 	return uniqueCleanPaths(roots)
+}
+
+func executableRelativeSkillRoots(resolveExe func() (string, error)) []string {
+	if resolveExe == nil {
+		return nil
+	}
+	exePath, err := resolveExe()
+	if err != nil || strings.TrimSpace(exePath) == "" {
+		return nil
+	}
+	exeDir := filepath.Dir(exePath)
+	return []string{
+		filepath.Join(exeDir, "skills"),
+		filepath.Join(exeDir, "..", "skills"),
+		filepath.Join(exeDir, "..", "..", "skills"),
+	}
 }
 
 func discoverGatewaySkills(roots []string) map[string]gatewaySkill {
