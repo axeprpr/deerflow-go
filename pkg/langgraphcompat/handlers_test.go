@@ -71,6 +71,58 @@ func TestFilterTransientMessagesKeepsRegularMultimodalHumanMessage(t *testing.T)
 	}
 }
 
+func TestFilterTransientMessagesStripsInjectedUploadedImageDataURLs(t *testing.T) {
+	messages := []models.Message{{
+		ID:        "m1",
+		SessionID: "thread-1",
+		Role:      models.RoleHuman,
+		Content:   "<uploaded_files>\n- diagram.png (1.0 KB)\n  Path: /mnt/user-data/uploads/diagram.png\n</uploaded_files>\n\ndescribe this image",
+		Metadata: map[string]string{
+			"additional_kwargs": `{"files":[{"filename":"diagram.png","size":1024}]}`,
+			"multi_content":     `[{"type":"text","text":"<uploaded_files>\n- diagram.png (1.0 KB)\n  Path: /mnt/user-data/uploads/diagram.png\n</uploaded_files>\n\ndescribe this image"},{"type":"image_url","image_url":{"url":"data:image/png;base64,abc"}}]`,
+		},
+	}}
+
+	filtered := filterTransientMessages(messages)
+	if len(filtered) != 1 {
+		t.Fatalf("len(filtered)=%d want=1", len(filtered))
+	}
+	multi := decodeMultiContent(filtered[0].Metadata)
+	if len(multi) != 1 {
+		t.Fatalf("multi_content len=%d want=1", len(multi))
+	}
+	if got := multi[0]["type"]; got != "text" {
+		t.Fatalf("multi_content[0].type=%v want text", got)
+	}
+	if kwargs := decodeAdditionalKwargs(filtered[0].Metadata); kwargs == nil {
+		t.Fatal("expected additional_kwargs to be preserved")
+	}
+}
+
+func TestFilterTransientMessagesKeepsRegularMultimodalImagesWithoutUploadContext(t *testing.T) {
+	messages := []models.Message{{
+		ID:        "m1",
+		SessionID: "thread-1",
+		Role:      models.RoleHuman,
+		Content:   "describe this image",
+		Metadata: map[string]string{
+			"multi_content": `[{"type":"text","text":"describe this image"},{"type":"image_url","image_url":{"url":"data:image/png;base64,abc"}}]`,
+		},
+	}}
+
+	filtered := filterTransientMessages(messages)
+	if len(filtered) != 1 {
+		t.Fatalf("len(filtered)=%d want=1", len(filtered))
+	}
+	multi := decodeMultiContent(filtered[0].Metadata)
+	if len(multi) != 2 {
+		t.Fatalf("multi_content len=%d want=2", len(multi))
+	}
+	if got := multi[1]["type"]; got != "image_url" {
+		t.Fatalf("multi_content[1].type=%v want image_url", got)
+	}
+}
+
 func TestForwardAgentEventEmitsLangChainToolEndEvent(t *testing.T) {
 	s := &Server{
 		runs:       map[string]*Run{},

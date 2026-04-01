@@ -1272,9 +1272,75 @@ func filterTransientMessages(messages []models.Message) []models.Message {
 		if isTransientViewedImagesMessage(msg) || isInjectedSummaryMessage(msg) || isTransientTodoReminderMessage(msg) {
 			continue
 		}
-		filtered = append(filtered, msg)
+		filtered = append(filtered, sanitizePersistedMessage(msg))
 	}
 	return filtered
+}
+
+func sanitizePersistedMessage(msg models.Message) models.Message {
+	if !messageHasUploadedFilesContext(msg) {
+		return msg
+	}
+
+	multi := decodeMultiContent(msg.Metadata)
+	if len(multi) == 0 {
+		return msg
+	}
+
+	sanitized := make([]map[string]any, 0, len(multi))
+	removed := false
+	for _, part := range multi {
+		if shouldStripUploadedImagePart(part) {
+			removed = true
+			continue
+		}
+		sanitized = append(sanitized, part)
+	}
+	if !removed {
+		return msg
+	}
+
+	cloned := msg
+	cloned.Metadata = cloneStringMap(msg.Metadata)
+	if raw, err := json.Marshal(sanitized); err == nil {
+		cloned.Metadata["multi_content"] = string(raw)
+	}
+	return cloned
+}
+
+func messageHasUploadedFilesContext(msg models.Message) bool {
+	if msg.Role != models.RoleHuman || len(msg.Metadata) == 0 {
+		return false
+	}
+	if strings.Contains(msg.Content, "<uploaded_files>") {
+		return true
+	}
+	for _, part := range decodeMultiContent(msg.Metadata) {
+		if text, _ := part["text"].(string); strings.Contains(text, "<uploaded_files>") {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldStripUploadedImagePart(part map[string]any) bool {
+	if part == nil || strings.TrimSpace(stringFromAny(part["type"])) != "image_url" {
+		return false
+	}
+	imageURL, _ := part["image_url"].(map[string]any)
+	url := strings.TrimSpace(stringFromAny(imageURL["url"]))
+	return strings.HasPrefix(strings.ToLower(url), "data:image/")
+}
+
+func cloneStringMap(input map[string]string) map[string]string {
+	if len(input) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
 }
 
 func isTransientViewedImagesMessage(msg models.Message) bool {
