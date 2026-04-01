@@ -173,3 +173,98 @@ func TestWebSearchUsesUserAgent(t *testing.T) {
 		t.Fatalf("searchDuckDuckGo() error = %v", err)
 	}
 }
+
+func TestExtractDuckDuckGoImageToken(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "json field",
+			body: `{"vqd":"3-12345678901234567890123456789012"}`,
+			want: "3-12345678901234567890123456789012",
+		},
+		{
+			name: "query parameter",
+			body: `https://duckduckgo.com/i.js?vqd=4-abcdef&foo=bar`,
+			want: "4-abcdef",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := extractDuckDuckGoImageToken(tt.body); got != tt.want {
+				t.Fatalf("extractDuckDuckGoImageToken()=%q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestImageSearchHandler(t *testing.T) {
+	restore := stubHTTPClient(t, func(r *http.Request) (*http.Response, error) {
+		switch {
+		case strings.HasPrefix(r.URL.String(), duckDuckGoImageAPIURL):
+			if got := r.URL.Query().Get("vqd"); got != "3-abc123" {
+				t.Fatalf("image token=%q want %q", got, "3-abc123")
+			}
+			if got := r.URL.Query().Get("f"); got != "size:large,type:photo,layout:wide" {
+				t.Fatalf("filters=%q want %q", got, "size:large,type:photo,layout:wide")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Header:     http.Header(textproto.MIMEHeader{"Content-Type": {"application/json"}}),
+				Body: io.NopCloser(strings.NewReader(`{
+					"results": [
+						{
+							"title": "Retro Robot",
+							"image": "https://img.example.com/full.jpg",
+							"thumbnail": "https://img.example.com/thumb.jpg",
+							"url": "https://source.example.com/robot",
+							"width": 1024,
+							"height": 768
+						}
+					]
+				}`)),
+				Request: r,
+			}, nil
+		case strings.HasPrefix(r.URL.String(), duckDuckGoPageBaseURL):
+			if got := r.URL.Query().Get("q"); got != "retro robot illustration" {
+				t.Fatalf("page query=%q want %q", got, "retro robot illustration")
+			}
+			return newHTTPResponse(r, `<html><script>var cfg={"vqd":"3-abc123"}</script></html>`), nil
+		default:
+			t.Fatalf("unexpected request URL %q", r.URL.String())
+			return nil, nil
+		}
+	})
+	defer restore()
+
+	result, err := ImageSearchHandler(context.Background(), models.ToolCall{
+		ID:   "call-image-search-1",
+		Name: "image_search",
+		Arguments: map[string]any{
+			"query":       "retro robot illustration",
+			"max_results": float64(1),
+			"size":        "Large",
+			"type_image":  "photo",
+			"layout":      "Wide",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ImageSearchHandler() error = %v", err)
+	}
+	if !strings.Contains(result.Content, `"query":"retro robot illustration"`) {
+		t.Fatalf("content=%q missing query", result.Content)
+	}
+	if !strings.Contains(result.Content, `"image_url":"https://img.example.com/full.jpg"`) {
+		t.Fatalf("content=%q missing image_url", result.Content)
+	}
+	if !strings.Contains(result.Content, `"thumbnail_url":"https://img.example.com/thumb.jpg"`) {
+		t.Fatalf("content=%q missing thumbnail_url", result.Content)
+	}
+	if !strings.Contains(result.Content, `"source_url":"https://source.example.com/robot"`) {
+		t.Fatalf("content=%q missing source_url", result.Content)
+	}
+}

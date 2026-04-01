@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"compress/flate"
 	"compress/zlib"
+	"encoding/csv"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -27,7 +29,17 @@ var convertibleUploadExtensions = map[string]struct{}{
 	".xlsx": {},
 	".doc":  {},
 	".docx": {},
+	".csv":  {},
+	".tsv":  {},
+	".json": {},
+	".yaml": {},
+	".yml":  {},
 }
+
+const (
+	maxStructuredPreviewRows = 40
+	maxStructuredPreviewCols = 8
+)
 
 func isConvertibleUploadExtension(name string) bool {
 	_, ok := convertibleUploadExtensions[strings.ToLower(filepath.Ext(name))]
@@ -67,6 +79,14 @@ func convertUploadedDocumentToMarkdown(path string, ext string) (string, error) 
 		return convertPPTXToMarkdown(path)
 	case ".xlsx":
 		return convertXLSXToMarkdown(path)
+	case ".csv":
+		return convertDelimitedTextToMarkdown(path, ',', "CSV")
+	case ".tsv":
+		return convertDelimitedTextToMarkdown(path, '\t', "TSV")
+	case ".json":
+		return convertJSONToMarkdown(path)
+	case ".yaml", ".yml":
+		return convertYAMLToMarkdown(path)
 	default:
 		return defaultConversionPlaceholder(filepath.Base(path), ext), nil
 	}
@@ -100,6 +120,87 @@ func convertPDFToMarkdown(path string) (string, error) {
 		return "", nil
 	}
 	return "# " + filepath.Base(path) + "\n\n" + text + "\n", nil
+}
+
+func convertDelimitedTextToMarkdown(path string, comma rune, label string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+
+	reader := csv.NewReader(strings.NewReader(string(data)))
+	reader.Comma = comma
+	reader.FieldsPerRecord = -1
+	reader.TrimLeadingSpace = true
+
+	rows, err := reader.ReadAll()
+	if err != nil {
+		return "", err
+	}
+	rows = compactTableRows(rows)
+	if len(rows) == 0 {
+		return "", nil
+	}
+
+	trimmed, note := limitMarkdownTable(rows, maxStructuredPreviewRows, maxStructuredPreviewCols)
+	sections := []string{
+		"# " + filepath.Base(path),
+		"",
+		fmt.Sprintf("Detected %s content.", label),
+		"",
+		renderMarkdownTable(trimmed),
+	}
+	if note != "" {
+		sections = append(sections, "", note)
+	}
+	return strings.Join(sections, "\n") + "\n", nil
+}
+
+func convertJSONToMarkdown(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+
+	var decoded any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return "", err
+	}
+
+	sections := []string{"# " + filepath.Base(path), ""}
+	if rows := jsonArrayTable(decoded); len(rows) > 0 {
+		trimmed, note := limitMarkdownTable(rows, maxStructuredPreviewRows, maxStructuredPreviewCols)
+		sections = append(sections, "Structured JSON preview.", "", renderMarkdownTable(trimmed))
+		if note != "" {
+			sections = append(sections, "", note)
+		}
+		return strings.Join(sections, "\n") + "\n", nil
+	}
+
+	pretty, err := json.MarshalIndent(decoded, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	sections = append(sections, "```json", string(pretty), "```")
+	return strings.Join(sections, "\n") + "\n", nil
+}
+
+func convertYAMLToMarkdown(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	text := strings.TrimSpace(string(data))
+	if text == "" {
+		return "", nil
+	}
+	return strings.Join([]string{
+		"# " + filepath.Base(path),
+		"",
+		"```yaml",
+		text,
+		"```",
+	}, "\n") + "\n", nil
 }
 
 func convertDOCXToMarkdown(path string) (string, error) {
@@ -657,6 +758,128 @@ func renderMarkdownTable(rows [][]string) string {
 		lines = append(lines, "| "+strings.Join(row, " | ")+" |")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func compactTableRows(rows [][]string) [][]string {
+	out := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		trimmed := trimTrailingEmpty(row)
+		nonEmpty := false
+		for i := range trimmed {
+			trimmed[i] = strings.TrimSpace(trimmed[i])
+			if trimmed[i] != "" {
+				nonEmpty = true
+			}
+		}
+		if !nonEmpty {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func limitMarkdownTable(rows [][]string, maxRows int, maxCols int) ([][]string, string) {
+	if len(rows) == 0 {
+		return nil, ""
+	}
+
+	originalRows := len(rows)
+	originalCols := 0
+	for _, row := range rows {
+		if len(row) > originalCols {
+			originalCols = len(row)
+		}
+	}
+
+	if maxRows > 0 && len(rows) > maxRows {
+		rows = rows[:maxRows]
+	}
+	if maxCols > 0 {
+		for i := range rows {
+			if len(rows[i]) > maxCols {
+				rows[i] = rows[i][:maxCols]
+			}
+		}
+	}
+
+	if originalRows == len(rows) && originalCols <= maxCols {
+		return rows, ""
+	}
+
+	note := fmt.Sprintf("_Preview truncated to %d rows and %d columns", len(rows), min(originalCols, maxCols))
+	switch {
+	case originalRows > len(rows) && originalCols > maxCols:
+		note += fmt.Sprintf(" from %d rows and %d columns._", originalRows, originalCols)
+	case originalRows > len(rows):
+		note += fmt.Sprintf(" from %d rows._", originalRows)
+	default:
+		note += fmt.Sprintf(" from %d columns._", originalCols)
+	}
+	return rows, note
+}
+
+func jsonArrayTable(value any) [][]string {
+	items, ok := value.([]any)
+	if !ok || len(items) == 0 {
+		return nil
+	}
+
+	keySet := map[string]struct{}{}
+	rows := make([]map[string]string, 0, len(items))
+	for _, item := range items {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			return nil
+		}
+		row := make(map[string]string, len(obj))
+		for key, raw := range obj {
+			text, ok := jsonScalarString(raw)
+			if !ok {
+				return nil
+			}
+			row[key] = text
+			keySet[key] = struct{}{}
+		}
+		rows = append(rows, row)
+	}
+	keys := make([]string, 0, len(keySet))
+	for key := range keySet {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if len(keys) == 0 {
+		return nil
+	}
+
+	table := make([][]string, 0, len(rows)+1)
+	table = append(table, keys)
+	for _, row := range rows {
+		current := make([]string, len(keys))
+		for i, key := range keys {
+			current[i] = row[key]
+		}
+		table = append(table, current)
+	}
+	return table
+}
+
+func jsonScalarString(value any) (string, bool) {
+	switch v := value.(type) {
+	case nil:
+		return "", true
+	case string:
+		return v, true
+	case bool:
+		if v {
+			return "true", true
+		}
+		return "false", true
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64), true
+	default:
+		return "", false
+	}
 }
 
 func escapeMarkdownTableCell(value string) string {

@@ -21,6 +21,7 @@ func TestApplyAgentTypeUsesUpdatedBuiltinFileToolsets(t *testing.T) {
 		"task",
 		"web_search",
 		"web_fetch",
+		"image_search",
 		"glob",
 	} {
 		if err := registry.Register(models.Tool{Name: name, Handler: func(_ context.Context, _ models.ToolCall) (models.ToolResult, error) {
@@ -56,7 +57,7 @@ func TestApplyAgentTypeUsesUpdatedBuiltinFileToolsets(t *testing.T) {
 		t.Fatalf("ApplyAgentType(researcher) error = %v", err)
 	}
 	got = registryToolNames(cfg.Tools)
-	want = []string{"ask_clarification", "ls", "present_files", "read_file", "task", "web_fetch", "web_search"}
+	want = []string{"ask_clarification", "image_search", "ls", "present_files", "read_file", "task", "web_fetch", "web_search"}
 	if len(got) != len(want) {
 		t.Fatalf("researcher tools=%v want=%v", got, want)
 	}

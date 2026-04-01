@@ -50,7 +50,7 @@ var BuiltinAgentTypes = map[AgentType]AgentTypeConfig{
 		Name:         "Researcher",
 		Description:  "Profile for research, reading, and synthesis tasks.",
 		SystemPrompt: researcherSystemPrompt,
-		DefaultTools: []string{"web_search", "web_fetch", "ls", "read_file", "present_files", "ask_clarification", "task"},
+		DefaultTools: []string{"web_search", "web_fetch", "image_search", "ls", "read_file", "present_files", "ask_clarification", "task"},
 		MaxTurns:     10,
 		Temperature:  0.1,
 	},

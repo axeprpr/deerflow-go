@@ -711,7 +711,7 @@ func (s *Server) handleUploadsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	names, err := prepareUploadFilenames(files, seenNames)
+	files, names, err := prepareUploadFilenames(files, seenNames)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": err.Error()})
 		return
@@ -1320,31 +1320,37 @@ func sanitizePathFilename(name string) string {
 	return sanitizeFilename(name)
 }
 
-func prepareUploadFilenames(files []*multipart.FileHeader, seen map[string]struct{}) ([]string, error) {
+func prepareUploadFilenames(files []*multipart.FileHeader, seen map[string]struct{}) ([]*multipart.FileHeader, []string, error) {
 	if seen == nil {
 		seen = map[string]struct{}{}
 	}
+	selected := make([]*multipart.FileHeader, 0, len(files))
 	names := make([]string, 0, len(files))
 	for _, fh := range files {
 		if fh == nil {
-			return nil, errBadFileName
+			return nil, nil, errBadFileName
 		}
 		name, err := validateUploadedFilename(fh.Filename)
 		if err != nil {
-			return nil, err
+			if errors.Is(err, errBadFileName) {
+				continue
+			}
+			return nil, nil, err
 		}
+		selected = append(selected, fh)
 		names = append(names, claimUniqueFilename(name, seen))
 	}
-	return names, nil
+	return selected, names, nil
 }
 
 func validateUploadedFilename(name string) (string, error) {
 	raw := strings.TrimSpace(name)
-	if raw == "" || raw == "." {
+	if raw == "" {
 		return "", errBadFileName
 	}
-	if strings.Contains(raw, "/") || strings.Contains(raw, "\\") {
-		return "", errors.New("directory uploads are not allowed")
+	raw = filepath.Base(strings.ReplaceAll(raw, "\\", "/"))
+	if raw == "." || raw == ".." {
+		return "", errBadFileName
 	}
 	safe := normalizeUploadedFilename(raw)
 	if safe == "" {

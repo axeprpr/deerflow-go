@@ -24,22 +24,46 @@ const (
 var (
 	webClient               = &http.Client{Timeout: 20 * time.Second}
 	duckDuckGoSearchBaseURL = "https://html.duckduckgo.com/html/"
+	duckDuckGoPageBaseURL   = "https://duckduckgo.com/"
+	duckDuckGoImageAPIURL   = "https://duckduckgo.com/i.js"
 
 	ddgResultAnchorRE = regexp.MustCompile(`(?is)<a[^>]+(?:class="[^"]*(?:result__a|result-link)[^"]*"|class='[^']*(?:result__a|result-link)[^']*')[^>]+href="([^"]+)"[^>]*>(.*?)</a>`)
 	ddgSnippetRE      = regexp.MustCompile(`(?is)<(?:a|div|span)[^>]+class="[^"]*(?:result__snippet|result-snippet)[^"]*"[^>]*>(.*?)</(?:a|div|span)>`)
-	titleTagRE        = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
-	scriptTagRE       = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
-	styleTagRE        = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
-	blockTagRE        = regexp.MustCompile(`(?is)</?(?:article|aside|blockquote|br|div|h[1-6]|header|footer|li|main|nav|p|pre|section|tr|table|ul|ol)[^>]*>`)
-	anyTagRE          = regexp.MustCompile(`(?is)<[^>]+>`)
-	spaceRE           = regexp.MustCompile(`[ \t\r\f\v]+`)
-	blankLineRE       = regexp.MustCompile(`\n{3,}`)
+	ddgImageVQDREs    = []*regexp.Regexp{
+		regexp.MustCompile(`vqd=([\w-]+)[&']`),
+		regexp.MustCompile(`"vqd":"([^"]+)"`),
+		regexp.MustCompile(`vqd='([^']+)'`),
+		regexp.MustCompile(`vqd="([^"]+)"`),
+	}
+	titleTagRE  = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+	scriptTagRE = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
+	styleTagRE  = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
+	blockTagRE  = regexp.MustCompile(`(?is)</?(?:article|aside|blockquote|br|div|h[1-6]|header|footer|li|main|nav|p|pre|section|tr|table|ul|ol)[^>]*>`)
+	anyTagRE    = regexp.MustCompile(`(?is)<[^>]+>`)
+	spaceRE     = regexp.MustCompile(`[ \t\r\f\v]+`)
+	blankLineRE = regexp.MustCompile(`\n{3,}`)
 )
 
 type webSearchResult struct {
 	Title   string `json:"title"`
 	URL     string `json:"url"`
 	Content string `json:"content,omitempty"`
+}
+
+type imageSearchResult struct {
+	Title        string `json:"title"`
+	SourceURL    string `json:"source_url"`
+	ImageURL     string `json:"image_url"`
+	ThumbnailURL string `json:"thumbnail_url"`
+	Width        int    `json:"width,omitempty"`
+	Height       int    `json:"height,omitempty"`
+}
+
+type imageSearchResponse struct {
+	Query        string              `json:"query"`
+	TotalResults int                 `json:"total_results"`
+	Results      []imageSearchResult `json:"results"`
+	UsageHint    string              `json:"usage_hint,omitempty"`
 }
 
 func WebSearchHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
@@ -110,6 +134,53 @@ func WebFetchHandler(ctx context.Context, call models.ToolCall) (models.ToolResu
 	}, nil
 }
 
+func ImageSearchHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+	_ = ctx
+
+	query, ok := call.Arguments["query"].(string)
+	if !ok || strings.TrimSpace(query) == "" {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("query is required")
+	}
+	query = strings.TrimSpace(query)
+
+	maxResults := defaultWebSearchMaxResults
+	if raw, ok := call.Arguments["max_results"].(float64); ok && raw > 0 {
+		maxResults = int(raw)
+	}
+	if maxResults <= 0 {
+		maxResults = defaultWebSearchMaxResults
+	}
+	if maxResults > 10 {
+		maxResults = 10
+	}
+
+	size := optionalStringArg(call.Arguments, "size")
+	imageType := optionalStringArg(call.Arguments, "type_image")
+	layout := optionalStringArg(call.Arguments, "layout")
+
+	results, err := searchDuckDuckGoImages(query, maxResults, size, imageType, layout)
+	if err != nil {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("image search failed: %w", err)
+	}
+
+	body, err := json.Marshal(imageSearchResponse{
+		Query:        query,
+		TotalResults: len(results),
+		Results:      results,
+		UsageHint:    "Use the image_url values as visual references before generating images.",
+	})
+	if err != nil {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("encode image results: %w", err)
+	}
+
+	return models.ToolResult{
+		CallID:   call.ID,
+		ToolName: call.Name,
+		Status:   models.CallStatusCompleted,
+		Content:  string(body),
+	}, nil
+}
+
 func WebSearchTool() models.Tool {
 	return models.Tool{
 		Name:        "web_search",
@@ -144,10 +215,31 @@ func WebFetchTool() models.Tool {
 	}
 }
 
+func ImageSearchTool() models.Tool {
+	return models.Tool{
+		Name:        "image_search",
+		Description: "Search for reference images online and return image URLs plus thumbnails.",
+		Groups:      []string{"builtin", "web"},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"query":       map[string]any{"type": "string", "description": "Search keywords for the desired images"},
+				"max_results": map[string]any{"type": "number", "description": "Maximum number of images to return"},
+				"size":        map[string]any{"type": "string", "description": "Optional size filter such as Small, Medium, Large, or Wallpaper"},
+				"type_image":  map[string]any{"type": "string", "description": "Optional image type filter such as photo, clipart, gif, transparent, or line"},
+				"layout":      map[string]any{"type": "string", "description": "Optional layout filter such as Square, Tall, or Wide"},
+			},
+			"required": []any{"query"},
+		},
+		Handler: ImageSearchHandler,
+	}
+}
+
 func WebTools() []models.Tool {
 	return []models.Tool{
 		WebSearchTool(),
 		WebFetchTool(),
+		ImageSearchTool(),
 	}
 }
 
@@ -242,6 +334,164 @@ func fetchWebPage(rawURL string, maxChars int) (string, error) {
 		return "", err
 	}
 	return extractReadableContent(parsed.String(), string(body), maxChars), nil
+}
+
+func searchDuckDuckGoImages(query string, maxResults int, size, imageType, layout string) ([]imageSearchResult, error) {
+	vqd, err := fetchDuckDuckGoImageToken(query)
+	if err != nil {
+		return nil, err
+	}
+
+	endpoint, err := url.Parse(duckDuckGoImageAPIURL)
+	if err != nil {
+		return nil, err
+	}
+	params := endpoint.Query()
+	params.Set("q", query)
+	params.Set("o", "json")
+	params.Set("l", "wt-wt")
+	params.Set("p", "1")
+	params.Set("vqd", vqd)
+	if filters := duckDuckGoImageFilters(size, imageType, layout); filters != "" {
+		params.Set("f", filters)
+	}
+	endpoint.RawQuery = params.Encode()
+
+	req, err := http.NewRequest(http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", defaultWebUserAgent)
+	req.Header.Set("Referer", duckDuckGoPageBaseURL)
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+
+	resp, err := webClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Results []struct {
+			Title     string `json:"title"`
+			Image     string `json:"image"`
+			Thumbnail string `json:"thumbnail"`
+			URL       string `json:"url"`
+			Width     int    `json:"width"`
+			Height    int    `json:"height"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&payload); err != nil {
+		return nil, err
+	}
+
+	results := make([]imageSearchResult, 0, min(maxResults, len(payload.Results)))
+	seen := make(map[string]struct{}, len(payload.Results))
+	for _, item := range payload.Results {
+		imageURL := strings.TrimSpace(item.Image)
+		if imageURL == "" {
+			imageURL = strings.TrimSpace(item.Thumbnail)
+		}
+		if imageURL == "" {
+			continue
+		}
+		if _, ok := seen[imageURL]; ok {
+			continue
+		}
+		seen[imageURL] = struct{}{}
+		results = append(results, imageSearchResult{
+			Title:        cleanHTMLText(item.Title),
+			SourceURL:    strings.TrimSpace(item.URL),
+			ImageURL:     imageURL,
+			ThumbnailURL: firstNonEmptyString(strings.TrimSpace(item.Thumbnail), imageURL),
+			Width:        item.Width,
+			Height:       item.Height,
+		})
+		if len(results) >= maxResults {
+			break
+		}
+	}
+	return results, nil
+}
+
+func fetchDuckDuckGoImageToken(query string) (string, error) {
+	endpoint, err := url.Parse(duckDuckGoPageBaseURL)
+	if err != nil {
+		return "", err
+	}
+	params := endpoint.Query()
+	params.Set("q", query)
+	params.Set("iax", "images")
+	params.Set("ia", "images")
+	endpoint.RawQuery = params.Encode()
+
+	req, err := http.NewRequest(http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", defaultWebUserAgent)
+
+	resp, err := webClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	vqd := extractDuckDuckGoImageToken(string(body))
+	if vqd == "" {
+		return "", fmt.Errorf("image search token not found")
+	}
+	return vqd, nil
+}
+
+func extractDuckDuckGoImageToken(body string) string {
+	for _, re := range ddgImageVQDREs {
+		match := re.FindStringSubmatch(body)
+		if len(match) >= 2 && strings.TrimSpace(match[1]) != "" {
+			return strings.TrimSpace(match[1])
+		}
+	}
+	return ""
+}
+
+func duckDuckGoImageFilters(size, imageType, layout string) string {
+	parts := make([]string, 0, 3)
+	if value := strings.TrimSpace(size); value != "" {
+		parts = append(parts, "size:"+strings.ToLower(value))
+	}
+	if value := strings.TrimSpace(imageType); value != "" {
+		parts = append(parts, "type:"+strings.ToLower(value))
+	}
+	if value := strings.TrimSpace(layout); value != "" {
+		parts = append(parts, "layout:"+strings.ToLower(value))
+	}
+	return strings.Join(parts, ",")
+}
+
+func optionalStringArg(args map[string]any, key string) string {
+	value, _ := args[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func extractReadableContent(pageURL, body string, maxChars int) string {

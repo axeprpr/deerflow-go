@@ -1017,13 +1017,13 @@ func TestUploadsEndpointIgnoresMarkdownConversionFailures(t *testing.T) {
 	}
 }
 
-func TestValidateUploadedFilenameRejectsDirectoryPaths(t *testing.T) {
-	_, err := validateUploadedFilename("nested/report.txt")
-	if err == nil {
-		t.Fatal("expected directory-style filename to be rejected")
+func TestValidateUploadedFilenameNormalizesDirectoryPathsToBasename(t *testing.T) {
+	got, err := validateUploadedFilename("nested/report.txt")
+	if err != nil {
+		t.Fatalf("validateUploadedFilename error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "directory uploads are not allowed") {
-		t.Fatalf("err=%q want directory upload error", err)
+	if got != "report.txt" {
+		t.Fatalf("filename=%q want=%q", got, "report.txt")
 	}
 }
 
@@ -1528,6 +1528,104 @@ func TestUploadsCreateDoesNotOverwriteExistingFile(t *testing.T) {
 	}
 	if string(newData) != "new" {
 		t.Fatalf("deduplicated=%q want=new", newData)
+	}
+}
+
+func TestUploadsCreateSkipsUnsafeFilenames(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+	threadID := "thread-upload-skip-unsafe"
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	for _, name := range []string{".", ".."} {
+		part, err := w.CreateFormFile("files", name)
+		if err != nil {
+			t.Fatalf("create form file %q: %v", name, err)
+		}
+		if _, err := part.Write([]byte("ignored")); err != nil {
+			t.Fatalf("write form file %q: %v", name, err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/"+threadID+"/uploads", &body, map[string]string{"Content-Type": w.FormDataContentType()})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("upload status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var uploaded struct {
+		Success bool             `json:"success"`
+		Files   []map[string]any `json:"files"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&uploaded); err != nil {
+		t.Fatalf("decode upload response: %v", err)
+	}
+	if !uploaded.Success {
+		t.Fatal("expected upload success")
+	}
+	if len(uploaded.Files) != 0 {
+		t.Fatalf("files=%d want=0", len(uploaded.Files))
+	}
+
+	listResp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/uploads/list", nil, nil)
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", listResp.Code, listResp.Body.String())
+	}
+	var listed struct {
+		Count int              `json:"count"`
+		Files []map[string]any `json:"files"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if listed.Count != 0 || len(listed.Files) != 0 {
+		t.Fatalf("expected empty uploads, got count=%d files=%d", listed.Count, len(listed.Files))
+	}
+}
+
+func TestUploadsCreateNormalizesPathLikeFilenameToBasename(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-upload-basename"
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	part, err := w.CreateFormFile("files", "../etc/passwd")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("safe")); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/"+threadID+"/uploads", &body, map[string]string{"Content-Type": w.FormDataContentType()})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("upload status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var uploaded struct {
+		Files []map[string]any `json:"files"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&uploaded); err != nil {
+		t.Fatalf("decode upload response: %v", err)
+	}
+	if len(uploaded.Files) != 1 {
+		t.Fatalf("files=%d want=1", len(uploaded.Files))
+	}
+	if got := asString(uploaded.Files[0]["filename"]); got != "passwd" {
+		t.Fatalf("filename=%q want=passwd", got)
+	}
+
+	data, err := os.ReadFile(filepath.Join(s.uploadsDir(threadID), "passwd"))
+	if err != nil {
+		t.Fatalf("read normalized upload: %v", err)
+	}
+	if string(data) != "safe" {
+		t.Fatalf("content=%q want=safe", string(data))
 	}
 }
 

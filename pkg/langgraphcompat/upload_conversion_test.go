@@ -259,6 +259,99 @@ func TestConvertXLSXToMarkdownUsesSheetNamesAndMarkdownTables(t *testing.T) {
 	}
 }
 
+func TestConvertDelimitedTextToMarkdownRendersMarkdownTable(t *testing.T) {
+	path := writeTempFile(t, "metrics.csv", []byte("quarter,revenue\nQ1,120\nQ2,150\n"))
+
+	md, err := convertUploadedDocumentToMarkdown(path, ".csv")
+	if err != nil {
+		t.Fatalf("convert csv: %v", err)
+	}
+	for _, want := range []string{
+		"Detected CSV content.",
+		"| quarter | revenue |",
+		"| Q1 | 120 |",
+		"| Q2 | 150 |",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown missing %q: %q", want, md)
+		}
+	}
+}
+
+func TestConvertDelimitedTextToMarkdownTruncatesLargeTables(t *testing.T) {
+	var builder strings.Builder
+	builder.WriteString("c1,c2,c3,c4,c5,c6,c7,c8,c9\n")
+	for i := 0; i < maxStructuredPreviewRows+5; i++ {
+		builder.WriteString(fmt.Sprintf("%d,%d,%d,%d,%d,%d,%d,%d,%d\n", i, i, i, i, i, i, i, i, i))
+	}
+
+	md, err := convertUploadedDocumentToMarkdown(writeTempFile(t, "wide.csv", []byte(builder.String())), ".csv")
+	if err != nil {
+		t.Fatalf("convert large csv: %v", err)
+	}
+	if !strings.Contains(md, "Preview truncated") {
+		t.Fatalf("markdown missing truncation note: %q", md)
+	}
+	if strings.Contains(md, "| c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 |") {
+		t.Fatalf("markdown should truncate columns: %q", md)
+	}
+}
+
+func TestConvertJSONToMarkdownUsesStructuredTableWhenPossible(t *testing.T) {
+	path := writeTempFile(t, "records.json", []byte(`[{"name":"Ada","score":99},{"name":"Linus","score":100}]`))
+
+	md, err := convertUploadedDocumentToMarkdown(path, ".json")
+	if err != nil {
+		t.Fatalf("convert json: %v", err)
+	}
+	for _, want := range []string{
+		"Structured JSON preview.",
+		"| name | score |",
+		"| Ada | 99 |",
+		"| Linus | 100 |",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown missing %q: %q", want, md)
+		}
+	}
+}
+
+func TestConvertJSONToMarkdownFallsBackToCodeBlockForNestedData(t *testing.T) {
+	path := writeTempFile(t, "nested.json", []byte(`{"project":{"name":"Phoenix","owners":["ops","eng"]}}`))
+
+	md, err := convertUploadedDocumentToMarkdown(path, ".json")
+	if err != nil {
+		t.Fatalf("convert nested json: %v", err)
+	}
+	for _, want := range []string{
+		"```json",
+		`"project": {`,
+		`"owners": [`,
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown missing %q: %q", want, md)
+		}
+	}
+}
+
+func TestConvertYAMLToMarkdownWrapsContentInCodeFence(t *testing.T) {
+	path := writeTempFile(t, "config.yaml", []byte("name: deerflow\nfeatures:\n  - uploads\n"))
+
+	md, err := convertUploadedDocumentToMarkdown(path, ".yaml")
+	if err != nil {
+		t.Fatalf("convert yaml: %v", err)
+	}
+	for _, want := range []string{
+		"```yaml",
+		"name: deerflow",
+		"- uploads",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown missing %q: %q", want, md)
+		}
+	}
+}
+
 type pdfCompressionMode int
 
 const (
