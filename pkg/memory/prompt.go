@@ -3,7 +3,10 @@ package memory
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
@@ -47,6 +50,14 @@ func BuildMemoryUpdatePrompt(messages []models.Message, current Document) string
 }
 
 func BuildInjection(doc Document) string {
+	return BuildInjectionWithContext(doc, "", 0)
+}
+
+func BuildInjectionWithContext(doc Document, currentContext string, maxTokens int) string {
+	if maxTokens <= 0 {
+		maxTokens = 2000
+	}
+
 	lines := []string{"## User Memory"}
 
 	if v := strings.TrimSpace(doc.User.WorkContext); v != "" {
@@ -67,12 +78,11 @@ func BuildInjection(doc Document) string {
 	if v := strings.TrimSpace(doc.History.LongTermBackground); v != "" {
 		lines = append(lines, "Long Term Background: "+v)
 	}
-	if len(doc.Facts) > 0 {
+	base := strings.Join(lines, "\n")
+	selectedFacts := selectRelevantFacts(doc.Facts, currentContext, maxTokens-approximateTokenCount(base))
+	if len(selectedFacts) > 0 {
 		lines = append(lines, "Known Facts:")
-		for _, fact := range doc.Facts {
-			if strings.TrimSpace(fact.Content) == "" {
-				continue
-			}
+		for _, fact := range selectedFacts {
 			if strings.TrimSpace(fact.Category) != "" {
 				lines = append(lines, fmt.Sprintf("- [%s] %s", fact.Category, fact.Content))
 				continue
@@ -83,6 +93,7 @@ func BuildInjection(doc Document) string {
 	if len(lines) == 1 {
 		return ""
 	}
+
 	return strings.Join(lines, "\n") + "\n\n## Current Session\n"
 }
 
@@ -114,4 +125,158 @@ func renderMessagesForPrompt(messages []models.Message) string {
 		return "(no textual messages)"
 	}
 	return out
+}
+
+func selectRelevantFacts(facts []Fact, currentContext string, remainingTokens int) []Fact {
+	if len(facts) == 0 || remainingTokens <= 0 {
+		return nil
+	}
+
+	type scoredFact struct {
+		fact       Fact
+		score      float64
+		similarity float64
+		confidence float64
+	}
+
+	contextTerms := extractTerms(currentContext)
+	useContext := len(contextTerms) > 0
+	scored := make([]scoredFact, 0, len(facts))
+	hasContextMatch := false
+	for _, fact := range facts {
+		fact.Content = strings.TrimSpace(fact.Content)
+		if fact.Content == "" {
+			continue
+		}
+		confidence := clamp01(fact.Confidence)
+		score := confidence
+		similarity := 0.0
+		if useContext {
+			similarity = cosineSimilarity(contextTerms, extractTerms(fact.Content))
+			score = (similarity * 0.6) + (confidence * 0.4)
+			if similarity > 0 {
+				hasContextMatch = true
+			}
+		}
+		scored = append(scored, scoredFact{
+			fact:       fact,
+			score:      score,
+			similarity: similarity,
+			confidence: confidence,
+		})
+	}
+	if useContext && hasContextMatch {
+		filtered := scored[:0]
+		for _, item := range scored {
+			if item.similarity > 0 {
+				filtered = append(filtered, item)
+			}
+		}
+		scored = filtered
+	}
+
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
+		}
+		if scored[i].confidence != scored[j].confidence {
+			return scored[i].confidence > scored[j].confidence
+		}
+		if !scored[i].fact.UpdatedAt.Equal(scored[j].fact.UpdatedAt) {
+			return scored[i].fact.UpdatedAt.After(scored[j].fact.UpdatedAt)
+		}
+		if !scored[i].fact.CreatedAt.Equal(scored[j].fact.CreatedAt) {
+			return scored[i].fact.CreatedAt.After(scored[j].fact.CreatedAt)
+		}
+		return scored[i].fact.ID < scored[j].fact.ID
+	})
+
+	selected := make([]Fact, 0, len(scored))
+	usedTokens := 0
+	for _, item := range scored {
+		line := item.fact.Content
+		if strings.TrimSpace(item.fact.Category) != "" {
+			line = fmt.Sprintf("- [%s] %s", item.fact.Category, item.fact.Content)
+		} else {
+			line = "- " + item.fact.Content
+		}
+		cost := approximateTokenCount(line)
+		if usedTokens > 0 && usedTokens+cost > remainingTokens {
+			break
+		}
+		selected = append(selected, item.fact)
+		usedTokens += cost
+	}
+	return selected
+}
+
+func approximateTokenCount(text string) int {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return 0
+	}
+	runes := len([]rune(text))
+	if runes <= 4 {
+		return 1
+	}
+	return (runes + 3) / 4
+}
+
+func extractTerms(text string) map[string]float64 {
+	terms := make(map[string]float64)
+	var current []rune
+	flush := func() {
+		if len(current) == 0 {
+			return
+		}
+		token := strings.ToLower(strings.TrimSpace(string(current)))
+		if token != "" {
+			terms[token]++
+		}
+		current = current[:0]
+	}
+
+	for _, r := range strings.ToLower(text) {
+		switch {
+		case unicode.In(r, unicode.Han):
+			flush()
+			terms[string(r)]++
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			current = append(current, r)
+		default:
+			flush()
+		}
+	}
+	flush()
+	return terms
+}
+
+func cosineSimilarity(left, right map[string]float64) float64 {
+	if len(left) == 0 || len(right) == 0 {
+		return 0
+	}
+	var dot float64
+	var leftNorm float64
+	var rightNorm float64
+	for token, value := range left {
+		leftNorm += value * value
+		dot += value * right[token]
+	}
+	for _, value := range right {
+		rightNorm += value * value
+	}
+	if leftNorm == 0 || rightNorm == 0 {
+		return 0
+	}
+	return dot / (math.Sqrt(leftNorm) * math.Sqrt(rightNorm))
+}
+
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
 }

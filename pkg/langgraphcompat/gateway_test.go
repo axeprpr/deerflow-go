@@ -3289,6 +3289,71 @@ func TestRunsStreamInjectsStoredMemoryIntoSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestRunsStreamPrioritizesMemoryFactsRelevantToCurrentConversation(t *testing.T) {
+	provider := &streamSpyProvider{}
+	now := time.Now().UTC()
+	store := &fakeGatewayMemoryStore{
+		docs: map[string]memory.Document{
+			"thread-memory-relevance": {
+				SessionID: "thread-memory-relevance",
+				User: memory.UserMemory{
+					WorkContext: "Maintains multiple long-lived projects.",
+				},
+				Facts: []memory.Fact{
+					{
+						ID:         "cooking",
+						Content:    "Collects vintage cookware and recipe books.",
+						Category:   "personal",
+						Confidence: 0.99,
+						CreatedAt:  now.Add(-2 * time.Hour),
+						UpdatedAt:  now.Add(-2 * time.Hour),
+					},
+					{
+						ID:         "gateway",
+						Content:    "Owns deerflow-go gateway compatibility work.",
+						Category:   "project",
+						Confidence: 0.72,
+						CreatedAt:  now.Add(-time.Hour),
+						UpdatedAt:  now.Add(-time.Hour),
+					},
+				},
+				Source:    "thread-memory-relevance",
+				UpdatedAt: now,
+			},
+		},
+	}
+	s := &Server{
+		llmProvider:  provider,
+		defaultModel: "default-model",
+		tools:        newRuntimeToolRegistry(t),
+		sessions:     make(map[string]*Session),
+		runs:         make(map[string]*Run),
+		runStreams:   make(map[string]map[uint64]chan StreamEvent),
+		dataRoot:     t.TempDir(),
+		memoryStore:  store,
+		memorySvc:    memory.NewService(store, fakeMemoryExtractor{}),
+		agents:       map[string]gatewayAgent{},
+	}
+
+	body := `{"thread_id":"thread-memory-relevance","input":{"messages":[{"role":"user","content":"Please help me debug deerflow-go gateway compatibility."}]}}`
+	req := httptest.NewRequest(http.MethodPost, "/runs/stream", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleRunsStream(rec, req)
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(payload))
+	}
+	if !strings.Contains(provider.lastReq.SystemPrompt, "Owns deerflow-go gateway compatibility work.") {
+		t.Fatalf("system prompt missing relevant fact: %q", provider.lastReq.SystemPrompt)
+	}
+	if strings.Contains(provider.lastReq.SystemPrompt, "Collects vintage cookware and recipe books.") {
+		t.Fatalf("system prompt should trim unrelated fact under relevance ranking: %q", provider.lastReq.SystemPrompt)
+	}
+}
+
 func TestRunsStreamUsesAgentScopedMemoryForCustomAgents(t *testing.T) {
 	provider := &streamSpyProvider{}
 	store := &fakeGatewayMemoryStore{

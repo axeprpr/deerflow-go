@@ -755,6 +755,89 @@ func TestAgentRunTruncatesExcessTaskToolCalls(t *testing.T) {
 	}
 }
 
+func TestAgentRunExecutesTaskToolCallsInParallel(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name: "task",
+		Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+			time.Sleep(80 * time.Millisecond)
+			return models.ToolResult{
+				CallID:   call.ID,
+				ToolName: call.Name,
+				Status:   models.CallStatusCompleted,
+				Content:  call.ID + " ok",
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register task tool: %v", err)
+	}
+
+	provider := &scriptedStreamProvider{
+		steps: []streamStep{
+			{toolCalls: []models.ToolCall{
+				{ID: "task-1", Name: "task", Arguments: map[string]any{"prompt": "one"}},
+				{ID: "task-2", Name: "task", Arguments: map[string]any{"prompt": "two"}},
+				{ID: "task-3", Name: "task", Arguments: map[string]any{"prompt": "three"}},
+			}},
+			{check: func(t *testing.T, req llm.ChatRequest) {
+				if got := len(req.Messages); got != 5 {
+					t.Fatalf("messages=%d want 5", got)
+				}
+				for i, want := range []string{"task-1", "task-2", "task-3"} {
+					msg := req.Messages[i+2]
+					if msg.ToolResult == nil || msg.ToolResult.CallID != want {
+						t.Fatalf("tool result %d call_id=%v want %s", i, msg.ToolResult, want)
+					}
+				}
+			}, content: "Done."},
+		},
+		t: t,
+	}
+
+	agent := New(AgentConfig{
+		LLMProvider:            provider,
+		Tools:                  registry,
+		MaxTurns:               3,
+		MaxConcurrentSubagents: 3,
+	})
+
+	started := time.Now()
+	result, err := agent.Run(context.Background(), "session-task-parallel", []models.Message{
+		{ID: "m1", SessionID: "session-task-parallel", Role: models.RoleHuman, Content: "Parallelize this"},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "Done." {
+		t.Fatalf("FinalOutput=%q", result.FinalOutput)
+	}
+
+	if elapsed := time.Since(started); elapsed >= 220*time.Millisecond {
+		t.Fatalf("elapsed=%s want parallel execution under 220ms", elapsed)
+	}
+}
+
+func TestSelectSubagentToolsWithDenylist(t *testing.T) {
+	all := []models.Tool{
+		{Name: "bash", Groups: []string{"bash"}},
+		{Name: "read_file", Groups: []string{"file_ops"}},
+		{Name: "web_search", Groups: []string{"web"}},
+		{Name: "task", Groups: []string{"agent"}},
+		{Name: "ask_clarification", Groups: []string{"agent"}},
+		{Name: "present_files", Groups: []string{"artifact"}},
+	}
+
+	got := selectSubagentToolsWithDenylist(all, nil, []string{"ask_clarification", "present_files"})
+	if names := toolNames(got); !slices.Equal(names, []string{"bash", "read_file", "web_search"}) {
+		t.Fatalf("names=%v want [bash read_file web_search]", names)
+	}
+
+	got = selectSubagentToolsWithDenylist(all, []string{"bash", "file_ops", "task"}, []string{"bash"})
+	if names := toolNames(got); !slices.Equal(names, []string{"read_file"}) {
+		t.Fatalf("filtered names=%v want [read_file]", names)
+	}
+}
+
 type timeoutProvider struct{}
 
 func (timeoutProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {

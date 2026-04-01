@@ -170,6 +170,10 @@ func (s *Service) ScheduleUpdate(sessionID string, messages []models.Message) {
 }
 
 func (s *Service) Inject(ctx context.Context, sessionID string) string {
+	return s.InjectWithContext(ctx, sessionID, "")
+}
+
+func (s *Service) InjectWithContext(ctx context.Context, sessionID string, currentContext string) string {
 	if s == nil || s.storage == nil || strings.TrimSpace(sessionID) == "" {
 		return ""
 	}
@@ -181,7 +185,7 @@ func (s *Service) Inject(ctx context.Context, sessionID string) string {
 		}
 		return ""
 	}
-	return BuildInjection(doc)
+	return BuildInjectionWithContext(doc, currentContext, 2000)
 }
 
 func Merge(current Document, update Update, sessionID string, now time.Time) Document {

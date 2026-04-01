@@ -29,6 +29,15 @@ func TestResolveRunConfigIncludesWorkingDirectoryGuidance(t *testing.T) {
 	if strings.Contains(cfg.SystemPrompt, "ACP Agent Tasks") {
 		t.Fatalf("system prompt unexpectedly included ACP guidance: %q", cfg.SystemPrompt)
 	}
+	if !strings.Contains(cfg.SystemPrompt, "<response_style>") {
+		t.Fatalf("system prompt missing response style section: %q", cfg.SystemPrompt)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "[citation:TITLE](URL)") {
+		t.Fatalf("system prompt missing citations guidance: %q", cfg.SystemPrompt)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "Language Consistency") {
+		t.Fatalf("system prompt missing critical reminders: %q", cfg.SystemPrompt)
+	}
 }
 
 func TestResolveRunConfigIncludesACPGuidanceWhenToolConfigured(t *testing.T) {

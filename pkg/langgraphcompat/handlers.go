@@ -175,12 +175,13 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 	for key, value := range threadMetadataFromRuntimeContext(runtimeContext, resolvedRunCfg) {
 		s.setThreadMetadata(threadID, key, value)
 	}
-	memorySessionID := deriveMemorySessionID(threadID, firstNonEmpty(stringFromAny(runtimeContext["agent_name"]), resolvedRunCfg.AgentName))
-	resolvedRunCfg.SystemPrompt = joinPromptSections(resolvedRunCfg.SystemPrompt, s.memoryInjectionPrompt(ctx, memorySessionID))
-
 	s.sessionsMu.RLock()
 	existingMessages := append([]models.Message(nil), session.Messages...)
 	s.sessionsMu.RUnlock()
+	memorySessionID := deriveMemorySessionID(threadID, firstNonEmpty(stringFromAny(runtimeContext["agent_name"]), resolvedRunCfg.AgentName))
+	memoryContext := renderMessagesForPrompt(recentMessagesForMemoryInjection(existingMessages, newMessages, 6))
+	resolvedRunCfg.SystemPrompt = joinPromptSections(resolvedRunCfg.SystemPrompt, s.memoryInjectionPrompt(ctx, memorySessionID, memoryContext))
+
 	historySummary := s.threadHistorySummary(threadID)
 	compactedExisting := s.compactConversationHistory(ctx, threadID, resolvedRunCfg.ModelName, historySummary, existingMessages)
 	if compactedExisting.Changed {
@@ -1213,11 +1214,36 @@ func joinPromptSections(parts ...string) string {
 	return strings.Join(trimmed, "\n\n")
 }
 
-func (s *Server) memoryInjectionPrompt(ctx context.Context, threadID string) string {
+func (s *Server) memoryInjectionPrompt(ctx context.Context, threadID string, currentContext string) string {
 	if s == nil || s.memorySvc == nil || strings.TrimSpace(threadID) == "" {
 		return ""
 	}
-	return strings.TrimSpace(s.memorySvc.Inject(ctx, threadID))
+	return strings.TrimSpace(s.memorySvc.InjectWithContext(ctx, threadID, currentContext))
+}
+
+func recentMessagesForMemoryInjection(existingMessages, newMessages []models.Message, limit int) []models.Message {
+	if limit <= 0 {
+		limit = 6
+	}
+	combined := make([]models.Message, 0, len(existingMessages)+len(newMessages))
+	combined = append(combined, existingMessages...)
+	combined = append(combined, newMessages...)
+	if len(combined) == 0 {
+		return nil
+	}
+
+	recent := make([]models.Message, 0, limit)
+	for i := len(combined) - 1; i >= 0 && len(recent) < limit; i-- {
+		msg := combined[i]
+		if strings.TrimSpace(msg.Content) == "" && (msg.ToolResult == nil || strings.TrimSpace(msg.ToolResult.Content) == "") {
+			continue
+		}
+		recent = append(recent, msg)
+	}
+	for i, j := 0, len(recent)-1; i < j; i, j = i+1, j-1 {
+		recent[i], recent[j] = recent[j], recent[i]
+	}
+	return recent
 }
 
 func deriveMemorySessionID(threadID, agentName string) string {

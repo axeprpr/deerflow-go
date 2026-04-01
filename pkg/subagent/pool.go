@@ -36,16 +36,18 @@ func NewPool(executor Executor, cfg PoolConfig) *Pool {
 	if cfg.Defaults == nil {
 		cfg.Defaults = map[SubagentType]SubagentConfig{
 			SubagentGeneralPurpose: {
-				Type:     SubagentGeneralPurpose,
-				MaxTurns: 6,
-				Timeout:  cfg.Timeout,
-				Tools:    []string{"file_ops"},
+				Type:         SubagentGeneralPurpose,
+				MaxTurns:     6,
+				Timeout:      cfg.Timeout,
+				SystemPrompt: "You are a general-purpose subagent working on a delegated task. Complete it autonomously and return a concise, actionable result.",
 			},
 			SubagentBash: {
-				Type:     SubagentBash,
-				MaxTurns: 4,
-				Timeout:  cfg.Timeout,
-				Tools:    []string{"bash"},
+				Type:            SubagentBash,
+				MaxTurns:        4,
+				Timeout:         cfg.Timeout,
+				SystemPrompt:    "You are a bash execution specialist. Run the requested commands carefully and report the result clearly.",
+				Tools:           []string{"bash", "ls", "read_file", "write_file", "str_replace"},
+				DisallowedTools: []string{"task", "ask_clarification", "present_file", "present_files"},
 			},
 		}
 	}
@@ -272,6 +274,9 @@ func (p *Pool) resolveConfig(cfg SubagentConfig) SubagentConfig {
 	}
 	if len(cfg.Tools) > 0 {
 		base.Tools = append([]string(nil), cfg.Tools...)
+	}
+	if len(cfg.DisallowedTools) > 0 {
+		base.DisallowedTools = append([]string(nil), cfg.DisallowedTools...)
 	}
 	if base.Timeout <= 0 {
 		base.Timeout = p.cfg.Timeout

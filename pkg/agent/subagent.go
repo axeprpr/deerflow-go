@@ -40,7 +40,7 @@ func (e *SubagentExecutor) Execute(ctx context.Context, task *subagent.Task, emi
 	}
 
 	registry := tools.NewRegistry()
-	for _, tool := range selectSubagentTools(e.tools.List(), task.Config.Tools) {
+	for _, tool := range selectSubagentToolsWithDenylist(e.tools.List(), task.Config.Tools, task.Config.DisallowedTools) {
 		_ = registry.Register(tool)
 	}
 
@@ -104,8 +104,13 @@ func NewSubagentPool(provider llm.LLMProvider, registry *tools.Registry, sb *san
 }
 
 func selectSubagentTools(all []models.Tool, selectors []string) []models.Tool {
+	return selectSubagentToolsWithDenylist(all, selectors, nil)
+}
+
+func selectSubagentToolsWithDenylist(all []models.Tool, selectors []string, denylist []string) []models.Tool {
 	if len(selectors) == 0 {
-		return append([]models.Tool(nil), all...)
+		selected := append([]models.Tool(nil), all...)
+		return filterDisallowedSubagentTools(selected, denylist)
 	}
 
 	allowNames := make(map[string]struct{}, len(selectors))
@@ -121,9 +126,6 @@ func selectSubagentTools(all []models.Tool, selectors []string) []models.Tool {
 
 	selected := make([]models.Tool, 0, len(all))
 	for _, tool := range all {
-		if tool.Name == "task" {
-			continue
-		}
 		if _, ok := allowNames[tool.Name]; ok {
 			selected = append(selected, tool)
 			continue
@@ -135,7 +137,29 @@ func selectSubagentTools(all []models.Tool, selectors []string) []models.Tool {
 			}
 		}
 	}
-	return selected
+	return filterDisallowedSubagentTools(selected, denylist)
+}
+
+func filterDisallowedSubagentTools(all []models.Tool, denylist []string) []models.Tool {
+	denied := map[string]struct{}{
+		"task": {},
+	}
+	for _, name := range denylist {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		denied[name] = struct{}{}
+	}
+
+	filtered := make([]models.Tool, 0, len(all))
+	for _, tool := range all {
+		if _, blocked := denied[tool.Name]; blocked {
+			continue
+		}
+		filtered = append(filtered, tool)
+	}
+	return filtered
 }
 
 func subagentMessageFromAgentEvent(evt AgentEvent) string {
@@ -163,7 +187,10 @@ func subagentSystemPrompt(task *subagent.Task) string {
 	if task != nil && strings.TrimSpace(task.Config.SystemPrompt) != "" {
 		return strings.TrimSpace(task.Config.SystemPrompt)
 	}
-	return "You are a focused subagent. Complete the assigned task and return the result."
+	if task != nil && task.Type == subagent.SubagentBash {
+		return "You are a bash execution specialist. Execute commands carefully, summarize what ran, and report relevant output or failures."
+	}
+	return "You are a general-purpose subagent working on a delegated task. Complete it autonomously and return a concise, actionable result."
 }
 
 func newSubagentMessageID(prefix string) string {

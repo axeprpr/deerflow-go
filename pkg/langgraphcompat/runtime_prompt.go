@@ -23,8 +23,32 @@ const acpAgentPrompt = "**ACP Agent Tasks (`invoke_acp_agent`):**\n" +
 	"- ACP agent results are accessible at `/mnt/acp-workspace/` (read-only) and can be inspected with file tools or `bash cp`\n" +
 	"- To deliver ACP output to the user: copy from `/mnt/acp-workspace/<file>` to `/mnt/user-data/outputs/<file>`, then use `present_files`"
 
+const responseStylePrompt = "<response_style>\n" +
+	"- Clear and Concise: Avoid over-formatting unless requested\n" +
+	"- Natural Tone: Use paragraphs and prose, not bullet points by default\n" +
+	"- Action-Oriented: Focus on delivering results, not explaining processes\n" +
+	"</response_style>"
+
+const citationsPrompt = "<citations>\n" +
+	"CRITICAL: Always include citations when using web search results.\n\n" +
+	"- When to Use: Mandatory after `web_search`, `web_fetch`, or any external information source.\n" +
+	"- Format: Use Markdown links in the form `[citation:TITLE](URL)` immediately after the supported claim.\n" +
+	"- Sources Section: For reports and research-style answers, add a `Sources` section at the end with standard Markdown links `[Title](URL) - Description`.\n" +
+	"- Never present externally sourced factual claims without citations when source URLs are available.\n" +
+	"</citations>"
+
+const criticalRemindersPrompt = "<critical_reminders>\n" +
+	"- Clarification First: Clarify unclear, missing, or ambiguous requirements before committing to a path.\n" +
+	"- Skill First: Load the relevant skill before starting complex work when a skill matches the task.\n" +
+	"- Progressive Loading: Load referenced resources incrementally and only when needed.\n" +
+	"- Output Files: Final deliverables must be saved in `/mnt/user-data/outputs`.\n" +
+	"- Clarity: Be direct and helpful, avoid unnecessary meta-commentary.\n" +
+	"- Language Consistency: Reply in the same language as the user unless they ask to switch.\n" +
+	"- Always Respond: Thinking is internal; always provide a visible response to the user.\n" +
+	"</critical_reminders>"
+
 func (s *Server) environmentPrompt() string {
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 6)
 	if skills := s.skillsPrompt(); skills != "" {
 		parts = append(parts, skills)
 	}
@@ -32,6 +56,9 @@ func (s *Server) environmentPrompt() string {
 	if s != nil && s.tools != nil && s.tools.Get("invoke_acp_agent") != nil {
 		parts = append(parts, acpAgentPrompt)
 	}
+	parts = append(parts, responseStylePrompt)
+	parts = append(parts, citationsPrompt)
+	parts = append(parts, criticalRemindersPrompt)
 	return strings.Join(parts, "\n\n")
 }
 

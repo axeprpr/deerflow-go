@@ -158,3 +158,40 @@ func TestPoolHonorsContextConcurrencyLimit(t *testing.T) {
 		t.Fatalf("max concurrent = %d, want 1", got)
 	}
 }
+
+func TestPoolResolveConfigPreservesDisallowedTools(t *testing.T) {
+	pool := NewPool(fakeExecutor{
+		execute: func(ctx context.Context, task *Task, emit func(TaskEvent)) (ExecutionResult, error) {
+			return ExecutionResult{}, nil
+		},
+	}, PoolConfig{
+		Timeout: time.Second,
+		Defaults: map[SubagentType]SubagentConfig{
+			SubagentGeneralPurpose: {
+				Type:            SubagentGeneralPurpose,
+				MaxTurns:        6,
+				Timeout:         time.Second,
+				DisallowedTools: []string{"task", "ask_clarification"},
+			},
+		},
+	})
+
+	resolved := pool.resolveConfig(SubagentConfig{Type: SubagentGeneralPurpose})
+	if len(resolved.DisallowedTools) != 2 {
+		t.Fatalf("disallowed len=%d want 2", len(resolved.DisallowedTools))
+	}
+	if resolved.DisallowedTools[0] != "task" || resolved.DisallowedTools[1] != "ask_clarification" {
+		t.Fatalf("disallowed=%v", resolved.DisallowedTools)
+	}
+
+	override := pool.resolveConfig(SubagentConfig{
+		Type:            SubagentGeneralPurpose,
+		DisallowedTools: []string{"task", "present_files"},
+	})
+	if len(override.DisallowedTools) != 2 {
+		t.Fatalf("override disallowed len=%d want 2", len(override.DisallowedTools))
+	}
+	if override.DisallowedTools[0] != "task" || override.DisallowedTools[1] != "present_files" {
+		t.Fatalf("override disallowed=%v", override.DisallowedTools)
+	}
+}

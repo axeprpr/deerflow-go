@@ -291,79 +291,21 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			}
 
 			viewedImages := make([]viewedImage, 0)
-			for _, call := range toolCalls {
-				emit(AgentEvent{
-					Type:      AgentEventToolCall,
-					MessageID: aiMessageID,
-					ToolCall:  &call,
-					ToolEvent: newToolCallEvent(call, nil),
-				})
-				startedAt := time.Now().UTC()
-				runningCall := call
-				runningCall.Status = models.CallStatusRunning
-				runningCall.StartedAt = startedAt
-				emit(AgentEvent{
-					Type:      AgentEventToolCallStart,
-					ToolCall:  &runningCall,
-					ToolEvent: newToolCallEvent(runningCall, nil),
-				})
-
-				toolStarted := time.Now().UTC()
-				toolCtx := tools.WithSandbox(ctx, a.sandbox)
-				toolCtx = tools.WithThreadID(toolCtx, sessionID)
-				result, err := a.executeTool(toolCtx, call, deferredState)
-				if err != nil {
-					err = normalizeRunError(ctx, err, a.requestTimeout)
-					result = preserveToolFailureResult(call, result, err)
-				}
-				result.Duration = time.Since(toolStarted)
-				if result.CompletedAt.IsZero() {
-					result.CompletedAt = time.Now().UTC()
-				}
-
-				viewedImages = append(viewedImages, collectViewedImages(result)...)
-				result = sanitizedToolResult(result)
-				runMessages = append(runMessages, models.Message{
-					ID:         newMessageID("tool"),
-					SessionID:  sessionID,
-					Role:       models.RoleTool,
-					Content:    toolMessageContent(result),
-					ToolResult: &result,
-					CreatedAt:  time.Now().UTC(),
-				})
-				toolMessage := runMessages[len(runMessages)-1]
-				emit(AgentEvent{
-					Type:      AgentEventToolResult,
-					MessageID: toolMessage.ID,
-					Result:    &result,
-					ToolEvent: newToolEventFromResult(call, result),
-				})
-				completedCall := runningCall
-				completedCall.Status = result.Status
-				completedCall.CompletedAt = result.CompletedAt
-				emit(AgentEvent{
-					Type:      AgentEventToolCallEnd,
-					MessageID: toolMessage.ID,
-					ToolCall:  &completedCall,
-					Result:    &result,
-					ToolEvent: newToolEventFromResult(completedCall, result),
-				})
-				if shouldPauseAfterToolCall(call, result) {
-					return &RunResult{
-						Messages:    runMessages,
-						FinalOutput: assistantMessage.Content,
-						Usage:       usage,
-					}, nil
-				}
-
-				if err := ctx.Err(); err != nil {
-					err = normalizeRunError(ctx, err, a.requestTimeout)
-					emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
-					return nil, err
-				}
+			var pause bool
+			var err error
+			runMessages, viewedImages, pause, err = a.executeToolCalls(ctx, sessionID, aiMessageID, runMessages, toolCalls, deferredState, emit)
+			if err != nil {
+				return nil, err
 			}
 			if len(viewedImages) > 0 {
 				runMessages = append(runMessages, viewedImagesMessage(sessionID, viewedImages, modelLikelySupportsVision(a.model)))
+			}
+			if pause {
+				return &RunResult{
+					Messages:    runMessages,
+					FinalOutput: assistantMessage.Content,
+					Usage:       usage,
+				}, nil
 			}
 			runMessages = append(runMessages, models.Message{
 				ID:        newMessageID("human"),
@@ -376,85 +318,250 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 		}
 
 		viewedImages := make([]viewedImage, 0)
-		for _, call := range toolCalls {
-			emit(AgentEvent{
-				Type:      AgentEventToolCall,
-				MessageID: aiMessageID,
-				ToolCall:  &call,
-				ToolEvent: newToolCallEvent(call, nil),
-			})
-			startedAt := time.Now().UTC()
-			runningCall := call
-			runningCall.Status = models.CallStatusRunning
-			runningCall.StartedAt = startedAt
-			emit(AgentEvent{
-				Type:      AgentEventToolCallStart,
-				ToolCall:  &runningCall,
-				ToolEvent: newToolCallEvent(runningCall, nil),
-			})
-
-			toolStarted := time.Now().UTC()
-			toolCtx := tools.WithSandbox(ctx, a.sandbox)
-			toolCtx = tools.WithThreadID(toolCtx, sessionID)
-			result, err := a.executeTool(toolCtx, call, deferredState)
-			if err != nil {
-				err = normalizeRunError(ctx, err, a.requestTimeout)
-				result = preserveToolFailureResult(call, result, err)
-			}
-			result.Duration = time.Since(toolStarted)
-			if result.CompletedAt.IsZero() {
-				result.CompletedAt = time.Now().UTC()
-			}
-
-			viewedImages = append(viewedImages, collectViewedImages(result)...)
-			result = sanitizedToolResult(result)
-			runMessages = append(runMessages, models.Message{
-				ID:         newMessageID("tool"),
-				SessionID:  sessionID,
-				Role:       models.RoleTool,
-				Content:    toolMessageContent(result),
-				ToolResult: &result,
-				CreatedAt:  time.Now().UTC(),
-			})
-			toolMessage := runMessages[len(runMessages)-1]
-			emit(AgentEvent{
-				Type:      AgentEventToolResult,
-				MessageID: toolMessage.ID,
-				Result:    &result,
-				ToolEvent: newToolEventFromResult(call, result),
-			})
-			completedCall := runningCall
-			completedCall.Status = result.Status
-			completedCall.CompletedAt = result.CompletedAt
-			emit(AgentEvent{
-				Type:      AgentEventToolCallEnd,
-				MessageID: toolMessage.ID,
-				ToolCall:  &completedCall,
-				Result:    &result,
-				ToolEvent: newToolEventFromResult(completedCall, result),
-			})
-			if shouldPauseAfterToolCall(call, result) {
-				return &RunResult{
-					Messages:    runMessages,
-					FinalOutput: assistantMessage.Content,
-					Usage:       usage,
-				}, nil
-			}
-
-			if err := ctx.Err(); err != nil {
-				err = normalizeRunError(ctx, err, a.requestTimeout)
-				emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
-				return nil, err
-			}
+		pause := false
+		runMessages, viewedImages, pause, err = a.executeToolCalls(ctx, sessionID, aiMessageID, runMessages, toolCalls, deferredState, emit)
+		if err != nil {
+			return nil, err
 		}
 		if len(viewedImages) > 0 {
 			runMessages = append(runMessages, viewedImagesMessage(sessionID, viewedImages, modelLikelySupportsVision(a.model)))
+		}
+		if pause {
+			return &RunResult{
+				Messages:    runMessages,
+				FinalOutput: assistantMessage.Content,
+				Usage:       usage,
+			}, nil
 		}
 	}
 
 	err := fmt.Errorf("agent exceeded max turns (%d)", a.maxTurns)
 	emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
 	return nil, err
+}
+
+func (a *Agent) executeToolCalls(
+	ctx context.Context,
+	sessionID string,
+	aiMessageID string,
+	runMessages []models.Message,
+	toolCalls []models.ToolCall,
+	deferredState *deferredToolState,
+	emit func(AgentEvent),
+) ([]models.Message, []viewedImage, bool, error) {
+	viewedImages := make([]viewedImage, 0)
+
+	for i := 0; i < len(toolCalls); {
+		if toolCalls[i].Name != "task" {
+			result, pause, err := a.executeSingleToolCall(ctx, sessionID, aiMessageID, toolCalls[i], deferredState, emit, &runMessages, &viewedImages)
+			_ = result
+			if err != nil {
+				return nil, nil, false, err
+			}
+			if pause {
+				return runMessages, viewedImages, true, nil
+			}
+			i++
+			continue
+		}
+
+		j := i
+		for j < len(toolCalls) && toolCalls[j].Name == "task" {
+			j++
+		}
+		results, err := a.executeParallelTaskCalls(ctx, sessionID, aiMessageID, toolCalls[i:j], deferredState, emit)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		for _, item := range results {
+			viewedImages = append(viewedImages, item.viewedImages...)
+			runMessages = append(runMessages, item.message)
+			emit(AgentEvent{
+				Type:      AgentEventToolResult,
+				MessageID: item.message.ID,
+				Result:    &item.result,
+				ToolEvent: newToolEventFromResult(item.call, item.result),
+			})
+			completedCall := item.runningCall
+			completedCall.Status = item.result.Status
+			completedCall.CompletedAt = item.result.CompletedAt
+			emit(AgentEvent{
+				Type:      AgentEventToolCallEnd,
+				MessageID: item.message.ID,
+				ToolCall:  &completedCall,
+				Result:    &item.result,
+				ToolEvent: newToolEventFromResult(completedCall, item.result),
+			})
+		}
+		i = j
+	}
+
+	return runMessages, viewedImages, false, nil
+}
+
+type toolExecutionRecord struct {
+	call         models.ToolCall
+	runningCall  models.ToolCall
+	result       models.ToolResult
+	message      models.Message
+	viewedImages []viewedImage
+}
+
+func (a *Agent) executeParallelTaskCalls(
+	ctx context.Context,
+	sessionID string,
+	aiMessageID string,
+	taskCalls []models.ToolCall,
+	deferredState *deferredToolState,
+	emit func(AgentEvent),
+) ([]toolExecutionRecord, error) {
+	type resultEnvelope struct {
+		index  int
+		record toolExecutionRecord
+	}
+
+	results := make([]toolExecutionRecord, len(taskCalls))
+	ch := make(chan resultEnvelope, len(taskCalls))
+	var wg sync.WaitGroup
+
+	for idx, call := range taskCalls {
+		call := call
+		idx := idx
+
+		emit(AgentEvent{
+			Type:      AgentEventToolCall,
+			MessageID: aiMessageID,
+			ToolCall:  &call,
+			ToolEvent: newToolCallEvent(call, nil),
+		})
+		startedAt := time.Now().UTC()
+		runningCall := call
+		runningCall.Status = models.CallStatusRunning
+		runningCall.StartedAt = startedAt
+		emit(AgentEvent{
+			Type:      AgentEventToolCallStart,
+			ToolCall:  &runningCall,
+			ToolEvent: newToolCallEvent(runningCall, nil),
+		})
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result, toolErr := a.performToolCall(ctx, sessionID, call, deferredState)
+			toolMessage := models.Message{
+				ID:         newMessageID("tool"),
+				SessionID:  sessionID,
+				Role:       models.RoleTool,
+				Content:    toolMessageContent(result),
+				ToolResult: &result,
+				CreatedAt:  time.Now().UTC(),
+			}
+			_ = toolErr
+			ch <- resultEnvelope{
+				index: idx,
+				record: toolExecutionRecord{
+					call:         call,
+					runningCall:  runningCall,
+					result:       result,
+					message:      toolMessage,
+					viewedImages: collectViewedImages(result),
+				},
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(ch)
+
+	for item := range ch {
+		results[item.index] = item.record
+	}
+	return results, nil
+}
+
+func (a *Agent) executeSingleToolCall(
+	ctx context.Context,
+	sessionID string,
+	aiMessageID string,
+	call models.ToolCall,
+	deferredState *deferredToolState,
+	emit func(AgentEvent),
+	runMessages *[]models.Message,
+	viewedImages *[]viewedImage,
+) (models.ToolResult, bool, error) {
+	emit(AgentEvent{
+		Type:      AgentEventToolCall,
+		MessageID: aiMessageID,
+		ToolCall:  &call,
+		ToolEvent: newToolCallEvent(call, nil),
+	})
+	startedAt := time.Now().UTC()
+	runningCall := call
+	runningCall.Status = models.CallStatusRunning
+	runningCall.StartedAt = startedAt
+	emit(AgentEvent{
+		Type:      AgentEventToolCallStart,
+		ToolCall:  &runningCall,
+		ToolEvent: newToolCallEvent(runningCall, nil),
+	})
+
+	result, err := a.performToolCall(ctx, sessionID, call, deferredState)
+	if err != nil {
+		return models.ToolResult{}, false, err
+	}
+
+	*viewedImages = append(*viewedImages, collectViewedImages(result)...)
+	*runMessages = append(*runMessages, models.Message{
+		ID:         newMessageID("tool"),
+		SessionID:  sessionID,
+		Role:       models.RoleTool,
+		Content:    toolMessageContent(result),
+		ToolResult: &result,
+		CreatedAt:  time.Now().UTC(),
+	})
+	toolMessage := (*runMessages)[len(*runMessages)-1]
+	emit(AgentEvent{
+		Type:      AgentEventToolResult,
+		MessageID: toolMessage.ID,
+		Result:    &result,
+		ToolEvent: newToolEventFromResult(call, result),
+	})
+	completedCall := runningCall
+	completedCall.Status = result.Status
+	completedCall.CompletedAt = result.CompletedAt
+	emit(AgentEvent{
+		Type:      AgentEventToolCallEnd,
+		MessageID: toolMessage.ID,
+		ToolCall:  &completedCall,
+		Result:    &result,
+		ToolEvent: newToolEventFromResult(completedCall, result),
+	})
+	if shouldPauseAfterToolCall(call, result) {
+		return result, true, nil
+	}
+	if err := ctx.Err(); err != nil {
+		err = normalizeRunError(ctx, err, a.requestTimeout)
+		emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
+		return models.ToolResult{}, false, err
+	}
+	return result, false, nil
+}
+
+func (a *Agent) performToolCall(ctx context.Context, sessionID string, call models.ToolCall, deferredState *deferredToolState) (models.ToolResult, error) {
+	toolStarted := time.Now().UTC()
+	toolCtx := tools.WithSandbox(ctx, a.sandbox)
+	toolCtx = tools.WithThreadID(toolCtx, sessionID)
+	result, err := a.executeTool(toolCtx, call, deferredState)
+	if err != nil {
+		err = normalizeRunError(ctx, err, a.requestTimeout)
+		result = preserveToolFailureResult(call, result, err)
+	}
+	result.Duration = time.Since(toolStarted)
+	if result.CompletedAt.IsZero() {
+		result.CompletedAt = time.Now().UTC()
+	}
+	result = sanitizedToolResult(result)
+	return result, nil
 }
 
 func shouldPauseAfterToolCall(call models.ToolCall, result models.ToolResult) bool {

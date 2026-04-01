@@ -111,6 +111,24 @@ type Run struct {
 	abandonTimer *time.Timer
 }
 
+const generalPurposeSubagentPrompt = "You are a general-purpose subagent working on a delegated task. Complete it autonomously and return a clear, actionable result.\n\n" +
+	"<guidelines>\n" +
+	"- Focus on completing the delegated task efficiently\n" +
+	"- Use available tools as needed to accomplish the goal\n" +
+	"- Think step by step but act decisively\n" +
+	"- If you hit issues, explain them clearly in your response\n" +
+	"- Do not ask for clarification; work with the provided information\n" +
+	"</guidelines>"
+
+const bashSubagentPrompt = "You are a bash command execution specialist. Execute the requested commands carefully and report results clearly.\n\n" +
+	"<guidelines>\n" +
+	"- Execute commands one at a time when they depend on each other\n" +
+	"- Use parallel execution only when commands are independent\n" +
+	"- Report both success/failure and relevant output\n" +
+	"- Use absolute paths for file operations\n" +
+	"- Be cautious with destructive operations\n" +
+	"</guidelines>"
+
 // LangGraph API types
 type RunCreateRequest struct {
 	AssistantID string         `json:"assistant_id"`
@@ -179,7 +197,29 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		logger.Printf("Warning: failed to create sandbox: %v", err)
 	}
 
-	subagentPool := agent.NewSubagentPool(provider, registry, sb, 2, 2*time.Minute)
+	subagentAppCfg := loadSubagentsAppConfig()
+	subagentExecutor := agent.NewSubagentExecutor(provider, registry, sb)
+	subagentPool := subagent.NewPool(subagentExecutor, subagent.PoolConfig{
+		MaxConcurrent: 2,
+		Timeout:       subagentAppCfg.timeoutFor(subagent.SubagentGeneralPurpose),
+		Defaults: map[subagent.SubagentType]subagent.SubagentConfig{
+			subagent.SubagentGeneralPurpose: {
+				Type:            subagent.SubagentGeneralPurpose,
+				MaxTurns:        6,
+				Timeout:         subagentAppCfg.timeoutFor(subagent.SubagentGeneralPurpose),
+				SystemPrompt:    generalPurposeSubagentPrompt,
+				DisallowedTools: []string{"task", "ask_clarification", "present_file", "present_files"},
+			},
+			subagent.SubagentBash: {
+				Type:            subagent.SubagentBash,
+				MaxTurns:        4,
+				Timeout:         subagentAppCfg.timeoutFor(subagent.SubagentBash),
+				SystemPrompt:    bashSubagentPrompt,
+				Tools:           []string{"bash", "ls", "read_file", "write_file", "str_replace"},
+				DisallowedTools: []string{"task", "ask_clarification", "present_file", "present_files"},
+			},
+		},
+	})
 	registry.Register(tools.TaskTool(subagentPool))
 
 	// Create checkpoint store

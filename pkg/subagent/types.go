@@ -27,11 +27,12 @@ const (
 )
 
 type SubagentConfig struct {
-	Type         SubagentType
-	MaxTurns     int
-	Timeout      time.Duration
-	SystemPrompt string
-	Tools        []string
+	Type            SubagentType
+	MaxTurns        int
+	Timeout         time.Duration
+	SystemPrompt    string
+	Tools           []string
+	DisallowedTools []string
 }
 
 type PoolConfig struct {

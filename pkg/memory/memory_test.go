@@ -113,6 +113,79 @@ func TestServiceUpdateAndInject(t *testing.T) {
 	}
 }
 
+func TestBuildInjectionWithContextPrioritizesRelevantFacts(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 4, 1, 9, 0, 0, 0, time.UTC)
+	doc := Document{
+		SessionID: "session-relevance",
+		User: UserMemory{
+			WorkContext: "Maintains deerflow-go compatibility.",
+		},
+		Facts: []Fact{
+			{
+				ID:         "cooking",
+				Content:    "Likes collecting vintage cookware and recipe books.",
+				Category:   "personal",
+				Confidence: 0.98,
+				CreatedAt:  now.Add(-2 * time.Hour),
+				UpdatedAt:  now.Add(-2 * time.Hour),
+			},
+			{
+				ID:         "deerflow",
+				Content:    "Maintains deerflow-go gateway compatibility with DeerFlow UI.",
+				Category:   "project",
+				Confidence: 0.75,
+				CreatedAt:  now.Add(-time.Hour),
+				UpdatedAt:  now.Add(-time.Hour),
+			},
+		},
+	}
+
+	injected := BuildInjectionWithContext(doc, "Need help debugging deerflow-go gateway compatibility.", 40)
+	if !strings.Contains(injected, "Maintains deerflow-go gateway compatibility with DeerFlow UI.") {
+		t.Fatalf("expected relevant fact in injection: %q", injected)
+	}
+	if strings.Contains(injected, "Likes collecting vintage cookware") {
+		t.Fatalf("expected unrelated fact to be trimmed first: %q", injected)
+	}
+}
+
+func TestBuildInjectionWithContextFallsBackToConfidenceOrder(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC)
+	doc := Document{
+		SessionID: "session-confidence",
+		Facts: []Fact{
+			{
+				ID:         "lower",
+				Content:    "Uses Go for the project runtime.",
+				Category:   "project",
+				Confidence: 0.60,
+				CreatedAt:  now.Add(-time.Hour),
+				UpdatedAt:  now.Add(-time.Hour),
+			},
+			{
+				ID:         "higher",
+				Content:    "Prefers concise technical answers in reviews.",
+				Category:   "preference",
+				Confidence: 0.95,
+				CreatedAt:  now,
+				UpdatedAt:  now,
+			},
+		},
+	}
+
+	injected := BuildInjectionWithContext(doc, "", 12)
+	if !strings.Contains(injected, "Prefers concise technical answers in reviews.") {
+		t.Fatalf("expected highest confidence fact in injection: %q", injected)
+	}
+	if strings.Contains(injected, "Uses Go for the project runtime.") {
+		t.Fatalf("expected lower-confidence fact to be excluded under tight budget: %q", injected)
+	}
+}
+
 func TestScheduleUpdateGracefulDegradation(t *testing.T) {
 	t.Parallel()
 
