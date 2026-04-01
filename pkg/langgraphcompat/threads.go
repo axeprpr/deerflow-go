@@ -283,6 +283,9 @@ func threadMatchesSearch(session *Session, thread map[string]any, req threadSear
 	if query == "" {
 		return true
 	}
+	if threadValues, _ := thread["values"].(map[string]any); anyContainsQuery(threadValues, query) {
+		return true
+	}
 	title := ""
 	if values, _ := thread["values"].(map[string]any); values != nil {
 		title = strings.ToLower(stringFromAnyValue(values["title"]))

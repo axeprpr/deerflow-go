@@ -3,6 +3,8 @@ package langgraphcompat
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -223,6 +225,43 @@ func TestThreadSearchMatchesStructuredMessageMetadataAndToolCalls(t *testing.T) 
 		}
 		if got := asString(threads[0]["thread_id"]); got != "thread-structured" {
 			t.Fatalf("query=%q thread_id=%q want=thread-structured", query, got)
+		}
+	}
+}
+
+func TestThreadSearchMatchesArtifactsAndThreadDataPaths(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	threadID := "thread-artifacts"
+	s.ensureSession(threadID, map[string]any{
+		"title": "Website build",
+	})
+
+	outputDir := filepath.Join(s.threadRoot(threadID), "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "launch-plan.html"), []byte("<html></html>"), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+
+	for _, query := range []string{"launch-plan.html", "user-data/workspace"} {
+		resp := performCompatRequest(t, handler, http.MethodPost, "/threads/search", strings.NewReader(`{"query":"`+query+`"}`), map[string]string{
+			"Content-Type": "application/json",
+		})
+		if resp.Code != http.StatusOK {
+			t.Fatalf("query=%q status=%d body=%s", query, resp.Code, resp.Body.String())
+		}
+
+		var threads []map[string]any
+		if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+			t.Fatalf("query=%q unmarshal response: %v", query, err)
+		}
+		if len(threads) != 1 {
+			t.Fatalf("query=%q threads=%d want=1 body=%s", query, len(threads), resp.Body.String())
+		}
+		if got := asString(threads[0]["thread_id"]); got != threadID {
+			t.Fatalf("query=%q thread_id=%q want=%s", query, got, threadID)
 		}
 	}
 }
