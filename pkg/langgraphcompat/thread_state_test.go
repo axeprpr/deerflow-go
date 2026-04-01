@@ -88,6 +88,48 @@ func TestThreadStateIncludesThreadDataAndConfigurableContext(t *testing.T) {
 	}
 }
 
+func TestThreadStateFallsBackToMetadataAgentName(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	s.ensureSession("thread-agent-name", map[string]any{
+		"title":      "Agent thread",
+		"agent_name": "code-reviewer",
+	})
+
+	state := s.getThreadState("thread-agent-name")
+	if state == nil {
+		t.Fatal("state is nil")
+	}
+
+	config, ok := state.Config["configurable"].(map[string]any)
+	if !ok {
+		t.Fatalf("config=%#v", state.Config)
+	}
+	if got := asString(config["agent_name"]); got != "code-reviewer" {
+		t.Fatalf("agent_name=%q want=code-reviewer", got)
+	}
+}
+
+func TestThreadResponseFallsBackToMetadataAgentName(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	session := s.ensureSession("thread-agent-response", map[string]any{
+		"title":      "Agent thread",
+		"agent_name": "writer-bot",
+	})
+
+	resp := s.threadResponse(session)
+	config, ok := resp["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("config=%#v", resp["config"])
+	}
+	configurable, ok := config["configurable"].(map[string]any)
+	if !ok {
+		t.Fatalf("configurable=%#v", config["configurable"])
+	}
+	if got := asString(configurable["agent_name"]); got != "writer-bot" {
+		t.Fatalf("agent_name=%q want=writer-bot", got)
+	}
+}
+
 func TestThreadStateIncludesStructuredUploadedFiles(t *testing.T) {
 	s, _ := newCompatTestServer(t)
 	threadID := "thread-uploaded-files"

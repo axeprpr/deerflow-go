@@ -903,6 +903,9 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 	if configurable == nil {
 		configurable = map[string]any{}
 	}
+	if _, ok := configurable["agent_name"]; !ok {
+		configurable["agent_name"] = stringValue(session.Metadata["agent_name"])
+	}
 	if _, ok := configurable["agent_type"]; !ok {
 		configurable["agent_type"] = stringValue(session.Metadata["agent_type"])
 	}
@@ -995,6 +998,9 @@ func (s *Server) threadStateFromSession(session *Session, checkpointID string, c
 	configurable := copyMetadataMap(session.Configurable)
 	if configurable == nil {
 		configurable = map[string]any{}
+	}
+	if _, ok := configurable["agent_name"]; !ok {
+		configurable["agent_name"] = stringValue(session.Metadata["agent_name"])
 	}
 	if _, ok := configurable["agent_type"]; !ok {
 		configurable["agent_type"] = stringValue(session.Metadata["agent_type"])

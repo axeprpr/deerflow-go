@@ -1366,15 +1366,17 @@ func resolveAgentToolRegistry(base *tools.Registry, toolGroups []string) *tools.
 		case "bash":
 			addTool("bash")
 		case "file":
+			addTool("ls")
 			addTool("read_file")
 			addTool("write_file")
-			addTool("glob")
+			addTool("str_replace")
 			addTool("present_files")
 		case "file:read":
+			addTool("ls")
 			addTool("read_file")
-			addTool("glob")
 		case "file:write":
 			addTool("write_file")
+			addTool("str_replace")
 			addTool("present_files")
 		case "interaction":
 			addTool("ask_clarification")

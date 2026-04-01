@@ -711,24 +711,30 @@ func (s *Server) handleUploadsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	names, err := prepareUploadFilenames(files, seenNames)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": err.Error()})
+		return
+	}
+
 	infos := make([]map[string]any, 0, len(files))
-	for _, fh := range files {
-		name := sanitizeFilename(fh.Filename)
-		if name == "" {
-			continue
-		}
-		name = claimUniqueFilename(name, seenNames)
+	writtenPaths := make([]string, 0, len(files)*2)
+	for i, fh := range files {
+		name := names[i]
 
 		info, err := s.saveUploadedFile(threadID, uploadDir, name, fh)
 		if err != nil {
+			removeUploadedPaths(writtenPaths)
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
 			return
 		}
+		writtenPaths = append(writtenPaths, filepath.Join(uploadDir, name))
 		if mdPath, err := generateUploadMarkdownCompanion(filepath.Join(uploadDir, name)); err != nil {
 			if s.logger != nil {
 				s.logger.Printf("upload markdown conversion failed for %s/%s: %v", threadID, name, err)
 			}
 		} else if mdPath != "" {
+			writtenPaths = append(writtenPaths, mdPath)
 			mdName := filepath.Base(mdPath)
 			info["markdown_file"] = mdName
 			info["markdown_path"] = "/mnt/user-data/uploads/" + mdName
@@ -1293,6 +1299,45 @@ func sanitizePathFilename(name string) string {
 		return ""
 	}
 	return sanitizeFilename(name)
+}
+
+func prepareUploadFilenames(files []*multipart.FileHeader, seen map[string]struct{}) ([]string, error) {
+	if seen == nil {
+		seen = map[string]struct{}{}
+	}
+	names := make([]string, 0, len(files))
+	for _, fh := range files {
+		if fh == nil {
+			return nil, errBadFileName
+		}
+		name, err := validateUploadedFilename(fh.Filename)
+		if err != nil {
+			return nil, err
+		}
+		names = append(names, claimUniqueFilename(name, seen))
+	}
+	return names, nil
+}
+
+func validateUploadedFilename(name string) (string, error) {
+	raw := strings.TrimSpace(name)
+	if raw == "" || raw == "." {
+		return "", errBadFileName
+	}
+	if strings.Contains(raw, "/") || strings.Contains(raw, "\\") {
+		return "", errors.New("directory uploads are not allowed")
+	}
+	safe := sanitizeFilename(raw)
+	if safe == "" {
+		return "", errBadFileName
+	}
+	return safe, nil
+}
+
+func removeUploadedPaths(paths []string) {
+	for i := len(paths) - 1; i >= 0; i-- {
+		_ = os.Remove(paths[i])
+	}
 }
 
 func existingUploadNames(uploadDir string) (map[string]struct{}, error) {

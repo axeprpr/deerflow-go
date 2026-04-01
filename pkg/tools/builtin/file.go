@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -81,6 +82,78 @@ func GlobHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, 
 	return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: string(data)}, nil
 }
 
+func LsHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+	args := call.Arguments
+	path, ok := args["path"].(string)
+	if !ok || strings.TrimSpace(path) == "" {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("path is required")
+	}
+	path = tools.ResolveVirtualPath(ctx, path)
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("list failed: %w", err)
+	}
+	if !info.IsDir() {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("path is not a directory")
+	}
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("list failed: %w", err)
+	}
+	if len(entries) == 0 {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: "(empty)"}, nil
+	}
+
+	lines := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() {
+			name += "/"
+		}
+		lines = append(lines, name)
+	}
+	sort.Strings(lines)
+	return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: strings.Join(lines, "\n")}, nil
+}
+
+func StrReplaceHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+	args := call.Arguments
+	path, ok := args["path"].(string)
+	if !ok || strings.TrimSpace(path) == "" {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("path is required")
+	}
+	oldStr, ok := args["old_str"].(string)
+	if !ok {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("old_str is required")
+	}
+	newStr, ok := args["new_str"].(string)
+	if !ok {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("new_str is required")
+	}
+	replaceAll, _ := args["replace_all"].(bool)
+	path = tools.ResolveVirtualPath(ctx, path)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("replace failed: %w", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, oldStr) {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("string to replace not found")
+	}
+	if replaceAll {
+		content = strings.ReplaceAll(content, oldStr, newStr)
+	} else {
+		content = strings.Replace(content, oldStr, newStr, 1)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("replace failed: %w", err)
+	}
+	return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: "OK"}, nil
+}
+
 func GlobTool() models.Tool {
 	return models.Tool{
 		Name:        "glob",
@@ -95,6 +168,22 @@ func GlobTool() models.Tool {
 			"required": []any{"pattern"},
 		},
 		Handler: GlobHandler,
+	}
+}
+
+func LsTool() models.Tool {
+	return models.Tool{
+		Name:        "ls",
+		Description: "List the contents of a directory.",
+		Groups:      []string{"builtin", "file_ops"},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path": map[string]any{"type": "string", "description": "Directory path to list"},
+			},
+			"required": []any{"path"},
+		},
+		Handler: LsHandler,
 	}
 }
 
@@ -133,11 +222,32 @@ func WriteFileTool() models.Tool {
 	}
 }
 
+func StrReplaceTool() models.Tool {
+	return models.Tool{
+		Name:        "str_replace",
+		Description: "Replace a string in a file.",
+		Groups:      []string{"builtin", "file_ops"},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path":        map[string]any{"type": "string", "description": "File path to update"},
+				"old_str":     map[string]any{"type": "string", "description": "Substring to replace"},
+				"new_str":     map[string]any{"type": "string", "description": "Replacement string"},
+				"replace_all": map[string]any{"type": "boolean", "description": "Replace all occurrences instead of just the first"},
+			},
+			"required": []any{"path", "old_str", "new_str"},
+		},
+		Handler: StrReplaceHandler,
+	}
+}
+
 // FileTools returns all file operation tools.
 func FileTools() []models.Tool {
 	return []models.Tool{
+		LsTool(),
 		ReadFileTool(),
 		WriteFileTool(),
+		StrReplaceTool(),
 		GlobTool(),
 	}
 }

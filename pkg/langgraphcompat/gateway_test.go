@@ -910,6 +910,75 @@ func TestUploadsEndpointIgnoresMarkdownConversionFailures(t *testing.T) {
 	}
 }
 
+func TestValidateUploadedFilenameRejectsDirectoryPaths(t *testing.T) {
+	_, err := validateUploadedFilename("nested/report.txt")
+	if err == nil {
+		t.Fatal("expected directory-style filename to be rejected")
+	}
+	if !strings.Contains(err.Error(), "directory uploads are not allowed") {
+		t.Fatalf("err=%q want directory upload error", err)
+	}
+}
+
+func TestUploadsEndpointRollsBackWrittenFilesOnSaveFailure(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-upload-rollback"
+	s.ensureSession(threadID, nil)
+
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir upload dir: %v", err)
+	}
+	blockedPath := filepath.Join(uploadDir, "blocked.txt")
+	if err := os.MkdirAll(blockedPath, 0o755); err != nil {
+		t.Fatalf("mkdir blocked path: %v", err)
+	}
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	firstPart, err := w.CreateFormFile("files", "first.txt")
+	if err != nil {
+		t.Fatalf("create first form file: %v", err)
+	}
+	if _, err := firstPart.Write([]byte("first artifact")); err != nil {
+		t.Fatalf("write first form file: %v", err)
+	}
+	secondPart, err := w.CreateFormFile("files", "blocked.txt")
+	if err != nil {
+		t.Fatalf("create second form file: %v", err)
+	}
+	if _, err := secondPart.Write([]byte("should fail")); err != nil {
+		t.Fatalf("write second form file: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/"+threadID+"/uploads", &body, map[string]string{"Content-Type": w.FormDataContentType()})
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("upload status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	if _, err := os.Stat(filepath.Join(uploadDir, "first.txt")); !os.IsNotExist(err) {
+		t.Fatalf("expected first.txt to be rolled back, stat err=%v", err)
+	}
+
+	listResp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/uploads/list", nil, nil)
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", listResp.Code, listResp.Body.String())
+	}
+	var listed struct {
+		Count int              `json:"count"`
+		Files []map[string]any `json:"files"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if listed.Count != 0 || len(listed.Files) != 0 {
+		t.Fatalf("expected empty uploads after rollback, got count=%d files=%d", listed.Count, len(listed.Files))
+	}
+}
+
 func TestArtifactEndpointForcesDownloadForHTML(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-active-artifact"
@@ -2713,8 +2782,8 @@ func TestRunsStreamAppliesCustomAgentRuntimeConfig(t *testing.T) {
 	for _, tool := range provider.lastReq.Tools {
 		gotTools = append(gotTools, tool.Name)
 	}
-	if strings.Join(gotTools, ",") != "ask_clarification,bash,glob,present_files,read_file" {
-		t.Fatalf("tools=%q want=%q", strings.Join(gotTools, ","), "ask_clarification,bash,glob,present_files,read_file")
+	if strings.Join(gotTools, ",") != "ask_clarification,bash,ls,present_files,read_file" {
+		t.Fatalf("tools=%q want=%q", strings.Join(gotTools, ","), "ask_clarification,bash,ls,present_files,read_file")
 	}
 }
 
@@ -3210,9 +3279,10 @@ func newRuntimeToolRegistry(t *testing.T) *tools.Registry {
 		{Name: "bash", Groups: []string{"builtin"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
 		{Name: "read_file", Groups: []string{"builtin", "file_ops"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
 		{Name: "write_file", Groups: []string{"builtin", "file_ops"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
-		{Name: "glob", Groups: []string{"builtin", "file_ops"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
+		{Name: "ls", Groups: []string{"builtin", "file_ops"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
 		{Name: "present_file", Groups: []string{"builtin", "file_ops"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
 		{Name: "ask_clarification", Groups: []string{"builtin", "interaction"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
+		{Name: "str_replace", Groups: []string{"builtin", "file_ops"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
 		{Name: "task", Groups: []string{"agent"}, Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }},
 	} {
 		if err := registry.Register(tool); err != nil {

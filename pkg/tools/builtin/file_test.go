@@ -98,6 +98,35 @@ func TestGlobHandlerResolvesVirtualPattern(t *testing.T) {
 	}
 }
 
+func TestLsHandlerListsResolvedVirtualDirectory(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	threadID := "thread-ls-tool"
+	dir := filepath.Join(root, "threads", threadID, "user-data", "uploads")
+	if err := os.MkdirAll(filepath.Join(dir, "nested"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	ctx := tools.WithThreadID(context.Background(), threadID)
+	result, err := LsHandler(ctx, models.ToolCall{
+		ID:   "call-ls-1",
+		Name: "ls",
+		Arguments: map[string]any{
+			"path": "/mnt/user-data/uploads",
+		},
+	})
+	if err != nil {
+		t.Fatalf("LsHandler() error = %v", err)
+	}
+	if !strings.Contains(result.Content, "a.txt") || !strings.Contains(result.Content, "nested/") {
+		t.Fatalf("ls result=%q", result.Content)
+	}
+}
+
 func TestReadFileHandlerResolvesACPWorkspaceVirtualPath(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DEERFLOW_DATA_ROOT", root)
@@ -212,6 +241,45 @@ func TestWriteFileHandlerAppendMode(t *testing.T) {
 	}
 	if string(data) != "hello world" {
 		t.Fatalf("content=%q want %q", string(data), "hello world")
+	}
+}
+
+func TestStrReplaceHandlerUpdatesResolvedFile(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	threadID := "thread-str-replace"
+	target := filepath.Join(root, "threads", threadID, "user-data", "workspace", "draft.txt")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("hello world"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	ctx := tools.WithThreadID(context.Background(), threadID)
+	result, err := StrReplaceHandler(ctx, models.ToolCall{
+		ID:   "call-replace-1",
+		Name: "str_replace",
+		Arguments: map[string]any{
+			"path":    "draft.txt",
+			"old_str": "world",
+			"new_str": "deerflow",
+		},
+	})
+	if err != nil {
+		t.Fatalf("StrReplaceHandler() error = %v", err)
+	}
+	if result.Content != "OK" {
+		t.Fatalf("content=%q want OK", result.Content)
+	}
+
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if string(data) != "hello deerflow" {
+		t.Fatalf("content=%q want %q", string(data), "hello deerflow")
 	}
 }
 
