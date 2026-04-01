@@ -1050,6 +1050,32 @@ func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 	}
 }
 
+func TestArtifactEndpointServesPresentedSourcePathOutsideThreadRoot(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-presented-artifact"
+	session := s.ensureSession(threadID, nil)
+
+	externalDir := t.TempDir()
+	externalPath := filepath.Join(externalDir, "report.md")
+	if err := os.WriteFile(externalPath, []byte("# external report\n"), 0o644); err != nil {
+		t.Fatalf("write external artifact: %v", err)
+	}
+	if err := session.PresentFiles.Register(tools.PresentFile{
+		Path:       "/mnt/user-data/outputs/report.md",
+		SourcePath: externalPath,
+	}); err != nil {
+		t.Fatalf("register present file: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/report.md", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Body.String(); got != "# external report\n" {
+		t.Fatalf("body=%q want external artifact contents", got)
+	}
+}
+
 func TestUploadsEndpointIgnoresMarkdownConversionFailures(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-upload-conversion-failure"

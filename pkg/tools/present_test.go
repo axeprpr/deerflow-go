@@ -36,6 +36,9 @@ func TestPresentFileRegistryRegisterTextFile(t *testing.T) {
 	if file.Path != path {
 		t.Errorf("Path = %q, want %q", file.Path, path)
 	}
+	if file.SourcePath != path {
+		t.Errorf("SourcePath = %q, want %q", file.SourcePath, path)
+	}
 	if file.Description != "Generated report" {
 		t.Errorf("Description = %q, want %q", file.Description, "Generated report")
 	}
@@ -124,6 +127,9 @@ func TestPresentFileRegistryGetAndClear(t *testing.T) {
 	}
 	if got.Path != file.Path {
 		t.Errorf("Get path = %q, want %q", got.Path, file.Path)
+	}
+	if got.SourcePath != file.SourcePath {
+		t.Errorf("Get source path = %q, want %q", got.SourcePath, file.SourcePath)
 	}
 
 	registry.Clear()

@@ -102,6 +102,7 @@ func (r *PresentFileRegistry) Register(file PresentFile) error {
 	r.files[id] = PresentFile{
 		ID:          id,
 		Path:        normalizedPath,
+		SourcePath:  absSourcePath,
 		Description: description,
 		MimeType:    mimeType,
 		Content:     content,

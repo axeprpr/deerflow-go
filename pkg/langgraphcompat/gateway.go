@@ -838,7 +838,7 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	absPath, err := s.resolveArtifactPath(threadID, artifactPath)
+	absPath, err := s.resolvePresentedArtifactPath(threadID, artifactPath)
 	if err != nil {
 		http.Error(w, err.Error(), gatewayPathErrorStatus(err))
 		return
@@ -861,6 +861,63 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+}
+
+func (s *Server) resolvePresentedArtifactPath(threadID, artifactPath string) (string, error) {
+	if resolved, ok := s.presentedArtifactSourcePath(threadID, artifactPath); ok {
+		return resolved, nil
+	}
+	return s.resolveArtifactPath(threadID, artifactPath)
+}
+
+func (s *Server) presentedArtifactSourcePath(threadID, artifactPath string) (string, bool) {
+	if s == nil {
+		return "", false
+	}
+
+	s.sessionsMu.RLock()
+	session := s.sessions[threadID]
+	s.sessionsMu.RUnlock()
+	if session == nil || session.PresentFiles == nil {
+		return "", false
+	}
+
+	lookup := normalizePresentedArtifactLookupPath(artifactPath)
+	if lookup == "" {
+		return "", false
+	}
+
+	for _, file := range session.PresentFiles.List() {
+		if normalizePresentedArtifactLookupPath(file.Path) != lookup {
+			continue
+		}
+		sourcePath := strings.TrimSpace(file.SourcePath)
+		if sourcePath == "" {
+			sourcePath = strings.TrimSpace(file.Path)
+		}
+		if sourcePath == "" || strings.HasPrefix(sourcePath, "/mnt/") {
+			return "", false
+		}
+		if absPath, err := filepath.Abs(sourcePath); err == nil {
+			return absPath, true
+		}
+		return filepath.Clean(sourcePath), true
+	}
+	return "", false
+}
+
+func normalizePresentedArtifactLookupPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "/mnt/") {
+		return filepath.ToSlash(filepath.Clean(path))
+	}
+	if strings.HasPrefix(path, "mnt/") {
+		return "/" + filepath.ToSlash(filepath.Clean(path))
+	}
+	return filepath.Clean(path)
 }
 
 func (s *Server) handleSkillArchiveRootPreview(w http.ResponseWriter, r *http.Request, threadID, artifactPath string) bool {
