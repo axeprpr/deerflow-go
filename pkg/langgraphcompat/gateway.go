@@ -745,7 +745,7 @@ func (s *Server) handleUploadsList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	uploadDir := s.uploadsDir(threadID)
-	entries, err := os.ReadDir(uploadDir)
+	_, err := os.ReadDir(uploadDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			writeJSON(w, http.StatusOK, map[string]any{"files": []any{}, "count": 0})
@@ -755,33 +755,7 @@ func (s *Server) handleUploadsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	files := make([]map[string]any, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if isGeneratedMarkdownCompanion(uploadDir, name) {
-			continue
-		}
-		fullPath := filepath.Join(uploadDir, name)
-		stat, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		info := s.uploadInfo(threadID, fullPath, name, stat.Size(), stat.ModTime().Unix())
-		s.attachMarkdownCompanionInfo(threadID, uploadDir, name, info)
-		files = append(files, info)
-	}
-
-	sort.Slice(files, func(i, j int) bool {
-		li := toInt64(files[i]["modified"])
-		lj := toInt64(files[j]["modified"])
-		if li == lj {
-			return asString(files[i]["filename"]) < asString(files[j]["filename"])
-		}
-		return li > lj
-	})
+	files := s.listUploadedFiles(threadID)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"files": files,
@@ -997,6 +971,43 @@ func (s *Server) attachMarkdownCompanionInfo(threadID, uploadDir, name string, i
 	if strings.TrimSpace(threadID) != "" {
 		info["markdown_artifact_url"] = uploadArtifactURL(threadID, mdName)
 	}
+}
+
+func (s *Server) listUploadedFiles(threadID string) []map[string]any {
+	uploadDir := s.uploadsDir(threadID)
+	entries, err := os.ReadDir(uploadDir)
+	if err != nil {
+		return nil
+	}
+
+	files := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if isGeneratedMarkdownCompanion(uploadDir, name) {
+			continue
+		}
+		stat, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		info := s.uploadInfo(threadID, filepath.Join(uploadDir, name), name, stat.Size(), stat.ModTime().Unix())
+		info["extension"] = strings.ToLower(filepath.Ext(name))
+		s.attachMarkdownCompanionInfo(threadID, uploadDir, name, info)
+		files = append(files, info)
+	}
+
+	sort.Slice(files, func(i, j int) bool {
+		li := toInt64(files[i]["modified"])
+		lj := toInt64(files[j]["modified"])
+		if li == lj {
+			return asString(files[i]["filename"]) < asString(files[j]["filename"])
+		}
+		return li > lj
+	})
+	return files
 }
 
 func (s *Server) uploadInfo(threadID, fullPath, name string, size int64, modified int64) map[string]any {

@@ -923,14 +923,12 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 				"error":          evt.ToolEvent.Error,
 			},
 		})
-		if evt.Result != nil && evt.Result.ToolName == "write_todos" {
-			state := s.getThreadState(run.ThreadID)
-			if state != nil {
-				s.recordAndSendEvent(w, flusher, run, "updates", map[string]any{
-					"agent": map[string]any{
-						"todos": state.Values["todos"],
-					},
-				})
+		if evt.Result != nil {
+			switch evt.Result.ToolName {
+			case "write_todos":
+				s.sendThreadUpdateEvent(w, flusher, run, "todos")
+			case "present_file", "present_files":
+				s.sendThreadUpdateEvent(w, flusher, run, "artifacts")
 			}
 		}
 	case agent.AgentEventEnd:
@@ -960,6 +958,30 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 		}
 		s.recordAndSendEvent(w, flusher, run, "error", errData)
 	}
+}
+
+func (s *Server) sendThreadUpdateEvent(w http.ResponseWriter, flusher http.Flusher, run *Run, keys ...string) {
+	if s == nil || run == nil || len(keys) == 0 {
+		return
+	}
+	state := s.getThreadState(run.ThreadID)
+	if state == nil {
+		return
+	}
+	agentUpdate := make(map[string]any, len(keys))
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		agentUpdate[key] = state.Values[key]
+	}
+	if len(agentUpdate) == 0 {
+		return
+	}
+	s.recordAndSendEvent(w, flusher, run, "updates", map[string]any{
+		"agent": agentUpdate,
+	})
 }
 
 func usageMetadataFromAgentUsage(usage *agent.Usage) map[string]int {

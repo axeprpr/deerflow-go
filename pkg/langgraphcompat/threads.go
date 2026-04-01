@@ -916,10 +916,11 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 			"configurable": configurable,
 		},
 		"values": map[string]any{
-			"title":       session.Metadata["title"],
-			"artifacts":   s.sessionArtifactPaths(session),
-			"todos":       todosToAny(session.Todos),
-			"thread_data": s.threadDataState(session.ThreadID),
+			"title":          session.Metadata["title"],
+			"artifacts":      s.sessionArtifactPaths(session),
+			"todos":          todosToAny(session.Todos),
+			"thread_data":    s.threadDataState(session.ThreadID),
+			"uploaded_files": s.listUploadedFiles(session.ThreadID),
 		},
 	}
 }
@@ -984,11 +985,12 @@ func (s *Server) threadStateFromSession(session *Session, checkpointID string, c
 		return nil
 	}
 	values := map[string]any{
-		"messages":    s.messagesToLangChain(session.Messages),
-		"title":       stringValue(session.Metadata["title"]),
-		"artifacts":   s.sessionArtifactPaths(session),
-		"todos":       todosToAny(session.Todos),
-		"thread_data": s.threadDataState(session.ThreadID),
+		"messages":       s.messagesToLangChain(session.Messages),
+		"title":          stringValue(session.Metadata["title"]),
+		"artifacts":      s.sessionArtifactPaths(session),
+		"todos":          todosToAny(session.Todos),
+		"thread_data":    s.threadDataState(session.ThreadID),
+		"uploaded_files": s.listUploadedFiles(session.ThreadID),
 	}
 	configurable := copyMetadataMap(session.Configurable)
 	if configurable == nil {

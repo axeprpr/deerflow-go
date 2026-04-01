@@ -129,6 +129,55 @@ func TestThreadsListSupportsSelectQueryParameter(t *testing.T) {
 	}
 }
 
+func TestThreadsListDefaultValuesIncludeUploadedFiles(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-list-uploads"
+	s.ensureSession(threadID, map[string]any{"title": "Uploads"})
+
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "notes.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/threads", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var threads []map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(threads) != 1 {
+		t.Fatalf("threads=%d want=1", len(threads))
+	}
+
+	values, ok := threads[0]["values"].(map[string]any)
+	if !ok {
+		t.Fatalf("values=%#v", threads[0]["values"])
+	}
+	uploadedFiles, ok := values["uploaded_files"].([]any)
+	if !ok {
+		t.Fatalf("uploaded_files=%#v", values["uploaded_files"])
+	}
+	if len(uploadedFiles) != 1 {
+		t.Fatalf("uploaded_files len=%d want=1", len(uploadedFiles))
+	}
+	file, ok := uploadedFiles[0].(map[string]any)
+	if !ok {
+		t.Fatalf("uploaded_files[0]=%#v", uploadedFiles[0])
+	}
+	if got := asString(file["filename"]); got != "notes.txt" {
+		t.Fatalf("filename=%q want=notes.txt", got)
+	}
+	if got := asString(file["extension"]); got != ".txt" {
+		t.Fatalf("extension=%q want=.txt", got)
+	}
+}
+
 func TestThreadSearchFiltersByQueryStatusMetadataAndValues(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 

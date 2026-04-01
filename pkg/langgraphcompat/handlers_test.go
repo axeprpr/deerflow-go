@@ -1,11 +1,16 @@
 package langgraphcompat
 
 import (
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/models"
+	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
 func TestFilterTransientMessagesDropsViewedImageContext(t *testing.T) {
@@ -256,5 +261,56 @@ func TestForwardAgentEventEmitsFinalAssistantMessageTupleWithUsage(t *testing.T)
 	}
 	if !found {
 		t.Fatal("missing final assistant messages-tuple payload")
+	}
+}
+
+func TestForwardAgentEventEmitsArtifactUpdatesWhenPresentToolCompletes(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-artifacts",
+		ThreadID:    "thread-artifacts",
+		AssistantID: "lead_agent",
+		Status:      "running",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.saveRun(run)
+
+	session := s.ensureSession(run.ThreadID, nil)
+	sourcePath := filepath.Join(t.TempDir(), "report.md")
+	if err := os.WriteFile(sourcePath, []byte("# report\n"), 0o644); err != nil {
+		t.Fatalf("write artifact source: %v", err)
+	}
+	if err := session.PresentFiles.Register(tools.PresentFile{
+		Path:       "/mnt/user-data/outputs/report.md",
+		SourcePath: sourcePath,
+	}); err != nil {
+		t.Fatalf("register present file: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	s.forwardAgentEvent(rec, rec, run, agent.AgentEvent{
+		Type:      agent.AgentEventToolCallEnd,
+		MessageID: "tool-msg-artifacts",
+		ToolEvent: &agent.ToolCallEvent{
+			ID:          "call-artifacts",
+			Name:        "present_files",
+			Status:      models.CallStatusCompleted,
+			CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		},
+		Result: &models.ToolResult{
+			CallID:   "call-artifacts",
+			ToolName: "present_files",
+			Status:   models.CallStatusCompleted,
+			Content:  "Presented 1 file(s)",
+		},
+	})
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: updates") {
+		t.Fatalf("expected updates event in %q", body)
+	}
+	if !strings.Contains(body, `"artifacts":["/mnt/user-data/outputs/report.md"]`) {
+		t.Fatalf("expected artifact update payload in %q", body)
 	}
 }

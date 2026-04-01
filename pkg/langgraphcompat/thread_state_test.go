@@ -2,6 +2,8 @@ package langgraphcompat
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -83,5 +85,47 @@ func TestThreadStateIncludesThreadDataAndConfigurableContext(t *testing.T) {
 	}
 	if got := asString(config["reasoning_effort"]); got != "high" {
 		t.Fatalf("reasoning_effort=%q want=high", got)
+	}
+}
+
+func TestThreadStateIncludesStructuredUploadedFiles(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	threadID := "thread-uploaded-files"
+	s.ensureSession(threadID, map[string]any{"title": "Uploads"})
+
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "report.pdf"), []byte("pdf"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "report.md"), []byte("# Report"), 0o644); err != nil {
+		t.Fatalf("write markdown companion: %v", err)
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("state is nil")
+	}
+
+	uploadedFiles, ok := state.Values["uploaded_files"].([]map[string]any)
+	if !ok {
+		t.Fatalf("uploaded_files=%#v", state.Values["uploaded_files"])
+	}
+	if len(uploadedFiles) != 1 {
+		t.Fatalf("uploaded_files len=%d want=1", len(uploadedFiles))
+	}
+	if got := asString(uploadedFiles[0]["filename"]); got != "report.pdf" {
+		t.Fatalf("filename=%q want=report.pdf", got)
+	}
+	if got := asString(uploadedFiles[0]["path"]); got != "/mnt/user-data/uploads/report.pdf" {
+		t.Fatalf("path=%q want=/mnt/user-data/uploads/report.pdf", got)
+	}
+	if got := asString(uploadedFiles[0]["extension"]); got != ".pdf" {
+		t.Fatalf("extension=%q want=.pdf", got)
+	}
+	if got := asString(uploadedFiles[0]["markdown_path"]); got != "/mnt/user-data/uploads/report.md" {
+		t.Fatalf("markdown_path=%q want=/mnt/user-data/uploads/report.md", got)
 	}
 }
