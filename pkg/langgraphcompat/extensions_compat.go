@@ -30,13 +30,15 @@ func resolveGatewayExtensionsConfigPath() string {
 	candidates := []string{
 		filepath.Join(cwd, "extensions_config.json"),
 		filepath.Join(filepath.Dir(cwd), "extensions_config.json"),
+		filepath.Join(cwd, "mcp_config.json"),
+		filepath.Join(filepath.Dir(cwd), "mcp_config.json"),
 	}
 	for _, candidate := range candidates {
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			return candidate
 		}
 	}
-	return candidates[0]
+	return filepath.Join(cwd, "extensions_config.json")
 }
 
 func (s *Server) loadGatewayExtensionsConfig() error {
@@ -52,8 +54,18 @@ func (s *Server) loadGatewayExtensionsConfig() error {
 		return err
 	}
 
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	raw = resolveGatewayExtensionsEnvVariables(raw).(map[string]any)
+
 	var cfg gatewayExtensionsConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	normalized, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(normalized, &cfg); err != nil {
 		return err
 	}
 
@@ -94,6 +106,33 @@ func (s *Server) loadGatewayExtensionsConfig() error {
 		s.skills = mergeGatewaySkills(defaultGatewaySkills(), merged)
 	}
 	return nil
+}
+
+func resolveGatewayExtensionsEnvVariables(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		resolved := make(map[string]any, len(v))
+		for key, item := range v {
+			resolved[key] = resolveGatewayExtensionsEnvVariables(item)
+		}
+		return resolved
+	case []any:
+		resolved := make([]any, len(v))
+		for i, item := range v {
+			resolved[i] = resolveGatewayExtensionsEnvVariables(item)
+		}
+		return resolved
+	case string:
+		if strings.HasPrefix(v, "$") {
+			if envValue, ok := os.LookupEnv(strings.TrimPrefix(v, "$")); ok {
+				return envValue
+			}
+			return ""
+		}
+		return v
+	default:
+		return value
+	}
 }
 
 func (s *Server) persistGatewayExtensionsConfig() error {

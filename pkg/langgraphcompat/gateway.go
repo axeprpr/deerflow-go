@@ -2186,13 +2186,7 @@ func splitSkillStorageKey(key string) (string, string) {
 
 func defaultGatewayMCPConfig() gatewayMCPConfig {
 	return gatewayMCPConfig{
-		MCPServers: map[string]gatewayMCPServerConfig{
-			"default": {
-				Type:        "stdio",
-				Enabled:     false,
-				Description: "Default MCP server placeholder for deerflow-go.",
-			},
-		},
+		MCPServers: map[string]gatewayMCPServerConfig{},
 	}
 }
 

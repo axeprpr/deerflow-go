@@ -1,11 +1,5 @@
 {
-  "mcpServers": {
-    "default": {
-      "type": "stdio",
-      "enabled": false,
-      "description": "Default MCP server placeholder for deerflow-go."
-    }
-  },
+  "mcpServers": {},
   "skills": {
     "code-assist": {
       "enabled": true
