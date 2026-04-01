@@ -183,6 +183,21 @@ func TestNewServerEnablesFileBackedMemoryWithoutPostgres(t *testing.T) {
 	}
 }
 
+func TestNewServerMatchesUpstreamSubagentConcurrency(t *testing.T) {
+	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
+
+	s, err := NewServer(":0", "", "test-model")
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	if s.subagents == nil {
+		t.Fatal("subagents is nil")
+	}
+	if got := s.subagents.MaxConcurrent(); got != defaultGatewaySubagentMaxConcurrent {
+		t.Fatalf("subagent max concurrent=%d want=%d", got, defaultGatewaySubagentMaxConcurrent)
+	}
+}
+
 func TestMemoryConfigReportsFileBackedStoragePath(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DEERFLOW_DATA_ROOT", root)

@@ -195,3 +195,21 @@ func TestPoolResolveConfigPreservesDisallowedTools(t *testing.T) {
 		t.Fatalf("override disallowed=%v", override.DisallowedTools)
 	}
 }
+
+func TestPoolDefaultConfigsMatchUpstreamTurns(t *testing.T) {
+	pool := NewPool(fakeExecutor{
+		execute: func(ctx context.Context, task *Task, emit func(TaskEvent)) (ExecutionResult, error) {
+			return ExecutionResult{}, nil
+		},
+	}, PoolConfig{Timeout: time.Second})
+
+	general := pool.resolveConfig(SubagentConfig{Type: SubagentGeneralPurpose})
+	if general.MaxTurns != defaultGeneralPurposeMaxTurns {
+		t.Fatalf("general max turns=%d want=%d", general.MaxTurns, defaultGeneralPurposeMaxTurns)
+	}
+
+	bash := pool.resolveConfig(SubagentConfig{Type: SubagentBash})
+	if bash.MaxTurns != defaultBashMaxTurns {
+		t.Fatalf("bash max turns=%d want=%d", bash.MaxTurns, defaultBashMaxTurns)
+	}
+}

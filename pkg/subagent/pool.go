@@ -16,6 +16,11 @@ import (
 var taskSeq uint64
 var taskRequestSeq uint64
 
+const (
+	defaultGeneralPurposeMaxTurns = 50
+	defaultBashMaxTurns           = 30
+)
+
 type Pool struct {
 	executor Executor
 	tasks    sync.Map
@@ -37,13 +42,13 @@ func NewPool(executor Executor, cfg PoolConfig) *Pool {
 		cfg.Defaults = map[SubagentType]SubagentConfig{
 			SubagentGeneralPurpose: {
 				Type:         SubagentGeneralPurpose,
-				MaxTurns:     6,
+				MaxTurns:     defaultGeneralPurposeMaxTurns,
 				Timeout:      cfg.Timeout,
 				SystemPrompt: "You are a general-purpose subagent working on a delegated task. Complete it autonomously and return a concise, actionable result.",
 			},
 			SubagentBash: {
 				Type:            SubagentBash,
-				MaxTurns:        4,
+				MaxTurns:        defaultBashMaxTurns,
 				Timeout:         cfg.Timeout,
 				SystemPrompt:    "You are a bash execution specialist. Run the requested commands carefully and report the result clearly.",
 				Tools:           []string{"bash", "ls", "read_file", "write_file", "str_replace"},
@@ -56,6 +61,13 @@ func NewPool(executor Executor, cfg PoolConfig) *Pool {
 		cfg:      cfg,
 		sem:      make(chan struct{}, cfg.MaxConcurrent),
 	}
+}
+
+func (p *Pool) MaxConcurrent() int {
+	if p == nil {
+		return 0
+	}
+	return cap(p.sem)
 }
 
 func (p *Pool) StartTask(ctx context.Context, description, prompt string, cfg SubagentConfig) (*Task, error) {

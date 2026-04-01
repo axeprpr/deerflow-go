@@ -171,6 +171,8 @@ type StreamEvent struct {
 	ThreadID string
 }
 
+const defaultGatewaySubagentMaxConcurrent = 3
+
 func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) {
 	logger := log.Default()
 	ctx := context.Background()
@@ -202,25 +204,9 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 	subagentAppCfg := loadSubagentsAppConfig()
 	subagentExecutor := agent.NewSubagentExecutor(provider, registry, sb)
 	subagentPool := subagent.NewPool(subagentExecutor, subagent.PoolConfig{
-		MaxConcurrent: 2,
+		MaxConcurrent: defaultGatewaySubagentMaxConcurrent,
 		Timeout:       subagentAppCfg.timeoutFor(subagent.SubagentGeneralPurpose),
-		Defaults: map[subagent.SubagentType]subagent.SubagentConfig{
-			subagent.SubagentGeneralPurpose: {
-				Type:            subagent.SubagentGeneralPurpose,
-				MaxTurns:        6,
-				Timeout:         subagentAppCfg.timeoutFor(subagent.SubagentGeneralPurpose),
-				SystemPrompt:    generalPurposeSubagentPrompt,
-				DisallowedTools: []string{"task", "ask_clarification", "present_file", "present_files"},
-			},
-			subagent.SubagentBash: {
-				Type:            subagent.SubagentBash,
-				MaxTurns:        4,
-				Timeout:         subagentAppCfg.timeoutFor(subagent.SubagentBash),
-				SystemPrompt:    bashSubagentPrompt,
-				Tools:           []string{"bash", "ls", "read_file", "write_file", "str_replace"},
-				DisallowedTools: []string{"task", "ask_clarification", "present_file", "present_files"},
-			},
-		},
+		Defaults:      gatewayDefaultSubagentConfigs(subagentAppCfg),
 	})
 	registry.Register(tools.TaskTool(subagentPool))
 

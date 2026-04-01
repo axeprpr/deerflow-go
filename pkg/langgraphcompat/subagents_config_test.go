@@ -70,3 +70,23 @@ subagents:
 		t.Fatalf("bash timeout=%s want=%s", got, 480*time.Second)
 	}
 }
+
+func TestGatewayDefaultSubagentConfigsMatchUpstreamTurns(t *testing.T) {
+	cfg := gatewayDefaultSubagentConfigs(loadSubagentsAppConfig())
+
+	general, ok := cfg[subagent.SubagentGeneralPurpose]
+	if !ok {
+		t.Fatal("missing general-purpose config")
+	}
+	if general.MaxTurns != defaultGatewayGeneralPurposeSubagentMaxTurns {
+		t.Fatalf("general max turns=%d want=%d", general.MaxTurns, defaultGatewayGeneralPurposeSubagentMaxTurns)
+	}
+
+	bash, ok := cfg[subagent.SubagentBash]
+	if !ok {
+		t.Fatal("missing bash config")
+	}
+	if bash.MaxTurns != defaultGatewayBashSubagentMaxTurns {
+		t.Fatalf("bash max turns=%d want=%d", bash.MaxTurns, defaultGatewayBashSubagentMaxTurns)
+	}
+}
