@@ -262,7 +262,7 @@ func (r *Registry) executeWithSandbox(ctx context.Context, call models.ToolCall,
 			CallID:      call.ID,
 			ToolName:    call.Name,
 			Status:      models.CallStatusFailed,
-			Error:       err.Error(),
+			Error:       FormatToolExecutionError(call.Name, err),
 			CompletedAt: time.Now().UTC(),
 		}, err
 	}
@@ -307,7 +307,7 @@ func (r *Registry) executeWithSandbox(ctx context.Context, call models.ToolCall,
 			result.Status = models.CallStatusFailed
 		}
 		if result.Error == "" {
-			result.Error = err.Error()
+			result.Error = FormatToolExecutionError(call.Name, err)
 		}
 		return result, err
 	}
@@ -339,6 +339,44 @@ func formatToolPanicMessage(toolName string, recovered any) string {
 		toolName,
 		detail,
 	)
+}
+
+func FormatToolExecutionError(toolName string, err error) string {
+	detail := ""
+	if err != nil {
+		detail = strings.TrimSpace(err.Error())
+	}
+	if detail == "" {
+		detail = "tool execution failed"
+	}
+	if len(detail) > 500 {
+		detail = detail[:497] + "..."
+	}
+	errType := "error"
+	if err != nil {
+		errType = errTypeName(err)
+	}
+	return fmt.Sprintf(
+		"Error: Tool %q failed with %s: %s. Continue with available context, or choose an alternative tool.",
+		toolName,
+		errType,
+		detail,
+	)
+}
+
+func errTypeName(err error) string {
+	if err == nil {
+		return "error"
+	}
+	typeName := fmt.Sprintf("%T", err)
+	if idx := strings.LastIndex(typeName, "."); idx >= 0 && idx+1 < len(typeName) {
+		typeName = typeName[idx+1:]
+	}
+	typeName = strings.TrimPrefix(typeName, "*")
+	if strings.TrimSpace(typeName) == "" {
+		return "error"
+	}
+	return typeName
 }
 
 func (r *Registry) Restrict(allowed []string) *Registry {

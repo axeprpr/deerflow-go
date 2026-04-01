@@ -266,6 +266,39 @@ func TestRegistry_ExecuteRecoversFromToolPanic(t *testing.T) {
 	}
 }
 
+func TestRegistry_ExecuteFormatsToolErrors(t *testing.T) {
+	r := NewRegistry()
+
+	if err := r.Register(models.Tool{
+		Name:        "error_tool",
+		Description: "Returns an error",
+		Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+			return models.ToolResult{}, errors.New("backend unavailable")
+		},
+	}); err != nil {
+		t.Fatalf("register failed: %v", err)
+	}
+
+	result, err := r.Execute(context.Background(), models.ToolCall{
+		ID:     "call-error",
+		Name:   "error_tool",
+		Status: models.CallStatusPending,
+	})
+
+	if err == nil {
+		t.Fatal("expected handler error")
+	}
+	if result.Status != models.CallStatusFailed {
+		t.Fatalf("status = %q, want %q", result.Status, models.CallStatusFailed)
+	}
+	if !strings.Contains(result.Error, `Error: Tool "error_tool" failed with errorString: backend unavailable.`) {
+		t.Fatalf("error = %q", result.Error)
+	}
+	if !strings.Contains(result.Error, "Continue with available context, or choose an alternative tool.") {
+		t.Fatalf("error = %q", result.Error)
+	}
+}
+
 func TestWithSandbox(t *testing.T) {
 	ctx := context.Background()
 

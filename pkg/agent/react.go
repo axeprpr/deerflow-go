@@ -991,7 +991,7 @@ func preserveToolFailureResult(call models.ToolCall, result models.ToolResult, e
 			CallID:      call.ID,
 			ToolName:    call.Name,
 			Status:      models.CallStatusFailed,
-			Error:       err.Error(),
+			Error:       tools.FormatToolExecutionError(call.Name, err),
 			CompletedAt: time.Now().UTC(),
 		}
 	}
@@ -1005,7 +1005,7 @@ func preserveToolFailureResult(call models.ToolCall, result models.ToolResult, e
 		result.Status = models.CallStatusFailed
 	}
 	if result.Error == "" {
-		result.Error = err.Error()
+		result.Error = tools.FormatToolExecutionError(call.Name, err)
 	}
 	if result.CompletedAt.IsZero() {
 		result.CompletedAt = time.Now().UTC()

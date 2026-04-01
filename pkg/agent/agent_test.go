@@ -600,6 +600,43 @@ func TestAgentRunContinuesAfterToolPanic(t *testing.T) {
 	}
 }
 
+func TestAgentRunContinuesAfterMissingTool(t *testing.T) {
+	provider := &scriptedStreamProvider{
+		steps: []streamStep{
+			{toolCalls: []models.ToolCall{{ID: "missing-call-1", Name: "missing_tool"}}},
+			{check: func(t *testing.T, req llm.ChatRequest) {
+				last := req.Messages[len(req.Messages)-1]
+				if last.Role != models.RoleTool || last.ToolResult == nil {
+					t.Fatalf("last message=%#v", last)
+				}
+				if last.ToolResult.Status != models.CallStatusFailed {
+					t.Fatalf("tool result status=%q want failed", last.ToolResult.Status)
+				}
+				if !strings.Contains(last.Content, `Error: Tool "missing_tool" failed with errorString: tool "missing_tool" not found.`) {
+					t.Fatalf("tool message content=%q", last.Content)
+				}
+			}, content: "Recovered after missing tool."},
+		},
+		t: t,
+	}
+
+	agent := New(AgentConfig{
+		LLMProvider: provider,
+		Tools:       tools.NewRegistry(),
+		MaxTurns:    3,
+	})
+
+	result, err := agent.Run(context.Background(), "session-missing-tool", []models.Message{
+		{ID: "m1", SessionID: "session-missing-tool", Role: models.RoleHuman, Content: "Use the missing tool"},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "Recovered after missing tool." {
+		t.Fatalf("FinalOutput=%q", result.FinalOutput)
+	}
+}
+
 func TestAgentRunStopsAfterClarificationRequest(t *testing.T) {
 	registry := tools.NewRegistry()
 	if err := registry.Register(models.Tool{
