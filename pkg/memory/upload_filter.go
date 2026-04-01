@@ -9,7 +9,7 @@ import (
 
 var uploadBlockRE = regexp.MustCompile(`(?is)<uploaded_files>[\s\S]*?</uploaded_files>\n*`)
 
-var uploadMentionRE = regexp.MustCompile(`(?i)(upload(?:ed|ing)?(?:\s+\w+){0,3}\s+(?:file|files?|document|documents?|attachment|attachments?)|file\s+upload|/mnt/user-data/uploads/|<uploaded_files>)`)
+var uploadMentionRE = regexp.MustCompile(`(?i)(upload(?:ed|ing)?(?:\s+\w+){0,3}\s+(?:file|files?|doc|docs|document|documents?|attachment|attachments?)|file\s+upload|/mnt/user-data/uploads/|<uploaded_files>)`)
 
 func filterMessagesForMemory(messages []models.Message) []models.Message {
 	if len(messages) == 0 {
@@ -48,6 +48,7 @@ func sanitizeUpdateForStorage(update Update) Update {
 	update.User.TopOfMind = stripUploadSentences(update.User.TopOfMind)
 	update.History.RecentMonths = stripUploadSentences(update.History.RecentMonths)
 	update.History.EarlierContext = stripUploadSentences(update.History.EarlierContext)
+	update.History.LongTermBackground = stripUploadSentences(update.History.LongTermBackground)
 
 	facts := make([]Fact, 0, len(update.Facts))
 	for _, fact := range update.Facts {

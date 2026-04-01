@@ -1323,7 +1323,6 @@ func (s *Server) sessionArtifactPaths(session *Session) []string {
 		seen[path] = struct{}{}
 		paths = append(paths, path)
 	}
-	sort.Strings(paths)
 	return paths
 }
 

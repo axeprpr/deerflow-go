@@ -23,7 +23,8 @@ Schema:
   },
   "history": {
     "recentMonths": "string",
-    "earlierContext": "string"
+    "earlierContext": "string",
+    "longTermBackground": "string"
   },
   "facts": [
     {
@@ -62,6 +63,9 @@ func BuildInjection(doc Document) string {
 	}
 	if v := strings.TrimSpace(doc.History.EarlierContext); v != "" {
 		lines = append(lines, "Earlier Context: "+v)
+	}
+	if v := strings.TrimSpace(doc.History.LongTermBackground); v != "" {
+		lines = append(lines, "Long Term Background: "+v)
 	}
 	if len(doc.Facts) > 0 {
 		lines = append(lines, "Known Facts:")

@@ -1874,7 +1874,7 @@ func (s *Server) loadGatewayState() error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return s.loadGatewayExtensionsConfig()
 		}
 		return err
 	}
@@ -1898,7 +1898,7 @@ func (s *Server) loadGatewayState() error {
 	if state.Memory.Version != "" {
 		s.setMemoryLocked(state.Memory)
 	}
-	return nil
+	return s.loadGatewayExtensionsConfig()
 }
 
 func (s *Server) persistGatewayState() error {
@@ -1916,7 +1916,10 @@ func (s *Server) persistGatewayState() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.gatewayStatePath(), data, 0o644)
+	if err := os.WriteFile(s.gatewayStatePath(), data, 0o644); err != nil {
+		return err
+	}
+	return s.persistGatewayExtensionsConfig()
 }
 
 func defaultGatewaySkills() map[string]gatewaySkill {
@@ -2470,7 +2473,7 @@ func gatewayMemoryFromDocument(doc memory.Document) gatewayMemoryResponse {
 	resp.User.TopOfMind = gatewayMemorySection(doc.User.TopOfMind, doc.UpdatedAt)
 	resp.History.RecentMonths = gatewayMemorySection(doc.History.RecentMonths, doc.UpdatedAt)
 	resp.History.EarlierContext = gatewayMemorySection(doc.History.EarlierContext, doc.UpdatedAt)
-	resp.History.LongTermBackground = gatewayMemorySection("", time.Time{})
+	resp.History.LongTermBackground = gatewayMemorySection(doc.History.LongTermBackground, doc.UpdatedAt)
 	resp.Facts = make([]memoryFact, 0, len(doc.Facts))
 	for _, fact := range doc.Facts {
 		resp.Facts = append(resp.Facts, memoryFact{

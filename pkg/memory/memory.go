@@ -32,8 +32,9 @@ type UserMemory struct {
 }
 
 type HistoryMemory struct {
-	RecentMonths   string `json:"recentMonths,omitempty"`
-	EarlierContext string `json:"earlierContext,omitempty"`
+	RecentMonths       string `json:"recentMonths,omitempty"`
+	EarlierContext     string `json:"earlierContext,omitempty"`
+	LongTermBackground string `json:"longTermBackground,omitempty"`
 }
 
 type Fact struct {
@@ -208,6 +209,9 @@ func Merge(current Document, update Update, sessionID string, now time.Time) Doc
 	}
 	if v := strings.TrimSpace(update.History.EarlierContext); v != "" {
 		merged.History.EarlierContext = v
+	}
+	if v := strings.TrimSpace(update.History.LongTermBackground); v != "" {
+		merged.History.LongTermBackground = v
 	}
 	if v := strings.TrimSpace(update.Source); v != "" {
 		merged.Source = v

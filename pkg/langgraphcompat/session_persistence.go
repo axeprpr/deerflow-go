@@ -242,7 +242,12 @@ func (s *Server) readPersistedHistory(threadID string) ([]persistedHistoryEntry,
 }
 
 func collectArtifactPaths(root string) []string {
-	entries := make([]string, 0)
+	type artifactEntry struct {
+		path     string
+		modified time.Time
+	}
+
+	entries := make([]artifactEntry, 0)
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d == nil || d.IsDir() {
 			return nil
@@ -251,11 +256,29 @@ func collectArtifactPaths(root string) []string {
 		if relErr != nil {
 			return nil
 		}
-		entries = append(entries, "/mnt/user-data/outputs/"+filepath.ToSlash(rel))
+		info, infoErr := d.Info()
+		if infoErr != nil {
+			return nil
+		}
+		entries = append(entries, artifactEntry{
+			path:     "/mnt/user-data/outputs/" + filepath.ToSlash(rel),
+			modified: info.ModTime(),
+		})
 		return nil
 	})
-	sort.Strings(entries)
-	return entries
+
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].modified.Equal(entries[j].modified) {
+			return entries[i].path < entries[j].path
+		}
+		return entries[i].modified.After(entries[j].modified)
+	})
+
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		paths = append(paths, entry.path)
+	}
+	return paths
 }
 
 func copyMetadataMap(in map[string]any) map[string]any {

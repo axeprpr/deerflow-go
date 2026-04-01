@@ -34,6 +34,9 @@ func TestMerge(t *testing.T) {
 		User: UserMemory{
 			TopOfMind: "Ship the memory service",
 		},
+		History: HistoryMemory{
+			LongTermBackground: "Maintains long-lived agent infrastructure.",
+		},
 		Facts: []Fact{
 			{ID: "pref-editor", Content: "Prefers neovim", Category: "preference", Confidence: 0.9},
 			{ID: "project-main", Content: "Building deerflow-go memory service", Category: "project", Confidence: 0.8},
@@ -46,6 +49,9 @@ func TestMerge(t *testing.T) {
 	}
 	if got.User.TopOfMind != "Ship the memory service" {
 		t.Fatalf("top of mind = %q", got.User.TopOfMind)
+	}
+	if got.History.LongTermBackground != "Maintains long-lived agent infrastructure." {
+		t.Fatalf("long term background = %q", got.History.LongTermBackground)
 	}
 	if len(got.Facts) != 2 {
 		t.Fatalf("facts len = %d", len(got.Facts))
@@ -66,7 +72,8 @@ func TestServiceUpdateAndInject(t *testing.T) {
 				TopOfMind:   "Memory reliability",
 			},
 			History: HistoryMemory{
-				RecentMonths: "Rebuilding the agent runtime in Go",
+				RecentMonths:       "Rebuilding the agent runtime in Go",
+				LongTermBackground: "Maintains agent systems over multiple releases",
 			},
 			Facts: []Fact{
 				{ID: "project", Content: "Owns deerflow-go", Category: "project", Confidence: 0.95},
@@ -99,6 +106,9 @@ func TestServiceUpdateAndInject(t *testing.T) {
 	injected := service.Inject(context.Background(), "session-42")
 	if !strings.Contains(injected, "## User Memory") || !strings.Contains(injected, "Owns deerflow-go") {
 		t.Fatalf("Inject() = %q", injected)
+	}
+	if !strings.Contains(injected, "Long Term Background: Maintains agent systems over multiple releases") {
+		t.Fatalf("Inject() missing long term background: %q", injected)
 	}
 }
 
@@ -237,6 +247,9 @@ func TestServiceUpdateStripsUploadMentionsFromMemory(t *testing.T) {
 			User: UserMemory{
 				TopOfMind: "User is interested in AI. User uploaded a test file for verification. User prefers concise answers.",
 			},
+			History: HistoryMemory{
+				LongTermBackground: "User uploaded onboarding docs. User values durable project context.",
+			},
 			Facts: []Fact{
 				{ID: "upload", Content: "User uploaded a file titled secret.txt", Category: "behavior"},
 				{ID: "pref", Content: "User prefers dark mode", Category: "preference"},
@@ -273,6 +286,9 @@ func TestServiceUpdateStripsUploadMentionsFromMemory(t *testing.T) {
 	if len(doc.Facts) != 1 || doc.Facts[0].Content != "User prefers dark mode" {
 		t.Fatalf("facts = %#v", doc.Facts)
 	}
+	if doc.History.LongTermBackground != "User values durable project context" {
+		t.Fatalf("long term background = %q", doc.History.LongTermBackground)
+	}
 }
 
 func TestPostgresStoreSaveLoadUsesTransaction(t *testing.T) {
@@ -288,7 +304,8 @@ func TestPostgresStoreSaveLoadUsesTransaction(t *testing.T) {
 			WorkContext: "Go rewrite",
 		},
 		History: HistoryMemory{
-			EarlierContext: "Original Python implementation",
+			EarlierContext:     "Original Python implementation",
+			LongTermBackground: "Maintains the project across rewrites",
 		},
 		Facts: []Fact{
 			{ID: "language", Content: "Uses Go", Category: "project", Confidence: 0.99},
@@ -312,6 +329,9 @@ func TestPostgresStoreSaveLoadUsesTransaction(t *testing.T) {
 	}
 	if got.User.WorkContext != doc.User.WorkContext {
 		t.Fatalf("loaded user memory = %#v", got.User)
+	}
+	if got.History.LongTermBackground != doc.History.LongTermBackground {
+		t.Fatalf("loaded history memory = %#v", got.History)
 	}
 	if len(got.Facts) != 1 || got.Facts[0].ID != "language" {
 		t.Fatalf("loaded facts = %#v", got.Facts)

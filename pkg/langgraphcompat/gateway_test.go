@@ -1794,6 +1794,114 @@ func TestMCPConfigRoundTripsExtendedFields(t *testing.T) {
 	}
 }
 
+func TestLoadGatewayStateReadsExtensionsConfigCompatibilityFile(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	configPath := filepath.Join(t.TempDir(), "extensions_config.json")
+	t.Setenv("DEERFLOW_EXTENSIONS_CONFIG_PATH", configPath)
+
+	if err := os.WriteFile(configPath, []byte(`{
+  "mcpServers": {
+    "github": {
+      "enabled": true,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "description": "GitHub tools"
+    }
+  },
+  "skills": {
+    "deep-research": {
+      "enabled": false
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatalf("write extensions config: %v", err)
+	}
+
+	if err := s.loadGatewayState(); err != nil {
+		t.Fatalf("loadGatewayState: %v", err)
+	}
+
+	skillResp := performCompatRequest(t, handler, http.MethodGet, "/api/skills/deep-research", nil, nil)
+	if skillResp.Code != http.StatusOK {
+		t.Fatalf("skill status=%d body=%s", skillResp.Code, skillResp.Body.String())
+	}
+	var skill gatewaySkill
+	if err := json.NewDecoder(skillResp.Body).Decode(&skill); err != nil {
+		t.Fatalf("decode skill: %v", err)
+	}
+	if skill.Enabled {
+		t.Fatal("expected extensions_config.json to disable deep-research")
+	}
+
+	mcpResp := performCompatRequest(t, handler, http.MethodGet, "/api/mcp/config", nil, nil)
+	if mcpResp.Code != http.StatusOK {
+		t.Fatalf("mcp status=%d body=%s", mcpResp.Code, mcpResp.Body.String())
+	}
+	var mcp gatewayMCPConfig
+	if err := json.NewDecoder(mcpResp.Body).Decode(&mcp); err != nil {
+		t.Fatalf("decode mcp: %v", err)
+	}
+	if !mcp.MCPServers["github"].Enabled {
+		t.Fatal("expected github MCP server to be enabled from extensions_config.json")
+	}
+}
+
+func TestSkillSetEnabledPersistsExtensionsConfigCompatibilityFile(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+	configPath := filepath.Join(t.TempDir(), "extensions_config.json")
+	t.Setenv("DEERFLOW_EXTENSIONS_CONFIG_PATH", configPath)
+
+	resp := performCompatRequest(t, handler, http.MethodPut, "/api/skills/deep-research", strings.NewReader(`{"enabled":false}`), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read extensions config: %v", err)
+	}
+	var cfg gatewayExtensionsConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("decode extensions config: %v", err)
+	}
+	state, ok := cfg.Skills["deep-research"]
+	if !ok {
+		t.Fatalf("missing deep-research in skills config: %s", string(data))
+	}
+	if state.Enabled {
+		t.Fatalf("deep-research enabled=%v want false", state.Enabled)
+	}
+}
+
+func TestMCPConfigPutPersistsExtensionsConfigCompatibilityFile(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+	configPath := filepath.Join(t.TempDir(), "extensions_config.json")
+	t.Setenv("DEERFLOW_EXTENSIONS_CONFIG_PATH", configPath)
+
+	body := `{"mcp_servers":{"github":{"enabled":true,"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-github"],"description":"GitHub tools"}}}`
+	resp := performCompatRequest(t, handler, http.MethodPut, "/api/mcp/config", strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read extensions config: %v", err)
+	}
+	var cfg gatewayExtensionsConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("decode extensions config: %v", err)
+	}
+	server, ok := cfg.MCPServers["github"]
+	if !ok {
+		t.Fatalf("missing github server in mcpServers: %s", string(data))
+	}
+	if !server.Enabled || server.Command != "npx" {
+		t.Fatalf("persisted github server=%#v", server)
+	}
+}
+
 func TestApplyGatewayMCPConfigRegistersConnectedTools(t *testing.T) {
 	s, _ := newCompatTestServer(t)
 	s.tools = tools.NewRegistry()
