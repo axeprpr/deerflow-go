@@ -211,6 +211,23 @@ func TestThreadFilesIncludeAutoDiscoveredArtifacts(t *testing.T) {
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("paths=%q want=%q", strings.Join(got, ","), strings.Join(want, ","))
 	}
+	if payload.Files[0].MimeType != "text/markdown; charset=utf-8" {
+		t.Fatalf("output mime=%q want text/markdown; charset=utf-8", payload.Files[0].MimeType)
+	}
+	if payload.Files[1].MimeType != "text/plain; charset=utf-8" {
+		t.Fatalf("workspace mime=%q want text/plain; charset=utf-8", payload.Files[1].MimeType)
+	}
+	if payload.Files[2].MimeType != "application/pdf" {
+		t.Fatalf("upload mime=%q want application/pdf", payload.Files[2].MimeType)
+	}
+	for i, file := range payload.Files {
+		if strings.TrimSpace(file.ID) == "" {
+			t.Fatalf("files[%d] missing id: %#v", i, file)
+		}
+		if file.CreatedAt.IsZero() {
+			t.Fatalf("files[%d] missing created_at: %#v", i, file)
+		}
+	}
 }
 
 func TestThreadStateFallsBackToMetadataAgentName(t *testing.T) {

@@ -2,8 +2,10 @@ package langgraphcompat
 
 import (
 	"bufio"
+	"crypto/md5"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"mime"
 	"net/http"
@@ -317,9 +319,11 @@ func collectArtifactFiles(root string, virtualPrefix string) []tools.PresentFile
 		}
 		entries = append(entries, artifactEntry{
 			file: tools.PresentFile{
-				Path:      virtualPrefix + "/" + filepath.ToSlash(rel),
-				MimeType:  detectArtifactMimeType(path),
-				CreatedAt: info.ModTime(),
+				ID:         autodiscoveredPresentFileID(virtualPrefix + "/" + filepath.ToSlash(rel)),
+				Path:       virtualPrefix + "/" + filepath.ToSlash(rel),
+				SourcePath: path,
+				MimeType:   detectArtifactMimeType(path),
+				CreatedAt:  info.ModTime().UTC(),
 			},
 		})
 		return nil
@@ -350,6 +354,16 @@ func detectArtifactMimeType(path string) string {
 		return "application/octet-stream"
 	}
 	return http.DetectContentType(data)
+}
+
+func autodiscoveredPresentFileID(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	// Keep IDs deterministic for files surfaced from disk rather than tools.
+	sum := md5.Sum([]byte(path))
+	return fmt.Sprintf("auto_%x", sum[:6])
 }
 
 func copyMetadataMap(in map[string]any) map[string]any {
