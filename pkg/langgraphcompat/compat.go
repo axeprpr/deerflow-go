@@ -335,6 +335,7 @@ func (s *Server) registerLangGraphRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("GET "+prefix+"/runs/{run_id}", s.handleRunGet)
 	mux.HandleFunc("GET "+prefix+"/runs/{run_id}/stream", s.handleRunStream)
 
+	mux.HandleFunc("GET "+prefix+"/threads", s.handleThreadsList)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}", s.handleThreadGet)
 	mux.HandleFunc("POST "+prefix+"/threads", s.handleThreadCreate)
 	mux.HandleFunc("PATCH "+prefix+"/threads/{thread_id}", s.handleThreadUpdate)

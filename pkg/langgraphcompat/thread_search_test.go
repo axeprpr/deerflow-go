@@ -72,6 +72,63 @@ func TestThreadSearchAcceptsCamelCaseAndSelectsRequestedFields(t *testing.T) {
 	}
 }
 
+func TestThreadsListUsesQueryParamsAndDefaultFields(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	alpha := s.ensureSession("thread-alpha", map[string]any{"title": "Alpha"})
+	beta := s.ensureSession("thread-beta", map[string]any{"title": "Beta"})
+	alpha.CreatedAt = time.Date(2026, 3, 31, 8, 0, 0, 0, time.UTC)
+	alpha.UpdatedAt = alpha.CreatedAt.Add(1 * time.Hour)
+	beta.CreatedAt = time.Date(2026, 3, 31, 10, 0, 0, 0, time.UTC)
+	beta.UpdatedAt = beta.CreatedAt.Add(1 * time.Hour)
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/threads?limit=1&sortBy=created_at&sortOrder=asc", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var threads []map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(threads) != 1 {
+		t.Fatalf("threads=%d want=1", len(threads))
+	}
+	if got := asString(threads[0]["thread_id"]); got != "thread-alpha" {
+		t.Fatalf("thread_id=%q want=thread-alpha", got)
+	}
+	if _, ok := threads[0]["values"].(map[string]any); !ok {
+		t.Fatalf("values=%#v", threads[0]["values"])
+	}
+	if _, ok := threads[0]["metadata"].(map[string]any); !ok {
+		t.Fatalf("metadata=%#v", threads[0]["metadata"])
+	}
+}
+
+func TestThreadsListSupportsSelectQueryParameter(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	s.ensureSession("thread-select", map[string]any{"title": "Selected"})
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/threads?select=thread_id,updated_at", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var threads []map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(threads) != 1 {
+		t.Fatalf("threads=%d want=1", len(threads))
+	}
+	if _, ok := threads[0]["updated_at"]; !ok {
+		t.Fatalf("updated_at missing: %#v", threads[0])
+	}
+	if _, ok := threads[0]["values"]; ok {
+		t.Fatalf("unexpected values field: %#v", threads[0])
+	}
+}
+
 func TestThreadSearchFiltersByQueryStatusMetadataAndValues(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 

@@ -30,6 +30,12 @@ type threadSearchRequest struct {
 	Select    []string       `json:"select"`
 }
 
+func (s *Server) handleThreadsList(w http.ResponseWriter, r *http.Request) {
+	req := parseThreadSearchRequest(r)
+	req.Select = preferThreadSearchSelect(req.Select, []string{"thread_id", "created_at", "updated_at", "metadata", "status", "config", "values"})
+	s.writeThreadSearchResponse(w, req)
+}
+
 func (s *Server) handleThreadGet(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if err := validateThreadID(threadID); err != nil {
@@ -120,7 +126,10 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 	req := parseThreadSearchRequest(r)
+	s.writeThreadSearchResponse(w, req)
+}
 
+func (s *Server) writeThreadSearchResponse(w http.ResponseWriter, req threadSearchRequest) {
 	limit := 50
 	if req.Limit != nil {
 		limit = *req.Limit
@@ -180,7 +189,19 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 
 func parseThreadSearchRequest(r *http.Request) threadSearchRequest {
 	req := threadSearchRequest{}
-	if r == nil || r.Body == nil {
+	if r == nil {
+		return req
+	}
+
+	req.Limit = intPointerFromString(r.URL.Query().Get("limit"))
+	req.Offset = intPointerFromString(r.URL.Query().Get("offset"))
+	req.SortBy = firstNonEmpty(r.URL.Query().Get("sort_by"), r.URL.Query().Get("sortBy"))
+	req.SortOrder = firstNonEmpty(r.URL.Query().Get("sort_order"), r.URL.Query().Get("sortOrder"))
+	req.Query = r.URL.Query().Get("query")
+	req.Status = r.URL.Query().Get("status")
+	req.Select = csvStringSlice(r.URL.Query()["select"])
+
+	if r.Body == nil {
 		return req
 	}
 	defer r.Body.Close()
@@ -200,6 +221,41 @@ func parseThreadSearchRequest(r *http.Request) threadSearchRequest {
 	req.Values, _ = raw["values"].(map[string]any)
 	req.Select = stringSliceFromAny(raw["select"])
 	return req
+}
+
+func preferThreadSearchSelect(current []string, fallback []string) []string {
+	if len(current) > 0 {
+		return current
+	}
+	return append([]string(nil), fallback...)
+}
+
+func intPointerFromString(raw string) *int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return nil
+	}
+	return &value
+}
+
+func csvStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		for _, part := range strings.Split(value, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				out = append(out, part)
+			}
+		}
+	}
+	return out
 }
 
 func normalizeThreadSortBy(value string) string {
