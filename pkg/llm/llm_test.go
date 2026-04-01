@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -78,7 +79,7 @@ func TestUnavailableProvider(t *testing.T) {
 	if err != nil {
 		t.Errorf("Stream should not return error directly: %v", err)
 	}
-	
+
 	// Check the channel receives the error
 	chunk := <-ch
 	if chunk.Err == nil {
@@ -155,8 +156,8 @@ func TestChatResponse(t *testing.T) {
 	resp := ChatResponse{
 		Model: "test-model",
 		Message: models.Message{
-			ID:    "m1",
-			Role:  models.RoleAI,
+			ID:      "m1",
+			Role:    models.RoleAI,
 			Content: "Hello, world!",
 		},
 		Usage: Usage{
@@ -181,12 +182,48 @@ func TestChatResponse(t *testing.T) {
 func TestPtr(t *testing.T) {
 	val := "test"
 	ptr := ptr(val)
-	
+
 	if ptr == nil {
 		t.Error("ptr should not return nil")
 	}
-	
+
 	if *ptr != val {
 		t.Errorf("*ptr = %s, want %s", *ptr, val)
+	}
+}
+
+func TestNormalizeAssistantMessage_StripsThinkTagsIntoReasoningContent(t *testing.T) {
+	msg := NormalizeAssistantMessage(models.Message{
+		Role:    models.RoleAI,
+		Content: "<think>\nfirst pass\n</think>\n\nFinal answer.",
+	})
+
+	if msg.Content != "Final answer." {
+		t.Fatalf("content=%q want final answer", msg.Content)
+	}
+
+	var kwargs map[string]any
+	if err := json.Unmarshal([]byte(msg.Metadata["additional_kwargs"]), &kwargs); err != nil {
+		t.Fatalf("unmarshal additional_kwargs: %v", err)
+	}
+	if got, _ := kwargs["reasoning_content"].(string); got != "first pass" {
+		t.Fatalf("reasoning_content=%q want first pass", got)
+	}
+}
+
+func TestNormalizeAssistantMessage_UsesThinkContentWhenVisibleAnswerWouldBeEmpty(t *testing.T) {
+	msg := NormalizeAssistantMessage(models.Message{
+		Role:    models.RoleAI,
+		Content: "<think>\nanswer hidden in reasoning\n</think>",
+		Metadata: map[string]string{
+			"additional_kwargs": `{"reasoning_content":"older"}`,
+		},
+	})
+
+	if msg.Content != "answer hidden in reasoning" {
+		t.Fatalf("content=%q want extracted reasoning", msg.Content)
+	}
+	if got := msg.Metadata["additional_kwargs"]; got != "" {
+		t.Fatalf("additional_kwargs=%q want removed reasoning_content", got)
 	}
 }

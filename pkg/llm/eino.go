@@ -342,7 +342,7 @@ func fromEinoMessage(msg *einoSchema.Message) models.Message {
 	if stop := finishReason(msg.ResponseMeta); stop != "" {
 		out.Metadata = map[string]string{"stop_reason": stop}
 	}
-	return out
+	return NormalizeAssistantMessage(out)
 }
 
 func toEinoToolCalls(calls []models.ToolCall) []einoSchema.ToolCall {

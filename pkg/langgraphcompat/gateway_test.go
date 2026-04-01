@@ -317,6 +317,27 @@ func TestMessagesToLangChainPreservesToolCallsAndUsageMetadata(t *testing.T) {
 	}
 }
 
+func TestMessagesToLangChainIncludesReasoningMetadataAfterNormalization(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	msg := llm.NormalizeAssistantMessage(models.Message{
+		ID:        "ai-think",
+		SessionID: "thread-think",
+		Role:      models.RoleAI,
+		Content:   "<think>internal reasoning</think>\n\nVisible answer",
+	})
+
+	got := s.messagesToLangChain([]models.Message{msg})
+	if len(got) != 1 {
+		t.Fatalf("messages=%d want=1", len(got))
+	}
+	if got[0].Content != "Visible answer" {
+		t.Fatalf("content=%#v want Visible answer", got[0].Content)
+	}
+	if got[0].AdditionalKwargs["reasoning_content"] != "internal reasoning" {
+		t.Fatalf("additional_kwargs=%#v want reasoning_content", got[0].AdditionalKwargs)
+	}
+}
+
 func TestResolveRunConfigInjectsSkillCreatorPromptForSkillMode(t *testing.T) {
 	s, _ := newCompatTestServer(t)
 

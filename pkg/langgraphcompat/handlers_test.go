@@ -384,6 +384,49 @@ func TestForwardAgentEventEmitsFinalAssistantMessageTupleWithUsage(t *testing.T)
 	}
 }
 
+func TestForwardAgentEventEmitsNormalizedFinalAssistantText(t *testing.T) {
+	s := &Server{
+		runs:       map[string]*Run{},
+		runStreams: map[string]map[uint64]chan StreamEvent{},
+	}
+	run := &Run{
+		RunID:       "run-think",
+		ThreadID:    "thread-think",
+		AssistantID: "lead_agent",
+		Status:      "running",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.saveRun(run)
+
+	s.forwardAgentEvent(nil, nil, run, agent.AgentEvent{
+		Type:      agent.AgentEventEnd,
+		MessageID: "msg-ai-think",
+		Text:      "Visible answer",
+	})
+
+	stored := s.getRun(run.RunID)
+	if stored == nil {
+		t.Fatal("stored run missing")
+	}
+
+	for _, evt := range stored.Events {
+		if evt.Event != "messages-tuple" {
+			continue
+		}
+		payload, ok := evt.Data.(Message)
+		if !ok || payload.ID != "msg-ai-think" {
+			continue
+		}
+		if payload.Content != "Visible answer" {
+			t.Fatalf("content=%v want Visible answer", payload.Content)
+		}
+		return
+	}
+
+	t.Fatal("missing normalized assistant messages-tuple payload")
+}
+
 func TestUsagePayloadFromAgentUsageDefaultsToZero(t *testing.T) {
 	got := usagePayloadFromAgentUsage(nil)
 	want := map[string]int{
