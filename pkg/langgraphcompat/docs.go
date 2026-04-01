@@ -214,6 +214,9 @@ func gatewayOpenAPIPaths() map[string]any {
 			"get":  operation("langgraph", "List Thread Runs", "List runs for a thread."),
 			"post": operation("langgraph", "Create Thread Run", "Create a run bound to a thread."),
 		}),
+		"/threads/{thread_id}/runs/{run_id}": pathItem(map[string]any{
+			"get": operation("langgraph", "Get Thread Run", "Get run metadata for a thread-scoped run."),
+		}),
 		"/threads/{thread_id}/runs/stream": pathItem(map[string]any{
 			"post": operation("langgraph", "Stream Thread Run", "Stream a run bound to a thread."),
 		}),
@@ -254,6 +257,9 @@ func gatewayOpenAPIPaths() map[string]any {
 			"get":    operation("langgraph", "Get Thread (Prefixed)", "Get a thread via the prefixed API."),
 			"patch":  operation("langgraph", "Update Thread (Prefixed)", "Update a thread via the prefixed API."),
 			"delete": operation("langgraph", "Delete Thread (Prefixed)", "Delete a thread via the prefixed API."),
+		}),
+		"/api/langgraph/threads/{thread_id}/runs/{run_id}": pathItem(map[string]any{
+			"get": operation("langgraph", "Get Thread Run (Prefixed)", "Get run metadata for a thread-scoped run via the prefixed API."),
 		}),
 	}
 }

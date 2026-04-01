@@ -66,7 +66,13 @@ func TestGatewayOpenAPIDocumentationEndpoints(t *testing.T) {
 	if spec.Info["title"] != "DeerFlow API Gateway" {
 		t.Fatalf("title=%v want %q", spec.Info["title"], "DeerFlow API Gateway")
 	}
-	for _, path := range []string{"/api/models", "/api/threads/{thread_id}/uploads", "/runs/stream"} {
+	for _, path := range []string{
+		"/api/models",
+		"/api/threads/{thread_id}/uploads",
+		"/runs/stream",
+		"/threads/{thread_id}/runs/{run_id}",
+		"/api/langgraph/threads/{thread_id}/runs/{run_id}",
+	} {
 		if _, ok := spec.Paths[path]; !ok {
 			t.Fatalf("missing path %q in openapi spec", path)
 		}
@@ -92,6 +98,42 @@ func TestGatewayOpenAPIDocumentationEndpoints(t *testing.T) {
 	}
 	if !strings.Contains(redocResp.Body.String(), "<redoc ") && !strings.Contains(redocResp.Body.String(), "<redoc>") {
 		t.Fatalf("redoc body missing redoc element: %q", redocResp.Body.String())
+	}
+}
+
+func TestThreadRunGetReturnsOnlyMatchingThreadRun(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-run-owner"
+	otherThreadID := "thread-run-other"
+	s.ensureSession(threadID, nil)
+	s.ensureSession(otherThreadID, nil)
+
+	run := &Run{
+		RunID:       "run-thread-owner",
+		ThreadID:    threadID,
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.saveRun(run)
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/threads/"+threadID+"/runs/"+run.RunID, nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), `"thread_id":"`+threadID+`"`) {
+		t.Fatalf("body=%s missing thread_id", resp.Body.String())
+	}
+
+	resp = performCompatRequest(t, handler, http.MethodGet, "/threads/"+otherThreadID+"/runs/"+run.RunID, nil, nil)
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("cross-thread status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	resp = performCompatRequest(t, handler, http.MethodGet, "/api/langgraph/threads/"+threadID+"/runs/"+run.RunID, nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("prefixed status=%d body=%s", resp.Code, resp.Body.String())
 	}
 }
 

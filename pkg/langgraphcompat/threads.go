@@ -696,6 +696,27 @@ func (s *Server) handleRunGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.runResponse(run))
 }
 
+func (s *Server) handleThreadRunGet(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if s.getThreadState(threadID) == nil {
+		http.Error(w, "thread not found", http.StatusNotFound)
+		return
+	}
+
+	runID := r.PathValue("run_id")
+	run := s.getRun(runID)
+	if run == nil || run.ThreadID != threadID {
+		http.Error(w, "run not found", http.StatusNotFound)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, s.runResponse(run))
+}
+
 func (s *Server) handleThreadRunsList(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if err := validateThreadID(threadID); err != nil {
