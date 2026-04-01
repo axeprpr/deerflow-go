@@ -72,20 +72,28 @@ func (s *Server) loadGatewaySkillBody(name, category string) (string, bool) {
 		return "", false
 	}
 
-	var (
-		body  string
-		found bool
-	)
-	for _, root := range s.gatewaySkillRoots() {
-		for _, candidateCategory := range preferredSkillCategories(category) {
+	bodies := map[string]string{}
+	for _, candidateCategory := range preferredSkillCategories(category) {
+		for _, root := range s.gatewaySkillRoots() {
 			content, ok := loadGatewaySkillBodyFromCategory(filepath.Join(root, candidateCategory), normalizedName)
 			if ok {
-				body = content
-				found = true
+				bodies[candidateCategory] = content
 			}
 		}
 	}
-	return body, found
+
+	if normalizedCategory := normalizeSkillCategory(category); normalizedCategory != "" {
+		body := strings.TrimSpace(bodies[normalizedCategory])
+		return body, body != ""
+	}
+
+	for _, candidateCategory := range []string{skillCategoryPublic, skillCategoryCustom} {
+		body := strings.TrimSpace(bodies[candidateCategory])
+		if body != "" {
+			return body, true
+		}
+	}
+	return "", false
 }
 
 func preferredSkillCategories(category string) []string {

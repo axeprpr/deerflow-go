@@ -154,6 +154,84 @@ This body comes from the repo-local skills directory.
 	}
 }
 
+func TestLoadGatewaySkillBodyPrefersResolvedCategoryAndLatestRoot(t *testing.T) {
+	projectRoot := t.TempDir()
+	publicSkillDir := filepath.Join(projectRoot, "skills", "public", "duplicate-skill")
+	customSkillDir := filepath.Join(projectRoot, "skills", "custom", "duplicate-skill")
+	dataRoot := filepath.Join(projectRoot, "data")
+	dataSkillDir := filepath.Join(dataRoot, "skills", "public", "duplicate-skill")
+
+	for _, dir := range []string{publicSkillDir, customSkillDir, dataSkillDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(publicSkillDir, "SKILL.md"), []byte(`---
+name: duplicate-skill
+description: Public workspace version.
+license: MIT
+---
+# Public Duplicate
+
+Workspace public body.
+`), 0o644); err != nil {
+		t.Fatalf("write public workspace skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(customSkillDir, "SKILL.md"), []byte(`---
+name: duplicate-skill
+description: Custom workspace version.
+license: MIT
+---
+# Custom Duplicate
+
+Workspace custom body.
+`), 0o644); err != nil {
+		t.Fatalf("write custom workspace skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dataSkillDir, "SKILL.md"), []byte(`---
+name: duplicate-skill
+description: Persisted public override.
+license: MIT
+---
+# Persisted Duplicate
+
+Persisted public body.
+`), 0o644); err != nil {
+		t.Fatalf("write persisted public skill: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(projectRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(wd)
+	}()
+
+	s, _ := newCompatTestServer(t)
+	s.dataRoot = dataRoot
+
+	body, ok := s.loadGatewaySkillBody("duplicate-skill", "")
+	if !ok {
+		t.Fatal("expected duplicate skill body without category")
+	}
+	if got, want := body, "# Persisted Duplicate\n\nPersisted public body."; got != want {
+		t.Fatalf("body=%q want=%q", got, want)
+	}
+
+	body, ok = s.loadGatewaySkillBody("duplicate-skill", skillCategoryCustom)
+	if !ok {
+		t.Fatal("expected duplicate custom skill body")
+	}
+	if got, want := body, "# Custom Duplicate\n\nWorkspace custom body."; got != want {
+		t.Fatalf("custom body=%q want=%q", got, want)
+	}
+}
+
 func TestSkillsDiscoveryFollowsSymlinkedDirectories(t *testing.T) {
 	s, _ := newCompatTestServer(t)
 
