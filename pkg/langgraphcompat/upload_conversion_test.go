@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -256,6 +257,58 @@ func TestConvertXLSXToMarkdownUsesSheetNamesAndMarkdownTables(t *testing.T) {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q: %q", want, md)
 		}
+	}
+}
+
+func TestConvertXLSXToMarkdownTruncatesLargeSheets(t *testing.T) {
+	var sheet strings.Builder
+	sheet.WriteString(`<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>`)
+	sheet.WriteString("\n    <row r=\"1\">")
+	for col := 0; col < maxStructuredPreviewCols+1; col++ {
+		cellRef := string(rune('A'+col)) + "1"
+		sheet.WriteString(fmt.Sprintf(`<c r="%s" t="inlineStr"><is><t>h%d</t></is></c>`, cellRef, col))
+	}
+	sheet.WriteString(`</row>`)
+	for row := 0; row < maxStructuredPreviewRows+5; row++ {
+		sheet.WriteString(fmt.Sprintf("\n    <row r=\"%d\">", row+2))
+		for col := 0; col < maxStructuredPreviewCols+1; col++ {
+			cellRef := string(rune('A'+col)) + strconv.Itoa(row+2)
+			sheet.WriteString(fmt.Sprintf(`<c r="%s" t="inlineStr"><is><t>r%d-c%d</t></is></c>`, cellRef, row, col))
+		}
+		sheet.WriteString(`</row>`)
+	}
+	sheet.WriteString(`
+  </sheetData>
+</worksheet>`)
+
+	path := writeTempFile(t, "large.xlsx", minimalZipArchive(t, map[string]string{
+		"xl/workbook.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Wide Data" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>`,
+		"xl/_rels/workbook.xml.rels": `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`,
+		"xl/worksheets/sheet1.xml": sheet.String(),
+	}))
+
+	md, err := convertXLSXToMarkdown(path)
+	if err != nil {
+		t.Fatalf("convert xlsx: %v", err)
+	}
+	if !strings.Contains(md, "Preview truncated") {
+		t.Fatalf("markdown missing truncation note: %q", md)
+	}
+	if strings.Contains(md, "| h0 | h1 | h2 | h3 | h4 | h5 | h6 | h7 | h8 |") {
+		t.Fatalf("markdown should truncate columns: %q", md)
+	}
+	if strings.Contains(md, "r44-c0") {
+		t.Fatalf("markdown should truncate rows: %q", md)
 	}
 }
 

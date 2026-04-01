@@ -302,7 +302,11 @@ func convertXLSXToMarkdown(path string) (string, error) {
 		if title == "" {
 			title = fmt.Sprintf("Sheet %d", idx+1)
 		}
-		lines := []string{"## " + title, "", renderMarkdownTable(rows)}
+		trimmed, note := limitMarkdownTable(rows, maxStructuredPreviewRows, maxStructuredPreviewCols)
+		lines := []string{"## " + title, "", renderMarkdownTable(trimmed)}
+		if note != "" {
+			lines = append(lines, "", note)
+		}
 		sections = append(sections, strings.Join(lines, "\n"))
 	}
 	if len(sections) == 0 {
