@@ -73,7 +73,10 @@ func TestGatewayRoutesSupportThreadIDsWithDots(t *testing.T) {
 	if deleteResp.Code != http.StatusOK {
 		t.Fatalf("delete status=%d body=%s", deleteResp.Code, deleteResp.Body.String())
 	}
-	if _, err := os.Stat(s.threadDir(threadID)); !os.IsNotExist(err) {
-		t.Fatalf("expected thread dir removal, stat err=%v", err)
+	if _, err := os.Stat(s.threadDir(threadID)); err != nil {
+		t.Fatalf("expected thread dir preserved, stat err=%v", err)
+	}
+	if _, err := os.Stat(s.threadRoot(threadID)); !os.IsNotExist(err) {
+		t.Fatalf("expected user-data removal, stat err=%v", err)
 	}
 }

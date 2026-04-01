@@ -354,3 +354,25 @@ func TestForwardAgentEventEmitsArtifactUpdatesWhenPresentToolCompletes(t *testin
 		t.Fatalf("expected artifact update payload in %q", body)
 	}
 }
+
+func TestThreadMetadataFromRuntimeContextPrefersRuntimeAgentName(t *testing.T) {
+	metadata := threadMetadataFromRuntimeContext(map[string]any{
+		"agent_name": "release-bot",
+	}, runConfig{
+		AgentName: "fallback-bot",
+		AgentType: agent.AgentTypeCoder,
+	})
+
+	if got := stringValue(metadata["agent_name"]); got != "release-bot" {
+		t.Fatalf("agent_name=%q want=%q", got, "release-bot")
+	}
+	if got := stringValue(metadata["agent_type"]); got != string(agent.AgentTypeCoder) {
+		t.Fatalf("agent_type=%q want=%q", got, agent.AgentTypeCoder)
+	}
+}
+
+func TestThreadMetadataFromRuntimeContextReturnsNilWhenEmpty(t *testing.T) {
+	if metadata := threadMetadataFromRuntimeContext(nil, runConfig{}); metadata != nil {
+		t.Fatalf("metadata=%#v want nil", metadata)
+	}
+}

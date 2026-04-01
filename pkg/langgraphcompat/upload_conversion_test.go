@@ -41,6 +41,31 @@ func TestConvertPDFToMarkdownExtractsTextFromZlibFlateStream(t *testing.T) {
 	}
 }
 
+func TestConvertPDFToMarkdownDecodesUTF16HexStrings(t *testing.T) {
+	stream := "BT\n<FEFF00480065006C006C006F00204E16754C> Tj\nET\n"
+	md, err := convertPDFToMarkdown(writeTempFile(t, "unicode.pdf", minimalPDFStream(t, stream, pdfCompressionFlate)))
+	if err != nil {
+		t.Fatalf("convert pdf: %v", err)
+	}
+	if !strings.Contains(md, "Hello 世界") {
+		t.Fatalf("markdown missing utf16 text: %q", md)
+	}
+}
+
+func TestConvertPDFToMarkdownMergesTJArrayFragmentsWithoutSpuriousSpaces(t *testing.T) {
+	stream := "BT\n[(Hel) 120 (lo) -30 (World)] TJ\nET\n"
+	md, err := convertPDFToMarkdown(writeTempFile(t, "tj-array.pdf", minimalPDFStream(t, stream, pdfCompressionFlate)))
+	if err != nil {
+		t.Fatalf("convert pdf: %v", err)
+	}
+	if !strings.Contains(md, "HelloWorld") {
+		t.Fatalf("markdown missing merged tj text: %q", md)
+	}
+	if strings.Contains(md, "Hel lo") || strings.Contains(md, "lo World") {
+		t.Fatalf("markdown contains spurious tj spacing: %q", md)
+	}
+}
+
 func TestConvertUploadedDocumentToMarkdownReturnsEmptyForPDFWithoutText(t *testing.T) {
 	content, err := convertUploadedDocumentToMarkdown(writeTempFile(t, "image.pdf", []byte("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF")), ".pdf")
 	if err != nil {
@@ -252,16 +277,21 @@ func writeTempFile(t *testing.T, name string, data []byte) string {
 
 func minimalPDF(t *testing.T, text string, mode pdfCompressionMode) []byte {
 	t.Helper()
-	var compressed bytes.Buffer
-	writer, err := newPDFCompressionWriter(&compressed, mode)
-	if err != nil {
-		t.Fatalf("new compression writer: %v", err)
-	}
 	stream := "BT\n/F1 12 Tf\n72 720 Td\n"
 	for _, line := range strings.Split(text, "\n") {
 		stream += fmt.Sprintf("(%s) Tj\n0 -18 Td\n", escapePDFLiteral(line))
 	}
 	stream += "ET\n"
+	return minimalPDFStream(t, stream, mode)
+}
+
+func minimalPDFStream(t *testing.T, stream string, mode pdfCompressionMode) []byte {
+	t.Helper()
+	var compressed bytes.Buffer
+	writer, err := newPDFCompressionWriter(&compressed, mode)
+	if err != nil {
+		t.Fatalf("new compression writer: %v", err)
+	}
 	if _, err := writer.Write([]byte(stream)); err != nil {
 		t.Fatalf("compress stream: %v", err)
 	}

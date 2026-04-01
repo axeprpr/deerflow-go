@@ -672,7 +672,7 @@ func (s *Server) handleGatewayThreadDelete(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if err := s.deleteThreadResources(threadID, true); err != nil {
+	if err := s.deleteGatewayThreadData(threadID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to delete local thread data"})
 		return
 	}
@@ -2627,7 +2627,9 @@ func (s *Server) refreshGatewayMemoryCache(ctx context.Context) {
 		return
 	}
 	s.uiStateMu.Lock()
-	s.memoryThread = strings.TrimSpace(doc.SessionID)
+	if threadID := strings.TrimSpace(doc.SessionID); threadID != "" && !isAgentMemorySessionID(threadID) {
+		s.memoryThread = threadID
+	}
 	s.setMemoryLocked(gatewayMemoryFromDocument(doc))
 	s.uiStateMu.Unlock()
 }
@@ -2664,7 +2666,7 @@ func (s *Server) replaceGatewayMemoryDocument(ctx context.Context, doc memory.Do
 		}
 	}
 	s.uiStateMu.Lock()
-	if threadID != "" {
+	if threadID != "" && !isAgentMemorySessionID(threadID) {
 		s.memoryThread = threadID
 	}
 	s.setMemoryLocked(gatewayMemoryFromDocument(doc))

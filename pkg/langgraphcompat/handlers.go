@@ -172,6 +172,9 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 		newMessages = s.convertToMessages(threadID, messages, true)
 	}
 	s.setThreadConfig(threadID, threadConfigFromRuntimeContext(threadID, runtimeContext, resolvedRunCfg))
+	for key, value := range threadMetadataFromRuntimeContext(runtimeContext, resolvedRunCfg) {
+		s.setThreadMetadata(threadID, key, value)
+	}
 	memorySessionID := deriveMemorySessionID(threadID, firstNonEmpty(stringFromAny(runtimeContext["agent_name"]), resolvedRunCfg.AgentName))
 	resolvedRunCfg.SystemPrompt = joinPromptSections(resolvedRunCfg.SystemPrompt, s.memoryInjectionPrompt(ctx, memorySessionID))
 
@@ -215,9 +218,6 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 		"thread_id": threadID,
 	})
 
-	if resolvedRunCfg.AgentType != "" {
-		s.setThreadMetadata(threadID, "agent_type", string(resolvedRunCfg.AgentType))
-	}
 	runAgent := s.newAgent(agent.AgentConfig{
 		Tools:           resolvedRunCfg.Tools,
 		PresentFiles:    session.PresentFiles,
@@ -1222,6 +1222,10 @@ func deriveMemorySessionID(threadID, agentName string) string {
 	return strings.TrimSpace(threadID)
 }
 
+func isAgentMemorySessionID(sessionID string) bool {
+	return strings.HasPrefix(strings.TrimSpace(sessionID), "agent:")
+}
+
 func filterTransientMessages(messages []models.Message) []models.Message {
 	if len(messages) == 0 {
 		return nil
@@ -1269,9 +1273,11 @@ func (s *Server) scheduleMemoryUpdate(threadID string, messages []models.Message
 			}
 			return
 		}
-		if err := s.replaceGatewayMemoryDocument(context.Background(), doc); err != nil && s.logger != nil {
-			s.logger.Printf("memory cache refresh failed for %s: %v", threadID, err)
-			return
+		if !isAgentMemorySessionID(threadID) {
+			if err := s.replaceGatewayMemoryDocument(context.Background(), doc); err != nil && s.logger != nil {
+				s.logger.Printf("memory cache refresh failed for %s: %v", threadID, err)
+				return
+			}
 		}
 		if err := s.persistGatewayState(); err != nil && s.logger != nil {
 			s.logger.Printf("persist gateway state after memory update failed for %s: %v", threadID, err)
@@ -1475,6 +1481,20 @@ func threadConfigFromRuntimeContext(threadID string, runtimeContext map[string]a
 		configurable["agent_type"] = string(cfg.AgentType)
 	}
 	return configurable
+}
+
+func threadMetadataFromRuntimeContext(runtimeContext map[string]any, cfg runConfig) map[string]any {
+	metadata := map[string]any{}
+	if agentName := firstNonEmpty(stringFromAny(runtimeContext["agent_name"]), cfg.AgentName); agentName != "" {
+		metadata["agent_name"] = agentName
+	}
+	if cfg.AgentType != "" {
+		metadata["agent_type"] = string(cfg.AgentType)
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
 }
 
 func firstNonEmpty(values ...string) string {

@@ -1436,7 +1436,7 @@ func TestGatewayRejectsInvalidThreadIDForFileEndpoints(t *testing.T) {
 	}
 }
 
-func TestGatewayThreadDeleteRemovesLocalDataAndInMemorySession(t *testing.T) {
+func TestGatewayThreadDeleteRemovesOnlyLocalData(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-delete-local"
 	session := s.ensureSession(threadID, map[string]any{"title": "Delete me"})
@@ -1449,6 +1449,19 @@ func TestGatewayThreadDeleteRemovesLocalDataAndInMemorySession(t *testing.T) {
 	if err := s.persistSessionSnapshot(cloneSession(session)); err != nil {
 		t.Fatalf("persist session: %v", err)
 	}
+	outputFile := filepath.Join(s.threadRoot(threadID), "outputs", "report.md")
+	if err := os.MkdirAll(filepath.Dir(outputFile), 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	if err := os.WriteFile(outputFile, []byte("report"), 0o644); err != nil {
+		t.Fatalf("write output file: %v", err)
+	}
+	if err := session.PresentFiles.Register(tools.PresentFile{
+		Path:       "/mnt/user-data/outputs/report.md",
+		SourcePath: outputFile,
+	}); err != nil {
+		t.Fatalf("register present file: %v", err)
+	}
 
 	workspaceFile := filepath.Join(s.threadRoot(threadID), "workspace", "notes.txt")
 	if err := os.MkdirAll(filepath.Dir(workspaceFile), 0o755); err != nil {
@@ -1456,6 +1469,13 @@ func TestGatewayThreadDeleteRemovesLocalDataAndInMemorySession(t *testing.T) {
 	}
 	if err := os.WriteFile(workspaceFile, []byte("cleanup"), 0o644); err != nil {
 		t.Fatalf("write workspace file: %v", err)
+	}
+	uploadFile := filepath.Join(s.uploadsDir(threadID), "notes.txt")
+	if err := os.MkdirAll(filepath.Dir(uploadFile), 0o755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+	if err := os.WriteFile(uploadFile, []byte("upload"), 0o644); err != nil {
+		t.Fatalf("write upload file: %v", err)
 	}
 	runID := "run-delete-local"
 	s.saveRun(&Run{
@@ -1486,18 +1506,58 @@ func TestGatewayThreadDeleteRemovesLocalDataAndInMemorySession(t *testing.T) {
 		t.Fatalf("message=%q", payload.Message)
 	}
 
-	if _, err := os.Stat(s.threadDir(threadID)); !os.IsNotExist(err) {
-		t.Fatalf("expected thread dir removed, stat err=%v", err)
+	if _, err := os.Stat(s.threadDir(threadID)); err != nil {
+		t.Fatalf("expected thread dir to remain for persisted state, stat err=%v", err)
+	}
+	if _, err := os.Stat(s.threadRoot(threadID)); !os.IsNotExist(err) {
+		t.Fatalf("expected user-data removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(s.sessionStatePath(threadID)); err != nil {
+		t.Fatalf("expected session state preserved, stat err=%v", err)
 	}
 
 	getResp := performCompatRequest(t, handler, http.MethodGet, "/threads/"+threadID, nil, nil)
-	if getResp.Code != http.StatusNotFound {
+	if getResp.Code != http.StatusOK {
 		t.Fatalf("get status=%d body=%s", getResp.Code, getResp.Body.String())
 	}
 
 	runResp := performCompatRequest(t, handler, http.MethodGet, "/runs/"+runID, nil, nil)
-	if runResp.Code != http.StatusNotFound {
+	if runResp.Code != http.StatusOK {
 		t.Fatalf("run status=%d body=%s", runResp.Code, runResp.Body.String())
+	}
+
+	var threadPayload struct {
+		Values map[string]any `json:"values"`
+	}
+	if err := json.NewDecoder(getResp.Body).Decode(&threadPayload); err != nil {
+		t.Fatalf("decode thread response: %v", err)
+	}
+	if artifacts, _ := threadPayload.Values["artifacts"].([]any); len(artifacts) != 0 {
+		t.Fatalf("artifacts=%#v want empty after gateway cleanup", artifacts)
+	}
+	if uploads, _ := threadPayload.Values["uploaded_files"].([]any); len(uploads) != 0 {
+		t.Fatalf("uploaded_files=%#v want empty after gateway cleanup", uploads)
+	}
+
+	reloaded := &Server{
+		sessions:   make(map[string]*Session),
+		runs:       make(map[string]*Run),
+		runStreams: make(map[string]map[uint64]chan StreamEvent),
+		dataRoot:   s.dataRoot,
+	}
+	if err := reloaded.loadPersistedSessions(); err != nil {
+		t.Fatalf("load persisted sessions: %v", err)
+	}
+
+	state := reloaded.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("expected thread state after reload")
+	}
+	if artifacts, _ := state.Values["artifacts"].([]string); len(artifacts) != 0 {
+		t.Fatalf("reloaded artifacts=%#v want empty after cleanup", artifacts)
+	}
+	if uploads, _ := state.Values["uploaded_files"].([]map[string]any); len(uploads) != 0 {
+		t.Fatalf("reloaded uploaded_files=%#v want empty after cleanup", uploads)
 	}
 }
 
@@ -3236,6 +3296,83 @@ func TestRunsStreamPersistsMemoryUpdatesToAgentScope(t *testing.T) {
 	}
 	if _, ok := store.docs["thread-custom-agent-memory-save"]; ok {
 		t.Fatalf("unexpected thread-scoped memory document: %#v", store.docs["thread-custom-agent-memory-save"])
+	}
+}
+
+func TestAgentScopedMemoryUpdateDoesNotReplaceGlobalMemoryEndpoint(t *testing.T) {
+	provider := &streamSpyProvider{}
+	store := &fakeGatewayMemoryStore{
+		docs: map[string]memory.Document{
+			"thread-global-memory": {
+				SessionID: "thread-global-memory",
+				Source:    "thread-global-memory",
+				User: memory.UserMemory{
+					TopOfMind: "Global memory should stay visible.",
+				},
+				UpdatedAt: time.Now().Add(-time.Minute).UTC(),
+			},
+		},
+	}
+	s := &Server{
+		llmProvider:  provider,
+		defaultModel: "default-model",
+		tools:        newRuntimeToolRegistry(t),
+		sessions:     make(map[string]*Session),
+		runs:         make(map[string]*Run),
+		runStreams:   make(map[string]map[uint64]chan StreamEvent),
+		dataRoot:     t.TempDir(),
+		memoryStore:  store,
+		memorySvc:    memory.NewService(store, fakeStaticMemoryExtractor{update: memory.Update{User: memory.UserMemory{TopOfMind: "Agent private memory."}}}),
+		memoryThread: "thread-global-memory",
+		memory: gatewayMemoryResponse{
+			LastUpdated: time.Now().Add(-time.Minute).UTC().Format(time.RFC3339),
+			User: memoryUser{
+				TopOfMind: memorySection{Summary: "Global memory should stay visible."},
+			},
+		},
+		agents: map[string]gatewayAgent{
+			"code-reviewer": {
+				Name:        "code-reviewer",
+				Description: "Review code changes carefully.",
+			},
+		},
+	}
+	mux := http.NewServeMux()
+	s.registerRoutes(mux)
+
+	body := `{
+		"thread_id":"thread-custom-agent-memory-cache",
+		"input":{"messages":[{"role":"user","content":"Review this patch"}]},
+		"context":{"agent_name":"code-reviewer"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/runs/stream", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleRunsStream(rec, req)
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(payload))
+	}
+
+	memResp := performCompatRequest(t, mux, http.MethodGet, "/api/memory", nil, nil)
+	if memResp.Code != http.StatusOK {
+		t.Fatalf("memory status=%d body=%s", memResp.Code, memResp.Body.String())
+	}
+	if !strings.Contains(memResp.Body.String(), "Global memory should stay visible.") {
+		t.Fatalf("memory body=%q", memResp.Body.String())
+	}
+	if strings.Contains(memResp.Body.String(), "Agent private memory.") {
+		t.Fatalf("agent memory leaked into global endpoint: %q", memResp.Body.String())
+	}
+	if got := s.memoryThread; got != "thread-global-memory" {
+		t.Fatalf("memoryThread=%q want thread-global-memory", got)
+	}
+	if doc, ok := store.docs["agent:code-reviewer"]; !ok {
+		t.Fatalf("expected agent-scoped memory document, got keys=%v", mapsKeys(store.docs))
+	} else if doc.User.TopOfMind != "Agent private memory" {
+		t.Fatalf("agent top_of_mind=%q want=%q", doc.User.TopOfMind, "Agent private memory")
 	}
 }
 

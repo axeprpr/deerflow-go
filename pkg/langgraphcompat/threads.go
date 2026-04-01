@@ -1356,6 +1356,42 @@ func defaultThreadConfig(threadID string) map[string]any {
 	return cfg
 }
 
+func (s *Server) deleteGatewayThreadData(threadID string) error {
+	if strings.TrimSpace(threadID) == "" {
+		return nil
+	}
+
+	var snapshot *Session
+	s.sessionsMu.Lock()
+	if session := s.sessions[threadID]; session != nil {
+		if session.PresentFiles != nil {
+			session.PresentFiles.Clear()
+		}
+		session.UpdatedAt = time.Now().UTC()
+		snapshot = cloneSession(session)
+	}
+	s.sessionsMu.Unlock()
+
+	if snapshot != nil {
+		if err := s.persistSessionSnapshot(snapshot); err != nil {
+			return err
+		}
+	}
+
+	if err := os.RemoveAll(s.threadRoot(threadID)); err != nil {
+		return err
+	}
+
+	acpWorkspace, err := tools.ACPWorkspaceDir(threadID)
+	if err != nil {
+		return err
+	}
+	if err := os.RemoveAll(acpWorkspace); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Server) deleteThreadResources(threadID string, removeLocalData bool) error {
 	s.sessionsMu.Lock()
 	delete(s.sessions, threadID)

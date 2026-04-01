@@ -902,6 +902,10 @@ func extractPDFTextFromStream(stream string) string {
 			i += 2
 		case !inText:
 			i++
+		case stream[i] == '[':
+			text, next := consumePDFArrayText(stream, i)
+			appendPDFText(&out, text, &needsSpace)
+			i = next
 		case stream[i] == '(':
 			text, next := consumePDFLiteralString(stream, i)
 			appendPDFText(&out, text, &needsSpace)
@@ -932,6 +936,46 @@ func extractPDFTextFromStream(stream string) string {
 	return normalizePDFExtractedText(out.String())
 }
 
+func consumePDFArrayText(stream string, start int) (string, int) {
+	if start >= len(stream) || stream[start] != '[' {
+		return "", start
+	}
+	var parts []string
+	depth := 1
+	for i := start + 1; i < len(stream); {
+		switch stream[i] {
+		case '[':
+			depth++
+			i++
+		case ']':
+			depth--
+			i++
+			if depth == 0 {
+				return strings.Join(parts, ""), i
+			}
+		case '(':
+			text, next := consumePDFLiteralString(stream, i)
+			if text != "" {
+				parts = append(parts, text)
+			}
+			i = next
+		case '<':
+			if i+1 < len(stream) && stream[i+1] == '<' {
+				i += 2
+				continue
+			}
+			text, next := consumePDFHexString(stream, i)
+			if text != "" {
+				parts = append(parts, text)
+			}
+			i = next
+		default:
+			i++
+		}
+	}
+	return strings.Join(parts, ""), len(stream)
+}
+
 func hasPDFOperator(stream string, idx int, op string) bool {
 	if idx < 0 || idx+len(op) > len(stream) || stream[idx:idx+len(op)] != op {
 		return false
@@ -952,7 +996,12 @@ func hasPDFOperator(stream string, idx int, op string) bool {
 }
 
 func consumePDFLiteralString(stream string, start int) (string, int) {
-	var out strings.Builder
+	data, next := consumePDFLiteralBytes(stream, start)
+	return decodePDFStringBytes(data), next
+}
+
+func consumePDFLiteralBytes(stream string, start int) ([]byte, int) {
+	var out bytes.Buffer
 	depth := 0
 	for i := start; i < len(stream); i++ {
 		ch := stream[i]
@@ -966,7 +1015,7 @@ func consumePDFLiteralString(stream string, start int) (string, int) {
 		if ch == ')' {
 			depth--
 			if depth == 0 {
-				return out.String(), i + 1
+				return out.Bytes(), i + 1
 			}
 			out.WriteByte(ch)
 			continue
@@ -1009,16 +1058,21 @@ func consumePDFLiteralString(stream string, start int) (string, int) {
 			out.WriteByte(ch)
 		}
 	}
-	return out.String(), len(stream)
+	return out.Bytes(), len(stream)
 }
 
 func consumePDFHexString(stream string, start int) (string, int) {
+	data, next := consumePDFHexBytes(stream, start)
+	return decodePDFStringBytes(data), next
+}
+
+func consumePDFHexBytes(stream string, start int) ([]byte, int) {
 	end := start + 1
 	for end < len(stream) && stream[end] != '>' {
 		end++
 	}
 	if end >= len(stream) {
-		return "", len(stream)
+		return nil, len(stream)
 	}
 	hex := strings.Map(func(r rune) rune {
 		if unicode.IsSpace(r) {
@@ -1029,7 +1083,7 @@ func consumePDFHexString(stream string, start int) (string, int) {
 	if len(hex)%2 == 1 {
 		hex += "0"
 	}
-	var out strings.Builder
+	var out bytes.Buffer
 	for i := 0; i+1 < len(hex); i += 2 {
 		value, err := strconv.ParseUint(hex[i:i+2], 16, 8)
 		if err != nil {
@@ -1037,7 +1091,80 @@ func consumePDFHexString(stream string, start int) (string, int) {
 		}
 		out.WriteByte(byte(value))
 	}
-	return out.String(), end + 1
+	return out.Bytes(), end + 1
+}
+
+func decodePDFStringBytes(data []byte) string {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return ""
+	}
+	if decoded, ok := decodeUTF16PDFString(data); ok {
+		return decoded
+	}
+	if utf8.Valid(data) {
+		return string(data)
+	}
+	return strings.ToValidUTF8(string(data), "")
+}
+
+func decodeUTF16PDFString(data []byte) (string, bool) {
+	if len(data) < 2 {
+		return "", false
+	}
+	switch {
+	case len(data)%2 == 0 && data[0] == 0xFE && data[1] == 0xFF:
+		return decodeUTF16Words(data[2:], true), true
+	case len(data)%2 == 0 && data[0] == 0xFF && data[1] == 0xFE:
+		return decodeUTF16Words(data[2:], false), true
+	case looksLikeUTF16BE(data):
+		return decodeUTF16Words(data, true), true
+	case looksLikeUTF16LE(data):
+		return decodeUTF16Words(data, false), true
+	default:
+		return "", false
+	}
+}
+
+func looksLikeUTF16BE(data []byte) bool {
+	if len(data) < 4 || len(data)%2 != 0 {
+		return false
+	}
+	var zeroHigh int
+	for i := 0; i+1 < len(data); i += 2 {
+		if data[i] == 0 && data[i+1] != 0 {
+			zeroHigh++
+		}
+	}
+	return zeroHigh*2 >= len(data)/2
+}
+
+func looksLikeUTF16LE(data []byte) bool {
+	if len(data) < 4 || len(data)%2 != 0 {
+		return false
+	}
+	var zeroLow int
+	for i := 0; i+1 < len(data); i += 2 {
+		if data[i] != 0 && data[i+1] == 0 {
+			zeroLow++
+		}
+	}
+	return zeroLow*2 >= len(data)/2
+}
+
+func decodeUTF16Words(data []byte, bigEndian bool) string {
+	if len(data)%2 != 0 {
+		data = data[:len(data)-1]
+	}
+	words := make([]uint16, 0, len(data)/2)
+	for i := 0; i+1 < len(data); i += 2 {
+		if bigEndian {
+			words = append(words, uint16(data[i])<<8|uint16(data[i+1]))
+			continue
+		}
+		words = append(words, uint16(data[i])|uint16(data[i+1])<<8)
+	}
+	return string(utf16.Decode(words))
 }
 
 func appendPDFText(out *strings.Builder, text string, needsSpace *bool) {
