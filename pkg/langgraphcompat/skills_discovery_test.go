@@ -105,6 +105,55 @@ Ask focused questions before drafting the skill.
 	}
 }
 
+func TestGatewaySkillRootsDiscoversWorkspaceSkills(t *testing.T) {
+	projectRoot := t.TempDir()
+	workspaceSkillDir := filepath.Join(projectRoot, "skills", "public", "workspace-skill")
+	if err := os.MkdirAll(workspaceSkillDir, 0o755); err != nil {
+		t.Fatalf("mkdir workspace skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceSkillDir, "SKILL.md"), []byte(`---
+name: workspace-skill
+description: Loaded from the current workspace skills directory.
+license: MIT
+---
+# Workspace Skill
+
+This body comes from the repo-local skills directory.
+`), 0o644); err != nil {
+		t.Fatalf("write workspace skill: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(projectRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(wd)
+	}()
+
+	s, _ := newCompatTestServer(t)
+	skills := s.currentGatewaySkills()
+
+	skill, ok := skills[skillStorageKey(skillCategoryPublic, "workspace-skill")]
+	if !ok {
+		t.Fatalf("expected workspace skill discovery, got %#v", skills)
+	}
+	if skill.Description != "Loaded from the current workspace skills directory." {
+		t.Fatalf("description=%q want=%q", skill.Description, "Loaded from the current workspace skills directory.")
+	}
+
+	body, ok := s.loadGatewaySkillBody("workspace-skill", skillCategoryPublic)
+	if !ok {
+		t.Fatal("expected to load workspace skill body")
+	}
+	if got, want := body, "# Workspace Skill\n\nThis body comes from the repo-local skills directory."; got != want {
+		t.Fatalf("skill body=%q want=%q", got, want)
+	}
+}
+
 func TestSkillsDiscoveryFollowsSymlinkedDirectories(t *testing.T) {
 	s, _ := newCompatTestServer(t)
 
