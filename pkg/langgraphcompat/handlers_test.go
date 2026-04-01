@@ -1,6 +1,7 @@
 package langgraphcompat
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -261,6 +262,45 @@ func TestForwardAgentEventEmitsFinalAssistantMessageTupleWithUsage(t *testing.T)
 	}
 	if !found {
 		t.Fatal("missing final assistant messages-tuple payload")
+	}
+}
+
+func TestUsagePayloadFromAgentUsageDefaultsToZero(t *testing.T) {
+	got := usagePayloadFromAgentUsage(nil)
+	want := map[string]int{
+		"input_tokens":  0,
+		"output_tokens": 0,
+		"total_tokens":  0,
+	}
+	if got["input_tokens"] != want["input_tokens"] || got["output_tokens"] != want["output_tokens"] || got["total_tokens"] != want["total_tokens"] {
+		t.Fatalf("usage=%#v want %#v", got, want)
+	}
+}
+
+func TestUsagePayloadFromAgentUsagePreservesCounts(t *testing.T) {
+	got := usagePayloadFromAgentUsage(&agent.Usage{
+		InputTokens:  150,
+		OutputTokens: 25,
+		TotalTokens:  175,
+	})
+	if got["input_tokens"] != 150 || got["output_tokens"] != 25 || got["total_tokens"] != 175 {
+		t.Fatalf("usage=%#v", got)
+	}
+}
+
+func TestEndEventJSONIncludesZeroUsageWhenMissing(t *testing.T) {
+	payload := map[string]any{
+		"run_id": "run-no-usage",
+		"usage":  usagePayloadFromAgentUsage(nil),
+	}
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, `"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}`) {
+		t.Fatalf("payload=%s", text)
 	}
 }
 

@@ -104,6 +104,10 @@ The server can be configured through environment variables. `cmd/langgraph` read
 | `SILICONFLOW_API_KEY` | Yes for SiliconFlow | none | API key used by the default `siliconflow` provider. |
 | `POSTGRES_URL` | No | empty | PostgreSQL connection string for checkpoint persistence. When unset, state is in-memory only. |
 | `DEFAULT_LLM_MODEL` | No | `qwen/Qwen3.5-9B` for `cmd/langgraph` | Default model passed to runs when the request does not override `config.configurable.model_name`. |
+| `DEERFLOW_TITLE_ENABLED` | No | `true` | Enable or disable automatic thread title generation after the first exchange. |
+| `DEERFLOW_TITLE_MAX_WORDS` | No | `6` | Maximum words allowed in generated thread titles. Valid range: `1-20`. |
+| `DEERFLOW_TITLE_MAX_CHARS` | No | `60` | Maximum characters allowed in generated thread titles. Valid range: `10-200`. |
+| `DEERFLOW_TITLE_MODEL` | No | empty | Optional model override used only for title generation. |
 | `PORT` | No | `8080` | HTTP port used by `cmd/langgraph`. |
 | `ADDR` | No | derived from `PORT` | Optional full listen address override such as `0.0.0.0:8080` or `:8080`. |
 | `LOG_LEVEL` | No | empty | Logged at startup for deployment consistency. Current runtime logging still uses Go's standard logger. |

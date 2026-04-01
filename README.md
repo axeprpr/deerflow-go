@@ -127,6 +127,10 @@ Set `NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://localhost:8080` in your deerflow-ui `
 | `OPENAI_API_BASE_URL` | OpenAI-compatible provider base URL | Optional |
 | `ANTHROPIC_API_KEY` | Anthropic gateway API key | Optional |
 | `DEFAULT_LLM_MODEL` | Default model | `qwen/Qwen3.5-9B` |
+| `DEERFLOW_TITLE_ENABLED` | Enable automatic thread title generation | `true` |
+| `DEERFLOW_TITLE_MAX_WORDS` | Max words for generated thread titles (1-20) | `6` |
+| `DEERFLOW_TITLE_MAX_CHARS` | Max characters for generated thread titles (10-200) | `60` |
+| `DEERFLOW_TITLE_MODEL` | Optional model override for title generation | unset |
 | `DEERFLOW_MODELS` | Optional model catalog, e.g. `gpt-5=openai/gpt-5,claude=anthropic/claude-3-7-sonnet` | Optional |
 | `DEERFLOW_MODELS_JSON` | Optional JSON model catalog for `/api/models` metadata | Optional |
 | `POSTGRES_URL` | Postgres connection | Optional |

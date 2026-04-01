@@ -293,7 +293,7 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 	}
 	s.recordAndSendEvent(w, flusher, run, "end", map[string]any{
 		"run_id": run.RunID,
-		"usage":  result.Usage,
+		"usage":  usagePayloadFromAgentUsage(result.Usage),
 	})
 
 	run.Status = "success"
@@ -987,6 +987,21 @@ func (s *Server) sendThreadUpdateEvent(w http.ResponseWriter, flusher http.Flush
 func usageMetadataFromAgentUsage(usage *agent.Usage) map[string]int {
 	if usage == nil {
 		return nil
+	}
+	return map[string]int{
+		"input_tokens":  usage.InputTokens,
+		"output_tokens": usage.OutputTokens,
+		"total_tokens":  usage.TotalTokens,
+	}
+}
+
+func usagePayloadFromAgentUsage(usage *agent.Usage) map[string]int {
+	if usage == nil {
+		return map[string]int{
+			"input_tokens":  0,
+			"output_tokens": 0,
+			"total_tokens":  0,
+		}
 	}
 	return map[string]int{
 		"input_tokens":  usage.InputTokens,

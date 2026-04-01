@@ -165,6 +165,9 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 	for _, tool := range builtin.FileTools() {
 		registry.Register(tool)
 	}
+	for _, tool := range builtin.WebTools() {
+		registry.Register(tool)
+	}
 	registry.Register(builtin.ViewImageTool())
 	registry.Register(clarification.AskClarificationTool(clarifyManager))
 	if acpAgents := loadACPAgentConfigs(); len(acpAgents) > 0 {
