@@ -1104,9 +1104,7 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 		return runConfig{}, fmt.Errorf("invalid agent name")
 	}
 
-	s.uiStateMu.RLock()
-	customAgent, exists := s.getAgentsLocked()[name]
-	s.uiStateMu.RUnlock()
+	customAgent, exists := s.currentGatewayAgents()[name]
 	if !exists {
 		return runConfig{}, fmt.Errorf("agent %q not found", name)
 	}

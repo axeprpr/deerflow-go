@@ -340,14 +340,13 @@ func (s *Server) handleMCPConfigPut(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAgentsList(w http.ResponseWriter, r *http.Request) {
-	s.uiStateMu.RLock()
-	agents := make([]gatewayAgent, 0, len(s.getAgentsLocked()))
-	for _, a := range s.getAgentsLocked() {
+	currentAgents := s.currentGatewayAgents()
+	agents := make([]gatewayAgent, 0, len(currentAgents))
+	for _, a := range currentAgents {
 		out := a
 		out.Soul = ""
 		agents = append(agents, out)
 	}
-	s.uiStateMu.RUnlock()
 	sort.Slice(agents, func(i, j int) bool { return agents[i].Name < agents[j].Name })
 	writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
 }
@@ -359,9 +358,7 @@ func (s *Server) handleAgentCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	normalized := strings.ToLower(name)
-	s.uiStateMu.RLock()
-	_, exists := s.getAgentsLocked()[normalized]
-	s.uiStateMu.RUnlock()
+	_, exists := s.currentGatewayAgents()[normalized]
 	writeJSON(w, http.StatusOK, map[string]any{"available": !exists, "name": normalized})
 }
 
@@ -371,9 +368,7 @@ func (s *Server) handleAgentGet(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": "Invalid agent name"})
 		return
 	}
-	s.uiStateMu.RLock()
-	agent, exists := s.getAgentsLocked()[name]
-	s.uiStateMu.RUnlock()
+	agent, exists := s.currentGatewayAgents()[name]
 	if !exists {
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Agent '%s' not found", name)})
 		return
@@ -392,14 +387,13 @@ func (s *Server) handleAgentCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": "Invalid agent name"})
 		return
 	}
-
-	s.uiStateMu.Lock()
-	agents := s.getAgentsLocked()
-	if _, exists := agents[name]; exists {
-		s.uiStateMu.Unlock()
+	if _, exists := s.currentGatewayAgents()[name]; exists {
 		writeJSON(w, http.StatusConflict, map[string]any{"detail": fmt.Sprintf("Agent '%s' already exists", name)})
 		return
 	}
+
+	s.uiStateMu.Lock()
+	agents := s.getAgentsLocked()
 	req.Name = name
 	agents[name] = req
 	s.uiStateMu.Unlock()
@@ -441,6 +435,13 @@ func (s *Server) handleAgentUpdate(w http.ResponseWriter, r *http.Request) {
 	s.uiStateMu.Lock()
 	agents := s.getAgentsLocked()
 	agent, exists := agents[name]
+	if !exists {
+		if discovered, ok := s.discoverGatewayAgents()[name]; ok {
+			agent = discovered
+			agents[name] = agent
+			exists = true
+		}
+	}
 	if !exists {
 		s.uiStateMu.Unlock()
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Agent '%s' not found", name)})
@@ -490,6 +491,13 @@ func (s *Server) handleAgentDelete(w http.ResponseWriter, r *http.Request) {
 	s.uiStateMu.Lock()
 	agents := s.getAgentsLocked()
 	agent, exists := agents[name]
+	if !exists {
+		if discovered, ok := s.discoverGatewayAgents()[name]; ok {
+			agent = discovered
+			agents[name] = agent
+			exists = true
+		}
+	}
 	if !exists {
 		s.uiStateMu.Unlock()
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Agent '%s' not found", name)})
@@ -845,13 +853,10 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	if shouldForceAttachment(r, mimeType) {
 		w.Header().Set("Content-Disposition", contentDisposition("attachment", filepath.Base(absPath)))
 	}
-
-	data, err := os.ReadFile(absPath)
-	if err != nil {
+	if err := serveArtifactFile(w, r, filepath.Base(absPath), mimeType, absPath, downloadRequested(r)); err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	serveArtifactContent(w, filepath.Base(absPath), mimeType, data, downloadRequested(r))
 }
 
 func (s *Server) handleSkillArchiveRootPreview(w http.ResponseWriter, r *http.Request, threadID, artifactPath string) bool {
@@ -1104,6 +1109,50 @@ func extractSkillArchiveFile(archivePath, internalPath string) ([]byte, error) {
 
 func (s *Server) resolveArtifactPath(threadID, artifactPath string) (string, error) {
 	return s.resolveThreadVirtualPath(threadID, artifactPath)
+}
+
+func serveArtifactFile(w http.ResponseWriter, r *http.Request, filename, mimeType, path string, download bool) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+
+	sample := make([]byte, 8192)
+	n, readErr := file.Read(sample)
+	if readErr != nil && readErr != io.EOF {
+		return readErr
+	}
+	sample = sample[:n]
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
+	switch {
+	case mimeType == "" && looksLikeText(sample) && utf8.Valid(sample):
+		mimeType = "text/plain; charset=utf-8"
+	case isTextMIMEType(mimeType):
+		mimeType = withUTF8Charset(mimeType)
+	}
+
+	if download {
+		if w.Header().Get("Content-Disposition") == "" {
+			w.Header().Set("Content-Disposition", contentDisposition("attachment", filename))
+		}
+	} else if !isTextMIMEType(mimeType) && !looksLikeText(sample) {
+		w.Header().Set("Content-Disposition", contentDisposition("inline", filename))
+	}
+	if mimeType != "" {
+		w.Header().Set("Content-Type", mimeType)
+	}
+
+	http.ServeContent(w, r, filename, info.ModTime(), file)
+	return nil
 }
 
 func serveArtifactContent(w http.ResponseWriter, filename, mimeType string, data []byte, download bool) {
@@ -2366,6 +2415,121 @@ func normalizeAgentName(name string) (string, bool) {
 		return "", false
 	}
 	return strings.ToLower(name), true
+}
+
+func (s *Server) currentGatewayAgents() map[string]gatewayAgent {
+	s.uiStateMu.RLock()
+	stateAgents := cloneGatewayAgents(s.getAgentsLocked())
+	s.uiStateMu.RUnlock()
+
+	discovered := s.discoverGatewayAgents()
+	if len(discovered) == 0 {
+		return stateAgents
+	}
+	if len(stateAgents) == 0 {
+		return discovered
+	}
+
+	merged := make(map[string]gatewayAgent, len(stateAgents)+len(discovered))
+	for name, agent := range stateAgents {
+		merged[name] = agent
+	}
+	for name, agent := range discovered {
+		merged[name] = agent
+	}
+	return merged
+}
+
+func cloneGatewayAgents(src map[string]gatewayAgent) map[string]gatewayAgent {
+	if len(src) == 0 {
+		return map[string]gatewayAgent{}
+	}
+	out := make(map[string]gatewayAgent, len(src))
+	for name, agent := range src {
+		out[name] = agent
+	}
+	return out
+}
+
+func (s *Server) discoverGatewayAgents() map[string]gatewayAgent {
+	entries, err := os.ReadDir(filepath.Join(s.dataRoot, "agents"))
+	if err != nil {
+		return nil
+	}
+
+	discovered := make(map[string]gatewayAgent, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name, ok := normalizeAgentName(entry.Name())
+		if !ok {
+			continue
+		}
+		agent, err := loadGatewayAgentFromDir(filepath.Join(s.dataRoot, "agents", entry.Name()), name)
+		if err != nil {
+			continue
+		}
+		discovered[name] = agent
+	}
+	return discovered
+}
+
+func loadGatewayAgentFromDir(dir string, fallbackName string) (gatewayAgent, error) {
+	type persistedAgent struct {
+		Name        string   `json:"name" yaml:"name"`
+		Description string   `json:"description" yaml:"description"`
+		Model       *string  `json:"model" yaml:"model"`
+		ToolGroups  []string `json:"tool_groups" yaml:"tool_groups"`
+		Soul        string   `json:"soul" yaml:"soul"`
+	}
+
+	var raw persistedAgent
+	loadedConfig := false
+	for _, candidate := range []string{
+		filepath.Join(dir, "config.yaml"),
+		filepath.Join(dir, "agent.json"),
+	} {
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			continue
+		}
+		switch filepath.Ext(candidate) {
+		case ".yaml":
+			if err := yaml.Unmarshal(data, &raw); err != nil {
+				return gatewayAgent{}, err
+			}
+		case ".json":
+			if err := json.Unmarshal(data, &raw); err != nil {
+				return gatewayAgent{}, err
+			}
+		}
+		loadedConfig = true
+		break
+	}
+	if !loadedConfig {
+		return gatewayAgent{}, os.ErrNotExist
+	}
+
+	soulPath := filepath.Join(dir, "SOUL.md")
+	if data, err := os.ReadFile(soulPath); err == nil {
+		raw.Soul = string(data)
+	} else if !os.IsNotExist(err) {
+		return gatewayAgent{}, err
+	}
+
+	name, ok := normalizeAgentName(firstNonEmpty(raw.Name, fallbackName, filepath.Base(dir)))
+	if !ok {
+		return gatewayAgent{}, fmt.Errorf("invalid agent name %q", raw.Name)
+	}
+
+	return gatewayAgent{
+		Name:        name,
+		Description: strings.TrimSpace(raw.Description),
+		Model:       raw.Model,
+		ToolGroups:  append([]string(nil), raw.ToolGroups...),
+		Soul:        raw.Soul,
+	}, nil
 }
 
 func nullableString(v string) any {

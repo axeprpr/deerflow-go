@@ -1063,6 +1063,33 @@ func TestArtifactEndpointForcesDownloadForSVG(t *testing.T) {
 	}
 }
 
+func TestArtifactEndpointSupportsRangeRequests(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-artifact-range"
+	outputDir := filepath.Join(s.threadRoot(threadID), "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "movie.txt"), []byte("hello world"), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/movie.txt", nil)
+	req.Header.Set("Range", "bytes=6-10")
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusPartialContent {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Body.String(); got != "world" {
+		t.Fatalf("body=%q want=world", got)
+	}
+	if got := resp.Header().Get("Content-Range"); got != "bytes 6-10/11" {
+		t.Fatalf("content-range=%q want bytes 6-10/11", got)
+	}
+}
+
 func TestArtifactEndpointRejectsSymlinkEscapingThreadRoot(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-artifact-symlink"
@@ -2505,6 +2532,133 @@ func TestAgentsAndMemoryEndpoints(t *testing.T) {
 	chResp := performCompatRequest(t, handler, http.MethodGet, "/api/channels", nil, nil)
 	if chResp.Code != http.StatusOK {
 		t.Fatalf("channels status=%d", chResp.Code)
+	}
+}
+
+func TestAgentEndpointsDiscoverFilesystemAgents(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	agentDir := s.agentDir("disk-agent")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatalf("mkdir agent dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "config.yaml"), []byte("name: disk-agent\ndescription: Loaded from disk.\nmodel: gpt-5\ntool_groups:\n  - bash\n"), 0o644); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "SOUL.md"), []byte("# Disk Agent\n\nUse filesystem-backed config."), 0o644); err != nil {
+		t.Fatalf("write SOUL.md: %v", err)
+	}
+
+	listResp := performCompatRequest(t, handler, http.MethodGet, "/api/agents", nil, nil)
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", listResp.Code, listResp.Body.String())
+	}
+	var listed struct {
+		Agents []gatewayAgent `json:"agents"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listed.Agents) != 1 || listed.Agents[0].Name != "disk-agent" {
+		t.Fatalf("listed agents=%#v", listed.Agents)
+	}
+	if listed.Agents[0].Soul != "" {
+		t.Fatalf("list should omit soul, got %#v", listed.Agents[0])
+	}
+
+	getResp := performCompatRequest(t, handler, http.MethodGet, "/api/agents/disk-agent", nil, nil)
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", getResp.Code, getResp.Body.String())
+	}
+	var got gatewayAgent
+	if err := json.NewDecoder(getResp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode get response: %v", err)
+	}
+	if got.Description != "Loaded from disk." {
+		t.Fatalf("description=%q want=%q", got.Description, "Loaded from disk.")
+	}
+	if !strings.Contains(got.Soul, "filesystem-backed config") {
+		t.Fatalf("soul=%q", got.Soul)
+	}
+
+	checkResp := performCompatRequest(t, handler, http.MethodGet, "/api/agents/check?name=disk-agent", nil, nil)
+	if checkResp.Code != http.StatusOK {
+		t.Fatalf("check status=%d body=%s", checkResp.Code, checkResp.Body.String())
+	}
+	var check struct {
+		Available bool `json:"available"`
+	}
+	if err := json.NewDecoder(checkResp.Body).Decode(&check); err != nil {
+		t.Fatalf("decode check response: %v", err)
+	}
+	if check.Available {
+		t.Fatal("expected filesystem agent name to be unavailable")
+	}
+
+	updateResp := performCompatRequest(t, handler, http.MethodPut, "/api/agents/disk-agent", strings.NewReader(`{"description":"Updated from API.","soul":"# Disk Agent\n\nUpdated soul."}`), map[string]string{"Content-Type": "application/json"})
+	if updateResp.Code != http.StatusOK {
+		t.Fatalf("update status=%d body=%s", updateResp.Code, updateResp.Body.String())
+	}
+	assertFileContains(t, filepath.Join(agentDir, "config.yaml"), "description: Updated from API.")
+	assertFileContains(t, filepath.Join(agentDir, "SOUL.md"), "Updated soul.")
+
+	deleteResp := performCompatRequest(t, handler, http.MethodDelete, "/api/agents/disk-agent", nil, nil)
+	if deleteResp.Code != http.StatusNoContent {
+		t.Fatalf("delete status=%d body=%s", deleteResp.Code, deleteResp.Body.String())
+	}
+	if _, err := os.Stat(agentDir); !os.IsNotExist(err) {
+		t.Fatalf("agent dir still exists: %v", err)
+	}
+}
+
+func TestRunsStreamAppliesFilesystemCustomAgentRuntimeConfig(t *testing.T) {
+	provider := &streamSpyProvider{}
+	s := &Server{
+		llmProvider:  provider,
+		defaultModel: "default-model",
+		tools:        newRuntimeToolRegistry(t),
+		sessions:     make(map[string]*Session),
+		runs:         make(map[string]*Run),
+		dataRoot:     t.TempDir(),
+		agents:       map[string]gatewayAgent{},
+	}
+	s.ensureSession("thread-disk-agent", map[string]any{"title": "Existing title"})
+
+	agentDir := s.agentDir("disk-agent")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatalf("mkdir agent dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "config.yaml"), []byte("name: disk-agent\ndescription: Review code from disk.\nmodel: custom-model\ntool_groups:\n  - file:read\n"), 0o644); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "SOUL.md"), []byte("# Disk Agent\n\nReview carefully."), 0o644); err != nil {
+		t.Fatalf("write SOUL.md: %v", err)
+	}
+
+	body := `{
+		"thread_id":"thread-disk-agent",
+		"input":{"messages":[{"role":"user","content":"Review this patch"}]},
+		"context":{"agent_name":"disk-agent"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/runs/stream", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.handleRunsStream(rec, req)
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(payload))
+	}
+
+	if provider.lastReq.Model != "custom-model" {
+		t.Fatalf("model=%q want=%q", provider.lastReq.Model, "custom-model")
+	}
+	if !strings.Contains(provider.lastReq.SystemPrompt, "Review code from disk.") {
+		t.Fatalf("system prompt missing description: %q", provider.lastReq.SystemPrompt)
+	}
+	if !strings.Contains(provider.lastReq.SystemPrompt, "Review carefully.") {
+		t.Fatalf("system prompt missing soul: %q", provider.lastReq.SystemPrompt)
 	}
 }
 
