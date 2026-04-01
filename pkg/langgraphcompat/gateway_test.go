@@ -1616,6 +1616,39 @@ func TestUploadConvertibleDocumentCreatesMarkdownCompanion(t *testing.T) {
 	}
 }
 
+func TestUploadsCreateMakesFilesSandboxWritable(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-upload-permissions"
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	part, err := w.CreateFormFile("files", "report.docx")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write(minimalDOCX(t, "Writable Upload")); err != nil {
+		t.Fatalf("write docx: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/"+threadID+"/uploads", &body, map[string]string{"Content-Type": w.FormDataContentType()})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("upload status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	for _, name := range []string{"report.docx", "report.md"} {
+		info, err := os.Stat(filepath.Join(s.uploadsDir(threadID), name))
+		if err != nil {
+			t.Fatalf("stat %s: %v", name, err)
+		}
+		if got := info.Mode().Perm() & 0o222; got != 0o222 {
+			t.Fatalf("%s mode=%#o want world-writable", name, info.Mode().Perm())
+		}
+	}
+}
+
 func TestDeleteConvertibleUploadRemovesMarkdownCompanion(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-delete-companion"

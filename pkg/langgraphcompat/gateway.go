@@ -732,6 +732,11 @@ func (s *Server) handleUploadsCreate(w http.ResponseWriter, r *http.Request) {
 				s.logger.Printf("upload markdown conversion failed for %s/%s: %v", threadID, name, err)
 			}
 		} else if mdPath != "" {
+			if err := ensureUploadSandboxWritable(mdPath); err != nil {
+				removeUploadedPaths(append(writtenPaths, filepath.Join(uploadDir, name), mdPath))
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
+				return
+			}
 			writtenPaths = append(writtenPaths, mdPath)
 			mdName := filepath.Base(mdPath)
 			info["markdown_file"] = mdName
@@ -1016,7 +1021,25 @@ func (s *Server) saveUploadedFile(threadID, uploadDir, name string, fh *multipar
 	if err != nil {
 		return nil, err
 	}
+	if err := ensureUploadSandboxWritable(dstPath); err != nil {
+		return nil, err
+	}
 	return s.uploadInfo(threadID, dstPath, name, n, nowUnix()), nil
+}
+
+func ensureUploadSandboxWritable(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil
+	}
+	mode := info.Mode().Perm() | 0o222
+	if err := os.Chmod(path, mode); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Server) attachMarkdownCompanionInfo(threadID, uploadDir, name string, info map[string]any) {
