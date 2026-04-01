@@ -191,6 +191,19 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 			logger.Printf("Warning: failed to create Postgres store: %v", err)
 		}
 	}
+
+	dataRoot := strings.TrimSpace(os.Getenv("DEERFLOW_DATA_ROOT"))
+	if dataRoot == "" {
+		dataRoot = filepath.Join(os.TempDir(), "deerflow-go-data")
+	}
+	dataRootAbs, err := filepath.Abs(dataRoot)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dataRootAbs, 0o755); err != nil {
+		return nil, err
+	}
+
 	var memoryStore memory.Storage
 	var memoryStoreCloser interface{ Close() }
 	var memorySvc *memory.Service
@@ -214,17 +227,28 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 			memorySvc = memory.NewService(memoryStore, memory.NewLLMClient(provider, memoryModel)).WithUpdateTimeout(timeout)
 		}
 	}
-
-	dataRoot := strings.TrimSpace(os.Getenv("DEERFLOW_DATA_ROOT"))
-	if dataRoot == "" {
-		dataRoot = filepath.Join(os.TempDir(), "deerflow-go-data")
-	}
-	dataRootAbs, err := filepath.Abs(dataRoot)
-	if err != nil {
-		return nil, err
-	}
-	if err := os.MkdirAll(dataRootAbs, 0o755); err != nil {
-		return nil, err
+	if memoryStore == nil {
+		fileMemoryStore, err := memory.NewFileStore(filepath.Join(dataRootAbs, "memory"))
+		if err != nil {
+			logger.Printf("Warning: failed to create file-backed memory store: %v", err)
+		} else {
+			if err := fileMemoryStore.AutoMigrate(ctx); err != nil {
+				logger.Printf("Warning: failed to initialize file-backed memory store: %v", err)
+			} else {
+				memoryStore = fileMemoryStore
+				timeout := 30 * time.Second
+				if raw := strings.TrimSpace(os.Getenv("MEMORY_UPDATE_TIMEOUT")); raw != "" {
+					if parsed, parseErr := time.ParseDuration(raw); parseErr == nil && parsed > 0 {
+						timeout = parsed
+					}
+				}
+				memoryModel := strings.TrimSpace(os.Getenv("MEMORY_LLM_MODEL"))
+				if memoryModel == "" {
+					memoryModel = defaultModel
+				}
+				memorySvc = memory.NewService(memoryStore, memory.NewLLMClient(provider, memoryModel)).WithUpdateTimeout(timeout)
+			}
+		}
 	}
 
 	s := &Server{

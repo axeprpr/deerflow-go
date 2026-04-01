@@ -19,7 +19,7 @@ func ReadFileHandler(ctx context.Context, call models.ToolCall) (models.ToolResu
 	if !ok || strings.TrimSpace(path) == "" {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("path is required")
 	}
-	path = tools.ResolveVirtualPath(ctx, path)
+	path = resolveReadableFilePath(ctx, path)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -31,6 +31,37 @@ func ReadFileHandler(ctx context.Context, call models.ToolCall) (models.ToolResu
 	}
 
 	return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: string(data)}, nil
+}
+
+func resolveReadableFilePath(ctx context.Context, path string) string {
+	path = strings.TrimSpace(path)
+	resolved := tools.ResolveVirtualPath(ctx, path)
+	if !shouldPreferMarkdownCompanion(path) {
+		return resolved
+	}
+
+	companion := strings.TrimSuffix(resolved, filepath.Ext(resolved)) + ".md"
+	info, err := os.Stat(companion)
+	if err != nil || !info.Mode().IsRegular() {
+		return resolved
+	}
+	return companion
+}
+
+func shouldPreferMarkdownCompanion(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	if !strings.HasPrefix(path, "/mnt/user-data/uploads/") {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".pdf", ".ppt", ".pptx", ".xls", ".xlsx", ".doc", ".docx":
+		return true
+	default:
+		return false
+	}
 }
 
 func WriteFileHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {

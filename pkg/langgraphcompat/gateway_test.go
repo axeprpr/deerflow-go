@@ -95,6 +95,56 @@ func TestGatewayOpenAPIDocumentationEndpoints(t *testing.T) {
 	}
 }
 
+func TestNewServerEnablesFileBackedMemoryWithoutPostgres(t *testing.T) {
+	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
+
+	s, err := NewServer(":0", "", "test-model")
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	if s.memorySvc == nil {
+		t.Fatal("memorySvc is nil, want file-backed memory enabled")
+	}
+	if s.memoryStore == nil {
+		t.Fatal("memoryStore is nil, want file-backed memory store")
+	}
+	if got := s.gatewayMemoryStoragePath(); !strings.HasSuffix(got, string(filepath.Separator)+"memory") {
+		t.Fatalf("gatewayMemoryStoragePath()=%q want file-backed memory directory", got)
+	}
+}
+
+func TestMemoryConfigReportsFileBackedStoragePath(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	s, err := NewServer(":0", "", "test-model")
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	mux := http.NewServeMux()
+	s.registerRoutes(mux)
+
+	resp := performCompatRequest(t, mux, http.MethodGet, "/api/memory/config", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d want=%d", resp.Code, http.StatusOK)
+	}
+
+	var body struct {
+		Enabled     bool   `json:"enabled"`
+		StoragePath string `json:"storage_path"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !body.Enabled {
+		t.Fatal("enabled=false want true")
+	}
+	want := filepath.Join(root, "memory")
+	if body.StoragePath != want {
+		t.Fatalf("storage_path=%q want=%q", body.StoragePath, want)
+	}
+}
+
 func performCompatRequest(t *testing.T, handler http.Handler, method, target string, body io.Reader, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, target, body)

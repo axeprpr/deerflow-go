@@ -40,6 +40,67 @@ func TestReadFileHandlerResolvesThreadVirtualPath(t *testing.T) {
 	}
 }
 
+func TestReadFileHandlerPrefersMarkdownCompanionForConvertibleUploads(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	threadID := "thread-convertible-upload"
+	uploadDir := filepath.Join(root, "threads", threadID, "user-data", "uploads")
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "report.pdf"), []byte("%PDF-binary"), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "report.md"), []byte("# Report\n\nConverted content"), 0o644); err != nil {
+		t.Fatalf("write markdown companion: %v", err)
+	}
+
+	ctx := tools.WithThreadID(context.Background(), threadID)
+	result, err := ReadFileHandler(ctx, models.ToolCall{
+		ID:   "call-read-convertible-1",
+		Name: "read_file",
+		Arguments: map[string]any{
+			"path": "/mnt/user-data/uploads/report.pdf",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ReadFileHandler() error = %v", err)
+	}
+	if result.Content != "# Report\n\nConverted content" {
+		t.Fatalf("content=%q want markdown companion", result.Content)
+	}
+}
+
+func TestReadFileHandlerFallsBackToOriginalUploadWhenMarkdownCompanionMissing(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	threadID := "thread-convertible-upload-fallback"
+	uploadDir := filepath.Join(root, "threads", threadID, "user-data", "uploads")
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "report.pdf"), []byte("raw-content"), 0o644); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	ctx := tools.WithThreadID(context.Background(), threadID)
+	result, err := ReadFileHandler(ctx, models.ToolCall{
+		ID:   "call-read-convertible-2",
+		Name: "read_file",
+		Arguments: map[string]any{
+			"path": "/mnt/user-data/uploads/report.pdf",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ReadFileHandler() error = %v", err)
+	}
+	if result.Content != "raw-content" {
+		t.Fatalf("content=%q want raw-content", result.Content)
+	}
+}
+
 func TestWriteFileHandlerWritesToResolvedVirtualPath(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DEERFLOW_DATA_ROOT", root)

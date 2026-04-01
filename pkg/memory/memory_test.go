@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -335,6 +336,69 @@ func TestPostgresStoreSaveLoadUsesTransaction(t *testing.T) {
 	}
 	if len(got.Facts) != 1 || got.Facts[0].ID != "language" {
 		t.Fatalf("loaded facts = %#v", got.Facts)
+	}
+}
+
+func TestFileStoreSaveLoadRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	store, err := NewFileStore(filepath.Join(t.TempDir(), "memory"))
+	if err != nil {
+		t.Fatalf("NewFileStore() error = %v", err)
+	}
+	if err := store.AutoMigrate(context.Background()); err != nil {
+		t.Fatalf("AutoMigrate() error = %v", err)
+	}
+
+	now := time.Date(2026, 4, 1, 8, 0, 0, 0, time.UTC)
+	doc := Document{
+		SessionID: "agent:code-reviewer",
+		User: UserMemory{
+			WorkContext: "Reviewing backend compatibility",
+		},
+		History: HistoryMemory{
+			LongTermBackground: "Maintains DeerFlow-compatible runtimes.",
+		},
+		Facts: []Fact{
+			{ID: "pref", Content: "Prefers concrete bug reports", Category: "preference", Confidence: 0.9, CreatedAt: now, UpdatedAt: now},
+		},
+		Source:    "agent:code-reviewer",
+		UpdatedAt: now,
+	}
+
+	if err := store.Save(context.Background(), doc); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	got, err := store.Load(context.Background(), doc.SessionID)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.SessionID != doc.SessionID {
+		t.Fatalf("session_id = %q want %q", got.SessionID, doc.SessionID)
+	}
+	if got.User.WorkContext != doc.User.WorkContext {
+		t.Fatalf("workContext = %q want %q", got.User.WorkContext, doc.User.WorkContext)
+	}
+	if got.History.LongTermBackground != doc.History.LongTermBackground {
+		t.Fatalf("longTermBackground = %q want %q", got.History.LongTermBackground, doc.History.LongTermBackground)
+	}
+	if len(got.Facts) != 1 || got.Facts[0].Content != "Prefers concrete bug reports" {
+		t.Fatalf("facts = %#v", got.Facts)
+	}
+}
+
+func TestFileStoreLoadMissingReturnsNotFound(t *testing.T) {
+	t.Parallel()
+
+	store, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore() error = %v", err)
+	}
+
+	_, err = store.Load(context.Background(), "missing-session")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Load() err = %v want ErrNotFound", err)
 	}
 }
 

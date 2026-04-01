@@ -2637,8 +2637,11 @@ func (s *Server) setMemoryLocked(memory gatewayMemoryResponse) {
 }
 
 func (s *Server) gatewayMemoryStoragePath() string {
-	if s.memoryStore != nil {
+	switch store := s.memoryStore.(type) {
+	case *memory.PostgresStore:
 		return "postgres://memories"
+	case *memory.FileStore:
+		return store.Root()
 	}
 	return filepath.Join(s.dataRoot, "memory.json")
 }
