@@ -72,6 +72,38 @@ func TestReadFileHandlerPrefersMarkdownCompanionForConvertibleUploads(t *testing
 	}
 }
 
+func TestReadFileHandlerPrefersMarkdownCompanionForStructuredUploads(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	threadID := "thread-structured-upload"
+	uploadDir := filepath.Join(root, "threads", threadID, "user-data", "uploads")
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "dataset.csv"), []byte("name,score\nalice,10\n"), 0o644); err != nil {
+		t.Fatalf("write csv: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "dataset.md"), []byte("# Dataset\n\n| name | score |\n| --- | --- |\n| alice | 10 |"), 0o644); err != nil {
+		t.Fatalf("write markdown companion: %v", err)
+	}
+
+	ctx := tools.WithThreadID(context.Background(), threadID)
+	result, err := ReadFileHandler(ctx, models.ToolCall{
+		ID:   "call-read-structured-1",
+		Name: "read_file",
+		Arguments: map[string]any{
+			"path": "/mnt/user-data/uploads/dataset.csv",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ReadFileHandler() error = %v", err)
+	}
+	if result.Content != "# Dataset\n\n| name | score |\n| --- | --- |\n| alice | 10 |" {
+		t.Fatalf("content=%q want markdown companion", result.Content)
+	}
+}
+
 func TestReadFileHandlerFallsBackToOriginalUploadWhenMarkdownCompanionMissing(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DEERFLOW_DATA_ROOT", root)

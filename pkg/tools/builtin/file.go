@@ -125,7 +125,7 @@ func shouldPreferMarkdownCompanion(path string) bool {
 		return false
 	}
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".pdf", ".ppt", ".pptx", ".xls", ".xlsx", ".doc", ".docx":
+	case ".pdf", ".ppt", ".pptx", ".xls", ".xlsx", ".doc", ".docx", ".csv", ".tsv", ".json", ".yaml", ".yml":
 		return true
 	default:
 		return false
