@@ -547,6 +547,14 @@ func (s *Server) handleAgentDelete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to delete agent files"})
 		return
 	}
+	if err := s.deleteAgentMemory(name); err != nil {
+		s.uiStateMu.Lock()
+		s.getAgentsLocked()[name] = agent
+		s.uiStateMu.Unlock()
+		_ = s.persistAgentFiles(agent)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to delete agent memory"})
+		return
+	}
 	if err := s.persistGatewayState(); err != nil {
 		s.uiStateMu.Lock()
 		s.getAgentsLocked()[name] = agent
@@ -3340,6 +3348,27 @@ func (s *Server) gatewayMemoryStoragePath() string {
 		return store.Root()
 	}
 	return filepath.Join(s.dataRoot, "memory.json")
+}
+
+func (s *Server) deleteAgentMemory(agentName string) error {
+	if s == nil {
+		return nil
+	}
+	name, ok := normalizeAgentName(agentName)
+	if !ok {
+		return nil
+	}
+	deleter, ok := s.memoryStore.(interface {
+		Delete(context.Context, string) error
+	})
+	if !ok {
+		return nil
+	}
+	sessionID := deriveMemorySessionID("", name)
+	if err := deleter.Delete(context.Background(), sessionID); err != nil && !errors.Is(err, memory.ErrNotFound) {
+		return err
+	}
+	return nil
 }
 
 func (s *Server) refreshGatewayMemoryCache(ctx context.Context) {
