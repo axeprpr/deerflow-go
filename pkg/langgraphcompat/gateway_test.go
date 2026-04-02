@@ -1198,8 +1198,8 @@ func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 	if listed.Count != 1 {
 		t.Fatalf("count=%d want=1", listed.Count)
 	}
-	if got := asString(listed.Files[0]["path"]); got != "/mnt/user-data/uploads/hello.txt" {
-		t.Fatalf("path=%q want=/mnt/user-data/uploads/hello.txt", got)
+	if got := asString(listed.Files[0]["path"]); got != filepath.Join(s.uploadsDir(threadID), "hello.txt") {
+		t.Fatalf("path=%q want=%q", got, filepath.Join(s.uploadsDir(threadID), "hello.txt"))
 	}
 
 	artifactResp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/hello.txt", nil, nil)
@@ -1868,7 +1868,7 @@ func TestArtifactEndpointRejectsPathTraversalWithForbidden(t *testing.T) {
 }
 
 func TestUploadConvertibleDocumentCreatesMarkdownCompanion(t *testing.T) {
-	_, handler := newCompatTestServer(t)
+	s, handler := newCompatTestServer(t)
 	threadID := "thread-gateway-docx"
 
 	var body bytes.Buffer
@@ -1901,11 +1901,17 @@ func TestUploadConvertibleDocumentCreatesMarkdownCompanion(t *testing.T) {
 	if got := asString(uploaded.Files[0]["markdown_file"]); got != "report.md" {
 		t.Fatalf("markdown_file=%q want=report.md", got)
 	}
-	if got := asString(uploaded.Files[0]["path"]); got != "/mnt/user-data/uploads/report.docx" {
-		t.Fatalf("path=%q want=/mnt/user-data/uploads/report.docx", got)
+	if got := asString(uploaded.Files[0]["path"]); got != filepath.Join(s.uploadsDir(threadID), "report.docx") {
+		t.Fatalf("path=%q want=%q", got, filepath.Join(s.uploadsDir(threadID), "report.docx"))
 	}
-	if got := asString(uploaded.Files[0]["markdown_path"]); got != "/mnt/user-data/uploads/report.md" {
-		t.Fatalf("markdown_path=%q want=/mnt/user-data/uploads/report.md", got)
+	if got := asString(uploaded.Files[0]["virtual_path"]); got != "/mnt/user-data/uploads/report.docx" {
+		t.Fatalf("virtual_path=%q want=/mnt/user-data/uploads/report.docx", got)
+	}
+	if got := asString(uploaded.Files[0]["markdown_path"]); got != filepath.Join(s.uploadsDir(threadID), "report.md") {
+		t.Fatalf("markdown_path=%q want=%q", got, filepath.Join(s.uploadsDir(threadID), "report.md"))
+	}
+	if got := asString(uploaded.Files[0]["markdown_virtual_path"]); got != "/mnt/user-data/uploads/report.md" {
+		t.Fatalf("markdown_virtual_path=%q want=/mnt/user-data/uploads/report.md", got)
 	}
 
 	mdResp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/report.md", nil, nil)
@@ -1943,6 +1949,15 @@ func TestUploadConvertibleDocumentCreatesMarkdownCompanion(t *testing.T) {
 	}
 	if got := asString(report["markdown_file"]); got != "report.md" {
 		t.Fatalf("list markdown_file=%q want=report.md", got)
+	}
+	if got := asString(report["path"]); got != filepath.Join(s.uploadsDir(threadID), "report.docx") {
+		t.Fatalf("list path=%q want=%q", got, filepath.Join(s.uploadsDir(threadID), "report.docx"))
+	}
+	if got := asString(report["virtual_path"]); got != "/mnt/user-data/uploads/report.docx" {
+		t.Fatalf("list virtual_path=%q want=/mnt/user-data/uploads/report.docx", got)
+	}
+	if got := asString(report["markdown_path"]); got != filepath.Join(s.uploadsDir(threadID), "report.md") {
+		t.Fatalf("list markdown_path=%q want=%q", got, filepath.Join(s.uploadsDir(threadID), "report.md"))
 	}
 	if got := asString(report["markdown_virtual_path"]); got != "/mnt/user-data/uploads/report.md" {
 		t.Fatalf("list markdown_virtual_path=%q want=/mnt/user-data/uploads/report.md", got)

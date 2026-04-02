@@ -842,7 +842,7 @@ func (s *Server) handleUploadsCreate(w http.ResponseWriter, r *http.Request) {
 			writtenPaths = append(writtenPaths, mdPath)
 			mdName := filepath.Base(mdPath)
 			info["markdown_file"] = mdName
-			info["markdown_path"] = "/mnt/user-data/uploads/" + mdName
+			info["markdown_path"] = mdPath
 			info["markdown_virtual_path"] = "/mnt/user-data/uploads/" + mdName
 			info["markdown_artifact_url"] = uploadArtifactURL(threadID, mdName)
 		}
@@ -874,7 +874,7 @@ func (s *Server) handleUploadsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	files := s.listUploadedFiles(threadID)
+	files := s.listGatewayUploadedFiles(threadID)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"files": files,
@@ -1223,7 +1223,7 @@ func (s *Server) saveUploadedFile(threadID, uploadDir, name string, fh *multipar
 	if err := ensureUploadSandboxWritable(dstPath); err != nil {
 		return nil, err
 	}
-	return s.uploadInfo(threadID, dstPath, name, n, nowUnix()), nil
+	return s.gatewayUploadInfo(threadID, dstPath, name, n, nowUnix()), nil
 }
 
 func ensureUploadSandboxWritable(path string) error {
@@ -1241,7 +1241,7 @@ func ensureUploadSandboxWritable(path string) error {
 	return nil
 }
 
-func (s *Server) attachMarkdownCompanionInfo(threadID, uploadDir, name string, info map[string]any) {
+func (s *Server) attachMarkdownCompanionInfo(threadID, uploadDir, name string, info map[string]any, hostPaths bool) {
 	if !isConvertibleUploadExtension(name) {
 		return
 	}
@@ -1254,7 +1254,11 @@ func (s *Server) attachMarkdownCompanionInfo(threadID, uploadDir, name string, i
 	}
 
 	info["markdown_file"] = mdName
-	info["markdown_path"] = "/mnt/user-data/uploads/" + mdName
+	if hostPaths {
+		info["markdown_path"] = mdPath
+	} else {
+		info["markdown_path"] = "/mnt/user-data/uploads/" + mdName
+	}
 	info["markdown_virtual_path"] = "/mnt/user-data/uploads/" + mdName
 	if strings.TrimSpace(threadID) != "" {
 		info["markdown_artifact_url"] = uploadArtifactURL(threadID, mdName)
@@ -1262,6 +1266,14 @@ func (s *Server) attachMarkdownCompanionInfo(threadID, uploadDir, name string, i
 }
 
 func (s *Server) listUploadedFiles(threadID string) []map[string]any {
+	return s.listUploadedFilesWithMode(threadID, false)
+}
+
+func (s *Server) listGatewayUploadedFiles(threadID string) []map[string]any {
+	return s.listUploadedFilesWithMode(threadID, true)
+}
+
+func (s *Server) listUploadedFilesWithMode(threadID string, hostPaths bool) []map[string]any {
 	uploadDir := s.uploadsDir(threadID)
 	entries, err := os.ReadDir(uploadDir)
 	if err != nil {
@@ -1281,9 +1293,13 @@ func (s *Server) listUploadedFiles(threadID string) []map[string]any {
 		if err != nil {
 			continue
 		}
-		info := s.uploadInfo(threadID, filepath.Join(uploadDir, name), name, stat.Size(), stat.ModTime().Unix())
+		fullPath := filepath.Join(uploadDir, name)
+		info := s.uploadInfo(threadID, fullPath, name, stat.Size(), stat.ModTime().Unix())
+		if hostPaths {
+			info["path"] = fullPath
+		}
 		info["extension"] = strings.ToLower(filepath.Ext(name))
-		s.attachMarkdownCompanionInfo(threadID, uploadDir, name, info)
+		s.attachMarkdownCompanionInfo(threadID, uploadDir, name, info, hostPaths)
 		files = append(files, info)
 	}
 
@@ -1296,6 +1312,12 @@ func (s *Server) listUploadedFiles(threadID string) []map[string]any {
 		return li > lj
 	})
 	return files
+}
+
+func (s *Server) gatewayUploadInfo(threadID, fullPath, name string, size int64, modified int64) map[string]any {
+	info := s.uploadInfo(threadID, fullPath, name, size, modified)
+	info["path"] = fullPath
+	return info
 }
 
 func (s *Server) uploadInfo(threadID, fullPath, name string, size int64, modified int64) map[string]any {
