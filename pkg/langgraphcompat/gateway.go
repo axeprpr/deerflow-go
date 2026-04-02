@@ -1878,7 +1878,7 @@ func suggestionStringsFromAny(value any) []string {
 		}
 		return out
 	case map[string]any:
-		for _, key := range []string{"suggestions", "questions", "follow_ups", "followups", "items"} {
+		for _, key := range []string{"suggestions", "questions", "follow_ups", "followups", "items", "output", "response", "results", "choices", "data"} {
 			if parsed := suggestionStringsFromAny(typed[key]); len(parsed) > 0 {
 				return parsed
 			}
@@ -1894,14 +1894,49 @@ func suggestionTextFromAny(value any) string {
 	switch typed := value.(type) {
 	case string:
 		return normalizeSuggestionText(typed)
+	case []any:
+		return normalizeSuggestionText(joinSuggestionFragments(typed))
 	case map[string]any:
-		for _, key := range []string{"text", "question", "suggestion", "content", "title"} {
-			if text, ok := typed[key].(string); ok {
-				return normalizeSuggestionText(text)
+		for _, key := range []string{"text", "question", "suggestion", "content", "title", "output_text"} {
+			if text := suggestionTextValue(typed[key]); text != "" {
+				return text
+			}
+		}
+		for _, key := range []string{"value", "message", "data", "output", "response", "result"} {
+			if text := suggestionTextValue(typed[key]); text != "" {
+				return text
 			}
 		}
 	}
 	return ""
+}
+
+func suggestionTextValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return normalizeSuggestionText(typed)
+	case []any:
+		return normalizeSuggestionText(joinSuggestionFragments(typed))
+	case map[string]any:
+		for _, key := range []string{"value", "text", "content", "output_text", "message", "data", "output", "response", "result"} {
+			if text := suggestionTextValue(typed[key]); text != "" {
+				return text
+			}
+		}
+	}
+	return ""
+}
+
+func joinSuggestionFragments(items []any) string {
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		text := strings.TrimSpace(suggestionTextFromAny(item))
+		if text == "" {
+			continue
+		}
+		parts = append(parts, text)
+	}
+	return strings.Join(parts, " ")
 }
 
 func parseBulletSuggestionList(candidate string) []string {

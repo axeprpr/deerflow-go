@@ -190,6 +190,50 @@ func TestParseJSONStringListAcceptsSingleObjectSuggestion(t *testing.T) {
 	}
 }
 
+func TestParseJSONStringListAcceptsNestedTextValueObject(t *testing.T) {
+	got := parseJSONStringList(`{"suggestions":[{"text":{"value":"先总结一下"}},{"content":{"text":"给我下一步建议"}}]}`)
+
+	if len(got) != 2 {
+		t.Fatalf("len=%d want=2 (%v)", len(got), got)
+	}
+	if got[0] != "先总结一下" || got[1] != "给我下一步建议" {
+		t.Fatalf("got=%v", got)
+	}
+}
+
+func TestParseJSONStringListAcceptsContentBlocks(t *testing.T) {
+	got := parseJSONStringList(`{"suggestions":[{"content":[{"type":"text","text":"先总结一下"}]},{"content":[{"type":"output_text","text":"给我下一步建议"}]}]}`)
+
+	if len(got) != 2 {
+		t.Fatalf("len=%d want=2 (%v)", len(got), got)
+	}
+	if got[0] != "先总结一下" || got[1] != "给我下一步建议" {
+		t.Fatalf("got=%v", got)
+	}
+}
+
+func TestParseJSONStringListAcceptsOutputWrapper(t *testing.T) {
+	got := parseJSONStringList(`{"output":[{"content":[{"type":"output_text","text":"先总结一下"}]},{"content":[{"type":"text","text":"给我下一步建议"}]}]}`)
+
+	if len(got) != 2 {
+		t.Fatalf("len=%d want=2 (%v)", len(got), got)
+	}
+	if got[0] != "先总结一下" || got[1] != "给我下一步建议" {
+		t.Fatalf("got=%v", got)
+	}
+}
+
+func TestParseJSONStringListAcceptsChoicesWrapper(t *testing.T) {
+	got := parseJSONStringList(`{"choices":[{"message":{"content":[{"type":"output_text","text":"先总结一下"}]}},{"message":{"content":[{"type":"text","text":"给我下一步建议"}]}}]}`)
+
+	if len(got) != 2 {
+		t.Fatalf("len=%d want=2 (%v)", len(got), got)
+	}
+	if got[0] != "先总结一下" || got[1] != "给我下一步建议" {
+		t.Fatalf("got=%v", got)
+	}
+}
+
 func TestParseJSONStringListFallsBackToBulletList(t *testing.T) {
 	got := parseJSONStringList("Here are some ideas:\n- 先总结当前方案\n- 给我列出风险点\n")
 
