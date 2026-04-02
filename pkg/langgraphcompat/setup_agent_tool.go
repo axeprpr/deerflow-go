@@ -161,8 +161,10 @@ func (s *Server) deleteAgentFiles(name string) error {
 	if strings.TrimSpace(name) == "" {
 		return nil
 	}
-	if err := os.RemoveAll(s.agentDir(name)); err != nil {
-		return err
+	for _, root := range s.agentsRoots() {
+		if err := os.RemoveAll(filepath.Join(root, name)); err != nil {
+			return err
+		}
 	}
 	if deleter, ok := s.memoryStore.(interface {
 		Delete(context.Context, string) error
@@ -176,7 +178,10 @@ func (s *Server) deleteAgentFiles(name string) error {
 }
 
 func (s *Server) agentDir(name string) string {
-	return filepath.Join(s.dataRoot, "agents", name)
+	if dir, ok := s.existingAgentDir(name); ok {
+		return dir
+	}
+	return filepath.Join(s.primaryAgentsRoot(), name)
 }
 
 func failedToolResult(call models.ToolCall, err error) models.ToolResult {

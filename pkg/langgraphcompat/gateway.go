@@ -341,6 +341,7 @@ func (s *Server) handleMCPConfigPut(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAgentsList(w http.ResponseWriter, r *http.Request) {
+	s.refreshGatewayCompatFiles()
 	currentAgents := s.currentGatewayAgents()
 	agents := make([]gatewayAgent, 0, len(currentAgents))
 	for _, a := range currentAgents {
@@ -353,6 +354,7 @@ func (s *Server) handleAgentsList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAgentCheck(w http.ResponseWriter, r *http.Request) {
+	s.refreshGatewayCompatFiles()
 	name := strings.TrimSpace(r.URL.Query().Get("name"))
 	if !agentNameRE.MatchString(name) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": "Invalid agent name"})
@@ -364,6 +366,7 @@ func (s *Server) handleAgentCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAgentGet(w http.ResponseWriter, r *http.Request) {
+	s.refreshGatewayCompatFiles()
 	name, ok := normalizeAgentName(r.PathValue("name"))
 	if !ok {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": "Invalid agent name"})
@@ -378,6 +381,7 @@ func (s *Server) handleAgentGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAgentCreate(w http.ResponseWriter, r *http.Request) {
+	s.refreshGatewayCompatFiles()
 	var req gatewayAgent
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid request body"})
@@ -417,6 +421,7 @@ func (s *Server) handleAgentCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAgentUpdate(w http.ResponseWriter, r *http.Request) {
+	s.refreshGatewayCompatFiles()
 	name, ok := normalizeAgentName(r.PathValue("name"))
 	if !ok {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": "Invalid agent name"})
@@ -484,6 +489,7 @@ func (s *Server) handleAgentUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAgentDelete(w http.ResponseWriter, r *http.Request) {
+	s.refreshGatewayCompatFiles()
 	name, ok := normalizeAgentName(r.PathValue("name"))
 	if !ok {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": "Invalid agent name"})
@@ -525,6 +531,7 @@ func (s *Server) handleAgentDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUserProfileGet(w http.ResponseWriter, r *http.Request) {
+	s.refreshGatewayCompatFiles()
 	s.uiStateMu.RLock()
 	content := s.getUserProfileLocked()
 	s.uiStateMu.RUnlock()
@@ -546,7 +553,7 @@ func (s *Server) handleUserProfilePut(w http.ResponseWriter, r *http.Request) {
 	s.uiStateMu.Lock()
 	s.setUserProfileLocked(req.Content)
 	s.uiStateMu.Unlock()
-	if err := os.MkdirAll(s.dataRoot, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(s.userProfilePath()), 0o755); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist user profile"})
 		return
 	}
@@ -2881,25 +2888,32 @@ func cloneGatewayAgents(src map[string]gatewayAgent) map[string]gatewayAgent {
 }
 
 func (s *Server) discoverGatewayAgents() map[string]gatewayAgent {
-	entries, err := os.ReadDir(filepath.Join(s.dataRoot, "agents"))
-	if err != nil {
-		return nil
-	}
-
-	discovered := make(map[string]gatewayAgent, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		name, ok := normalizeAgentName(entry.Name())
-		if !ok {
-			continue
-		}
-		agent, err := loadGatewayAgentFromDir(filepath.Join(s.dataRoot, "agents", entry.Name()), name)
+	discovered := map[string]gatewayAgent{}
+	for _, root := range s.agentsRoots() {
+		entries, err := os.ReadDir(root)
 		if err != nil {
 			continue
 		}
-		discovered[name] = agent
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			name, ok := normalizeAgentName(entry.Name())
+			if !ok {
+				continue
+			}
+			if _, exists := discovered[name]; exists {
+				continue
+			}
+			agent, err := loadGatewayAgentFromDir(filepath.Join(root, entry.Name()), name)
+			if err != nil {
+				continue
+			}
+			discovered[name] = agent
+		}
+	}
+	if len(discovered) == 0 {
+		return nil
 	}
 	return discovered
 }

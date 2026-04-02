@@ -29,11 +29,20 @@ import (
 func newCompatTestServer(t *testing.T) (*Server, http.Handler) {
 	t.Helper()
 	root := t.TempDir()
+	compatRoot := filepath.Join(root, "compat-root")
+	if err := os.MkdirAll(compatRoot, 0o755); err != nil {
+		t.Fatalf("mkdir compat root: %v", err)
+	}
+	dataRoot := filepath.Join(root, "data-root")
+	if err := os.MkdirAll(dataRoot, 0o755); err != nil {
+		t.Fatalf("mkdir data root: %v", err)
+	}
+	t.Setenv(compatRootEnv, compatRoot)
 	s := &Server{
 		sessions:   make(map[string]*Session),
 		runs:       make(map[string]*Run),
 		runStreams: make(map[string]map[uint64]chan StreamEvent),
-		dataRoot:   root,
+		dataRoot:   dataRoot,
 		startedAt:  time.Now().UTC(),
 		skills:     defaultGatewaySkills(),
 		mcpConfig:  defaultGatewayMCPConfig(),
@@ -3916,6 +3925,29 @@ func TestRunsStreamInjectsUserProfileIntoCustomAgentPrompt(t *testing.T) {
 	}
 	if !strings.Contains(provider.lastReq.SystemPrompt, "User prefers terse code-review summaries and Go-first examples.") {
 		t.Fatalf("system prompt missing user profile content: %q", provider.lastReq.SystemPrompt)
+	}
+}
+
+func TestResolveRunConfigRefreshesUserProfileFromDisk(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+
+	s.uiStateMu.Lock()
+	s.setUserProfileLocked("stale profile")
+	s.uiStateMu.Unlock()
+
+	if err := os.WriteFile(s.userProfilePath(), []byte("Prefers refreshed disk profile."), 0o644); err != nil {
+		t.Fatalf("write USER.md: %v", err)
+	}
+
+	cfg, err := s.resolveRunConfig(runConfig{}, nil)
+	if err != nil {
+		t.Fatalf("resolveRunConfig: %v", err)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "Prefers refreshed disk profile.") {
+		t.Fatalf("system prompt missing refreshed profile: %q", cfg.SystemPrompt)
+	}
+	if strings.Contains(cfg.SystemPrompt, "stale profile") {
+		t.Fatalf("system prompt unexpectedly kept stale profile: %q", cfg.SystemPrompt)
 	}
 }
 

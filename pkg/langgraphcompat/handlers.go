@@ -1110,6 +1110,7 @@ func parseRunConfig(raw map[string]any) runConfig {
 }
 
 func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) (runConfig, error) {
+	s.refreshGatewayCompatFiles()
 	cfg.IsBootstrap = cfg.IsBootstrap || boolFromAny(runtimeContext["is_bootstrap"])
 	cfg.AgentName = firstNonEmpty(stringFromAny(runtimeContext["agent_name"]), cfg.AgentName)
 	cfg.ReasoningEffort = s.effectiveReasoningEffort(firstNonEmpty(stringFromAny(runtimeContext["model_name"]), cfg.ModelName), cfg.ReasoningEffort, runtimeContext)

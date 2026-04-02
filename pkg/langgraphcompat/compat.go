@@ -49,6 +49,7 @@ type Server struct {
 	runStreams        map[string]map[uint64]chan StreamEvent
 	runStreamSeq      uint64
 	dataRoot          string
+	compatFSManaged   bool
 	uiStateMu         sync.RWMutex
 	skills            map[string]gatewaySkill
 	mcpConfig         gatewayMCPConfig

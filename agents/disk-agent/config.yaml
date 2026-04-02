@@ -1,0 +1,5 @@
+name: disk-agent
+description: Review code from disk.
+model: custom-model
+tool_groups:
+  - file:read

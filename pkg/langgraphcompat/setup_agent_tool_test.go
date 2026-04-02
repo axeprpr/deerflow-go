@@ -49,6 +49,12 @@ func TestSetupAgentToolCreatesAgentFromRuntimeContext(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(s.agentDir("code-reviewer"), "SOUL.md")); err != nil {
 		t.Fatalf("expected SOUL.md to be written: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(s.compatRoot(), "agents", "code-reviewer", "SOUL.md")); err != nil {
+		t.Fatalf("expected SOUL.md in compat root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.dataRoot, "agents", "code-reviewer", "SOUL.md")); !os.IsNotExist(err) {
+		t.Fatalf("legacy data root unexpectedly contains created agent, err=%v", err)
+	}
 }
 
 func TestSetupAgentToolRequiresRuntimeAgentName(t *testing.T) {
