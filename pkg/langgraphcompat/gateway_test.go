@@ -4926,6 +4926,110 @@ func TestMemoryEndpointsReadAndMutateStoredDocument(t *testing.T) {
 	}
 }
 
+func TestMemoryPutReplacesStoredDocument(t *testing.T) {
+	store := &fakeGatewayMemoryStore{
+		docs: map[string]memory.Document{
+			"thread-memory-api": {
+				SessionID: "thread-memory-api",
+				User: memory.UserMemory{
+					TopOfMind: "Old memory.",
+				},
+				Source:    "thread-memory-api",
+				UpdatedAt: time.Now().Add(-time.Hour).UTC(),
+			},
+		},
+	}
+	s, handler := newCompatTestServer(t)
+	s.memoryStore = store
+	s.memorySvc = memory.NewService(store, fakeMemoryExtractor{})
+	s.memoryThread = "thread-memory-api"
+
+	body := `{
+		"version":"1.0",
+		"lastUpdated":"2026-04-02T10:30:00Z",
+		"user":{
+			"workContext":{"summary":"Owns the gateway integration.","updatedAt":"2026-04-02T09:00:00Z"},
+			"personalContext":{"summary":"Prefers terse updates.","updatedAt":"2026-04-02T09:30:00Z"},
+			"topOfMind":{"summary":"Ship memory editing.","updatedAt":"2026-04-02T10:00:00Z"}
+		},
+		"history":{
+			"recentMonths":{"summary":"Focused on UI compatibility.","updatedAt":"2026-04-01T08:00:00Z"},
+			"earlierContext":{"summary":"Migrated Python behaviors to Go.","updatedAt":"2026-03-01T08:00:00Z"},
+			"longTermBackground":{"summary":"Maintains DeerFlow-related tooling.","updatedAt":"2025-12-01T08:00:00Z"}
+		},
+		"facts":[
+			{
+				"id":"fact-keep",
+				"content":"User prioritizes UX regressions first.",
+				"category":"preference",
+				"confidence":0.9,
+				"createdAt":"2026-04-02T10:15:00Z",
+				"source":"thread-memory-api"
+			},
+			{
+				"content":"Missing IDs are auto-generated.",
+				"category":"note",
+				"confidence":0.6
+			}
+		]
+	}`
+
+	putResp := performCompatRequest(t, handler, http.MethodPut, "/api/memory", strings.NewReader(body), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if putResp.Code != http.StatusOK {
+		t.Fatalf("put memory status=%d body=%s", putResp.Code, putResp.Body.String())
+	}
+
+	doc, err := store.Load(context.Background(), "thread-memory-api")
+	if err != nil {
+		t.Fatalf("reload store doc: %v", err)
+	}
+	if doc.User.WorkContext != "Owns the gateway integration." {
+		t.Fatalf("work context=%q", doc.User.WorkContext)
+	}
+	if doc.History.LongTermBackground != "Maintains DeerFlow-related tooling." {
+		t.Fatalf("longTermBackground=%q", doc.History.LongTermBackground)
+	}
+	if len(doc.Facts) != 2 {
+		t.Fatalf("facts=%d want=2", len(doc.Facts))
+	}
+	if doc.Facts[0].ID != "fact-keep" {
+		t.Fatalf("first fact id=%q", doc.Facts[0].ID)
+	}
+	if doc.Facts[1].ID != "fact-2" {
+		t.Fatalf("second fact id=%q want=%q", doc.Facts[1].ID, "fact-2")
+	}
+	if doc.UpdatedAt.Format(time.RFC3339) != "2026-04-02T10:30:00Z" {
+		t.Fatalf("updatedAt=%s", doc.UpdatedAt.Format(time.RFC3339))
+	}
+
+	getResp := performCompatRequest(t, handler, http.MethodGet, "/api/memory", nil, nil)
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("get memory after put status=%d body=%s", getResp.Code, getResp.Body.String())
+	}
+	if !strings.Contains(getResp.Body.String(), "Ship memory editing.") {
+		t.Fatalf("memory body=%q", getResp.Body.String())
+	}
+	if !strings.Contains(getResp.Body.String(), "fact-2") {
+		t.Fatalf("memory body missing generated fact id: %q", getResp.Body.String())
+	}
+}
+
+func TestMemoryPutRejectsInvalidJSON(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	resp := performCompatRequest(t, handler, http.MethodPut, "/api/memory", strings.NewReader("{"), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), "invalid request body") {
+		t.Fatalf("body=%q", resp.Body.String())
+	}
+}
+
 func TestRunsStreamPersistsMemoryUpdatesToAgentScope(t *testing.T) {
 	provider := &streamSpyProvider{}
 	store := &fakeGatewayMemoryStore{docs: map[string]memory.Document{}}

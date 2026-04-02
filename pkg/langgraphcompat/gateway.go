@@ -174,6 +174,7 @@ func (s *Server) registerGatewayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/user-profile", s.handleUserProfileGet)
 	mux.HandleFunc("PUT /api/user-profile", s.handleUserProfilePut)
 	mux.HandleFunc("GET /api/memory", s.handleMemoryGet)
+	mux.HandleFunc("PUT /api/memory", s.handleMemoryPut)
 	mux.HandleFunc("POST /api/memory/reload", s.handleMemoryReload)
 	mux.HandleFunc("DELETE /api/memory", s.handleMemoryClear)
 	mux.HandleFunc("DELETE /api/memory/facts/{fact_id}", s.handleMemoryFactDelete)
@@ -616,6 +617,25 @@ func (s *Server) handleMemoryGet(w http.ResponseWriter, r *http.Request) {
 	m := s.getMemoryLocked()
 	s.uiStateMu.RUnlock()
 	writeJSON(w, http.StatusOK, m)
+}
+
+func (s *Server) handleMemoryPut(w http.ResponseWriter, r *http.Request) {
+	var req gatewayMemoryResponse
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid request body"})
+		return
+	}
+
+	doc := gatewayMemoryToDocument(req, strings.TrimSpace(s.memoryThread))
+	if err := s.replaceGatewayMemoryDocument(r.Context(), doc); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist memory"})
+		return
+	}
+	if err := s.persistGatewayState(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
+		return
+	}
+	s.handleMemoryGet(w, r)
 }
 
 func (s *Server) handleMemoryReload(w http.ResponseWriter, r *http.Request) {
@@ -3357,11 +3377,108 @@ func gatewayMemoryFromDocument(doc memory.Document) gatewayMemoryResponse {
 	return resp
 }
 
+func gatewayMemoryToDocument(resp gatewayMemoryResponse, fallbackSessionID string) memory.Document {
+	now := time.Now().UTC()
+	updatedAt := parseGatewayMemoryTimestamp(resp.LastUpdated)
+	if updatedAt.IsZero() {
+		updatedAt = latestGatewayMemoryTimestamp(resp, now)
+	}
+
+	sessionID := strings.TrimSpace(fallbackSessionID)
+	doc := memory.Document{
+		SessionID: sessionID,
+		User: memory.UserMemory{
+			WorkContext:     strings.TrimSpace(resp.User.WorkContext.Summary),
+			PersonalContext: strings.TrimSpace(resp.User.PersonalContext.Summary),
+			TopOfMind:       strings.TrimSpace(resp.User.TopOfMind.Summary),
+		},
+		History: memory.HistoryMemory{
+			RecentMonths:       strings.TrimSpace(resp.History.RecentMonths.Summary),
+			EarlierContext:     strings.TrimSpace(resp.History.EarlierContext.Summary),
+			LongTermBackground: strings.TrimSpace(resp.History.LongTermBackground.Summary),
+		},
+		Source:    sessionID,
+		UpdatedAt: updatedAt,
+		Facts:     make([]memory.Fact, 0, len(resp.Facts)),
+	}
+
+	for i, fact := range resp.Facts {
+		content := strings.TrimSpace(fact.Content)
+		if content == "" {
+			continue
+		}
+		factID := strings.TrimSpace(fact.ID)
+		if factID == "" {
+			factID = fmt.Sprintf("fact-%d", i+1)
+		}
+		createdAt := parseGatewayMemoryTimestamp(fact.CreatedAt)
+		if createdAt.IsZero() {
+			createdAt = updatedAt
+		}
+		source := strings.TrimSpace(fact.Source)
+		if source == "" {
+			source = sessionID
+		}
+		doc.Facts = append(doc.Facts, memory.Fact{
+			ID:         factID,
+			Content:    content,
+			Category:   strings.TrimSpace(fact.Category),
+			Confidence: fact.Confidence,
+			Source:     source,
+			CreatedAt:  createdAt,
+			UpdatedAt:  updatedAt,
+		})
+	}
+	return doc
+}
+
 func gatewayMemorySection(summary string, updatedAt time.Time) memorySection {
 	return memorySection{
 		Summary:   strings.TrimSpace(summary),
 		UpdatedAt: formatMemoryTime(updatedAt),
 	}
+}
+
+func latestGatewayMemoryTimestamp(resp gatewayMemoryResponse, fallback time.Time) time.Time {
+	latest := parseGatewayMemoryTimestamp(resp.User.WorkContext.UpdatedAt)
+	for _, candidate := range []string{
+		resp.User.PersonalContext.UpdatedAt,
+		resp.User.TopOfMind.UpdatedAt,
+		resp.History.RecentMonths.UpdatedAt,
+		resp.History.EarlierContext.UpdatedAt,
+		resp.History.LongTermBackground.UpdatedAt,
+	} {
+		latest = laterGatewayMemoryTimestamp(latest, parseGatewayMemoryTimestamp(candidate))
+	}
+	for _, fact := range resp.Facts {
+		latest = laterGatewayMemoryTimestamp(latest, parseGatewayMemoryTimestamp(fact.CreatedAt))
+	}
+	if latest.IsZero() {
+		return fallback.UTC()
+	}
+	return latest.UTC()
+}
+
+func laterGatewayMemoryTimestamp(current, candidate time.Time) time.Time {
+	if candidate.IsZero() {
+		return current
+	}
+	if current.IsZero() || candidate.After(current) {
+		return candidate
+	}
+	return current
+}
+
+func parseGatewayMemoryTimestamp(raw string) time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed.UTC()
 }
 
 func formatMemoryTime(t time.Time) string {
