@@ -1062,6 +1062,14 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 	}
 }
 
+func threadRouteInfo(threadID string, metadata map[string]any) (kind string, routePath string, agentName string) {
+	threadID = strings.TrimSpace(threadID)
+	if name, ok := normalizeAgentName(stringValue(metadata["agent_name"])); ok {
+		return "agent", "/workspace/agents/" + name + "/chats/" + threadID, name
+	}
+	return "chat", "/workspace/chats/" + threadID, ""
+}
+
 func (s *Server) runResponse(run *Run) map[string]any {
 	if run == nil {
 		return map[string]any{}
@@ -1583,7 +1591,13 @@ func (s *Server) threadValues(session *Session) map[string]any {
 	if values == nil {
 		values = map[string]any{}
 	}
+	threadKind, routePath, agentName := threadRouteInfo(session.ThreadID, session.Metadata)
 	values["title"] = stringValue(session.Metadata["title"])
+	values["thread_kind"] = threadKind
+	values["route_path"] = routePath
+	if agentName != "" {
+		values["agent_name"] = agentName
+	}
 	values["sandbox"] = s.threadSandboxState(session.ThreadID)
 	values["artifacts"] = s.sessionArtifactPaths(session)
 	values["todos"] = todosToAny(session.Todos)

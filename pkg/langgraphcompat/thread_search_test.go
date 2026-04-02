@@ -178,6 +178,57 @@ func TestThreadsListDefaultValuesIncludeUploadedFiles(t *testing.T) {
 	}
 }
 
+func TestThreadsListIncludesRoutePathForAgentThreads(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	s.ensureSession("thread-general", map[string]any{"title": "General chat"})
+	s.ensureSession("thread-agent", map[string]any{
+		"title":      "Agent chat",
+		"agent_name": "writer-bot",
+	})
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/threads?sortBy=thread_id&sortOrder=asc", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var threads []map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(threads) != 2 {
+		t.Fatalf("threads=%d want=2", len(threads))
+	}
+
+	values, ok := threads[0]["values"].(map[string]any)
+	if !ok {
+		t.Fatalf("values=%#v", threads[0]["values"])
+	}
+	if got := asString(values["thread_kind"]); got != "agent" {
+		t.Fatalf("thread_kind=%q want=agent", got)
+	}
+	if got := asString(values["route_path"]); got != "/workspace/agents/writer-bot/chats/thread-agent" {
+		t.Fatalf("route_path=%q want agent route", got)
+	}
+	if got := asString(values["agent_name"]); got != "writer-bot" {
+		t.Fatalf("agent_name=%q want=writer-bot", got)
+	}
+
+	values, ok = threads[1]["values"].(map[string]any)
+	if !ok {
+		t.Fatalf("values=%#v", threads[1]["values"])
+	}
+	if got := asString(values["thread_kind"]); got != "chat" {
+		t.Fatalf("thread_kind=%q want=chat", got)
+	}
+	if got := asString(values["route_path"]); got != "/workspace/chats/thread-general" {
+		t.Fatalf("route_path=%q want general route", got)
+	}
+	if got := asString(values["agent_name"]); got != "" {
+		t.Fatalf("agent_name=%q want empty", got)
+	}
+}
+
 func TestThreadSearchFiltersByQueryStatusMetadataAndValues(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 
