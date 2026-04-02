@@ -60,6 +60,12 @@ func TestMerge(t *testing.T) {
 	if got.Facts[0].ID != "pref-editor" || got.Facts[0].Content != "Prefers neovim" {
 		t.Fatalf("merged fact = %#v", got.Facts[0])
 	}
+	if got.Facts[0].Source != "session-1" {
+		t.Fatalf("merged fact source = %q", got.Facts[0].Source)
+	}
+	if got.Facts[1].Source != "session-1" {
+		t.Fatalf("new fact source = %q", got.Facts[1].Source)
+	}
 }
 
 func TestServiceUpdateAndInject(t *testing.T) {
@@ -663,7 +669,7 @@ func (f *fakeMemoryDB) Query(_ context.Context, sql string, args ...any) (rows, 
 		}
 		data := make([][]any, 0, len(doc.Facts))
 		for _, fact := range doc.Facts {
-			data = append(data, []any{fact.ID, fact.Content, fact.Category, fact.Confidence, fact.CreatedAt, fact.UpdatedAt})
+			data = append(data, []any{fact.ID, fact.Content, fact.Category, fact.Confidence, fact.Source, fact.CreatedAt, fact.UpdatedAt})
 		}
 		return &fakeRows{data: data}, nil
 	}
@@ -722,8 +728,9 @@ func (f *fakeMemoryTx) Exec(_ context.Context, sql string, arguments ...any) (pg
 			Content:    arguments[2].(string),
 			Category:   arguments[3].(string),
 			Confidence: arguments[4].(float64),
-			CreatedAt:  arguments[5].(time.Time),
-			UpdatedAt:  arguments[6].(time.Time),
+			Source:     arguments[5].(string),
+			CreatedAt:  arguments[6].(time.Time),
+			UpdatedAt:  arguments[7].(time.Time),
 		})
 		f.db.memories[sessionID] = doc
 		return pgconn.NewCommandTag("INSERT 0 1"), nil

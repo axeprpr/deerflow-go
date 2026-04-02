@@ -13,6 +13,7 @@ const defaultGatewaySubagentTimeout = 15 * time.Minute
 
 type subagentOverrideConfig struct {
 	TimeoutSeconds int `yaml:"timeout_seconds"`
+	MaxTurns       int `yaml:"max_turns"`
 }
 
 type subagentsAppConfig struct {
@@ -57,7 +58,10 @@ func normalizeSubagentOverrides(input map[string]subagentOverrideConfig) map[str
 	out := make(map[string]subagentOverrideConfig, len(input))
 	for name, override := range input {
 		normalized := string(normalizeConfiguredSubagentType(name))
-		if normalized == "" || override.TimeoutSeconds <= 0 {
+		if normalized == "" {
+			continue
+		}
+		if override.TimeoutSeconds <= 0 && override.MaxTurns <= 0 {
 			continue
 		}
 		out[normalized] = override
@@ -87,4 +91,14 @@ func (c subagentsAppConfig) timeoutFor(kind subagent.SubagentType) time.Duration
 		return time.Duration(c.TimeoutSeconds) * time.Second
 	}
 	return defaultGatewaySubagentTimeout
+}
+
+func (c subagentsAppConfig) maxTurnsFor(kind subagent.SubagentType, fallback int) int {
+	if override, ok := c.Agents[string(kind)]; ok && override.MaxTurns > 0 {
+		return override.MaxTurns
+	}
+	if fallback > 0 {
+		return fallback
+	}
+	return 1
 }

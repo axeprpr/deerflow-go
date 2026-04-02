@@ -154,6 +154,62 @@ This body comes from the repo-local skills directory.
 	}
 }
 
+func TestGatewaySkillRootsDiscoversConfiguredSkillsPath(t *testing.T) {
+	projectRoot := t.TempDir()
+	configuredRoot := filepath.Join(projectRoot, "configured-skills")
+	skillDir := filepath.Join(configuredRoot, "public", "config-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir configured skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: config-skill
+description: Loaded from config.yaml skills.path.
+license: MIT
+---
+# Config Skill
+
+Loaded via configured skills root.
+`), 0o644); err != nil {
+		t.Fatalf("write configured skill: %v", err)
+	}
+
+	configPath := filepath.Join(projectRoot, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("skills:\n  path: ./configured-skills\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("DEERFLOW_CONFIG_PATH", configPath)
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(projectRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(wd)
+	}()
+
+	s, _ := newCompatTestServer(t)
+	skills := s.currentGatewaySkills()
+
+	skill, ok := skills[skillStorageKey(skillCategoryPublic, "config-skill")]
+	if !ok {
+		t.Fatalf("expected configured skills.path discovery, got %#v", skills)
+	}
+	if skill.Description != "Loaded from config.yaml skills.path." {
+		t.Fatalf("description=%q want=%q", skill.Description, "Loaded from config.yaml skills.path.")
+	}
+
+	body, ok := s.loadGatewaySkillBody("config-skill", skillCategoryPublic)
+	if !ok {
+		t.Fatal("expected to load configured skill body")
+	}
+	if got, want := body, "# Config Skill\n\nLoaded via configured skills root."; got != want {
+		t.Fatalf("skill body=%q want=%q", got, want)
+	}
+}
+
 func TestGatewaySkillRootsDiscoversExecutableRelativeSkills(t *testing.T) {
 	installRoot := t.TempDir()
 	skillDir := filepath.Join(installRoot, "skills", "public", "install-root-skill")

@@ -917,6 +917,25 @@ func TestResolveRunConfigKeepsTaskToolWhenSubagentsEnabled(t *testing.T) {
 	}
 }
 
+func TestResolveRunConfigDisablesTaskToolByDefault(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	s.tools = newRuntimeToolRegistry(t)
+
+	cfg, err := s.resolveRunConfig(runConfig{}, nil)
+	if err != nil {
+		t.Fatalf("resolveRunConfig error: %v", err)
+	}
+	if cfg.Tools == nil {
+		t.Fatal("expected tool registry")
+	}
+	if tool := cfg.Tools.Get("task"); tool != nil {
+		t.Fatalf("expected task tool to be removed by default, got %+v", tool)
+	}
+	if tool := cfg.Tools.Get("bash"); tool == nil {
+		t.Fatal("expected unrelated tools to remain available")
+	}
+}
+
 func TestResolveRunConfigRemovesViewImageForNonVisionModel(t *testing.T) {
 	s, _ := newCompatTestServer(t)
 	s.defaultModel = "deepseek-reasoner"
@@ -2869,6 +2888,53 @@ func TestSkillInstallFromArchive(t *testing.T) {
 	}
 }
 
+func TestSkillInstallUsesConfiguredSkillsPath(t *testing.T) {
+	projectRoot := t.TempDir()
+	configPath := filepath.Join(projectRoot, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("skills:\n  path: ./configured-skills\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("DEERFLOW_CONFIG_PATH", configPath)
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(projectRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(wd)
+	}()
+
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-skill-config-root"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir upload dir: %v", err)
+	}
+	archivePath := filepath.Join(uploadDir, "demo.skill")
+	if err := writeSkillArchive(archivePath, "demo-skill"); err != nil {
+		t.Fatalf("write skill archive: %v", err)
+	}
+
+	body := `{"thread_id":"` + threadID + `","path":"/mnt/user-data/uploads/demo.skill"}`
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/skills/install", strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	target := filepath.Join(projectRoot, "configured-skills", "custom", "demo-skill", "SKILL.md")
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("expected installed skill file under configured root: %v", err)
+	}
+
+	legacyTarget := filepath.Join(s.dataRoot, "skills", "custom", "demo-skill", "SKILL.md")
+	if _, err := os.Stat(legacyTarget); !os.IsNotExist(err) {
+		t.Fatalf("legacy install target should be unused, stat err=%v", err)
+	}
+}
+
 func TestSkillInstallRejectsInvalidFrontmatter(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-skill-invalid-frontmatter"
@@ -3710,6 +3776,59 @@ func TestRunsStreamUsesAgentScopedMemoryForCustomAgents(t *testing.T) {
 	}
 	if !strings.Contains(provider.lastReq.SystemPrompt, "Prefers terse review summaries.") {
 		t.Fatalf("system prompt missing agent-scoped fact: %q", provider.lastReq.SystemPrompt)
+	}
+}
+
+func TestRunsStreamPreservesPresentedArtifactsAcrossTurns(t *testing.T) {
+	provider := &streamSpyProvider{}
+	s := &Server{
+		llmProvider:  provider,
+		defaultModel: "default-model",
+		tools:        newRuntimeToolRegistry(t),
+		sessions:     make(map[string]*Session),
+		runs:         make(map[string]*Run),
+		runStreams:   make(map[string]map[uint64]chan StreamEvent),
+		dataRoot:     t.TempDir(),
+		agents:       map[string]gatewayAgent{},
+	}
+
+	threadID := "thread-persist-artifacts"
+	session := s.ensureSession(threadID, map[string]any{"title": "Artifact thread"})
+	externalPath := filepath.Join(t.TempDir(), "summary.md")
+	if err := os.WriteFile(externalPath, []byte("# Summary\n"), 0o644); err != nil {
+		t.Fatalf("write external artifact: %v", err)
+	}
+	if err := session.PresentFiles.Register(tools.PresentFile{
+		Path:       filepath.Clean(externalPath),
+		SourcePath: externalPath,
+	}); err != nil {
+		t.Fatalf("register external artifact: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		body := `{"thread_id":"` + threadID + `","input":{"messages":[{"role":"user","content":"Continue"}]}}`
+		req := httptest.NewRequest(http.MethodPost, "/runs/stream", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.handleRunsStream(rec, req)
+		resp := rec.Result()
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			payload, _ := io.ReadAll(resp.Body)
+			t.Fatalf("run %d status=%d body=%s", i+1, resp.StatusCode, string(payload))
+		}
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("state is nil")
+	}
+	artifacts, ok := state.Values["artifacts"].([]string)
+	if !ok {
+		t.Fatalf("artifacts=%#v", state.Values["artifacts"])
+	}
+	if !slices.Contains(artifacts, filepath.Clean(externalPath)) {
+		t.Fatalf("artifacts=%#v missing external presented artifact", artifacts)
 	}
 }
 

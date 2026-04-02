@@ -146,9 +146,6 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 	}
 
 	session := s.ensureSession(threadID, nil)
-	if session.PresentFiles != nil {
-		session.PresentFiles.Clear()
-	}
 	s.markThreadStatus(threadID, "busy")
 
 	input := req.Input
@@ -1134,6 +1131,9 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 		}
 		cfg.SystemPrompt = joinPromptSections(cfg.SystemPrompt, bootstrapAgentPrompt)
 		cfg.Tools = resolveRuntimeToolRegistry(s.tools, runtimeContext)
+		if _, ok := runtimeContext["subagent_enabled"]; !ok {
+			cfg.Tools = s.tools
+		}
 		cfg.Tools = s.resolveModelToolRegistry(cfg.Tools, firstNonEmpty(cfg.ModelName, s.defaultModel))
 		return cfg, nil
 	}
@@ -1564,12 +1564,8 @@ func resolveRuntimeToolRegistry(base *tools.Registry, runtimeContext map[string]
 	if base == nil {
 		return nil
 	}
-	if len(runtimeContext) == 0 {
-		return base
-	}
-
 	raw, ok := runtimeContext["subagent_enabled"]
-	if !ok || boolFromAny(raw) {
+	if ok && boolFromAny(raw) {
 		return base
 	}
 

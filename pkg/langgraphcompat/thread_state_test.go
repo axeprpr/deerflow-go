@@ -127,6 +127,14 @@ func TestThreadStateIncludesThreadDataAndConfigurableContext(t *testing.T) {
 		t.Fatal("state is nil")
 	}
 
+	sandbox, ok := state.Values["sandbox"].(map[string]any)
+	if !ok {
+		t.Fatalf("sandbox=%#v", state.Values["sandbox"])
+	}
+	if got := asString(sandbox["sandbox_id"]); got != "local" {
+		t.Fatalf("sandbox_id=%q want=local", got)
+	}
+
 	threadData, ok := state.Values["thread_data"].(map[string]any)
 	if !ok {
 		t.Fatalf("thread_data=%#v", state.Values["thread_data"])

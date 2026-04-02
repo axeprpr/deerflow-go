@@ -34,7 +34,8 @@ Schema:
       "id": "stable_fact_id",
       "content": "fact text",
       "category": "work|personal|preference|project|other",
-      "confidence": 0.0
+      "confidence": 0.0,
+      "source": "session id where this fact was learned"
     }
   ],
   "source": "session id"

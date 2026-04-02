@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/axeprpr/deerflow-go/pkg/guardrails"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/sandbox"
@@ -42,6 +43,9 @@ type AgentConfig struct {
 	MaxTokens              *int
 	Sandbox                *sandbox.Sandbox
 	RequestTimeout         time.Duration
+	GuardrailProvider      guardrails.Provider
+	GuardrailFailClosed    *bool
+	GuardrailPassport      string
 }
 
 type TimeoutError struct {

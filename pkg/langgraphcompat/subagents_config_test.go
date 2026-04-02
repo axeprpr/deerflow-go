@@ -71,6 +71,49 @@ subagents:
 	}
 }
 
+func TestLoadSubagentsAppConfigAppliesPerAgentMaxTurnsOverride(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+subagents:
+  agents:
+    bash:
+      max_turns: 12
+    general-purpose:
+      max_turns: 80
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("DEER_FLOW_CONFIG_PATH", configPath)
+
+	cfg := gatewayDefaultSubagentConfigs(loadSubagentsAppConfig())
+	if got := cfg[subagent.SubagentGeneralPurpose].MaxTurns; got != 80 {
+		t.Fatalf("general max turns=%d want=%d", got, 80)
+	}
+	if got := cfg[subagent.SubagentBash].MaxTurns; got != 12 {
+		t.Fatalf("bash max turns=%d want=%d", got, 12)
+	}
+}
+
+func TestLoadSubagentsAppConfigIgnoresInvalidPerAgentMaxTurnsOverride(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+subagents:
+  agents:
+    bash:
+      max_turns: 0
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("DEER_FLOW_CONFIG_PATH", configPath)
+
+	cfg := gatewayDefaultSubagentConfigs(loadSubagentsAppConfig())
+	if got := cfg[subagent.SubagentBash].MaxTurns; got != defaultGatewayBashSubagentMaxTurns {
+		t.Fatalf("bash max turns=%d want=%d", got, defaultGatewayBashSubagentMaxTurns)
+	}
+}
+
 func TestGatewayDefaultSubagentConfigsMatchUpstreamTurns(t *testing.T) {
 	cfg := gatewayDefaultSubagentConfigs(loadSubagentsAppConfig())
 

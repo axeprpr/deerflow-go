@@ -1465,11 +1465,21 @@ func (s *Server) threadValues(session *Session) map[string]any {
 		values = map[string]any{}
 	}
 	values["title"] = stringValue(session.Metadata["title"])
+	values["sandbox"] = s.threadSandboxState(session.ThreadID)
 	values["artifacts"] = s.sessionArtifactPaths(session)
 	values["todos"] = todosToAny(session.Todos)
 	values["thread_data"] = s.threadDataState(session.ThreadID)
 	values["uploaded_files"] = s.listUploadedFiles(session.ThreadID)
 	return values
+}
+
+func (s *Server) threadSandboxState(threadID string) map[string]any {
+	if strings.TrimSpace(threadID) == "" {
+		return map[string]any{}
+	}
+	return map[string]any{
+		"sandbox_id": "local",
+	}
 }
 
 func (s *Server) deleteGatewayThreadData(threadID string) error {

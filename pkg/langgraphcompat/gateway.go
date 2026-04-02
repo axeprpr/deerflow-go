@@ -656,8 +656,8 @@ func (s *Server) handleChannelsGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleChannelRestart(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.PathValue("name"))
-	success, message := s.restartGatewayChannel(name)
-	writeJSON(w, http.StatusOK, map[string]any{
+	status, success, message := s.restartGatewayChannel(name)
+	writeJSON(w, status, map[string]any{
 		"success": success,
 		"message": fmt.Sprintf("Channel %s: %s", name, message),
 	})
@@ -1783,7 +1783,7 @@ func ensureResolvedPathWithinBase(base, actual string) error {
 }
 
 func (s *Server) installSkillArchive(archivePath string) (gatewaySkill, error) {
-	skillsRoot := filepath.Join(s.dataRoot, "skills", "custom")
+	skillsRoot := s.gatewayCustomSkillsRoot()
 	if err := os.MkdirAll(skillsRoot, 0o755); err != nil {
 		return gatewaySkill{}, err
 	}
@@ -2836,13 +2836,20 @@ func gatewayMemoryFromDocument(doc memory.Document) gatewayMemoryResponse {
 	resp.History.LongTermBackground = gatewayMemorySection(doc.History.LongTermBackground, doc.UpdatedAt)
 	resp.Facts = make([]memoryFact, 0, len(doc.Facts))
 	for _, fact := range doc.Facts {
+		source := strings.TrimSpace(fact.Source)
+		if source == "" {
+			source = strings.TrimSpace(doc.Source)
+		}
+		if source == "" {
+			source = doc.SessionID
+		}
 		resp.Facts = append(resp.Facts, memoryFact{
 			ID:         fact.ID,
 			Content:    fact.Content,
 			Category:   fact.Category,
 			Confidence: fact.Confidence,
 			CreatedAt:  formatMemoryTime(fact.CreatedAt),
-			Source:     doc.SessionID,
+			Source:     source,
 		})
 	}
 	return resp

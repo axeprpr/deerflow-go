@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 var gatewayExecutablePath = os.Executable
@@ -40,7 +42,48 @@ func (s *Server) gatewaySkillRoots() []string {
 		}
 	}
 	roots = append(roots, filepath.Join(s.dataRoot, "skills"))
+	if configuredRoot, ok := gatewayConfiguredSkillsRoot(); ok {
+		roots = append(roots, configuredRoot)
+	}
 	return uniqueCleanPaths(roots)
+}
+
+func gatewayConfiguredSkillsRoot() (string, bool) {
+	configPath, ok := resolveGatewayConfigPath()
+	if !ok {
+		return "", false
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return "", false
+	}
+	var raw struct {
+		Skills struct {
+			Path string `yaml:"path"`
+		} `yaml:"skills"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return "", false
+	}
+	root := strings.TrimSpace(raw.Skills.Path)
+	if root == "" {
+		return "", false
+	}
+	if !filepath.IsAbs(root) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", false
+		}
+		root = filepath.Join(cwd, root)
+	}
+	return filepath.Clean(root), true
+}
+
+func (s *Server) gatewayCustomSkillsRoot() string {
+	if configuredRoot, ok := gatewayConfiguredSkillsRoot(); ok {
+		return filepath.Join(configuredRoot, skillCategoryCustom)
+	}
+	return filepath.Join(s.dataRoot, "skills", skillCategoryCustom)
 }
 
 func executableRelativeSkillRoots(resolveExe func() (string, error)) []string {

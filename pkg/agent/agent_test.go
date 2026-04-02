@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axeprpr/deerflow-go/pkg/guardrails"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
@@ -355,6 +356,133 @@ func TestAgentRunForceStopsRepeatedToolCalls(t *testing.T) {
 	if got := toolExecutions.Load(); got != 4 {
 		t.Fatalf("tool executions = %d want 4", got)
 	}
+}
+
+func TestAgentRunBlocksDeniedToolCallsWithGuardrails(t *testing.T) {
+	var toolExecutions atomic.Int32
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name: "bash",
+		Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) {
+			toolExecutions.Add(1)
+			return models.ToolResult{
+				CallID:   "guardrail-call",
+				ToolName: "bash",
+				Status:   models.CallStatusCompleted,
+				Content:  "should not run",
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
+
+	provider := &scriptedStreamProvider{
+		steps: []streamStep{
+			{toolCalls: []models.ToolCall{{ID: "guardrail-call-1", Name: "bash", Arguments: map[string]any{"command": "rm -rf /"}}}},
+			{check: func(t *testing.T, req llm.ChatRequest) {
+				last := req.Messages[len(req.Messages)-1]
+				if last.Role != models.RoleTool || last.ToolResult == nil {
+					t.Fatalf("last message = %#v want tool result", last)
+				}
+				if last.ToolResult.Status != models.CallStatusFailed {
+					t.Fatalf("tool result status = %q want failed", last.ToolResult.Status)
+				}
+				if !strings.Contains(last.Content, "Guardrail denied") {
+					t.Fatalf("tool content = %q want guardrail denial", last.Content)
+				}
+			}, content: "Used fallback after guardrail block."},
+		},
+		t: t,
+	}
+
+	failClosed := true
+	agent := New(AgentConfig{
+		LLMProvider:         provider,
+		Tools:               registry,
+		MaxTurns:            4,
+		GuardrailProvider:   guardrails.NewAllowlistProvider([]string{"web_search"}, nil),
+		GuardrailFailClosed: &failClosed,
+	})
+
+	result, err := agent.Run(context.Background(), "session-guardrail-deny", []models.Message{
+		{ID: "m1", SessionID: "session-guardrail-deny", Role: models.RoleHuman, Content: "Delete everything"},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "Used fallback after guardrail block." {
+		t.Fatalf("FinalOutput = %q", result.FinalOutput)
+	}
+	if got := toolExecutions.Load(); got != 0 {
+		t.Fatalf("tool executions = %d want 0", got)
+	}
+}
+
+func TestAgentRunFailsOpenWhenGuardrailProviderErrors(t *testing.T) {
+	var toolExecutions atomic.Int32
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name: "bash",
+		Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) {
+			toolExecutions.Add(1)
+			return models.ToolResult{
+				CallID:   "guardrail-call",
+				ToolName: "bash",
+				Status:   models.CallStatusCompleted,
+				Content:  "tool executed",
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
+
+	provider := &scriptedStreamProvider{
+		steps: []streamStep{
+			{toolCalls: []models.ToolCall{{ID: "guardrail-call-1", Name: "bash", Arguments: map[string]any{"command": "pwd"}}}},
+			{check: func(t *testing.T, req llm.ChatRequest) {
+				last := req.Messages[len(req.Messages)-1]
+				if last.Role != models.RoleTool || last.ToolResult == nil {
+					t.Fatalf("last message = %#v want tool result", last)
+				}
+				if last.ToolResult.Status != models.CallStatusCompleted {
+					t.Fatalf("tool result status = %q want completed", last.ToolResult.Status)
+				}
+			}, content: "Tool still ran."},
+		},
+		t: t,
+	}
+
+	failClosed := false
+	agent := New(AgentConfig{
+		LLMProvider:         provider,
+		Tools:               registry,
+		MaxTurns:            4,
+		GuardrailProvider:   explodingGuardrailProvider{},
+		GuardrailFailClosed: &failClosed,
+	})
+
+	result, err := agent.Run(context.Background(), "session-guardrail-fail-open", []models.Message{
+		{ID: "m1", SessionID: "session-guardrail-fail-open", Role: models.RoleHuman, Content: "Run pwd"},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "Tool still ran." {
+		t.Fatalf("FinalOutput = %q", result.FinalOutput)
+	}
+	if got := toolExecutions.Load(); got != 1 {
+		t.Fatalf("tool executions = %d want 1", got)
+	}
+}
+
+type explodingGuardrailProvider struct{}
+
+func (explodingGuardrailProvider) Name() string {
+	return "exploding"
+}
+
+func (explodingGuardrailProvider) Evaluate(guardrails.Request) (guardrails.Decision, error) {
+	return guardrails.Decision{}, errors.New("provider crashed")
 }
 
 func TestPatchDanglingToolCallsInsertsMissingToolResults(t *testing.T) {

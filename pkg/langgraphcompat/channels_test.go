@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestChannelsStatusIncludesSupportedChannelsWithoutConfig(t *testing.T) {
+func TestChannelsStatusWithoutConfigReturnsServiceStoppedAndEmptyChannels(t *testing.T) {
 	_, handler := newCompatTestServer(t)
 
 	resp := performCompatRequest(t, handler, http.MethodGet, "/api/channels", nil, nil)
@@ -24,20 +24,23 @@ func TestChannelsStatusIncludesSupportedChannelsWithoutConfig(t *testing.T) {
 	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if !payload.ServiceRunning {
-		t.Fatalf("service_running=%v want=true", payload.ServiceRunning)
+	if payload.ServiceRunning {
+		t.Fatalf("service_running=%v want=false", payload.ServiceRunning)
 	}
-	if len(payload.Channels) != len(supportedGatewayChannels) {
-		t.Fatalf("channels=%#v", payload.Channels)
+	if len(payload.Channels) != 0 {
+		t.Fatalf("channels=%#v want empty", payload.Channels)
 	}
-	for _, name := range supportedGatewayChannels {
-		info, ok := payload.Channels[name]
-		if !ok {
-			t.Fatalf("missing channel %q in %#v", name, payload.Channels)
-		}
-		if info.Enabled || info.Running {
-			t.Fatalf("channel %q info=%#v want disabled+stopped", name, info)
-		}
+}
+
+func TestChannelsRestartReturns503WithoutConfig(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/channels/feishu/restart", nil, nil)
+	if resp.Code != http.StatusServiceUnavailable {
+		t.Fatalf("restart status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), "channel service is not running") {
+		t.Fatalf("body=%q want service unavailable message", resp.Body.String())
 	}
 }
 

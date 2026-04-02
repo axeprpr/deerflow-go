@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/axeprpr/deerflow-go/pkg/guardrails"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/sandbox"
@@ -51,6 +52,9 @@ type Agent struct {
 	maxTurns               int
 	maxConcurrentSubagents int
 	requestTimeout         time.Duration
+	guardrailProvider      guardrails.Provider
+	guardrailFailClosed    bool
+	guardrailPassport      string
 	events                 chan AgentEvent
 	requests               sync.Map
 	runMu                  sync.Mutex
@@ -79,6 +83,7 @@ func New(cfg AgentConfig) *Agent {
 	if requestTimeout <= 0 {
 		requestTimeout = defaultRequestTimeout
 	}
+	guardrailProvider, guardrailFailClosed, guardrailPassport := resolveGuardrails(cfg)
 	return &Agent{
 		llm:                    cfg.LLMProvider,
 		tools:                  registry,
@@ -93,6 +98,9 @@ func New(cfg AgentConfig) *Agent {
 		maxTurns:               maxTurns,
 		maxConcurrentSubagents: clampMaxConcurrentSubagents(cfg.MaxConcurrentSubagents),
 		requestTimeout:         requestTimeout,
+		guardrailProvider:      guardrailProvider,
+		guardrailFailClosed:    guardrailFailClosed,
+		guardrailPassport:      guardrailPassport,
 		events:                 make(chan AgentEvent, 128),
 	}
 }
@@ -550,6 +558,13 @@ func (a *Agent) executeSingleToolCall(
 
 func (a *Agent) performToolCall(ctx context.Context, sessionID string, call models.ToolCall, deferredState *deferredToolState) (models.ToolResult, error) {
 	toolStarted := time.Now().UTC()
+	if result, blocked := a.evaluateGuardrails(ctx, sessionID, call); blocked {
+		result.Duration = time.Since(toolStarted)
+		if result.CompletedAt.IsZero() {
+			result.CompletedAt = time.Now().UTC()
+		}
+		return result, nil
+	}
 	toolCtx := tools.WithSandbox(ctx, a.sandbox)
 	toolCtx = tools.WithThreadID(toolCtx, sessionID)
 	result, err := a.executeTool(toolCtx, call, deferredState)
@@ -563,6 +578,144 @@ func (a *Agent) performToolCall(ctx context.Context, sessionID string, call mode
 	}
 	result = sanitizedToolResult(result)
 	return result, nil
+}
+
+func (a *Agent) evaluateGuardrails(ctx context.Context, sessionID string, call models.ToolCall) (models.ToolResult, bool) {
+	if a == nil || a.guardrailProvider == nil {
+		return models.ToolResult{}, false
+	}
+	req := guardrails.Request{
+		ToolName:   strings.TrimSpace(call.Name),
+		ToolInput:  cloneGuardrailArgs(call.Arguments),
+		AgentID:    a.resolveGuardrailAgentID(ctx),
+		ThreadID:   strings.TrimSpace(sessionID),
+		IsSubagent: false,
+		Timestamp:  time.Now().UTC(),
+	}
+	decision, err := a.guardrailProvider.Evaluate(req)
+	if err != nil {
+		if !a.guardrailFailClosed {
+			return models.ToolResult{}, false
+		}
+		return deniedGuardrailToolResult(call, guardrails.Decision{
+			Allow: false,
+			Reasons: []guardrails.Reason{{
+				Code:    "oap.evaluator_error",
+				Message: "guardrail provider error (fail-closed)",
+			}},
+		}), true
+	}
+	if decision.Allow {
+		return models.ToolResult{}, false
+	}
+	return deniedGuardrailToolResult(call, decision), true
+}
+
+func (a *Agent) resolveGuardrailAgentID(ctx context.Context) string {
+	if a == nil {
+		return ""
+	}
+	if value := strings.TrimSpace(a.guardrailPassport); value != "" {
+		return value
+	}
+	runtimeContext := tools.RuntimeContextFromContext(ctx)
+	if value := strings.TrimSpace(stringFromAny(runtimeContext["agent_name"])); value != "" {
+		return value
+	}
+	return ""
+}
+
+func deniedGuardrailToolResult(call models.ToolCall, decision guardrails.Decision) models.ToolResult {
+	toolName := strings.TrimSpace(call.Name)
+	reasonCode := "oap.denied"
+	reasonText := "blocked by guardrail policy"
+	if len(decision.Reasons) > 0 {
+		if value := strings.TrimSpace(decision.Reasons[0].Code); value != "" {
+			reasonCode = value
+		}
+		if value := strings.TrimSpace(decision.Reasons[0].Message); value != "" {
+			reasonText = value
+		}
+	}
+	content := fmt.Sprintf(
+		"Guardrail denied: tool '%s' was blocked (%s). Reason: %s. Choose an alternative approach.",
+		firstNonEmpty(toolName, "unknown_tool"),
+		reasonCode,
+		reasonText,
+	)
+	data := map[string]any{
+		"guardrail": map[string]any{
+			"allowed":   false,
+			"policy_id": strings.TrimSpace(decision.PolicyID),
+			"reasons":   guardrailReasonsPayload(decision.Reasons),
+		},
+	}
+	return models.ToolResult{
+		CallID:      strings.TrimSpace(call.ID),
+		ToolName:    firstNonEmpty(toolName, "unknown_tool"),
+		Status:      models.CallStatusFailed,
+		Content:     content,
+		Error:       content,
+		Data:        data,
+		CompletedAt: time.Now().UTC(),
+	}
+}
+
+func guardrailReasonsPayload(reasons []guardrails.Reason) []map[string]any {
+	if len(reasons) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(reasons))
+	for _, reason := range reasons {
+		out = append(out, map[string]any{
+			"code":    strings.TrimSpace(reason.Code),
+			"message": strings.TrimSpace(reason.Message),
+		})
+	}
+	return out
+}
+
+func cloneGuardrailArgs(args map[string]any) map[string]any {
+	if len(args) == 0 {
+		return nil
+	}
+	cloned := make(map[string]any, len(args))
+	for key, value := range args {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func stringFromAny(v any) string {
+	switch value := v.(type) {
+	case string:
+		return value
+	case fmt.Stringer:
+		return value.String()
+	default:
+		return ""
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func resolveGuardrails(cfg AgentConfig) (guardrails.Provider, bool, string) {
+	if cfg.GuardrailProvider != nil {
+		failClosed := true
+		if cfg.GuardrailFailClosed != nil {
+			failClosed = *cfg.GuardrailFailClosed
+		}
+		return cfg.GuardrailProvider, failClosed, strings.TrimSpace(cfg.GuardrailPassport)
+	}
+	envCfg := guardrails.LoadConfigFromEnv()
+	return envCfg.BuildProvider(), envCfg.FailClosed, envCfg.Passport
 }
 
 func shouldPauseAfterToolCall(call models.ToolCall, result models.ToolResult) bool {

@@ -42,6 +42,7 @@ type Fact struct {
 	Content    string    `json:"content"`
 	Category   string    `json:"category,omitempty"`
 	Confidence float64   `json:"confidence,omitempty"`
+	Source     string    `json:"source,omitempty"`
 	CreatedAt  time.Time `json:"created_at,omitempty"`
 	UpdatedAt  time.Time `json:"updated_at,omitempty"`
 }
@@ -224,18 +225,23 @@ func Merge(current Document, update Update, sessionID string, now time.Time) Doc
 		merged.Source = merged.SessionID
 	}
 
-	merged.Facts = mergeFacts(current.Facts, update.Facts, now)
+	merged.Facts = mergeFacts(current.Facts, update.Facts, merged.Source, now)
 	merged.UpdatedAt = now
 	return merged
 }
 
-func mergeFacts(existing, incoming []Fact, now time.Time) []Fact {
+func mergeFacts(existing, incoming []Fact, defaultSource string, now time.Time) []Fact {
 	index := make(map[string]int, len(existing))
 	merged := make([]Fact, 0, len(existing)+len(incoming))
+	defaultSource = strings.TrimSpace(defaultSource)
 
 	for _, fact := range existing {
 		if strings.TrimSpace(fact.ID) == "" || strings.TrimSpace(fact.Content) == "" {
 			continue
+		}
+		fact.Source = strings.TrimSpace(fact.Source)
+		if fact.Source == "" {
+			fact.Source = defaultSource
 		}
 		if fact.CreatedAt.IsZero() {
 			fact.CreatedAt = now
@@ -251,6 +257,10 @@ func mergeFacts(existing, incoming []Fact, now time.Time) []Fact {
 		fact.ID = strings.TrimSpace(fact.ID)
 		fact.Content = strings.TrimSpace(fact.Content)
 		fact.Category = strings.TrimSpace(fact.Category)
+		fact.Source = strings.TrimSpace(fact.Source)
+		if fact.Source == "" {
+			fact.Source = defaultSource
+		}
 		if fact.ID == "" || fact.Content == "" {
 			continue
 		}
