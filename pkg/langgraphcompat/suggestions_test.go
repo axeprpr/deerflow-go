@@ -157,6 +157,72 @@ func TestGenerateSuggestionsIncludesThreadContextInPrompt(t *testing.T) {
 	}
 }
 
+func TestParseJSONStringListAcceptsWrappedObject(t *testing.T) {
+	got := parseJSONStringList(`{"suggestions":["先总结一下","给我下一步建议"]}`)
+
+	if len(got) != 2 {
+		t.Fatalf("len=%d want=2 (%v)", len(got), got)
+	}
+	if got[0] != "先总结一下" || got[1] != "给我下一步建议" {
+		t.Fatalf("got=%v", got)
+	}
+}
+
+func TestParseJSONStringListAcceptsWrappedObjectArrayOfObjects(t *testing.T) {
+	got := parseJSONStringList(`{"suggestions":[{"text":"先总结一下"},{"question":"给我下一步建议"}]}`)
+
+	if len(got) != 2 {
+		t.Fatalf("len=%d want=2 (%v)", len(got), got)
+	}
+	if got[0] != "先总结一下" || got[1] != "给我下一步建议" {
+		t.Fatalf("got=%v", got)
+	}
+}
+
+func TestParseJSONStringListAcceptsSingleObjectSuggestion(t *testing.T) {
+	got := parseJSONStringList(`{"question":"先总结一下"}`)
+
+	if len(got) != 1 {
+		t.Fatalf("len=%d want=1 (%v)", len(got), got)
+	}
+	if got[0] != "先总结一下" {
+		t.Fatalf("got=%v", got)
+	}
+}
+
+func TestParseJSONStringListFallsBackToBulletList(t *testing.T) {
+	got := parseJSONStringList("Here are some ideas:\n- 先总结当前方案\n- 给我列出风险点\n")
+
+	if len(got) != 2 {
+		t.Fatalf("len=%d want=2 (%v)", len(got), got)
+	}
+	if got[0] != "先总结当前方案" || got[1] != "给我列出风险点" {
+		t.Fatalf("got=%v", got)
+	}
+}
+
+func TestParseJSONStringListAcceptsFencedWrappedObject(t *testing.T) {
+	got := parseJSONStringList("```json\n{\"questions\":[\"先总结当前方案\",\"给我列出风险点\"]}\n```")
+
+	if len(got) != 2 {
+		t.Fatalf("len=%d want=2 (%v)", len(got), got)
+	}
+	if got[0] != "先总结当前方案" || got[1] != "给我列出风险点" {
+		t.Fatalf("got=%v", got)
+	}
+}
+
+func TestParseJSONStringListFallsBackToParenthesizedNumberedList(t *testing.T) {
+	got := parseJSONStringList("1) 先总结当前方案\n2) 给我列出风险点\n")
+
+	if len(got) != 2 {
+		t.Fatalf("len=%d want=2 (%v)", len(got), got)
+	}
+	if got[0] != "先总结当前方案" || got[1] != "给我列出风险点" {
+		t.Fatalf("got=%v", got)
+	}
+}
+
 func TestFallbackSuggestionsUseThreadContextWhenConversationHasNoUserTurn(t *testing.T) {
 	got := fallbackSuggestions([]struct {
 		Role    string `json:"role"`

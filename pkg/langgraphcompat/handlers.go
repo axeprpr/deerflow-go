@@ -425,7 +425,7 @@ func (s *Server) convertToMessages(threadID string, input []any, includeUploaded
 		}
 
 		content, multiContent := extractMessageContent(msgMap["content"])
-		if role == "" || content == "" {
+		if role == "" {
 			continue
 		}
 
@@ -440,6 +440,10 @@ func (s *Server) convertToMessages(threadID string, input []any, includeUploaded
 			if includeUploadedImages {
 				multiContent = append(multiContent, uploadedImageParts(uploadDir, files, historical)...)
 			}
+		}
+		content = strings.TrimSpace(content)
+		if content == "" && len(multiContent) == 0 {
+			continue
 		}
 
 		msgSeq++
@@ -939,7 +943,9 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 			case "present_file", "present_files":
 				s.sendThreadUpdateEvent(w, flusher, run, "artifacts")
 			case "setup_agent":
-				s.sendThreadUpdateEvent(w, flusher, run, "created_agent_name")
+				if evt.Result.Status == models.CallStatusCompleted {
+					s.sendThreadUpdateEvent(w, flusher, run, "created_agent_name")
+				}
 			default:
 				if toolMayAffectArtifacts(resolvedToolNameForArtifacts(evt)) {
 					s.sendThreadUpdateEvent(w, flusher, run, "artifacts")

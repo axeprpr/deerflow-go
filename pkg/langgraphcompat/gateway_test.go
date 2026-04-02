@@ -1281,6 +1281,60 @@ func TestArtifactEndpointDownloadKeepsOriginalMarkdownPaths(t *testing.T) {
 	}
 }
 
+func TestArtifactEndpointServesUploadMarkdownPreviewForOfficeAndPDFFiles(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-upload-preview"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "brief.pdf"), []byte("%PDF-1.7"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+	const preview = "# Brief\n\nConverted preview.\n"
+	if err := os.WriteFile(filepath.Join(uploadDir, "brief.md"), []byte(preview), 0o644); err != nil {
+		t.Fatalf("write upload preview: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/brief.pdf", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Body.String(); got != preview {
+		t.Fatalf("body=%q want markdown preview", got)
+	}
+	if contentType := resp.Header().Get("Content-Type"); !strings.Contains(contentType, "text/markdown") {
+		t.Fatalf("content-type=%q want markdown", contentType)
+	}
+}
+
+func TestArtifactEndpointDownloadKeepsOriginalUploadFileWhenMarkdownPreviewExists(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-upload-preview-download"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads dir: %v", err)
+	}
+	const original = "%PDF-1.7"
+	if err := os.WriteFile(filepath.Join(uploadDir, "brief.pdf"), []byte(original), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "brief.md"), []byte("# Brief\n\nConverted preview.\n"), 0o644); err != nil {
+		t.Fatalf("write upload preview: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/brief.pdf?download=true", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Body.String(); got != original {
+		t.Fatalf("body=%q want original upload", got)
+	}
+	if disposition := resp.Header().Get("Content-Disposition"); !strings.Contains(disposition, "brief.pdf") {
+		t.Fatalf("content-disposition=%q want original filename", disposition)
+	}
+}
+
 func TestUploadsEndpointIgnoresMarkdownConversionFailures(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-upload-conversion-failure"
@@ -1948,6 +2002,9 @@ func TestUploadsCreateDoesNotOverwriteExistingFile(t *testing.T) {
 	if got := asString(uploaded.Files[0]["filename"]); got != "report_1.txt" {
 		t.Fatalf("filename=%q want=report_1.txt", got)
 	}
+	if got := asString(uploaded.Files[0]["original_filename"]); got != "report.txt" {
+		t.Fatalf("original_filename=%q want=report.txt", got)
+	}
 
 	oldData, err := os.ReadFile(filepath.Join(uploadDir, "report.txt"))
 	if err != nil {
@@ -1963,6 +2020,58 @@ func TestUploadsCreateDoesNotOverwriteExistingFile(t *testing.T) {
 	}
 	if string(newData) != "new" {
 		t.Fatalf("deduplicated=%q want=new", newData)
+	}
+}
+
+func TestUploadsCreateReturnsOriginalFilenameForInRequestDuplicates(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+	threadID := "thread-upload-triple-duplicates"
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	for _, content := range []string{"version A", "version B", "version C"} {
+		part, err := w.CreateFormFile("files", "report.csv")
+		if err != nil {
+			t.Fatalf("create form file: %v", err)
+		}
+		if _, err := part.Write([]byte(content)); err != nil {
+			t.Fatalf("write form file: %v", err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/"+threadID+"/uploads", &body, map[string]string{"Content-Type": w.FormDataContentType()})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("upload status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var uploaded struct {
+		Files []map[string]any `json:"files"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&uploaded); err != nil {
+		t.Fatalf("decode upload response: %v", err)
+	}
+	if len(uploaded.Files) != 3 {
+		t.Fatalf("files=%d want=3", len(uploaded.Files))
+	}
+
+	gotNames := []string{
+		asString(uploaded.Files[0]["filename"]),
+		asString(uploaded.Files[1]["filename"]),
+		asString(uploaded.Files[2]["filename"]),
+	}
+	if strings.Join(gotNames, ",") != "report.csv,report_1.csv,report_2.csv" {
+		t.Fatalf("filenames=%v", gotNames)
+	}
+	if _, exists := uploaded.Files[0]["original_filename"]; exists {
+		t.Fatalf("unexpected original_filename on first file: %#v", uploaded.Files[0])
+	}
+	for i := 1; i < 3; i++ {
+		if got := asString(uploaded.Files[i]["original_filename"]); got != "report.csv" {
+			t.Fatalf("files[%d].original_filename=%q want=report.csv", i, got)
+		}
 	}
 }
 
@@ -3755,6 +3864,46 @@ license: MIT
 	}
 	if !skill.Enabled {
 		t.Fatal("expected skill to be enabled")
+	}
+}
+
+func TestSkillUpdateReturnsSkillObjectLikeOriginalGateway(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	skillDir := filepath.Join(s.dataRoot, "skills", "public", "frontend-design")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(`---
+name: frontend-design
+description: Design distinctive product interfaces.
+license: MIT
+---
+# Frontend Design
+`), 0o644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPut, "/api/skills/frontend-design", strings.NewReader(`{"enabled":false}`), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("update status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode update payload: %v", err)
+	}
+	if got := asString(payload["name"]); got != "frontend-design" {
+		t.Fatalf("name=%q want frontend-design", got)
+	}
+	if got, ok := payload["enabled"].(bool); !ok || got {
+		t.Fatalf("enabled=%#v want false", payload["enabled"])
+	}
+	if _, exists := payload["skill"]; exists {
+		t.Fatalf("unexpected wrapped skill payload: %#v", payload)
+	}
+	if _, exists := payload["success"]; exists {
+		t.Fatalf("unexpected success wrapper payload: %#v", payload)
 	}
 }
 

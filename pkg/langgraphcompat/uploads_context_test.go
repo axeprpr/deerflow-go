@@ -167,6 +167,70 @@ func TestConvertToMessagesNormalizesUploadedFilePathAndSkipsMissingFiles(t *test
 	}
 }
 
+func TestConvertToMessagesKeepsAttachmentOnlyUserMessage(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{
+		sessions: make(map[string]*Session),
+		runs:     make(map[string]*Run),
+		dataRoot: root,
+	}
+
+	threadID := "thread-upload-only-files"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "report.pdf"), []byte("pdf"), 0o644); err != nil {
+		t.Fatalf("write uploaded file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "report.md"), []byte("# Report"), 0o644); err != nil {
+		t.Fatalf("write markdown companion: %v", err)
+	}
+
+	input := []any{
+		map[string]any{
+			"role": "user",
+			"content": []any{
+				map[string]any{"type": "text", "text": ""},
+			},
+			"additional_kwargs": map[string]any{
+				"files": []any{
+					map[string]any{
+						"filename": "report.pdf",
+						"size":     3,
+						"path":     "/mnt/user-data/uploads/report.pdf",
+					},
+				},
+			},
+		},
+	}
+
+	messages := s.convertToMessages(threadID, input, false)
+	if len(messages) != 1 {
+		t.Fatalf("messages len=%d want=1", len(messages))
+	}
+	if got := messages[0].Role; got != models.RoleHuman {
+		t.Fatalf("role=%q want=%q", got, models.RoleHuman)
+	}
+	if !strings.Contains(messages[0].Content, "<uploaded_files>") {
+		t.Fatalf("expected uploaded_files block in %q", messages[0].Content)
+	}
+	if strings.Contains(messages[0].Content, "/tmp/") {
+		t.Fatalf("unexpected host path leakage in %q", messages[0].Content)
+	}
+
+	multi := decodeMultiContent(messages[0].Metadata)
+	if len(multi) != 1 {
+		t.Fatalf("multi_content len=%d want=1", len(multi))
+	}
+	if got := multi[0]["type"]; got != "text" {
+		t.Fatalf("multi_content[0].type=%v want=text", got)
+	}
+	if text, _ := multi[0]["text"].(string); !strings.Contains(text, "report.pdf") {
+		t.Fatalf("multi_content[0].text=%q want upload context", text)
+	}
+}
+
 func TestMessagesToLangChainReturnsAdditionalKwargs(t *testing.T) {
 	additionalKwargs, err := json.Marshal(map[string]any{
 		"files": []map[string]any{

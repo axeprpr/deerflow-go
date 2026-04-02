@@ -106,6 +106,7 @@ var activeContentMIMETypes = map[string]struct{}{
 }
 
 var artifactVirtualPathRE = regexp.MustCompile(`(?i)/mnt/user-data/(?:uploads|outputs|workspace)/[^<>"')\]\r\n\t]+`)
+var suggestionBulletRE = regexp.MustCompile(`^(?:[-*•]|\d+[.)])\s+`)
 
 var skillInstallSeq uint64
 var agentNameRE = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
@@ -280,7 +281,7 @@ func (s *Server) updateSkillEnabled(w http.ResponseWriter, r *http.Request, enab
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "skill": skill})
+	writeJSON(w, http.StatusOK, skill)
 }
 
 func (s *Server) handleSkillInstall(w http.ResponseWriter, r *http.Request) {
@@ -784,6 +785,9 @@ func (s *Server) handleUploadsCreate(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
 			return
 		}
+		if originalName, err := validateUploadedFilename(fh.Filename); err == nil && originalName != "" && originalName != name {
+			info["original_filename"] = originalName
+		}
 		writtenPaths = append(writtenPaths, filepath.Join(uploadDir, name))
 		if mdPath, err := generateUploadMarkdownCompanion(filepath.Join(uploadDir, name)); err != nil {
 			if s.logger != nil {
@@ -916,19 +920,47 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	filename := filepath.Base(absPath)
 	mimeType := mime.TypeByExtension(strings.ToLower(filepath.Ext(absPath)))
-	if shouldForceAttachment(r, mimeType) {
-		w.Header().Set("Content-Disposition", contentDisposition("attachment", filepath.Base(absPath)))
+	if previewName, previewPath, ok := uploadMarkdownPreview(absPath, artifactPath, downloadRequested(r)); ok {
+		filename = previewName
+		absPath = previewPath
+		mimeType = "text/markdown"
 	}
-	if !downloadRequested(r) && shouldRewriteArtifactText(filepath.Base(absPath), mimeType) {
-		if served, err := serveRewrittenArtifactText(w, filepath.Base(absPath), mimeType, absPath, threadID); err == nil && served {
+	if shouldForceAttachment(r, mimeType) {
+		w.Header().Set("Content-Disposition", contentDisposition("attachment", filename))
+	}
+	if !downloadRequested(r) && shouldRewriteArtifactText(filename, mimeType) {
+		if served, err := serveRewrittenArtifactText(w, filename, mimeType, absPath, threadID); err == nil && served {
 			return
 		}
 	}
-	if err := serveArtifactFile(w, r, filepath.Base(absPath), mimeType, absPath, downloadRequested(r)); err != nil {
+	if err := serveArtifactFile(w, r, filename, mimeType, absPath, downloadRequested(r)); err != nil {
 		http.NotFound(w, r)
 		return
 	}
+}
+
+func uploadMarkdownPreview(absPath, artifactPath string, download bool) (string, string, bool) {
+	if download {
+		return "", "", false
+	}
+	artifactPath = strings.TrimSpace(artifactPath)
+	if !strings.HasPrefix(artifactPath, "mnt/user-data/uploads/") && !strings.HasPrefix(artifactPath, "/mnt/user-data/uploads/") {
+		return "", "", false
+	}
+	switch strings.ToLower(filepath.Ext(absPath)) {
+	case ".pdf", ".ppt", ".pptx", ".xls", ".xlsx", ".doc", ".docx":
+	default:
+		return "", "", false
+	}
+
+	previewPath := strings.TrimSuffix(absPath, filepath.Ext(absPath)) + ".md"
+	info, err := os.Stat(previewPath)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", "", false
+	}
+	return filepath.Base(previewPath), previewPath, true
 }
 
 func shouldRewriteArtifactText(filename, mimeType string) bool {
@@ -1769,30 +1801,97 @@ func parseJSONStringList(raw string) []string {
 		}
 	}
 
-	start := strings.Index(candidate, "[")
-	end := strings.LastIndex(candidate, "]")
-	if start < 0 || end <= start {
-		return nil
+	if parsed := decodeSuggestionPayload(candidate); len(parsed) > 0 {
+		return parsed
 	}
 
-	var decoded []any
-	if err := json.Unmarshal([]byte(candidate[start:end+1]), &decoded); err != nil {
-		return nil
-	}
-
-	out := make([]string, 0, len(decoded))
-	for _, item := range decoded {
-		text, ok := item.(string)
-		if !ok {
-			continue
+	start := strings.IndexAny(candidate, "[{")
+	end := strings.LastIndexAny(candidate, "]}")
+	if start >= 0 && end > start {
+		if parsed := decodeSuggestionPayload(candidate[start : end+1]); len(parsed) > 0 {
+			return parsed
 		}
-		text = strings.TrimSpace(strings.ReplaceAll(text, "\n", " "))
+	}
+
+	return parseBulletSuggestionList(candidate)
+}
+
+func decodeSuggestionPayload(candidate string) []string {
+	var decoded any
+	if err := json.Unmarshal([]byte(candidate), &decoded); err != nil {
+		return nil
+	}
+	return suggestionStringsFromAny(decoded)
+}
+
+func suggestionStringsFromAny(value any) []string {
+	switch typed := value.(type) {
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text := suggestionTextFromAny(item)
+			if text == "" {
+				continue
+			}
+			out = append(out, text)
+		}
+		return out
+	case map[string]any:
+		for _, key := range []string{"suggestions", "questions", "follow_ups", "followups", "items"} {
+			if parsed := suggestionStringsFromAny(typed[key]); len(parsed) > 0 {
+				return parsed
+			}
+		}
+		if text := suggestionTextFromAny(typed); text != "" {
+			return []string{text}
+		}
+	}
+	return nil
+}
+
+func suggestionTextFromAny(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return normalizeSuggestionText(typed)
+	case map[string]any:
+		for _, key := range []string{"text", "question", "suggestion", "content", "title"} {
+			if text, ok := typed[key].(string); ok {
+				return normalizeSuggestionText(text)
+			}
+		}
+	}
+	return ""
+}
+
+func parseBulletSuggestionList(candidate string) []string {
+	lines := strings.Split(candidate, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		text := normalizeBulletSuggestion(line)
 		if text == "" {
 			continue
 		}
 		out = append(out, text)
 	}
 	return out
+}
+
+func normalizeBulletSuggestion(line string) string {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return ""
+	}
+
+	if loc := suggestionBulletRE.FindStringIndex(line); loc != nil && loc[0] == 0 {
+		return normalizeSuggestionText(line[loc[1]:])
+	}
+	return ""
+}
+
+func normalizeSuggestionText(text string) string {
+	text = strings.TrimSpace(strings.ReplaceAll(text, "\n", " "))
+	text = strings.Trim(text, "\"'`")
+	return strings.Join(strings.Fields(text), " ")
 }
 
 func finalizeSuggestions(primary, fallback []string, n int) []string {

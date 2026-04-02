@@ -105,9 +105,8 @@ func (s *Server) handleThreadCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	metadata, _ := req["metadata"].(map[string]any)
-
-	session := s.ensureSession(threadID, metadata)
+	session := s.ensureSession(threadID, mapFromAny(req["metadata"]))
+	applyThreadEnvelope(session, req)
 	writeJSON(w, http.StatusCreated, s.threadResponse(session))
 }
 
@@ -133,17 +132,38 @@ func (s *Server) handleThreadUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if metadata, ok := req["metadata"].(map[string]any); ok {
-		for k, v := range metadata {
-			session.Metadata[k] = v
-		}
-	}
+	applyThreadEnvelope(session, req)
 	session.UpdatedAt = time.Now().UTC()
 	snapshot := cloneSession(session)
 	s.sessionsMu.Unlock()
 	_ = s.persistSessionSnapshot(snapshot)
 
 	writeJSON(w, http.StatusOK, s.threadResponse(session))
+}
+
+func applyThreadEnvelope(session *Session, req map[string]any) {
+	if session == nil || len(req) == 0 {
+		return
+	}
+	applyThreadStateUpdate(session, mapFromAny(req["values"]), mapFromAny(req["metadata"]))
+	if config, ok := req["config"].(map[string]any); ok {
+		if configurable := mapFromAny(config["configurable"]); len(configurable) > 0 {
+			if session.Configurable == nil {
+				session.Configurable = defaultThreadConfig(session.ThreadID)
+			}
+			for key, value := range configurable {
+				session.Configurable[key] = value
+			}
+		}
+	}
+	if status := strings.TrimSpace(stringFromAny(req["status"])); status != "" {
+		session.Status = status
+	}
+}
+
+func mapFromAny(value any) map[string]any {
+	out, _ := value.(map[string]any)
+	return out
 }
 
 func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
