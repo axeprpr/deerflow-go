@@ -229,6 +229,40 @@ func TestThreadsListIncludesRoutePathForAgentThreads(t *testing.T) {
 	}
 }
 
+func TestThreadsListUsesCreatedAgentNameForBootstrapThreads(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	bootstrap := s.ensureSession("thread-bootstrap-agent", map[string]any{"title": "Bootstrap"})
+	bootstrap.Values["created_agent_name"] = "code-reviewer"
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/threads", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var threads []map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(threads) != 1 {
+		t.Fatalf("threads=%d want=1", len(threads))
+	}
+
+	values, ok := threads[0]["values"].(map[string]any)
+	if !ok {
+		t.Fatalf("values=%#v", threads[0]["values"])
+	}
+	if got := asString(values["thread_kind"]); got != "agent" {
+		t.Fatalf("thread_kind=%q want=agent", got)
+	}
+	if got := asString(values["route_path"]); got != "/workspace/agents/code-reviewer/chats/thread-bootstrap-agent" {
+		t.Fatalf("route_path=%q want bootstrap agent route", got)
+	}
+	if got := asString(values["agent_name"]); got != "code-reviewer" {
+		t.Fatalf("agent_name=%q want=code-reviewer", got)
+	}
+}
+
 func TestThreadSearchFiltersByQueryStatusMetadataAndValues(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 

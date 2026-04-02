@@ -1159,9 +1159,15 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 	}
 }
 
-func threadRouteInfo(threadID string, metadata map[string]any) (kind string, routePath string, agentName string) {
-	threadID = strings.TrimSpace(threadID)
-	if name, ok := normalizeAgentName(stringValue(metadata["agent_name"])); ok {
+func threadRouteInfo(session *Session) (kind string, routePath string, agentName string) {
+	if session == nil {
+		return "chat", "/workspace/chats/", ""
+	}
+	threadID := strings.TrimSpace(session.ThreadID)
+	if name, ok := normalizeAgentName(stringValue(session.Metadata["agent_name"])); ok {
+		return "agent", "/workspace/agents/" + name + "/chats/" + threadID, name
+	}
+	if name, ok := normalizeAgentName(stringValue(session.Values["created_agent_name"])); ok {
 		return "agent", "/workspace/agents/" + name + "/chats/" + threadID, name
 	}
 	return "chat", "/workspace/chats/" + threadID, ""
@@ -1708,7 +1714,7 @@ func (s *Server) threadValues(session *Session) map[string]any {
 	if values == nil {
 		values = map[string]any{}
 	}
-	threadKind, routePath, agentName := threadRouteInfo(session.ThreadID, session.Metadata)
+	threadKind, routePath, agentName := threadRouteInfo(session)
 	values["title"] = stringValue(session.Metadata["title"])
 	values["thread_kind"] = threadKind
 	values["route_path"] = routePath
