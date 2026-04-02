@@ -97,9 +97,11 @@ func (s *Server) generateConversationSummary(ctx context.Context, threadID strin
 		return buildFallbackConversationSummary(existingSummary, messages)
 	}
 
+	resolvedModel := resolveTitleModel(modelName, s.defaultModel)
 	maxTokens := 320
 	resp, err := s.llmProvider.Chat(ctx, llm.ChatRequest{
-		Model: resolveTitleModel(modelName, s.defaultModel),
+		Model:           resolvedModel,
+		ReasoningEffort: s.backgroundReasoningEffort(resolvedModel),
 		Messages: []models.Message{{
 			ID:        "history-summary",
 			SessionID: threadID,

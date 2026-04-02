@@ -945,7 +945,9 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 			}
 		}
 	case agent.AgentEventEnd:
-		if strings.TrimSpace(evt.Text) == "" && evt.Usage == nil {
+		kwargs := decodeAdditionalKwargs(evt.Metadata)
+		usage := usageMetadataFromAgentUsage(evt.Usage)
+		if strings.TrimSpace(evt.Text) == "" && len(kwargs) == 0 && len(usage) == 0 {
 			return
 		}
 		msg := Message{
@@ -954,10 +956,10 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 			Role:    "assistant",
 			Content: evt.Text,
 		}
-		if kwargs := decodeAdditionalKwargs(evt.Metadata); len(kwargs) > 0 {
+		if len(kwargs) > 0 {
 			msg.AdditionalKwargs = kwargs
 		}
-		if usage := usageMetadataFromAgentUsage(evt.Usage); len(usage) > 0 {
+		if len(usage) > 0 {
 			msg.UsageMetadata = usage
 		}
 		s.recordAndSendEvent(w, flusher, run, "messages-tuple", msg)

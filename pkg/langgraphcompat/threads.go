@@ -1356,6 +1356,13 @@ func (s *Server) sessionArtifactPaths(session *Session) []string {
 		seen[path] = struct{}{}
 		paths = append(paths, path)
 	}
+	for _, path := range s.uploadArtifactPaths(session.ThreadID) {
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
 	return paths
 }
 
@@ -1399,19 +1406,42 @@ func (s *Server) sessionFiles(session *Session) []tools.PresentFile {
 	return files
 }
 
+func (s *Server) threadFiles(threadID string, session *Session) []tools.PresentFile {
+	if session != nil {
+		return s.sessionFiles(session)
+	}
+
+	seen := make(map[string]struct{})
+	files := make([]tools.PresentFile, 0)
+	for _, root := range []struct {
+		path          string
+		virtualPrefix string
+	}{
+		{path: filepath.Join(s.threadRoot(threadID), "outputs"), virtualPrefix: "/mnt/user-data/outputs"},
+		{path: filepath.Join(s.threadRoot(threadID), "workspace"), virtualPrefix: "/mnt/user-data/workspace"},
+		{path: s.uploadsDir(threadID), virtualPrefix: "/mnt/user-data/uploads"},
+	} {
+		for _, file := range collectArtifactFiles(root.path, root.virtualPrefix) {
+			if _, ok := seen[file.Path]; ok {
+				continue
+			}
+			seen[file.Path] = struct{}{}
+			files = append(files, file)
+		}
+	}
+	return files
+}
+
 func (s *Server) uploadArtifactPaths(threadID string) []string {
 	files := s.listUploadedFiles(threadID)
 	if len(files) == 0 {
 		return nil
 	}
 
-	paths := make([]string, 0, len(files)*2)
+	paths := make([]string, 0, len(files))
 	for _, info := range files {
 		if markdownPath := strings.TrimSpace(asString(info["markdown_virtual_path"])); markdownPath != "" {
 			paths = append(paths, markdownPath)
-		}
-		if path := strings.TrimSpace(asString(info["path"])); path != "" {
-			paths = append(paths, path)
 		}
 	}
 	return paths

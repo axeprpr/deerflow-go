@@ -1064,6 +1064,69 @@ func TestRunEmitsFinalAssistantMetadataAfterNormalization(t *testing.T) {
 	t.Fatal("missing AgentEventEnd")
 }
 
+func TestRunPreservesReasoningOnlyAssistantMessages(t *testing.T) {
+	provider := &scriptedStreamProvider{
+		t: t,
+		steps: []streamStep{
+			{content: "<think>internal reasoning</think>"},
+		},
+	}
+	agent := New(AgentConfig{
+		LLMProvider: provider,
+		Model:       "test-model",
+		MaxTurns:    1,
+	})
+
+	done := make(chan []AgentEvent, 1)
+	go func() {
+		var events []AgentEvent
+		for evt := range agent.Events() {
+			events = append(events, evt)
+			if evt.Type == AgentEventEnd || evt.Type == AgentEventError {
+				done <- events
+				return
+			}
+		}
+		done <- events
+	}()
+
+	result, err := agent.Run(context.Background(), "session-1", []models.Message{
+		{ID: "m1", SessionID: "session-1", Role: models.RoleHuman, Content: "hello"},
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if result.FinalOutput != "" {
+		t.Fatalf("final output=%q want empty", result.FinalOutput)
+	}
+	if len(result.Messages) == 0 {
+		t.Fatal("expected reasoning-only assistant message to be preserved")
+	}
+	last := result.Messages[len(result.Messages)-1]
+	if last.Content != "" {
+		t.Fatalf("content=%q want empty", last.Content)
+	}
+	if got := last.Metadata["additional_kwargs"]; !strings.Contains(got, `"reasoning_content":"internal reasoning"`) {
+		t.Fatalf("metadata=%q want reasoning_content", got)
+	}
+
+	events := <-done
+	for _, evt := range events {
+		if evt.Type != AgentEventEnd {
+			continue
+		}
+		if evt.Text != "" {
+			t.Fatalf("end text=%q want empty", evt.Text)
+		}
+		if got := evt.Metadata["additional_kwargs"]; !strings.Contains(got, `"reasoning_content":"internal reasoning"`) {
+			t.Fatalf("metadata=%q want reasoning_content", got)
+		}
+		return
+	}
+
+	t.Fatal("missing AgentEventEnd")
+}
+
 type timeoutProvider struct{}
 
 func (timeoutProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {

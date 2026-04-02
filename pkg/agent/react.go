@@ -254,7 +254,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			CreatedAt: time.Now().UTC(),
 		}
 		assistantMessage = llm.NormalizeAssistantMessage(assistantMessage)
-		if assistantMessage.Content != "" || len(assistantMessage.ToolCalls) > 0 {
+		if assistantMessage.Content != "" || len(assistantMessage.ToolCalls) > 0 || llm.HasReasoningContent(assistantMessage) {
 			runMessages = append(runMessages, assistantMessage)
 		}
 

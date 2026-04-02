@@ -80,8 +80,10 @@ func (s *Server) generateThreadTitle(ctx context.Context, modelName string, mess
 	}
 
 	maxTokens := 24
+	resolvedModel := resolveTitleModel(cfg.Model, modelName, s.defaultModel)
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
-		Model: resolveTitleModel(cfg.Model, modelName, s.defaultModel),
+		Model:           resolvedModel,
+		ReasoningEffort: s.backgroundReasoningEffort(resolvedModel),
 		Messages: []models.Message{
 			{
 				ID:        "title-user",

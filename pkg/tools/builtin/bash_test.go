@@ -115,8 +115,8 @@ func TestBashHandlerUsesThreadWorkspaceAsWorkingDirectory(t *testing.T) {
 	}
 
 	expectedDir := filepath.Join(root, "threads", threadID, "user-data", "workspace")
-	if got := strings.TrimSpace(output.Stdout); got != expectedDir {
-		t.Fatalf("stdout=%q want %q", got, expectedDir)
+	if got := strings.TrimSpace(output.Stdout); got != "/mnt/user-data/workspace" {
+		t.Fatalf("stdout=%q want %q", got, "/mnt/user-data/workspace")
 	}
 
 	data, err := os.ReadFile(filepath.Join(expectedDir, "relative.txt"))
@@ -125,5 +125,34 @@ func TestBashHandlerUsesThreadWorkspaceAsWorkingDirectory(t *testing.T) {
 	}
 	if string(data) != "workspace" {
 		t.Fatalf("file content=%q want %q", string(data), "workspace")
+	}
+}
+
+func TestBashHandlerMasksHostPathsInStderr(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	threadID := "thread-bash-stderr"
+	ctx := tools.WithThreadID(context.Background(), threadID)
+	result, err := BashHandler(ctx, models.ToolCall{
+		ID:   "call-bash-stderr-1",
+		Name: "bash",
+		Arguments: map[string]any{
+			"command": "pwd 1>&2",
+		},
+	})
+	if err != nil {
+		t.Fatalf("BashHandler() error = %v", err)
+	}
+
+	var output BashOutput
+	if err := json.Unmarshal([]byte(result.Content), &output); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if strings.Contains(output.Stdout, root) {
+		t.Fatalf("stdout=%q should not expose host root %q", output.Stdout, root)
+	}
+	if !strings.Contains(output.Stdout, "/mnt/user-data/workspace") {
+		t.Fatalf("stdout=%q missing virtual path", output.Stdout)
 	}
 }

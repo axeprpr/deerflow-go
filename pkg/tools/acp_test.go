@@ -42,8 +42,11 @@ func TestInvokeACPAgentToolUsesPerThreadWorkspace(t *testing.T) {
 	}
 
 	expectedDir := filepath.Join(root, "threads", "thread-acp-1", "acp-workspace")
-	if !strings.Contains(result.Content, expectedDir) {
-		t.Fatalf("content=%q want workspace %q", result.Content, expectedDir)
+	if strings.Contains(result.Content, expectedDir) {
+		t.Fatalf("content=%q should not expose workspace %q", result.Content, expectedDir)
+	}
+	if !strings.Contains(result.Content, "/mnt/acp-workspace") {
+		t.Fatalf("content=%q want virtual ACP workspace", result.Content)
 	}
 
 	data, err := os.ReadFile(filepath.Join(expectedDir, "result.txt"))

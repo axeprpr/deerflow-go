@@ -2437,6 +2437,64 @@ func TestGatewayThreadFilesEndpointListsUploadsWorkspaceAndArtifacts(t *testing.
 	}
 }
 
+func TestGatewayThreadFilesEndpointFallsBackToDiskWithoutSession(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-files-disk-only"
+
+	outputDir := filepath.Join(s.threadRoot(threadID), "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "report.md"), []byte("# report"), 0o644); err != nil {
+		t.Fatalf("write output: %v", err)
+	}
+
+	workspaceDir := filepath.Join(s.threadRoot(threadID), "workspace")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceDir, "notes.txt"), []byte("notes"), 0o644); err != nil {
+		t.Fatalf("write workspace file: %v", err)
+	}
+
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "requirements.pdf"), []byte("pdf"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "requirements.md"), []byte("# requirements"), 0o644); err != nil {
+		t.Fatalf("write upload markdown companion: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/files", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		Files []tools.PresentFile `json:"files"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	got := make([]string, 0, len(payload.Files))
+	for _, file := range payload.Files {
+		got = append(got, file.Path)
+	}
+	want := []string{
+		"/mnt/user-data/outputs/report.md",
+		"/mnt/user-data/workspace/notes.txt",
+		"/mnt/user-data/uploads/requirements.md",
+		"/mnt/user-data/uploads/requirements.pdf",
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("files=%v want=%v", got, want)
+	}
+}
+
 func TestAugmentToolRuntimeContext(t *testing.T) {
 	runtimeContext := map[string]any{
 		"thinking_enabled": true,

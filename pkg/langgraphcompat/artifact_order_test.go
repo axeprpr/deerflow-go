@@ -127,3 +127,48 @@ func TestThreadFilesListUploadMarkdownBeforeOriginalFile(t *testing.T) {
 		t.Fatalf("paths=%#v", paths)
 	}
 }
+
+func TestThreadStateArtifactsAppendUploadMarkdownAfterOutputs(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	threadID := "thread-artifacts-include-upload-markdown"
+	session := s.ensureSession(threadID, nil)
+
+	outputDir := filepath.Join(s.threadRoot(threadID), "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	reportPath := filepath.Join(outputDir, "report.md")
+	if err := os.WriteFile(reportPath, []byte("# Report"), 0o644); err != nil {
+		t.Fatalf("write output artifact: %v", err)
+	}
+	if err := session.PresentFiles.Register(tools.PresentFile{
+		Path:       "/mnt/user-data/outputs/report.md",
+		SourcePath: reportPath,
+	}); err != nil {
+		t.Fatalf("register output artifact: %v", err)
+	}
+
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "brief.pdf"), []byte("pdf"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "brief.md"), []byte("# Brief"), 0o644); err != nil {
+		t.Fatalf("write upload markdown: %v", err)
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("state is nil")
+	}
+
+	artifacts, ok := state.Values["artifacts"].([]string)
+	if !ok {
+		t.Fatalf("artifacts=%#v", state.Values["artifacts"])
+	}
+	if strings.Join(artifacts, ",") != "/mnt/user-data/outputs/report.md,/mnt/user-data/uploads/brief.md" {
+		t.Fatalf("artifacts=%#v", artifacts)
+	}
+}

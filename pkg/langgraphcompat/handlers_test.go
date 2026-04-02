@@ -476,6 +476,54 @@ func TestForwardAgentEventPreservesFinalAssistantAdditionalKwargs(t *testing.T) 
 	t.Fatal("missing final assistant messages-tuple payload with additional_kwargs")
 }
 
+func TestForwardAgentEventEmitsReasoningOnlyAssistantMessage(t *testing.T) {
+	s := &Server{
+		runs:       map[string]*Run{},
+		runStreams: map[string]map[uint64]chan StreamEvent{},
+	}
+	run := &Run{
+		RunID:       "run-think-only",
+		ThreadID:    "thread-think-only",
+		AssistantID: "lead_agent",
+		Status:      "running",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.saveRun(run)
+
+	s.forwardAgentEvent(nil, nil, run, agent.AgentEvent{
+		Type:      agent.AgentEventEnd,
+		MessageID: "msg-ai-think-only",
+		Metadata: map[string]string{
+			"additional_kwargs": `{"reasoning_content":"internal reasoning"}`,
+		},
+	})
+
+	stored := s.getRun(run.RunID)
+	if stored == nil {
+		t.Fatal("stored run missing")
+	}
+
+	for _, evt := range stored.Events {
+		if evt.Event != "messages-tuple" {
+			continue
+		}
+		payload, ok := evt.Data.(Message)
+		if !ok || payload.ID != "msg-ai-think-only" {
+			continue
+		}
+		if payload.Content != "" {
+			t.Fatalf("content=%v want empty", payload.Content)
+		}
+		if payload.AdditionalKwargs["reasoning_content"] != "internal reasoning" {
+			t.Fatalf("additional_kwargs=%#v want reasoning_content", payload.AdditionalKwargs)
+		}
+		return
+	}
+
+	t.Fatal("missing reasoning-only messages-tuple payload")
+}
+
 func TestUsagePayloadFromAgentUsageDefaultsToZero(t *testing.T) {
 	got := usagePayloadFromAgentUsage(nil)
 	want := map[string]int{

@@ -39,8 +39,8 @@ func BashHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, 
 	}
 
 	output := &BashOutput{
-		Stdout:   result.Stdout(),
-		Stderr:   result.Stderr(),
+		Stdout:   tools.MaskLocalPaths(ctx, result.Stdout()),
+		Stderr:   tools.MaskLocalPaths(ctx, result.Stderr()),
 		ExitCode: result.ExitCode(),
 	}
 	data, _ := json.Marshal(output)

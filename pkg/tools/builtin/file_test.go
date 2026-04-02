@@ -157,8 +157,11 @@ func TestGlobHandlerResolvesVirtualPattern(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GlobHandler() error = %v", err)
 	}
-	if !strings.Contains(result.Content, "a.txt") || !strings.Contains(result.Content, "b.txt") {
+	if !strings.Contains(result.Content, "/mnt/user-data/uploads/a.txt") || !strings.Contains(result.Content, "/mnt/user-data/uploads/b.txt") {
 		t.Fatalf("glob result=%q", result.Content)
+	}
+	if strings.Contains(result.Content, root) {
+		t.Fatalf("glob result=%q should not expose host root %q", result.Content, root)
 	}
 }
 
@@ -444,7 +447,34 @@ func TestGlobHandlerResolvesRelativePatternToThreadWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GlobHandler() error = %v", err)
 	}
-	if !strings.Contains(result.Content, "a.txt") || !strings.Contains(result.Content, "b.txt") {
+	if !strings.Contains(result.Content, "/mnt/user-data/workspace/a.txt") || !strings.Contains(result.Content, "/mnt/user-data/workspace/b.txt") {
 		t.Fatalf("glob result=%q", result.Content)
+	}
+	if strings.Contains(result.Content, root) {
+		t.Fatalf("glob result=%q should not expose host root %q", result.Content, root)
+	}
+}
+
+func TestReadFileHandlerMasksHostPathInErrors(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	threadID := "thread-read-mask-error"
+	ctx := tools.WithThreadID(context.Background(), threadID)
+	_, err := ReadFileHandler(ctx, models.ToolCall{
+		ID:   "call-read-mask-error-1",
+		Name: "read_file",
+		Arguments: map[string]any{
+			"path": "/mnt/user-data/workspace/missing.txt",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), root) {
+		t.Fatalf("error=%q should not expose host root %q", err.Error(), root)
+	}
+	if !strings.Contains(err.Error(), "/mnt/user-data/workspace/missing.txt") {
+		t.Fatalf("error=%q missing virtual path", err.Error())
 	}
 }

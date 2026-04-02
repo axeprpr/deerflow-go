@@ -129,10 +129,10 @@ func invokeACPAgentCommand(ctx context.Context, cfg ACPAgentConfig, prompt, thre
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return "", formatACPInvocationError(command, stderr.String(), err)
+		return "", fmt.Errorf("%s", MaskLocalPaths(ctx, formatACPInvocationError(command, stderr.String(), err).Error()))
 	}
 
-	out := strings.TrimSpace(stdout.String())
+	out := strings.TrimSpace(MaskLocalPaths(ctx, stdout.String()))
 	if out == "" {
 		out = "(no response)"
 	}

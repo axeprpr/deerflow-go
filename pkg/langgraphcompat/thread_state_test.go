@@ -325,7 +325,8 @@ func TestThreadStateIncludesStructuredUploadedFiles(t *testing.T) {
 	if !ok {
 		t.Fatalf("artifacts=%#v", state.Values["artifacts"])
 	}
-	if len(artifacts) != 0 {
-		t.Fatalf("artifacts=%#v want no auto-discovered uploads", artifacts)
+	wantArtifacts := []string{"/mnt/user-data/uploads/report.md"}
+	if strings.Join(artifacts, ",") != strings.Join(wantArtifacts, ",") {
+		t.Fatalf("artifacts=%#v want=%#v", artifacts, wantArtifacts)
 	}
 }

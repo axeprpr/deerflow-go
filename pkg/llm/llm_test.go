@@ -228,10 +228,17 @@ func TestNormalizeAssistantMessage_UsesThinkContentWhenVisibleAnswerWouldBeEmpty
 		},
 	})
 
-	if msg.Content != "answer hidden in reasoning" {
-		t.Fatalf("content=%q want extracted reasoning", msg.Content)
+	if msg.Content != "" {
+		t.Fatalf("content=%q want empty", msg.Content)
 	}
-	if got := msg.Metadata["additional_kwargs"]; got != "" {
-		t.Fatalf("additional_kwargs=%q want removed reasoning_content", got)
+	var kwargs map[string]any
+	if err := json.Unmarshal([]byte(msg.Metadata["additional_kwargs"]), &kwargs); err != nil {
+		t.Fatalf("unmarshal additional_kwargs: %v", err)
+	}
+	if got, _ := kwargs["reasoning_content"].(string); got != "older\n\nanswer hidden in reasoning" {
+		t.Fatalf("reasoning_content=%q want merged reasoning", got)
+	}
+	if !HasReasoningContent(msg) {
+		t.Fatal("expected HasReasoningContent to detect reasoning-only message")
 	}
 }

@@ -24,7 +24,7 @@ func ReadFileHandler(ctx context.Context, call models.ToolCall) (models.ToolResu
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("read failed: %w", err)
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("read failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
 	}
 
 	if limit, ok := args["limit"].(float64); ok && limit > 0 && int(limit) < len(data) {
@@ -146,19 +146,19 @@ func WriteFileHandler(ctx context.Context, call models.ToolCall) (models.ToolRes
 	appendMode, _ := args["append"].(bool)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("mkdir failed: %w", err)
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("mkdir failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
 	}
 	if appendMode {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
-			return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("write failed: %w", err)
+			return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("write failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
 		}
 		defer f.Close()
 		if _, err := f.WriteString(content); err != nil {
-			return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("write failed: %w", err)
+			return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("write failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
 		}
 	} else if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("write failed: %w", err)
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("write failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
 	}
 
 	return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: "OK"}, nil
@@ -174,7 +174,10 @@ func GlobHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, 
 
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
-		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("glob failed: %w", err)
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("glob failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
+	}
+	for i := range matches {
+		matches[i] = tools.MaskLocalPaths(ctx, matches[i])
 	}
 
 	data, _ := json.Marshal(matches)
@@ -191,7 +194,7 @@ func LsHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, er
 
 	info, err := os.Stat(path)
 	if err != nil {
-		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("list failed: %w", err)
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("list failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
 	}
 	if !info.IsDir() {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("path is not a directory")
@@ -199,7 +202,7 @@ func LsHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, er
 
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("list failed: %w", err)
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("list failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
 	}
 	if len(entries) == 0 {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: "(empty)"}, nil
@@ -256,7 +259,7 @@ func StrReplaceHandler(ctx context.Context, call models.ToolCall) (models.ToolRe
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("replace failed: %w", err)
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("replace failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
 	}
 	content := string(data)
 	if !strings.Contains(content, oldStr) {
@@ -271,7 +274,7 @@ func StrReplaceHandler(ctx context.Context, call models.ToolCall) (models.ToolRe
 		content = strings.Replace(content, oldStr, newStr, 1)
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("replace failed: %w", err)
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("replace failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
 	}
 	return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: "OK"}, nil
 }

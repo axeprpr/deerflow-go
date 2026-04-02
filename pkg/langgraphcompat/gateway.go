@@ -691,13 +691,14 @@ func (s *Server) handleGatewayThreadFiles(w http.ResponseWriter, r *http.Request
 	s.sessionsMu.RLock()
 	session := s.sessions[threadID]
 	s.sessionsMu.RUnlock()
-	if session == nil {
+	files := s.threadFiles(threadID, session)
+	if session == nil && len(files) == 0 {
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": "thread not found"})
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"files": s.sessionFiles(session),
+		"files": files,
 	})
 }
 
@@ -1566,9 +1567,11 @@ func (s *Server) generateSuggestionsWithLLM(ctx context.Context, conversation st
 		return nil
 	}
 
+	resolvedModel := resolveTitleModel(modelName, s.defaultModel)
 	maxTokens := 128
 	resp, err := provider.Chat(ctx, llm.ChatRequest{
-		Model: resolveTitleModel(modelName, s.defaultModel),
+		Model:           resolvedModel,
+		ReasoningEffort: s.backgroundReasoningEffort(resolvedModel),
 		Messages: []models.Message{{
 			ID:        "suggestions-user",
 			SessionID: "suggestions",

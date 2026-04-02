@@ -29,9 +29,28 @@ func NormalizeAssistantMessage(msg models.Message) models.Message {
 		return msg
 	}
 
-	msg.Content = reasoning
-	msg.Metadata = withoutReasoningContent(msg.Metadata)
+	msg.Content = ""
+	msg.Metadata = mergeAdditionalKwargsMetadata(msg.Metadata, reasoning)
 	return msg
+}
+
+func HasReasoningContent(msg models.Message) bool {
+	if msg.Role != models.RoleAI || len(msg.Metadata) == 0 {
+		return false
+	}
+
+	raw := strings.TrimSpace(msg.Metadata["additional_kwargs"])
+	if raw == "" {
+		return false
+	}
+
+	var additional map[string]any
+	if err := json.Unmarshal([]byte(raw), &additional); err != nil {
+		return false
+	}
+
+	reasoning, _ := additional["reasoning_content"].(string)
+	return strings.TrimSpace(reasoning) != ""
 }
 
 func stripInlineThinkTags(content string) (string, string) {
