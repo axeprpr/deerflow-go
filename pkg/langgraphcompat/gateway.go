@@ -104,6 +104,8 @@ var activeContentMIMETypes = map[string]struct{}{
 	"image/svg+xml":         {},
 }
 
+var artifactVirtualPathRE = regexp.MustCompile(`(?i)/mnt/user-data/(?:uploads|outputs|workspace)/[^<>"')\]\r\n\t]+`)
+
 var skillInstallSeq uint64
 var agentNameRE = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
 var threadIDRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
@@ -884,10 +886,71 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	if shouldForceAttachment(r, mimeType) {
 		w.Header().Set("Content-Disposition", contentDisposition("attachment", filepath.Base(absPath)))
 	}
+	if !downloadRequested(r) && shouldRewriteArtifactText(filepath.Base(absPath), mimeType) {
+		if served, err := serveRewrittenArtifactText(w, filepath.Base(absPath), mimeType, absPath, threadID); err == nil && served {
+			return
+		}
+	}
 	if err := serveArtifactFile(w, r, filepath.Base(absPath), mimeType, absPath, downloadRequested(r)); err != nil {
 		http.NotFound(w, r)
 		return
 	}
+}
+
+func shouldRewriteArtifactText(filename, mimeType string) bool {
+	base := strings.TrimSpace(strings.SplitN(mimeType, ";", 2)[0])
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".md", ".markdown", ".html", ".htm", ".xhtml":
+		return true
+	}
+	return base == "text/markdown" || base == "text/html" || base == "application/xhtml+xml"
+}
+
+func serveRewrittenArtifactText(w http.ResponseWriter, filename, mimeType, path, threadID string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	if !utf8.Valid(data) {
+		return false, nil
+	}
+	content := string(data)
+	rewritten := rewriteArtifactVirtualPaths(threadID, content)
+	if rewritten == content {
+		return false, nil
+	}
+	serveArtifactContent(w, filename, mimeType, []byte(rewritten), false)
+	return true, nil
+}
+
+func rewriteArtifactVirtualPaths(threadID, content string) string {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" || strings.TrimSpace(content) == "" {
+		return content
+	}
+	return artifactVirtualPathRE.ReplaceAllStringFunc(content, func(match string) string {
+		return artifactURLForVirtualPath(threadID, match)
+	})
+}
+
+func artifactURLForVirtualPath(threadID, virtualPath string) string {
+	virtualPath = strings.TrimSpace(virtualPath)
+	if virtualPath == "" {
+		return virtualPath
+	}
+
+	segments := strings.Split(strings.TrimPrefix(virtualPath, "/"), "/")
+	escaped := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		if segment == "" {
+			continue
+		}
+		escaped = append(escaped, url.PathEscape(segment))
+	}
+	if len(escaped) == 0 {
+		return virtualPath
+	}
+	return "/api/threads/" + threadID + "/artifacts/" + strings.Join(escaped, "/")
 }
 
 func (s *Server) resolvePresentedArtifactPath(threadID, artifactPath string) (string, error) {

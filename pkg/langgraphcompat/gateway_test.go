@@ -1125,6 +1125,67 @@ func TestArtifactEndpointServesPresentedSourcePathOutsideThreadRoot(t *testing.T
 	}
 }
 
+func TestArtifactEndpointRewritesMarkdownVirtualPaths(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-markdown-rewrite"
+	artifactPath := filepath.Join(s.threadRoot(threadID), "outputs", "report.md")
+	if err := os.MkdirAll(filepath.Dir(artifactPath), 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	content := strings.Join([]string{
+		"# Report",
+		"",
+		"![Chart](/mnt/user-data/outputs/chart final.png)",
+		"",
+		"[Source](/mnt/user-data/uploads/source data.csv)",
+		"",
+		"Raw path: /mnt/user-data/workspace/notes/todo.txt",
+		"",
+	}, "\n")
+	if err := os.WriteFile(artifactPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/report.md", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	body := resp.Body.String()
+	if strings.Contains(body, "/mnt/user-data/outputs/chart final.png") {
+		t.Fatalf("body=%q still contains raw outputs virtual path", body)
+	}
+	if !strings.Contains(body, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/chart%20final.png") {
+		t.Fatalf("body=%q missing rewritten outputs path", body)
+	}
+	if !strings.Contains(body, "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/source%20data.csv") {
+		t.Fatalf("body=%q missing rewritten uploads path", body)
+	}
+	if !strings.Contains(body, "/api/threads/"+threadID+"/artifacts/mnt/user-data/workspace/notes/todo.txt") {
+		t.Fatalf("body=%q missing rewritten workspace path", body)
+	}
+}
+
+func TestArtifactEndpointDownloadKeepsOriginalMarkdownPaths(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-markdown-download"
+	artifactPath := filepath.Join(s.threadRoot(threadID), "outputs", "report.md")
+	if err := os.MkdirAll(filepath.Dir(artifactPath), 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	content := "![Chart](/mnt/user-data/outputs/chart.png)\n"
+	if err := os.WriteFile(artifactPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/report.md?download=true", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Body.String(); got != content {
+		t.Fatalf("body=%q want original markdown body", got)
+	}
+}
+
 func TestUploadsEndpointIgnoresMarkdownConversionFailures(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-upload-conversion-failure"
