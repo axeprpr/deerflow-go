@@ -1475,6 +1475,17 @@ func runtimeContextFromRequest(req RunCreateRequest) map[string]any {
 		return runtimeContext
 	}
 
+	if _, exists := runtimeContext["model_name"]; !exists {
+		if modelName := firstNonEmpty(stringFromAny(configurable["model_name"]), stringFromAny(configurable["model"])); modelName != "" {
+			runtimeContext["model_name"] = modelName
+		}
+	}
+	if _, exists := runtimeContext["reasoning_effort"]; !exists {
+		if effort := strings.TrimSpace(stringFromAny(configurable["reasoning_effort"])); effort != "" {
+			runtimeContext["reasoning_effort"] = effort
+		}
+	}
+
 	// Match deerflow-ui's request shape, where runtime toggles live under
 	// config.configurable while allowing explicit request context to win.
 	for _, key := range []string{

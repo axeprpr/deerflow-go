@@ -961,6 +961,8 @@ func TestRuntimeContextFromRequestMergesConfigurableFlags(t *testing.T) {
 	req := RunCreateRequest{
 		Config: map[string]any{
 			"configurable": map[string]any{
+				"model":                    "openai/gpt-5",
+				"reasoning_effort":         "high",
 				"is_plan_mode":             true,
 				"subagent_enabled":         false,
 				"max_concurrent_subagents": 4,
@@ -981,6 +983,12 @@ func TestRuntimeContextFromRequestMergesConfigurableFlags(t *testing.T) {
 	}
 	if got := stringFromAny(runtimeContext["agent_name"]); got != "context-agent" {
 		t.Fatalf("agent_name=%q want context-agent", got)
+	}
+	if got := stringFromAny(runtimeContext["model_name"]); got != "openai/gpt-5" {
+		t.Fatalf("model_name=%q want openai/gpt-5", got)
+	}
+	if got := stringFromAny(runtimeContext["reasoning_effort"]); got != "high" {
+		t.Fatalf("reasoning_effort=%q want high", got)
 	}
 	if got, ok := runtimeContext["max_concurrent_subagents"].(int); !ok || got != 4 {
 		t.Fatalf("max_concurrent_subagents=%#v want 4", runtimeContext["max_concurrent_subagents"])
