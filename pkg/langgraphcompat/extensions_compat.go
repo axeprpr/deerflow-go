@@ -79,23 +79,32 @@ func (s *Server) loadGatewayExtensionsConfig() error {
 	}
 	if len(cfg.Skills) > 0 {
 		merged := normalizePersistedSkills(s.skills)
-		for name, state := range cfg.Skills {
-			normalizedName := sanitizeSkillName(name)
+		for rawKey, state := range cfg.Skills {
+			category, normalizedName := splitSkillStorageKey(rawKey)
 			if normalizedName == "" {
 				continue
 			}
 
 			applied := false
-			for key, skill := range currentSkills {
-				if skill.Name != normalizedName {
-					continue
+			if category != "" {
+				key := skillStorageKey(category, normalizedName)
+				if skill, ok := currentSkills[key]; ok {
+					skill.Enabled = state.Enabled
+					merged[key] = skill
+					applied = true
 				}
-				skill.Enabled = state.Enabled
-				merged[key] = skill
-				applied = true
+			} else {
+				for key, skill := range currentSkills {
+					if skill.Name != normalizedName {
+						continue
+					}
+					skill.Enabled = state.Enabled
+					merged[key] = skill
+					applied = true
+				}
 			}
 			if !applied {
-				category := inferSkillCategory(normalizedName)
+				category = inferSkillCategory(normalizedName)
 				merged[skillStorageKey(category, normalizedName)] = gatewaySkill{
 					Name:     normalizedName,
 					Category: category,
@@ -154,9 +163,10 @@ func (s *Server) persistGatewayExtensionsConfig() error {
 	}
 
 	s.uiStateMu.RLock()
+	persistedSkills := normalizePersistedSkills(s.skills)
 	cfg := gatewayExtensionsConfig{
 		MCPServers: cloneGatewayMCPServers(s.mcpConfig.MCPServers),
-		Skills:     gatewayExtensionsSkillsFromState(normalizePersistedSkills(s.skills)),
+		Skills:     gatewayExtensionsSkillsFromState(s.currentGatewaySkills(), persistedSkills),
 	}
 	s.uiStateMu.RUnlock()
 
@@ -208,24 +218,34 @@ func cloneGatewayMCPServerConfig(src gatewayMCPServerConfig) gatewayMCPServerCon
 	return dst
 }
 
-func gatewayExtensionsSkillsFromState(skills map[string]gatewaySkill) map[string]gatewayExtensionsSkillState {
-	if len(skills) == 0 {
+func gatewayExtensionsSkillsFromState(currentSkills, persistedSkills map[string]gatewaySkill) map[string]gatewayExtensionsSkillState {
+	if len(persistedSkills) == 0 {
 		return map[string]gatewayExtensionsSkillState{}
 	}
 
-	keys := make([]string, 0, len(skills))
-	for key := range skills {
+	keys := make([]string, 0, len(persistedSkills))
+	nameCounts := make(map[string]int, len(currentSkills))
+	for _, skill := range currentSkills {
+		if skill.Name != "" {
+			nameCounts[skill.Name]++
+		}
+	}
+	for key := range persistedSkills {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 
 	out := make(map[string]gatewayExtensionsSkillState, len(keys))
 	for _, key := range keys {
-		skill := skills[key]
+		skill := persistedSkills[key]
 		if skill.Name == "" {
 			continue
 		}
-		out[skill.Name] = gatewayExtensionsSkillState{Enabled: skill.Enabled}
+		stateKey := skill.Name
+		if nameCounts[skill.Name] > 1 && skill.Category != "" {
+			stateKey = skillStorageKey(skill.Category, skill.Name)
+		}
+		out[stateKey] = gatewayExtensionsSkillState{Enabled: skill.Enabled}
 	}
 	return out
 }

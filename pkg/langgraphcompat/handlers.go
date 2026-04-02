@@ -1134,7 +1134,7 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 		basePrompt,
 		s.userProfilePromptSection(),
 		s.runtimeModePrompt(runtimeContext),
-		s.environmentPrompt(skillNames...),
+		s.environmentPrompt(runtimeContext, skillNames...),
 	)
 	if boolFromAny(runtimeContext["is_plan_mode"]) {
 		cfg.SystemPrompt = joinPromptSections(cfg.SystemPrompt, planModeTodoPrompt)
@@ -1415,7 +1415,9 @@ func (s *Server) scheduleMemoryUpdate(threadID string, messages []models.Message
 		return
 	}
 	cloned := append([]models.Message(nil), messages...)
+	s.backgroundTasks.Add(1)
 	go func() {
+		defer s.backgroundTasks.Done()
 		if err := s.memorySvc.Update(context.Background(), threadID, cloned); err != nil {
 			if s.logger != nil {
 				s.logger.Printf("memory update failed for %s: %v", threadID, err)

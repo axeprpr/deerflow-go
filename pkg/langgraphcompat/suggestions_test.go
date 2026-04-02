@@ -230,6 +230,7 @@ func TestFallbackSuggestionsUseThreadContextWhenConversationHasNoUserTurn(t *tes
 	}{
 		{Role: "assistant", Content: "我已经生成了初稿。"},
 	}, suggestionContext{
+		Title:     "需求整理",
 		Uploads:   []string{"requirements.pdf"},
 		Artifacts: []string{"spec-summary.md"},
 	}, 3)
@@ -239,5 +240,86 @@ func TestFallbackSuggestionsUseThreadContextWhenConversationHasNoUserTurn(t *tes
 	}
 	if got[0] != "先概括这些上传文件的关键内容" {
 		t.Fatalf("first=%q want=%q", got[0], "先概括这些上传文件的关键内容")
+	}
+}
+
+func TestFallbackSuggestionsUseEnglishThreadContextWhenConversationHasNoUserTurn(t *testing.T) {
+	got := fallbackSuggestions([]struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}{
+		{Role: "assistant", Content: "I already drafted the migration summary."},
+	}, suggestionContext{
+		Title:     "Migration planning",
+		AgentName: "writer-bot",
+		Uploads:   []string{"requirements.pdf"},
+		Artifacts: []string{"migration-summary.md"},
+	}, 3)
+
+	if len(got) != 3 {
+		t.Fatalf("len=%d want=3 (%v)", len(got), got)
+	}
+	if got[0] != "Summarize the key points from these uploaded files first." {
+		t.Fatalf("first=%q", got[0])
+	}
+	if strings.Contains(got[0], "这些上传文件") {
+		t.Fatalf("first=%q unexpectedly Chinese", got[0])
+	}
+}
+
+func TestFallbackSuggestionsUseAssistantLanguageWithoutThreadContext(t *testing.T) {
+	got := fallbackSuggestions([]struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}{
+		{Role: "assistant", Content: "要点を整理しました。次は優先順位を詰めましょう。"},
+	}, suggestionContext{}, 3)
+
+	if len(got) != 3 {
+		t.Fatalf("len=%d want=3 (%v)", len(got), got)
+	}
+	if got[0] != "現在のスレッド文脈をもとに、次のステップを整理してください。" {
+		t.Fatalf("first=%q", got[0])
+	}
+	if strings.Contains(strings.ToLower(got[0]), "thread context") {
+		t.Fatalf("first=%q unexpectedly English", got[0])
+	}
+}
+
+func TestFallbackSuggestionsFillContextCandidatesUpToRequestedCount(t *testing.T) {
+	got := fallbackSuggestions([]struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}{
+		{Role: "assistant", Content: "I can help you continue with the writer workflow."},
+	}, suggestionContext{
+		AgentName: "writer-bot",
+	}, 3)
+
+	if len(got) != 3 {
+		t.Fatalf("len=%d want=3 (%v)", len(got), got)
+	}
+	if got[0] != "Use this agent to refine the next steps for me." {
+		t.Fatalf("first=%q", got[0])
+	}
+	if got[1] != "Based on the current thread context, what should I do next?" {
+		t.Fatalf("second=%q", got[1])
+	}
+	if got[2] != "Summarize the key conclusions and open questions in this thread." {
+		t.Fatalf("third=%q", got[2])
+	}
+}
+
+func TestLocalizedContextFallbackSuggestionsDeduplicatesGenericFillers(t *testing.T) {
+	got := localizedContextFallbackSuggestions(suggestionContext{}, "Please summarize the thread context", 2)
+
+	if len(got) != 2 {
+		t.Fatalf("len=%d want=2 (%v)", len(got), got)
+	}
+	if got[0] != "Based on the current thread context, what should I do next?" {
+		t.Fatalf("first=%q", got[0])
+	}
+	if got[1] != "Summarize the key conclusions and open questions in this thread." {
+		t.Fatalf("second=%q", got[1])
 	}
 }

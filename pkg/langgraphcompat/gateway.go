@@ -226,7 +226,13 @@ func (s *Server) handleSkillGet(w http.ResponseWriter, r *http.Request) {
 	s.refreshGatewayExtensionsConfig()
 	name := strings.TrimSpace(r.PathValue("skill_name"))
 	category := strings.TrimSpace(r.URL.Query().Get("category"))
-	skill, ok := findGatewaySkill(s.currentGatewaySkills(), name, category)
+	skill, ok, ambiguous := findGatewaySkillForAPI(s.currentGatewaySkills(), name, category)
+	if ambiguous {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"detail": fmt.Sprintf("Skill '%s' exists in multiple categories; specify category=public or category=custom", name),
+		})
+		return
+	}
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Skill '%s' not found", name)})
 		return
@@ -237,35 +243,43 @@ func (s *Server) handleSkillGet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSkillSetEnabled(w http.ResponseWriter, r *http.Request) {
 	s.refreshGatewayExtensionsConfig()
 	var req struct {
-		Enabled bool `json:"enabled"`
+		Enabled  bool   `json:"enabled"`
+		Category string `json:"category"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid request body"})
 		return
 	}
-	s.updateSkillEnabled(w, r, req.Enabled)
+	s.updateSkillEnabled(w, r, req.Enabled, req.Category)
 }
 
 func (s *Server) handleSkillEnable(w http.ResponseWriter, r *http.Request) {
-	s.updateSkillEnabled(w, r, true)
+	s.updateSkillEnabled(w, r, true, "")
 }
 
 func (s *Server) handleSkillDisable(w http.ResponseWriter, r *http.Request) {
-	s.updateSkillEnabled(w, r, false)
+	s.updateSkillEnabled(w, r, false, "")
 }
 
-func (s *Server) updateSkillEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
+func (s *Server) updateSkillEnabled(w http.ResponseWriter, r *http.Request, enabled bool, categoryHint string) {
 	name := strings.TrimSpace(r.PathValue("skill_name"))
 	if name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "skill_name is required"})
 		return
 	}
-	category := strings.TrimSpace(r.URL.Query().Get("category"))
+	category := firstNonEmpty(strings.TrimSpace(r.URL.Query().Get("category")), strings.TrimSpace(categoryHint))
 
 	currentSkills := s.currentGatewaySkills()
 	s.uiStateMu.Lock()
 	previousSkills := cloneGatewaySkills(s.skills)
-	key, skill, ok := findGatewaySkillEntry(currentSkills, name, category)
+	key, skill, ok, ambiguous := findGatewaySkillEntryForAPI(currentSkills, name, category)
+	if ambiguous {
+		s.uiStateMu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"detail": fmt.Sprintf("Skill '%s' exists in multiple categories; specify category=public or category=custom", name),
+		})
+		return
+	}
 	if !ok {
 		s.uiStateMu.Unlock()
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": "skill not found"})
@@ -1677,11 +1691,11 @@ func (s *Server) generateSuggestions(ctx context.Context, threadID string, messa
 		return []string{}
 	}
 
+	hints := s.suggestionContext(threadID)
 	conversation := formatSuggestionConversation(messages)
 	if conversation == "" {
-		return []string{}
+		return finalizeSuggestions(nil, fallbackSuggestions(messages, hints, n), n)
 	}
-	hints := s.suggestionContext(threadID)
 
 	return finalizeSuggestions(
 		s.generateSuggestionsWithLLM(ctx, conversation, hints, n, modelName),
@@ -1931,45 +1945,24 @@ func fallbackSuggestions(messages []struct {
 	Content string `json:"content"`
 }, hints suggestionContext, n int) []string {
 	lastUser := ""
+	languageHint := ""
 	for i := len(messages) - 1; i >= 0; i-- {
 		if strings.EqualFold(messages[i].Role, "user") || strings.EqualFold(messages[i].Role, "human") {
 			lastUser = strings.TrimSpace(messages[i].Content)
 			break
 		}
+		if languageHint == "" {
+			languageHint = strings.TrimSpace(messages[i].Content)
+		}
 	}
 	if lastUser == "" {
-		return contextFallbackSuggestions(hints, n)
+		return contextFallbackSuggestions(hints, languageHint, n)
 	}
 	return localizedFallbackSuggestions(lastUser, n)
 }
 
-func contextFallbackSuggestions(hints suggestionContext, n int) []string {
-	if n <= 0 {
-		return []string{}
-	}
-
-	suggestions := make([]string, 0, n)
-	if len(hints.Uploads) > 0 {
-		suggestions = append(suggestions,
-			"先概括这些上传文件的关键内容",
-			"这些文件里最值得我优先关注什么",
-		)
-	}
-	if len(hints.Artifacts) > 0 {
-		suggestions = append(suggestions,
-			"基于当前产物，下一步建议我做什么",
-			"帮我检查这些产物还有哪些需要完善",
-		)
-	}
-	if strings.TrimSpace(hints.AgentName) != "" {
-		suggestions = append(suggestions,
-			"继续用这个 agent 帮我细化下一步方案",
-		)
-	}
-	if len(suggestions) > n {
-		suggestions = suggestions[:n]
-	}
-	return suggestions
+func contextFallbackSuggestions(hints suggestionContext, languageHint string, n int) []string {
+	return localizedContextFallbackSuggestions(hints, languageHint, n)
 }
 
 func (s *Server) suggestionContext(threadID string) suggestionContext {
@@ -2606,6 +2599,37 @@ func defaultGatewaySkills() map[string]gatewaySkill {
 func findGatewaySkill(skills map[string]gatewaySkill, name, category string) (gatewaySkill, bool) {
 	_, skill, ok := findGatewaySkillEntry(skills, name, category)
 	return skill, ok
+}
+
+func findGatewaySkillForAPI(skills map[string]gatewaySkill, name, category string) (gatewaySkill, bool, bool) {
+	_, skill, ok, ambiguous := findGatewaySkillEntryForAPI(skills, name, category)
+	return skill, ok, ambiguous
+}
+
+func findGatewaySkillEntryForAPI(skills map[string]gatewaySkill, name, category string) (string, gatewaySkill, bool, bool) {
+	normalizedName := sanitizeSkillName(name)
+	if normalizedName == "" {
+		return "", gatewaySkill{}, false, false
+	}
+	if normalizedCategory := normalizeSkillCategory(category); normalizedCategory != "" {
+		key, skill, ok := findGatewaySkillEntry(skills, normalizedName, normalizedCategory)
+		return key, skill, ok, false
+	}
+
+	hasPublic := false
+	hasCustom := false
+	if _, ok := skills[skillStorageKey(skillCategoryPublic, normalizedName)]; ok {
+		hasPublic = true
+	}
+	if _, ok := skills[skillStorageKey(skillCategoryCustom, normalizedName)]; ok {
+		hasCustom = true
+	}
+	if hasPublic && hasCustom {
+		return "", gatewaySkill{}, false, true
+	}
+
+	key, skill, ok := findGatewaySkillEntry(skills, normalizedName, "")
+	return key, skill, ok, false
 }
 
 func findGatewaySkillEntry(skills map[string]gatewaySkill, name, category string) (string, gatewaySkill, bool) {

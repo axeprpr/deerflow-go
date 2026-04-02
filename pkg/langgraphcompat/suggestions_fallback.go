@@ -5,6 +5,95 @@ import (
 	"unicode"
 )
 
+func localizedContextFallbackSuggestions(hints suggestionContext, languageHint string, n int) []string {
+	if n <= 0 {
+		return []string{}
+	}
+
+	language := detectContextSuggestionLanguage(hints, languageHint)
+	var candidates []string
+	switch language {
+	case "zh":
+		candidates = zhContextFallbackCandidates(hints)
+	case "ja":
+		candidates = jaContextFallbackCandidates(hints)
+	case "ko":
+		candidates = koContextFallbackCandidates(hints)
+	default:
+		candidates = enContextFallbackCandidates(hints)
+	}
+	if len(candidates) >= n {
+		return candidates[:n]
+	}
+	return completeSuggestionCandidates(candidates, genericContextSuggestions(language, n), n)
+}
+
+func genericContextSuggestions(language string, n int) []string {
+	var candidates []string
+	switch language {
+	case "zh":
+		candidates = []string{
+			"请基于当前线程上下文给我一个清晰的下一步计划。",
+			"请总结当前线程的关键结论和待确认事项。",
+			"请给我 3 个最值得继续追问的问题。",
+		}
+	case "ja":
+		candidates = []string{
+			"現在のスレッド文脈をもとに、次のステップを整理してください。",
+			"現時点の重要な結論と未確定事項をまとめてください。",
+			"次に深掘りすべき質問を 3 つ挙げてください。",
+		}
+	case "ko":
+		candidates = []string{
+			"현재 스레드 맥락을 바탕으로 다음 단계를 정리해 주세요.",
+			"지금까지의 핵심 결론과 확인이 필요한 사항을 요약해 주세요.",
+			"다음에 더 물어볼 만한 질문 3가지를 제안해 주세요.",
+		}
+	default:
+		candidates = []string{
+			"Based on the current thread context, what should I do next?",
+			"Summarize the key conclusions and open questions in this thread.",
+			"Give me 3 good follow-up questions to keep this moving.",
+		}
+	}
+	if n < len(candidates) {
+		return candidates[:n]
+	}
+	return candidates
+}
+
+func completeSuggestionCandidates(primary, fallback []string, n int) []string {
+	if n <= 0 {
+		return []string{}
+	}
+
+	out := make([]string, 0, n)
+	seen := make(map[string]struct{}, n)
+	appendUnique := func(items []string) {
+		for _, item := range items {
+			item = normalizeSuggestionText(item)
+			if item == "" {
+				continue
+			}
+			key := strings.ToLower(item)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, item)
+			if len(out) == n {
+				return
+			}
+		}
+	}
+
+	appendUnique(primary)
+	if len(out) < n {
+		appendUnique(fallback)
+	}
+	return out
+}
+
 func localizedFallbackSuggestions(lastUser string, n int) []string {
 	if n <= 0 {
 		return []string{}
@@ -226,6 +315,128 @@ func enFallbackCandidates(subject, intent string) []string {
 		"Summarize the key conclusions and call out uncertainties.",
 		"Give me 3 possible next steps and compare the tradeoffs.",
 	}
+}
+
+func detectContextSuggestionLanguage(hints suggestionContext, languageHint string) string {
+	sampleParts := make([]string, 0, 6)
+	languageHint = strings.TrimSpace(languageHint)
+	if languageHint != "" {
+		sampleParts = append(sampleParts, languageHint)
+	}
+	for _, part := range []string{hints.Title, hints.AgentName, hints.AgentHint} {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			sampleParts = append(sampleParts, part)
+		}
+	}
+	for _, items := range [][]string{hints.Uploads, hints.Artifacts} {
+		for _, item := range items {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			sampleParts = append(sampleParts, item)
+			if len(sampleParts) >= 6 {
+				break
+			}
+		}
+		if len(sampleParts) >= 6 {
+			break
+		}
+	}
+	return detectSuggestionLanguage(strings.Join(sampleParts, " "))
+}
+
+func zhContextFallbackCandidates(hints suggestionContext) []string {
+	candidates := make([]string, 0, 5)
+	if len(hints.Uploads) > 0 {
+		candidates = append(candidates,
+			"先概括这些上传文件的关键内容",
+			"这些文件里最值得我优先关注什么",
+		)
+	}
+	if len(hints.Artifacts) > 0 {
+		candidates = append(candidates,
+			"基于当前产物，下一步建议我做什么",
+			"帮我检查这些产物还有哪些需要完善",
+		)
+	}
+	if strings.TrimSpace(hints.AgentName) != "" {
+		candidates = append(candidates, "继续用这个 agent 帮我细化下一步方案")
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	return candidates
+}
+
+func jaContextFallbackCandidates(hints suggestionContext) []string {
+	candidates := make([]string, 0, 5)
+	if len(hints.Uploads) > 0 {
+		candidates = append(candidates,
+			"アップロードしたファイルの要点を先に整理してください。",
+			"これらのファイルで優先して確認すべき点は何ですか。",
+		)
+	}
+	if len(hints.Artifacts) > 0 {
+		candidates = append(candidates,
+			"この成果物を踏まえて、次に何を進めるべきですか。",
+			"この成果物でまだ改善すべき点を確認してください。",
+		)
+	}
+	if strings.TrimSpace(hints.AgentName) != "" {
+		candidates = append(candidates, "この agent を使って次のステップをさらに具体化してください。")
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	return candidates
+}
+
+func koContextFallbackCandidates(hints suggestionContext) []string {
+	candidates := make([]string, 0, 5)
+	if len(hints.Uploads) > 0 {
+		candidates = append(candidates,
+			"업로드한 파일들의 핵심 내용을 먼저 정리해 주세요.",
+			"이 파일들에서 무엇을 가장 먼저 봐야 하나요?",
+		)
+	}
+	if len(hints.Artifacts) > 0 {
+		candidates = append(candidates,
+			"현재 산출물을 기준으로 다음 단계는 무엇이 좋을까요?",
+			"이 산출물에서 더 보완할 점이 있는지 점검해 주세요.",
+		)
+	}
+	if strings.TrimSpace(hints.AgentName) != "" {
+		candidates = append(candidates, "이 agent로 다음 단계를 더 구체화해 주세요.")
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	return candidates
+}
+
+func enContextFallbackCandidates(hints suggestionContext) []string {
+	candidates := make([]string, 0, 5)
+	if len(hints.Uploads) > 0 {
+		candidates = append(candidates,
+			"Summarize the key points from these uploaded files first.",
+			"What should I pay attention to first in these files?",
+		)
+	}
+	if len(hints.Artifacts) > 0 {
+		candidates = append(candidates,
+			"Based on the current artifacts, what should I do next?",
+			"Review these artifacts and point out what still needs improvement.",
+		)
+	}
+	if strings.TrimSpace(hints.AgentName) != "" {
+		candidates = append(candidates, "Use this agent to refine the next steps for me.")
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	return candidates
 }
 
 func detectSuggestionLanguage(text string) string {

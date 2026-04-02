@@ -51,6 +51,7 @@ func newCompatTestServer(t *testing.T) (*Server, http.Handler) {
 	}
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
+	t.Cleanup(s.waitForBackgroundTasks)
 	return s, wrapTrailingSlashCompat(mux)
 }
 
@@ -2636,6 +2637,62 @@ func TestSuggestionsEndpointIncludesThreadContextHints(t *testing.T) {
 	}
 }
 
+func TestSuggestionsEndpointFallsBackToThreadContextWithoutConversationText(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	s.sessions["t1"] = &Session{
+		ThreadID: "t1",
+		Metadata: map[string]any{
+			"title": "Migration planning",
+		},
+		PresentFiles: tools.NewPresentFileRegistry(),
+	}
+
+	uploadDir := s.uploadsDir("t1")
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "requirements.pdf"), []byte("pdf"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+
+	payload := `{"messages":[{"role":"user","content":"   "}],"n":2}`
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/t1/suggestions", strings.NewReader(payload), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var data struct {
+		Suggestions []string `json:"suggestions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got := strings.Join(data.Suggestions, ","); got != "Summarize the key points from these uploaded files first.,What should I pay attention to first in these files?" {
+		t.Fatalf("suggestions=%q", got)
+	}
+}
+
+func TestSuggestionsEndpointFallsBackToGenericContextWithoutThreadHints(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	s.llmProvider = &titleProvider{err: errors.New("llm unavailable")}
+
+	payload := `{"messages":[{"role":"assistant","content":"   "}],"n":2}`
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/t1/suggestions", strings.NewReader(payload), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var data struct {
+		Suggestions []string `json:"suggestions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got := strings.Join(data.Suggestions, ","); got != "Based on the current thread context, what should I do next?,Summarize the key conclusions and open questions in this thread." {
+		t.Fatalf("suggestions=%q", got)
+	}
+}
+
 func TestGatewayThreadFilesEndpointListsUploadsWorkspaceAndArtifacts(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-files-gateway"
@@ -3867,6 +3924,72 @@ license: MIT
 	}
 }
 
+func TestSkillGetRejectsAmbiguousDuplicateNamesWithoutCategory(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	for _, rel := range []string{
+		filepath.Join("skills", "public", "duplicate-skill", "SKILL.md"),
+		filepath.Join("skills", "custom", "duplicate-skill", "SKILL.md"),
+	} {
+		path := filepath.Join(s.dataRoot, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		category := skillCategoryPublic
+		if strings.Contains(rel, "/custom/") {
+			category = skillCategoryCustom
+		}
+		if err := os.WriteFile(path, []byte(`---
+name: duplicate-skill
+description: `+category+` variant.
+license: MIT
+---
+# Duplicate Skill
+`), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/skills/duplicate-skill", nil, nil)
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("get status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), "specify category=public or category=custom") {
+		t.Fatalf("body=%q missing ambiguity hint", resp.Body.String())
+	}
+}
+
+func TestSkillSetEnabledRejectsAmbiguousDuplicateNamesWithoutCategory(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	writeSkill := func(category string) {
+		path := filepath.Join(s.dataRoot, "skills", category, "duplicate-skill", "SKILL.md")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte(`---
+name: duplicate-skill
+description: `+category+` variant.
+license: MIT
+---
+# Duplicate Skill
+`), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	writeSkill(skillCategoryPublic)
+	writeSkill(skillCategoryCustom)
+
+	ambiguousResp := performCompatRequest(t, handler, http.MethodPut, "/api/skills/duplicate-skill", strings.NewReader(`{"enabled":false}`), map[string]string{"Content-Type": "application/json"})
+	if ambiguousResp.Code != http.StatusConflict {
+		t.Fatalf("ambiguous update status=%d body=%s", ambiguousResp.Code, ambiguousResp.Body.String())
+	}
+	if !strings.Contains(ambiguousResp.Body.String(), "specify category=public or category=custom") {
+		t.Fatalf("body=%q missing ambiguity hint", ambiguousResp.Body.String())
+	}
+}
+
 func TestSkillUpdateReturnsSkillObjectLikeOriginalGateway(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 
@@ -4839,6 +4962,7 @@ func TestRunsStreamPersistsMemoryUpdatesToAgentScope(t *testing.T) {
 		payload, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status=%d body=%s", resp.StatusCode, string(payload))
 	}
+	s.waitForBackgroundTasks()
 
 	doc, ok := store.docs["agent:code-reviewer"]
 	if !ok {
@@ -4908,6 +5032,7 @@ func TestAgentScopedMemoryUpdateDoesNotReplaceGlobalMemoryEndpoint(t *testing.T)
 		payload, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status=%d body=%s", resp.StatusCode, string(payload))
 	}
+	s.waitForBackgroundTasks()
 
 	memResp := performCompatRequest(t, mux, http.MethodGet, "/api/memory", nil, nil)
 	if memResp.Code != http.StatusOK {

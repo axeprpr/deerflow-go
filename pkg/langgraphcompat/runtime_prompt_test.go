@@ -32,6 +32,12 @@ func TestResolveRunConfigIncludesWorkingDirectoryGuidance(t *testing.T) {
 	if !strings.Contains(cfg.SystemPrompt, "<response_style>") {
 		t.Fatalf("system prompt missing response style section: %q", cfg.SystemPrompt)
 	}
+	if !strings.Contains(cfg.SystemPrompt, "<clarification_system>") {
+		t.Fatalf("system prompt missing clarification workflow: %q", cfg.SystemPrompt)
+	}
+	if strings.Contains(cfg.SystemPrompt, "<subagent_system>") {
+		t.Fatalf("system prompt unexpectedly included subagent guidance: %q", cfg.SystemPrompt)
+	}
 	if !strings.Contains(cfg.SystemPrompt, "[citation:TITLE](URL)") {
 		t.Fatalf("system prompt missing citations guidance: %q", cfg.SystemPrompt)
 	}
@@ -140,5 +146,25 @@ func TestResolveRunConfigInjectsUserProfileForBuiltinAgents(t *testing.T) {
 	}
 	if !strings.Contains(cfg.SystemPrompt, "Prefers terse answers and Go examples.") {
 		t.Fatalf("system prompt missing user profile content: %q", cfg.SystemPrompt)
+	}
+}
+
+func TestResolveRunConfigIncludesSubagentPromptWhenEnabled(t *testing.T) {
+	s := &Server{
+		tools: newRuntimeToolRegistry(t),
+	}
+
+	cfg, err := s.resolveRunConfig(runConfig{}, map[string]any{
+		"subagent_enabled":         true,
+		"max_concurrent_subagents": 5,
+	})
+	if err != nil {
+		t.Fatalf("resolveRunConfig error: %v", err)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "<subagent_system>") {
+		t.Fatalf("system prompt missing subagent guidance: %q", cfg.SystemPrompt)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "at most 5 `task` calls") {
+		t.Fatalf("system prompt missing subagent concurrency limit: %q", cfg.SystemPrompt)
 	}
 }

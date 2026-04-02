@@ -67,6 +67,7 @@ type Server struct {
 	mcpConnector      gatewayMCPConnector
 	channelMu         sync.Mutex
 	channelService    *gatewayChannelService
+	backgroundTasks   sync.WaitGroup
 }
 
 type HealthStatus struct {
@@ -493,6 +494,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.httpServer != nil {
 		shutdownErr = s.httpServer.Shutdown(ctx)
 	}
+	s.waitForBackgroundTasks()
 	if s.store != nil {
 		s.store.Close()
 	}
@@ -509,6 +511,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		}
 	}
 	return shutdownErr
+}
+
+func (s *Server) waitForBackgroundTasks() {
+	if s == nil {
+		return
+	}
+	s.backgroundTasks.Wait()
 }
 
 func (s *Server) healthStatus(ctx context.Context) HealthStatus {

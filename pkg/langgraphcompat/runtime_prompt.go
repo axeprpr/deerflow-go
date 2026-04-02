@@ -2,8 +2,30 @@ package langgraphcompat
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 )
+
+const thinkingStylePrompt = "<thinking_style>\n" +
+	"- Think concisely and strategically before taking action.\n" +
+	"- Break down the task into what is clear, what is ambiguous, and what is missing.\n" +
+	"- Never write your full final answer inside hidden reasoning; use reasoning only to plan.\n" +
+	"- After planning, always provide the user-facing answer or continue with the next visible action.\n" +
+	"</thinking_style>"
+
+const clarificationWorkflowPrompt = "<clarification_system>\n" +
+	"WORKFLOW PRIORITY: CLARIFY -> PLAN -> ACT\n" +
+	"1. Analyze the request first.\n" +
+	"2. If required information is missing or ambiguous, call `ask_clarification` immediately.\n" +
+	"3. Only continue execution after the clarification is resolved.\n\n" +
+	"Ask for clarification before acting when:\n" +
+	"- required details are missing\n" +
+	"- multiple interpretations are valid\n" +
+	"- there are meaningful approach choices the user should make\n" +
+	"- the operation is destructive or risky\n" +
+	"- you have a recommendation that needs user approval\n\n" +
+	"Do not start working and then clarify mid-execution.\n" +
+	"</clarification_system>"
 
 const workingDirectoryPrompt = "<working_directory existed=\"true\">\n" +
 	"- User uploads: `/mnt/user-data/uploads` - Files uploaded by the user\n" +
@@ -47,8 +69,28 @@ const criticalRemindersPrompt = "<critical_reminders>\n" +
 	"- Always Respond: Thinking is internal; always provide a visible response to the user.\n" +
 	"</critical_reminders>"
 
-func (s *Server) environmentPrompt(skillNames ...string) string {
-	parts := make([]string, 0, 6)
+func subagentPrompt(maxConcurrent int) string {
+	if maxConcurrent <= 0 {
+		maxConcurrent = defaultGatewaySubagentMaxConcurrent
+	}
+	limit := strconv.Itoa(maxConcurrent)
+	return "<subagent_system>\n" +
+		"SUBAGENT MODE ACTIVE. When the task is complex and decomposable, act as an orchestrator: decompose, delegate, and synthesize.\n\n" +
+		"Rules:\n" +
+		"1. Use `task` only when there are 2 or more meaningful sub-tasks that benefit from parallel execution.\n" +
+		"2. You may launch at most " + limit + " `task` calls in one response.\n" +
+		"3. If the work has more than " + limit + " sub-tasks, batch them across multiple turns.\n" +
+		"4. If the task is simple, tightly sequential, or needs clarification first, do it directly instead of using subagents.\n" +
+		"5. After delegated work finishes, synthesize all results into one coherent answer.\n" +
+		"</subagent_system>"
+}
+
+func (s *Server) environmentPrompt(runtimeContext map[string]any, skillNames ...string) string {
+	parts := make([]string, 0, 8)
+	parts = append(parts, thinkingStylePrompt, clarificationWorkflowPrompt)
+	if boolFromAny(runtimeContext["subagent_enabled"]) {
+		parts = append(parts, subagentPrompt(intValueFromAny(runtimeContext["max_concurrent_subagents"], defaultGatewaySubagentMaxConcurrent)))
+	}
 	if skills := s.skillsPrompt(skillNames...); skills != "" {
 		parts = append(parts, skills)
 	}
@@ -60,6 +102,13 @@ func (s *Server) environmentPrompt(skillNames ...string) string {
 	parts = append(parts, citationsPrompt)
 	parts = append(parts, criticalRemindersPrompt)
 	return strings.Join(parts, "\n\n")
+}
+
+func intValueFromAny(raw any, fallback int) int {
+	if value := intPointerFromAny(raw); value != nil {
+		return *value
+	}
+	return fallback
 }
 
 func (s *Server) skillsPrompt(skillNames ...string) string {
