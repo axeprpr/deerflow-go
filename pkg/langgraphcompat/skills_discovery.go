@@ -162,7 +162,7 @@ func preferredSkillCategories(category string) []string {
 	if normalized := normalizeSkillCategory(category); normalized != "" {
 		return []string{normalized}
 	}
-	return []string{skillCategoryPublic, skillCategoryCustom}
+	return []string{skillCategoryCustom, skillCategoryPublic}
 }
 
 func loadGatewaySkillBodyFromCategory(root, skillName string) (string, bool) {

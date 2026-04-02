@@ -3739,8 +3739,20 @@ func TestSkillEndpointsKeepPublicAndCustomVariantsSeparate(t *testing.T) {
 			categories = append(categories, skill.Category)
 		}
 	}
-	if strings.Join(categories, ",") != "custom,public" {
-		t.Fatalf("categories=%q want=%q", strings.Join(categories, ","), "custom,public")
+	if strings.Join(categories, ",") != "custom" {
+		t.Fatalf("categories=%q want=%q", strings.Join(categories, ","), "custom")
+	}
+
+	getDefault := performCompatRequest(t, handler, http.MethodGet, "/api/skills/deep-research", nil, nil)
+	if getDefault.Code != http.StatusOK {
+		t.Fatalf("get default status=%d body=%s", getDefault.Code, getDefault.Body.String())
+	}
+	var defaultSkill gatewaySkill
+	if err := json.NewDecoder(getDefault.Body).Decode(&defaultSkill); err != nil {
+		t.Fatalf("decode default skill: %v", err)
+	}
+	if defaultSkill.Category != skillCategoryCustom {
+		t.Fatalf("default category=%q want=%q", defaultSkill.Category, skillCategoryCustom)
 	}
 
 	getCustom := performCompatRequest(t, handler, http.MethodGet, "/api/skills/deep-research?category=custom", nil, nil)
@@ -3760,6 +3772,11 @@ func TestSkillEndpointsKeepPublicAndCustomVariantsSeparate(t *testing.T) {
 		t.Fatalf("update custom status=%d body=%s", updateResp.Code, updateResp.Body.String())
 	}
 
+	updateDefault := performCompatRequest(t, handler, http.MethodPut, "/api/skills/deep-research", strings.NewReader(`{"enabled":true}`), map[string]string{"Content-Type": "application/json"})
+	if updateDefault.Code != http.StatusOK {
+		t.Fatalf("update default status=%d body=%s", updateDefault.Code, updateDefault.Body.String())
+	}
+
 	publicResp := performCompatRequest(t, handler, http.MethodGet, "/api/skills/deep-research?category=public", nil, nil)
 	if publicResp.Code != http.StatusOK {
 		t.Fatalf("get public status=%d", publicResp.Code)
@@ -3770,6 +3787,17 @@ func TestSkillEndpointsKeepPublicAndCustomVariantsSeparate(t *testing.T) {
 	}
 	if !public.Enabled {
 		t.Fatal("expected public skill to remain enabled")
+	}
+
+	getCustomAfterDefault := performCompatRequest(t, handler, http.MethodGet, "/api/skills/deep-research?category=custom", nil, nil)
+	if getCustomAfterDefault.Code != http.StatusOK {
+		t.Fatalf("get custom after default status=%d", getCustomAfterDefault.Code)
+	}
+	if err := json.NewDecoder(getCustomAfterDefault.Body).Decode(&custom); err != nil {
+		t.Fatalf("decode custom after default: %v", err)
+	}
+	if !custom.Enabled {
+		t.Fatal("expected default update to target custom skill")
 	}
 }
 
@@ -3924,7 +3952,7 @@ license: MIT
 	}
 }
 
-func TestSkillGetRejectsAmbiguousDuplicateNamesWithoutCategory(t *testing.T) {
+func TestSkillGetPrefersCustomDuplicateNamesWithoutCategory(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 
 	for _, rel := range []string{
@@ -3951,15 +3979,19 @@ license: MIT
 	}
 
 	resp := performCompatRequest(t, handler, http.MethodGet, "/api/skills/duplicate-skill", nil, nil)
-	if resp.Code != http.StatusConflict {
+	if resp.Code != http.StatusOK {
 		t.Fatalf("get status=%d body=%s", resp.Code, resp.Body.String())
 	}
-	if !strings.Contains(resp.Body.String(), "specify category=public or category=custom") {
-		t.Fatalf("body=%q missing ambiguity hint", resp.Body.String())
+	var skill gatewaySkill
+	if err := json.NewDecoder(resp.Body).Decode(&skill); err != nil {
+		t.Fatalf("decode skill: %v", err)
+	}
+	if skill.Category != skillCategoryCustom {
+		t.Fatalf("category=%q want=%q", skill.Category, skillCategoryCustom)
 	}
 }
 
-func TestSkillSetEnabledRejectsAmbiguousDuplicateNamesWithoutCategory(t *testing.T) {
+func TestSkillSetEnabledPrefersCustomDuplicateNamesWithoutCategory(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 
 	writeSkill := func(category string) {
@@ -3981,12 +4013,33 @@ license: MIT
 	writeSkill(skillCategoryPublic)
 	writeSkill(skillCategoryCustom)
 
-	ambiguousResp := performCompatRequest(t, handler, http.MethodPut, "/api/skills/duplicate-skill", strings.NewReader(`{"enabled":false}`), map[string]string{"Content-Type": "application/json"})
-	if ambiguousResp.Code != http.StatusConflict {
-		t.Fatalf("ambiguous update status=%d body=%s", ambiguousResp.Code, ambiguousResp.Body.String())
+	defaultResp := performCompatRequest(t, handler, http.MethodPut, "/api/skills/duplicate-skill", strings.NewReader(`{"enabled":false}`), map[string]string{"Content-Type": "application/json"})
+	if defaultResp.Code != http.StatusOK {
+		t.Fatalf("default update status=%d body=%s", defaultResp.Code, defaultResp.Body.String())
 	}
-	if !strings.Contains(ambiguousResp.Body.String(), "specify category=public or category=custom") {
-		t.Fatalf("body=%q missing ambiguity hint", ambiguousResp.Body.String())
+
+	customResp := performCompatRequest(t, handler, http.MethodGet, "/api/skills/duplicate-skill?category=custom", nil, nil)
+	if customResp.Code != http.StatusOK {
+		t.Fatalf("get custom status=%d body=%s", customResp.Code, customResp.Body.String())
+	}
+	var custom gatewaySkill
+	if err := json.NewDecoder(customResp.Body).Decode(&custom); err != nil {
+		t.Fatalf("decode custom skill: %v", err)
+	}
+	if custom.Enabled {
+		t.Fatal("expected default update to target custom skill")
+	}
+
+	publicResp := performCompatRequest(t, handler, http.MethodGet, "/api/skills/duplicate-skill?category=public", nil, nil)
+	if publicResp.Code != http.StatusOK {
+		t.Fatalf("get public status=%d body=%s", publicResp.Code, publicResp.Body.String())
+	}
+	var public gatewaySkill
+	if err := json.NewDecoder(publicResp.Body).Decode(&public); err != nil {
+		t.Fatalf("decode public skill: %v", err)
+	}
+	if !public.Enabled {
+		t.Fatal("expected public skill to remain enabled")
 	}
 }
 

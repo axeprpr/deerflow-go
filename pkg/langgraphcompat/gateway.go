@@ -209,11 +209,7 @@ func (s *Server) handleModelGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
 	s.refreshGatewayExtensionsConfig()
-	currentSkills := s.currentGatewaySkills()
-	skills := make([]gatewaySkill, 0, len(currentSkills))
-	for _, skill := range currentSkills {
-		skills = append(skills, skill)
-	}
+	skills := gatewaySkillsForAPIList(s.currentGatewaySkills())
 	sort.Slice(skills, func(i, j int) bool {
 		if skills[i].Category == skills[j].Category {
 			return skills[i].Name < skills[j].Name
@@ -2677,19 +2673,6 @@ func findGatewaySkillEntryForAPI(skills map[string]gatewaySkill, name, category 
 		key, skill, ok := findGatewaySkillEntry(skills, normalizedName, normalizedCategory)
 		return key, skill, ok, false
 	}
-
-	hasPublic := false
-	hasCustom := false
-	if _, ok := skills[skillStorageKey(skillCategoryPublic, normalizedName)]; ok {
-		hasPublic = true
-	}
-	if _, ok := skills[skillStorageKey(skillCategoryCustom, normalizedName)]; ok {
-		hasCustom = true
-	}
-	if hasPublic && hasCustom {
-		return "", gatewaySkill{}, false, true
-	}
-
 	key, skill, ok := findGatewaySkillEntry(skills, normalizedName, "")
 	return key, skill, ok, false
 }
@@ -2706,20 +2689,45 @@ func findGatewaySkillEntry(skills map[string]gatewaySkill, name, category string
 		return key, skill, ok
 	}
 
-	publicKey := skillStorageKey(skillCategoryPublic, normalizedName)
-	if skill, ok := skills[publicKey]; ok {
-		return publicKey, skill, true
-	}
-
 	customKey := skillStorageKey(skillCategoryCustom, normalizedName)
 	if skill, ok := skills[customKey]; ok {
 		return customKey, skill, true
+	}
+
+	publicKey := skillStorageKey(skillCategoryPublic, normalizedName)
+	if skill, ok := skills[publicKey]; ok {
+		return publicKey, skill, true
 	}
 
 	if skill, ok := skills[normalizedName]; ok {
 		return normalizedName, normalizeGatewaySkill(skill, normalizedName, ""), true
 	}
 	return "", gatewaySkill{}, false
+}
+
+func gatewaySkillsForAPIList(skills map[string]gatewaySkill) []gatewaySkill {
+	if len(skills) == 0 {
+		return nil
+	}
+
+	visible := make(map[string]gatewaySkill, len(skills))
+	for _, skill := range skills {
+		if existing, ok := visible[skill.Name]; ok {
+			if existing.Category == skillCategoryCustom {
+				continue
+			}
+			if skill.Category != skillCategoryCustom {
+				continue
+			}
+		}
+		visible[skill.Name] = skill
+	}
+
+	out := make([]gatewaySkill, 0, len(visible))
+	for _, skill := range visible {
+		out = append(out, skill)
+	}
+	return out
 }
 
 func normalizePersistedSkills(skills map[string]gatewaySkill) map[string]gatewaySkill {
