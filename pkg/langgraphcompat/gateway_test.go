@@ -628,6 +628,92 @@ func TestThreadHistoryReturnsPersistedSnapshotsNewestFirst(t *testing.T) {
 	}
 }
 
+func TestThreadHistorySupportsBeforeCheckpointCursor(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-history-before"
+
+	session := s.ensureSession(threadID, map[string]any{"title": "First title"})
+	session.UpdatedAt = time.Date(2026, 3, 31, 9, 0, 0, 0, time.UTC)
+	if err := s.persistSessionSnapshot(cloneSession(session)); err != nil {
+		t.Fatalf("persist first snapshot: %v", err)
+	}
+
+	session.Metadata["title"] = "Second title"
+	session.UpdatedAt = time.Date(2026, 3, 31, 10, 0, 0, 0, time.UTC)
+	if err := s.persistSessionSnapshot(cloneSession(session)); err != nil {
+		t.Fatalf("persist second snapshot: %v", err)
+	}
+
+	session.Metadata["title"] = "Third title"
+	session.UpdatedAt = time.Date(2026, 3, 31, 11, 0, 0, 0, time.UTC)
+	if err := s.persistSessionSnapshot(cloneSession(session)); err != nil {
+		t.Fatalf("persist third snapshot: %v", err)
+	}
+
+	history := s.threadHistory(threadID)
+	if len(history) < 3 {
+		t.Fatalf("history len=%d want>=3", len(history))
+	}
+
+	before := history[0].CheckpointID
+	resp := performCompatRequest(t, handler, http.MethodGet, "/threads/"+threadID+"/history?limit=1&before="+before, nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var got []ThreadState
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal history: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("history len=%d want=1", len(got))
+	}
+	if title := asString(got[0].Values["title"]); title != "Second title" {
+		t.Fatalf("title=%q want Second title", title)
+	}
+}
+
+func TestThreadHistoryBeforeCheckpointInRequestBody(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-history-before-body"
+
+	session := s.ensureSession(threadID, map[string]any{"title": "First title"})
+	session.UpdatedAt = time.Date(2026, 3, 31, 9, 0, 0, 0, time.UTC)
+	if err := s.persistSessionSnapshot(cloneSession(session)); err != nil {
+		t.Fatalf("persist first snapshot: %v", err)
+	}
+
+	session.Metadata["title"] = "Second title"
+	session.UpdatedAt = time.Date(2026, 3, 31, 10, 0, 0, 0, time.UTC)
+	if err := s.persistSessionSnapshot(cloneSession(session)); err != nil {
+		t.Fatalf("persist second snapshot: %v", err)
+	}
+
+	history := s.threadHistory(threadID)
+	if len(history) < 2 {
+		t.Fatalf("history len=%d want>=2", len(history))
+	}
+
+	body := `{"before":"` + history[0].CheckpointID + `","limit":5}`
+	resp := performCompatRequest(t, handler, http.MethodPost, "/threads/"+threadID+"/history", strings.NewReader(body), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var got []ThreadState
+	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal history: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("history len=%d want=2", len(got))
+	}
+	if title := asString(got[0].Values["title"]); title != "First title" {
+		t.Fatalf("title=%q want First title", title)
+	}
+}
+
 func TestThreadHistorySurvivesServerReload(t *testing.T) {
 	s, _ := newCompatTestServer(t)
 	threadID := "thread-history-reload"

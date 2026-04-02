@@ -88,6 +88,15 @@ func TestWebSearchHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WebSearchHandler() error = %v", err)
 	}
+	if !strings.Contains(result.Content, `"query":"golang"`) {
+		t.Fatalf("content=%q missing query", result.Content)
+	}
+	if !strings.Contains(result.Content, `"total_results":2`) {
+		t.Fatalf("content=%q missing total_results", result.Content)
+	}
+	if !strings.Contains(result.Content, `"results":[`) {
+		t.Fatalf("content=%q missing results array", result.Content)
+	}
 	if !strings.Contains(result.Content, `"title":"Result One"`) || !strings.Contains(result.Content, `"title":"Result Two"`) {
 		t.Fatalf("content=%q missing result", result.Content)
 	}
@@ -132,11 +141,49 @@ func TestWebFetchHandler(t *testing.T) {
 	if !strings.Contains(result.Content, "# Sample Page") {
 		t.Fatalf("content=%q missing title", result.Content)
 	}
+	if strings.Contains(result.Content, "Site navigation") {
+		t.Fatalf("content=%q should prefer primary article content", result.Content)
+	}
 	if !strings.Contains(result.Content, "Important content.") {
 		t.Fatalf("content=%q missing article text", result.Content)
 	}
 	if strings.Contains(result.Content, "console.log") {
 		t.Fatalf("content=%q should not include script", result.Content)
+	}
+}
+
+func TestWebFetchPrefersMainContent(t *testing.T) {
+	restore := stubHTTPClient(t, func(r *http.Request) (*http.Response, error) {
+		return newHTTPResponse(r, `<!doctype html>
+<html>
+  <head><title>Long Page</title></head>
+  <body>
+    <nav>Global navigation</nav>
+    <main>
+      <h1>Main Story</h1>
+      <p>Key facts only.</p>
+    </main>
+    <footer>Footer links</footer>
+  </body>
+</html>`), nil
+	})
+	defer restore()
+
+	result, err := WebFetchHandler(context.Background(), models.ToolCall{
+		ID:   "call-web-fetch-main",
+		Name: "web_fetch",
+		Arguments: map[string]any{
+			"url": "https://example.com/main",
+		},
+	})
+	if err != nil {
+		t.Fatalf("WebFetchHandler() error = %v", err)
+	}
+	if !strings.Contains(result.Content, "Main Story") || !strings.Contains(result.Content, "Key facts only.") {
+		t.Fatalf("content=%q missing main content", result.Content)
+	}
+	if strings.Contains(result.Content, "Global navigation") || strings.Contains(result.Content, "Footer links") {
+		t.Fatalf("content=%q should exclude page chrome", result.Content)
 	}
 }
 

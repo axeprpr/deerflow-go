@@ -35,13 +35,17 @@ var (
 		regexp.MustCompile(`vqd='([^']+)'`),
 		regexp.MustCompile(`vqd="([^"]+)"`),
 	}
-	titleTagRE  = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
-	scriptTagRE = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
-	styleTagRE  = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
-	blockTagRE  = regexp.MustCompile(`(?is)</?(?:article|aside|blockquote|br|div|h[1-6]|header|footer|li|main|nav|p|pre|section|tr|table|ul|ol)[^>]*>`)
-	anyTagRE    = regexp.MustCompile(`(?is)<[^>]+>`)
-	spaceRE     = regexp.MustCompile(`[ \t\r\f\v]+`)
-	blankLineRE = regexp.MustCompile(`\n{3,}`)
+	titleTagRE   = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+	articleTagRE = regexp.MustCompile(`(?is)<article\b[^>]*>(.*?)</article>`)
+	mainTagRE    = regexp.MustCompile(`(?is)<main\b[^>]*>(.*?)</main>`)
+	bodyTagRE    = regexp.MustCompile(`(?is)<body\b[^>]*>(.*?)</body>`)
+	scriptTagRE  = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
+	styleTagRE   = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
+	noiseTagRE   = regexp.MustCompile(`(?is)<(?:aside|footer|form|nav|noscript|script|style|svg)[^>]*>.*?</(?:aside|footer|form|nav|noscript|script|style|svg)>`)
+	blockTagRE   = regexp.MustCompile(`(?is)</?(?:article|aside|blockquote|br|div|h[1-6]|header|footer|li|main|nav|p|pre|section|tr|table|ul|ol)[^>]*>`)
+	anyTagRE     = regexp.MustCompile(`(?is)<[^>]+>`)
+	spaceRE      = regexp.MustCompile(`[ \t\r\f\v]+`)
+	blankLineRE  = regexp.MustCompile(`\n{3,}`)
 )
 
 type webSearchResult struct {
@@ -49,6 +53,12 @@ type webSearchResult struct {
 	URL     string `json:"url"`
 	Snippet string `json:"snippet,omitempty"`
 	Content string `json:"content,omitempty"`
+}
+
+type webSearchResponse struct {
+	Query        string            `json:"query"`
+	TotalResults int               `json:"total_results"`
+	Results      []webSearchResult `json:"results"`
 }
 
 type imageSearchResult struct {
@@ -92,7 +102,11 @@ func WebSearchHandler(ctx context.Context, call models.ToolCall) (models.ToolRes
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("web search failed: %w", err)
 	}
 
-	body, err := json.Marshal(results)
+	body, err := json.Marshal(webSearchResponse{
+		Query:        query,
+		TotalResults: len(results),
+		Results:      results,
+	})
 	if err != nil {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("encode search results: %w", err)
 	}
@@ -502,8 +516,12 @@ func extractReadableContent(pageURL, body string, maxChars int) string {
 		title = cleanHTMLText(match[1])
 	}
 
-	text := scriptTagRE.ReplaceAllString(body, " ")
+	text := extractPrimaryContent(body)
+	text = scriptTagRE.ReplaceAllString(text, " ")
 	text = styleTagRE.ReplaceAllString(text, " ")
+	text = noiseTagRE.ReplaceAllString(text, " ")
+	text = strings.ReplaceAll(text, "</li>", "\n")
+	text = strings.ReplaceAll(text, "<li", "\n<li")
 	text = blockTagRE.ReplaceAllString(text, "\n")
 	text = anyTagRE.ReplaceAllString(text, " ")
 	text = html.UnescapeString(text)
@@ -538,6 +556,15 @@ func extractReadableContent(pageURL, body string, maxChars int) string {
 		content = strings.TrimSpace(content[:maxChars])
 	}
 	return content
+}
+
+func extractPrimaryContent(body string) string {
+	for _, re := range []*regexp.Regexp{articleTagRE, mainTagRE, bodyTagRE} {
+		if match := re.FindStringSubmatch(body); len(match) >= 2 && strings.TrimSpace(match[1]) != "" {
+			return match[1]
+		}
+	}
+	return body
 }
 
 func normalizeDuckDuckGoURL(raw string) string {

@@ -772,7 +772,8 @@ func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Limit int `json:"limit"`
+		Limit  int    `json:"limit"`
+		Before string `json:"before"`
 	}
 	if r.Method == http.MethodGet {
 		if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
@@ -783,9 +784,24 @@ func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
 			}
 			req.Limit = limit
 		}
+		req.Before = strings.TrimSpace(firstNonEmpty(
+			r.URL.Query().Get("before"),
+			r.URL.Query().Get("before_checkpoint"),
+			r.URL.Query().Get("checkpoint_id"),
+		))
 	} else if r.Body != nil {
 		defer r.Body.Close()
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		var raw map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&raw); err == nil {
+			if limit := intPointerFromAny(raw["limit"]); limit != nil {
+				req.Limit = *limit
+			}
+			req.Before = strings.TrimSpace(firstNonEmpty(
+				stringFromAny(raw["before"]),
+				stringFromAny(raw["before_checkpoint"]),
+				stringFromAny(raw["checkpoint_id"]),
+			))
+		}
 	}
 
 	state := s.getThreadState(threadID)
@@ -798,10 +814,29 @@ func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
 	if len(history) == 0 {
 		history = []ThreadState{*state}
 	}
+	if req.Before != "" {
+		history = historyBeforeCheckpoint(history, req.Before)
+	}
 	if req.Limit == 0 || req.Limit > len(history) {
 		req.Limit = len(history)
 	}
 	writeJSON(w, http.StatusOK, history[:req.Limit])
+}
+
+func historyBeforeCheckpoint(history []ThreadState, before string) []ThreadState {
+	before = strings.TrimSpace(before)
+	if before == "" || len(history) == 0 {
+		return history
+	}
+	for i, state := range history {
+		if strings.TrimSpace(state.CheckpointID) == before {
+			if i+1 >= len(history) {
+				return []ThreadState{}
+			}
+			return history[i+1:]
+		}
+	}
+	return []ThreadState{}
 }
 
 func (s *Server) handleRunGet(w http.ResponseWriter, r *http.Request) {
