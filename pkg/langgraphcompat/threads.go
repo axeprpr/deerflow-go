@@ -932,7 +932,7 @@ func (s *Server) messagesToLangChain(messages []models.Message) []Message {
 			Type:             msgType,
 			ID:               msg.ID,
 			Role:             role,
-			Content:          messageContent(msg.Content, msg.Metadata),
+			Content:          messageContent(msg.SessionID, msg.Role, msg.Content, msg.Metadata),
 			AdditionalKwargs: decodeAdditionalKwargs(msg.Metadata),
 			UsageMetadata:    decodeUsageMetadata(msg.Metadata),
 		}
@@ -987,11 +987,53 @@ func decodeMultiContent(metadata map[string]string) []map[string]any {
 	return out
 }
 
-func messageContent(content string, metadata map[string]string) any {
+func messageContent(threadID string, role models.Role, content string, metadata map[string]string) any {
 	if multi := decodeMultiContent(metadata); len(multi) > 0 {
+		if role == models.RoleAI {
+			return rewriteMultiContentVirtualPaths(threadID, multi)
+		}
 		return multi
 	}
+	if role == models.RoleAI {
+		return rewriteArtifactVirtualPaths(threadID, content)
+	}
 	return content
+}
+
+func rewriteMultiContentVirtualPaths(threadID string, parts []map[string]any) []map[string]any {
+	if len(parts) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(parts))
+	for _, part := range parts {
+		if len(part) == 0 {
+			out = append(out, part)
+			continue
+		}
+		clone := make(map[string]any, len(part))
+		for key, value := range part {
+			clone[key] = value
+		}
+		switch stringValue(clone["type"]) {
+		case "text":
+			if text, ok := clone["text"].(string); ok {
+				clone["text"] = rewriteArtifactVirtualPaths(threadID, text)
+			}
+		case "image_url":
+			if imageURL, ok := clone["image_url"].(map[string]any); ok {
+				imageClone := make(map[string]any, len(imageURL))
+				for key, value := range imageURL {
+					imageClone[key] = value
+				}
+				if rawURL, ok := imageClone["url"].(string); ok {
+					imageClone["url"] = rewriteArtifactVirtualPaths(threadID, rawURL)
+				}
+				clone["image_url"] = imageClone
+			}
+		}
+		out = append(out, clone)
+	}
+	return out
 }
 
 func decodeUsageMetadata(metadata map[string]string) map[string]int {

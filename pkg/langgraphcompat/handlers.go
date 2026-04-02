@@ -954,7 +954,7 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 			Type:    "ai",
 			ID:      evt.MessageID,
 			Role:    "assistant",
-			Content: evt.Text,
+			Content: rewriteArtifactVirtualPaths(run.ThreadID, evt.Text),
 		}
 		if len(kwargs) > 0 {
 			msg.AdditionalKwargs = kwargs

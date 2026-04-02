@@ -427,6 +427,49 @@ func TestForwardAgentEventEmitsNormalizedFinalAssistantText(t *testing.T) {
 	t.Fatal("missing normalized assistant messages-tuple payload")
 }
 
+func TestForwardAgentEventRewritesFinalAssistantArtifactLinks(t *testing.T) {
+	s := &Server{
+		runs:       map[string]*Run{},
+		runStreams: map[string]map[uint64]chan StreamEvent{},
+	}
+	run := &Run{
+		RunID:       "run-artifact-links",
+		ThreadID:    "thread-artifact-links",
+		AssistantID: "lead_agent",
+		Status:      "running",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.saveRun(run)
+
+	s.forwardAgentEvent(nil, nil, run, agent.AgentEvent{
+		Type:      agent.AgentEventEnd,
+		MessageID: "msg-ai-artifact-links",
+		Text:      "Open [artifact](/mnt/user-data/outputs/final report.md)",
+	})
+
+	stored := s.getRun(run.RunID)
+	if stored == nil {
+		t.Fatal("stored run missing")
+	}
+
+	for _, evt := range stored.Events {
+		if evt.Event != "messages-tuple" {
+			continue
+		}
+		payload, ok := evt.Data.(Message)
+		if !ok || payload.ID != "msg-ai-artifact-links" {
+			continue
+		}
+		if payload.Content != "Open [artifact](/api/threads/thread-artifact-links/artifacts/mnt/user-data/outputs/final%20report.md)" {
+			t.Fatalf("content=%v want rewritten artifact url", payload.Content)
+		}
+		return
+	}
+
+	t.Fatal("missing rewritten final assistant messages-tuple payload")
+}
+
 func TestForwardAgentEventPreservesFinalAssistantAdditionalKwargs(t *testing.T) {
 	s := &Server{
 		runs:       map[string]*Run{},
