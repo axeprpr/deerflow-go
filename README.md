@@ -12,6 +12,7 @@ A Go reimplementation of [DeerFlow](https://github.com/bytedance/deerflow) - a m
 ### 🧠 Memory & Context
 - **LLM-based Memory Service**: Automatically summarize and maintain conversation context
 - **Long-term Memory**: Persistent memory across sessions via Postgres checkpointing
+- **Gateway Memory Editing**: Read and replace memory snapshots through `/api/memory`
 
 ### 🛠️ Tool System
 - **Built-in Tools**: bash, file_read, file_write, file_search, web_search, visit_page

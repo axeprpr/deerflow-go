@@ -5030,6 +5030,47 @@ func TestMemoryPutRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestGatewayMemoryToDocumentDerivesTimestampsAndSkipsBlankFacts(t *testing.T) {
+	resp := gatewayMemoryResponse{
+		User: memoryUser{
+			TopOfMind: memorySection{
+				Summary:   "Focus on memory editing.",
+				UpdatedAt: "2026-04-02T09:00:00Z",
+			},
+		},
+		History: memoryHistory{
+			RecentMonths: memorySection{
+				Summary:   "Recently ported gateway APIs to Go.",
+				UpdatedAt: "2026-04-02T10:00:00Z",
+			},
+		},
+		Facts: []memoryFact{
+			{
+				Content:   "Valid facts remain in the document.",
+				CreatedAt: "2026-04-02T11:00:00Z",
+			},
+			{
+				ID:      "blank-fact",
+				Content: "   ",
+			},
+		},
+	}
+
+	doc := gatewayMemoryToDocument(resp, "thread-derived-memory")
+	if doc.SessionID != "thread-derived-memory" {
+		t.Fatalf("sessionID=%q", doc.SessionID)
+	}
+	if doc.UpdatedAt.Format(time.RFC3339) != "2026-04-02T11:00:00Z" {
+		t.Fatalf("updatedAt=%s want=%s", doc.UpdatedAt.Format(time.RFC3339), "2026-04-02T11:00:00Z")
+	}
+	if len(doc.Facts) != 1 {
+		t.Fatalf("facts=%d want=1", len(doc.Facts))
+	}
+	if doc.Facts[0].UpdatedAt.Format(time.RFC3339) != "2026-04-02T11:00:00Z" {
+		t.Fatalf("fact updatedAt=%s", doc.Facts[0].UpdatedAt.Format(time.RFC3339))
+	}
+}
+
 func TestRunsStreamPersistsMemoryUpdatesToAgentScope(t *testing.T) {
 	provider := &streamSpyProvider{}
 	store := &fakeGatewayMemoryStore{docs: map[string]memory.Document{}}

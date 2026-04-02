@@ -167,6 +167,49 @@ curl http://localhost:8080/health
 }
 ```
 
+### GET /api/memory
+
+Return the current gateway memory snapshot used by the settings page.
+
+### PUT /api/memory
+
+Replace the persisted gateway memory snapshot with a user-edited payload.
+
+**Request:**
+
+```json
+{
+  "version": "1.0",
+  "lastUpdated": "2026-04-02T10:30:00Z",
+  "user": {
+    "workContext": {"summary": "Owns the gateway integration.", "updatedAt": "2026-04-02T09:00:00Z"},
+    "personalContext": {"summary": "Prefers terse updates.", "updatedAt": "2026-04-02T09:30:00Z"},
+    "topOfMind": {"summary": "Ship memory editing.", "updatedAt": "2026-04-02T10:00:00Z"}
+  },
+  "history": {
+    "recentMonths": {"summary": "Focused on UI compatibility.", "updatedAt": "2026-04-01T08:00:00Z"},
+    "earlierContext": {"summary": "Migrated Python behaviors to Go.", "updatedAt": "2026-03-01T08:00:00Z"},
+    "longTermBackground": {"summary": "Maintains DeerFlow-related tooling.", "updatedAt": "2025-12-01T08:00:00Z"}
+  },
+  "facts": [
+    {
+      "id": "fact-keep",
+      "content": "User prioritizes UX regressions first.",
+      "category": "preference",
+      "confidence": 0.9,
+      "createdAt": "2026-04-02T10:15:00Z",
+      "source": "thread-memory-api"
+    }
+  ]
+}
+```
+
+**Notes:**
+
+- Empty fact content is ignored during persistence.
+- Missing fact IDs are auto-generated.
+- If `lastUpdated` is omitted, the server derives it from section or fact timestamps.
+
 ### POST /runs/stream
 
 Stream a run execution. If `thread_id` is omitted, the server creates one automatically.
