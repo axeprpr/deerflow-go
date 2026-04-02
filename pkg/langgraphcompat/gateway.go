@@ -1851,14 +1851,50 @@ func asString(v any) string {
 
 func (s *Server) resolveSkillArchivePath(threadID, path string) (string, error) {
 	threadID = strings.TrimSpace(threadID)
-	path = strings.TrimSpace(path)
 	if err := validateThreadID(threadID); err != nil {
 		return "", err
 	}
+	path = normalizeSkillArchiveRequestPath(threadID, path)
 	if path == "" {
 		return "", errors.New("thread_id and path are required")
 	}
 	return s.resolveThreadVirtualPath(threadID, path)
+}
+
+func normalizeSkillArchiveRequestPath(threadID, raw string) string {
+	path := strings.TrimSpace(raw)
+	if path == "" {
+		return ""
+	}
+
+	if parsed, err := url.Parse(path); err == nil {
+		if parsed.Path != "" {
+			path = parsed.Path
+		}
+	}
+
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+
+	prefixes := []string{
+		"/api/threads/" + threadID + "/artifacts/",
+		"/threads/" + threadID + "/artifacts/",
+	}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(path, prefix) {
+			if decoded, err := url.PathUnescape(strings.TrimPrefix(path, prefix)); err == nil {
+				return "/" + strings.TrimLeft(decoded, "/")
+			}
+			return "/" + strings.TrimLeft(strings.TrimPrefix(path, prefix), "/")
+		}
+	}
+
+	if decoded, err := url.PathUnescape(path); err == nil {
+		path = decoded
+	}
+	return path
 }
 
 func (s *Server) resolveThreadVirtualPath(threadID, virtualPath string) (string, error) {

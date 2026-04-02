@@ -3128,6 +3128,62 @@ func TestSkillInstallUsesConfiguredSkillsPath(t *testing.T) {
 	}
 }
 
+func TestSkillInstallAcceptsArtifactURLs(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-skill-artifact-url"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir upload dir: %v", err)
+	}
+	archiveName := "demo skill.skill"
+	archivePath := filepath.Join(uploadDir, archiveName)
+	if err := writeSkillArchive(archivePath, "demo-skill"); err != nil {
+		t.Fatalf("write skill archive: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{
+			name: "gateway artifact path",
+			path: "/api/threads/" + threadID + "/artifacts/mnt/user-data/uploads/" + url.PathEscape(archiveName),
+		},
+		{
+			name: "gateway artifact url with origin and query",
+			path: "https://example.com/api/threads/" + threadID + "/artifacts/mnt/user-data/uploads/" + url.PathEscape(archiveName) + "?download=true",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"thread_id":"` + threadID + `","path":"` + tc.path + `"}`
+			resp := performCompatRequest(t, handler, http.MethodPost, "/api/skills/install", strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
+			if resp.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+			}
+			var payload struct {
+				Success   bool   `json:"success"`
+				SkillName string `json:"skill_name"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode install response: %v", err)
+			}
+			if !payload.Success || payload.SkillName != "demo-skill" {
+				t.Fatalf("unexpected install payload: %#v", payload)
+			}
+
+			installed := filepath.Join(s.dataRoot, "skills", "custom", "demo-skill", "SKILL.md")
+			if _, err := os.Stat(installed); err != nil {
+				t.Fatalf("expected installed skill file: %v", err)
+			}
+			if err := os.RemoveAll(filepath.Dir(installed)); err != nil {
+				t.Fatalf("cleanup installed skill dir: %v", err)
+			}
+		})
+	}
+}
+
 func TestSkillInstallRejectsInvalidFrontmatter(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-skill-invalid-frontmatter"
