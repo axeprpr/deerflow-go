@@ -21,15 +21,16 @@ import (
 )
 
 type persistedSession struct {
-	ThreadID  string           `json:"thread_id"`
-	Messages  []models.Message `json:"messages"`
-	Todos     []Todo           `json:"todos,omitempty"`
-	Values    map[string]any   `json:"values,omitempty"`
-	Metadata  map[string]any   `json:"metadata,omitempty"`
-	Config    map[string]any   `json:"config,omitempty"`
-	Status    string           `json:"status"`
-	CreatedAt time.Time        `json:"created_at"`
-	UpdatedAt time.Time        `json:"updated_at"`
+	CheckpointID string           `json:"checkpoint_id,omitempty"`
+	ThreadID     string           `json:"thread_id"`
+	Messages     []models.Message `json:"messages"`
+	Todos        []Todo           `json:"todos,omitempty"`
+	Values       map[string]any   `json:"values,omitempty"`
+	Metadata     map[string]any   `json:"metadata,omitempty"`
+	Config       map[string]any   `json:"config,omitempty"`
+	Status       string           `json:"status"`
+	CreatedAt    time.Time        `json:"created_at"`
+	UpdatedAt    time.Time        `json:"updated_at"`
 }
 
 type persistedHistoryEntry struct {
@@ -102,8 +103,12 @@ func (s *Server) readPersistedSession(threadID string) (*Session, error) {
 	if stored.UpdatedAt.IsZero() {
 		stored.UpdatedAt = stored.CreatedAt
 	}
+	if strings.TrimSpace(stored.CheckpointID) == "" {
+		stored.CheckpointID = s.latestPersistedCheckpoint(threadID)
+	}
 
 	return &Session{
+		CheckpointID: stored.CheckpointID,
 		ThreadID:     stored.ThreadID,
 		Messages:     append([]models.Message(nil), stored.Messages...),
 		Todos:        append([]Todo(nil), stored.Todos...),
@@ -121,6 +126,8 @@ func (s *Server) persistSessionSnapshot(session *Session) error {
 	if session == nil || strings.TrimSpace(session.ThreadID) == "" {
 		return nil
 	}
+	session.CheckpointID = uuid.New().String()
+	s.syncSessionCheckpoint(session.ThreadID, session.CheckpointID, session.UpdatedAt)
 
 	path := s.sessionStatePath(session.ThreadID)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -128,15 +135,16 @@ func (s *Server) persistSessionSnapshot(session *Session) error {
 	}
 
 	payload := persistedSession{
-		ThreadID:  session.ThreadID,
-		Messages:  append([]models.Message(nil), session.Messages...),
-		Todos:     append([]Todo(nil), session.Todos...),
-		Values:    copyMetadataMap(session.Values),
-		Metadata:  copyMetadataMap(session.Metadata),
-		Config:    copyMetadataMap(session.Configurable),
-		Status:    session.Status,
-		CreatedAt: session.CreatedAt,
-		UpdatedAt: session.UpdatedAt,
+		CheckpointID: session.CheckpointID,
+		ThreadID:     session.ThreadID,
+		Messages:     append([]models.Message(nil), session.Messages...),
+		Todos:        append([]Todo(nil), session.Todos...),
+		Values:       copyMetadataMap(session.Values),
+		Metadata:     copyMetadataMap(session.Metadata),
+		Config:       copyMetadataMap(session.Configurable),
+		Status:       session.Status,
+		CreatedAt:    session.CreatedAt,
+		UpdatedAt:    session.UpdatedAt,
 	}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
@@ -170,17 +178,18 @@ func (s *Server) sessionHistoryPath(threadID string) string {
 
 func (s *Server) appendPersistedHistory(session *Session) error {
 	entry := persistedHistoryEntry{
-		CheckpointID: uuid.New().String(),
+		CheckpointID: session.CheckpointID,
 		persistedSession: persistedSession{
-			ThreadID:  session.ThreadID,
-			Messages:  append([]models.Message(nil), session.Messages...),
-			Todos:     append([]Todo(nil), session.Todos...),
-			Values:    copyMetadataMap(session.Values),
-			Metadata:  copyMetadataMap(session.Metadata),
-			Config:    copyMetadataMap(session.Configurable),
-			Status:    session.Status,
-			CreatedAt: session.CreatedAt,
-			UpdatedAt: session.UpdatedAt,
+			CheckpointID: session.CheckpointID,
+			ThreadID:     session.ThreadID,
+			Messages:     append([]models.Message(nil), session.Messages...),
+			Todos:        append([]Todo(nil), session.Todos...),
+			Values:       copyMetadataMap(session.Values),
+			Metadata:     copyMetadataMap(session.Metadata),
+			Config:       copyMetadataMap(session.Configurable),
+			Status:       session.Status,
+			CreatedAt:    session.CreatedAt,
+			UpdatedAt:    session.UpdatedAt,
 		},
 	}
 	data, err := json.Marshal(entry)
@@ -198,6 +207,32 @@ func (s *Server) appendPersistedHistory(session *Session) error {
 		return err
 	}
 	return nil
+}
+
+func (s *Server) syncSessionCheckpoint(threadID, checkpointID string, updatedAt time.Time) {
+	if s == nil || strings.TrimSpace(threadID) == "" || strings.TrimSpace(checkpointID) == "" {
+		return
+	}
+
+	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+
+	session := s.sessions[threadID]
+	if session == nil {
+		return
+	}
+	if session.CheckpointID != "" && updatedAt.Before(session.UpdatedAt) {
+		return
+	}
+	session.CheckpointID = checkpointID
+}
+
+func (s *Server) latestPersistedCheckpoint(threadID string) string {
+	entries, err := s.readPersistedHistory(threadID)
+	if err != nil || len(entries) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(entries[len(entries)-1].CheckpointID)
 }
 
 func (s *Server) readPersistedHistory(threadID string) ([]persistedHistoryEntry, error) {

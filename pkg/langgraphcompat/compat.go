@@ -75,6 +75,7 @@ type HealthStatus struct {
 }
 
 type Session struct {
+	CheckpointID string
 	ThreadID     string
 	Messages     []models.Message
 	Todos        []Todo

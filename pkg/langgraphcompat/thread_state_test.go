@@ -259,6 +259,99 @@ func TestThreadStateFallsBackToMetadataAgentName(t *testing.T) {
 	}
 }
 
+func TestThreadStateCheckpointIDStableUntilStateChanges(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	s.ensureSession("thread-checkpoint", map[string]any{"title": "Checkpoint thread"})
+
+	first := performCompatRequest(t, handler, http.MethodGet, "/threads/thread-checkpoint/state", nil, nil)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first status=%d body=%s", first.Code, first.Body.String())
+	}
+	second := performCompatRequest(t, handler, http.MethodGet, "/threads/thread-checkpoint/state", nil, nil)
+	if second.Code != http.StatusOK {
+		t.Fatalf("second status=%d body=%s", second.Code, second.Body.String())
+	}
+
+	var firstState ThreadState
+	if err := json.Unmarshal(first.Body.Bytes(), &firstState); err != nil {
+		t.Fatalf("unmarshal first state: %v", err)
+	}
+	var secondState ThreadState
+	if err := json.Unmarshal(second.Body.Bytes(), &secondState); err != nil {
+		t.Fatalf("unmarshal second state: %v", err)
+	}
+	if firstState.CheckpointID == "" {
+		t.Fatal("first checkpoint_id is empty")
+	}
+	if secondState.CheckpointID != firstState.CheckpointID {
+		t.Fatalf("checkpoint_id changed across reads: %q != %q", secondState.CheckpointID, firstState.CheckpointID)
+	}
+
+	patch := performCompatRequest(t, handler, http.MethodPatch, "/threads/thread-checkpoint/state", strings.NewReader(`{"values":{"sidebar_tab":"artifacts"}}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if patch.Code != http.StatusOK {
+		t.Fatalf("patch status=%d body=%s", patch.Code, patch.Body.String())
+	}
+
+	var patchedState ThreadState
+	if err := json.Unmarshal(patch.Body.Bytes(), &patchedState); err != nil {
+		t.Fatalf("unmarshal patched state: %v", err)
+	}
+	if patchedState.CheckpointID == "" {
+		t.Fatal("patched checkpoint_id is empty")
+	}
+	if patchedState.CheckpointID == firstState.CheckpointID {
+		t.Fatalf("checkpoint_id did not change after state update: %q", patchedState.CheckpointID)
+	}
+}
+
+func TestReloadedSessionKeepsLatestCheckpointID(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	s.ensureSession("thread-reload-checkpoint", map[string]any{"title": "Reload checkpoint"})
+
+	resp := performCompatRequest(t, handler, http.MethodPatch, "/threads/thread-reload-checkpoint/state", strings.NewReader(`{"values":{"draft_id":"draft-42"}}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("patch status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var patchedState ThreadState
+	if err := json.Unmarshal(resp.Body.Bytes(), &patchedState); err != nil {
+		t.Fatalf("unmarshal patched state: %v", err)
+	}
+	if patchedState.CheckpointID == "" {
+		t.Fatal("patched checkpoint_id is empty")
+	}
+
+	reloaded := &Server{
+		sessions:   make(map[string]*Session),
+		runs:       make(map[string]*Run),
+		runStreams: make(map[string]map[uint64]chan StreamEvent),
+		dataRoot:   s.dataRoot,
+	}
+	if err := reloaded.loadPersistedSessions(); err != nil {
+		t.Fatalf("loadPersistedSessions() error = %v", err)
+	}
+
+	state := reloaded.getThreadState("thread-reload-checkpoint")
+	if state == nil {
+		t.Fatal("state is nil after reload")
+	}
+	if state.CheckpointID != patchedState.CheckpointID {
+		t.Fatalf("checkpoint_id=%q want=%q", state.CheckpointID, patchedState.CheckpointID)
+	}
+
+	history := reloaded.threadHistory("thread-reload-checkpoint")
+	if len(history) == 0 {
+		t.Fatal("history is empty after reload")
+	}
+	if history[0].CheckpointID != patchedState.CheckpointID {
+		t.Fatalf("history checkpoint_id=%q want=%q", history[0].CheckpointID, patchedState.CheckpointID)
+	}
+}
+
 func TestThreadResponseFallsBackToMetadataAgentName(t *testing.T) {
 	s, _ := newCompatTestServer(t)
 	session := s.ensureSession("thread-agent-response", map[string]any{

@@ -1172,8 +1172,11 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 	if !exists {
 		return nil
 	}
-
-	return s.threadStateFromSession(session, uuid.New().String(), session.UpdatedAt)
+	checkpointID := strings.TrimSpace(session.CheckpointID)
+	if checkpointID == "" {
+		checkpointID = s.latestPersistedCheckpoint(threadID)
+	}
+	return s.threadStateFromSession(session, checkpointID, session.UpdatedAt)
 }
 
 func (s *Server) threadHistory(threadID string) []ThreadState {
@@ -1259,6 +1262,7 @@ func (s *Server) ensureSession(threadID string, metadata map[string]any) *Sessio
 	}
 	now := time.Now().UTC()
 	session := &Session{
+		CheckpointID: uuid.New().String(),
 		ThreadID:     threadID,
 		Messages:     []models.Message{},
 		Todos:        nil,
@@ -1643,6 +1647,7 @@ func cloneSession(session *Session) *Session {
 		return nil
 	}
 	return &Session{
+		CheckpointID: session.CheckpointID,
 		ThreadID:     session.ThreadID,
 		Messages:     append([]models.Message(nil), session.Messages...),
 		Todos:        append([]Todo(nil), session.Todos...),
