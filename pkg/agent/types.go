@@ -105,6 +105,7 @@ type AgentEvent struct {
 	RequestID string             `json:"request_id,omitempty"`
 	MessageID string             `json:"message_id,omitempty"`
 	Text      string             `json:"text,omitempty"`
+	Metadata  map[string]string  `json:"metadata,omitempty"`
 	ToolCall  *models.ToolCall   `json:"tool_call,omitempty"`
 	ToolEvent *ToolCallEvent     `json:"tool_event,omitempty"`
 	Result    *models.ToolResult `json:"result,omitempty"`

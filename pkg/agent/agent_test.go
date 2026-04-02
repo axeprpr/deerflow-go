@@ -1011,6 +1011,59 @@ func TestSelectSubagentToolsWithDenylist(t *testing.T) {
 	}
 }
 
+func TestRunEmitsFinalAssistantMetadataAfterNormalization(t *testing.T) {
+	provider := &scriptedStreamProvider{
+		t: t,
+		steps: []streamStep{
+			{content: "<think>internal reasoning</think>\n\nVisible answer"},
+		},
+	}
+	agent := New(AgentConfig{
+		LLMProvider: provider,
+		Model:       "test-model",
+		MaxTurns:    1,
+	})
+
+	done := make(chan []AgentEvent, 1)
+	go func() {
+		var events []AgentEvent
+		for evt := range agent.Events() {
+			events = append(events, evt)
+			if evt.Type == AgentEventEnd || evt.Type == AgentEventError {
+				done <- events
+				return
+			}
+		}
+		done <- events
+	}()
+
+	result, err := agent.Run(context.Background(), "session-1", []models.Message{
+		{ID: "m1", SessionID: "session-1", Role: models.RoleHuman, Content: "hello"},
+	})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if result.FinalOutput != "Visible answer" {
+		t.Fatalf("final output=%q want Visible answer", result.FinalOutput)
+	}
+
+	events := <-done
+	for _, evt := range events {
+		if evt.Type != AgentEventEnd {
+			continue
+		}
+		if evt.Text != "Visible answer" {
+			t.Fatalf("end text=%q want Visible answer", evt.Text)
+		}
+		if got := evt.Metadata["additional_kwargs"]; !strings.Contains(got, `"reasoning_content":"internal reasoning"`) {
+			t.Fatalf("metadata=%q want reasoning_content", got)
+		}
+		return
+	}
+
+	t.Fatal("missing AgentEventEnd")
+}
+
 type timeoutProvider struct{}
 
 func (timeoutProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {

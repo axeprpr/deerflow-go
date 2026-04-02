@@ -1356,23 +1356,6 @@ func (s *Server) sessionArtifactPaths(session *Session) []string {
 		seen[path] = struct{}{}
 		paths = append(paths, path)
 	}
-	for _, path := range collectArtifactPaths(
-		filepath.Join(s.threadRoot(session.ThreadID), "workspace"),
-		"/mnt/user-data/workspace",
-	) {
-		if _, ok := seen[path]; ok {
-			continue
-		}
-		seen[path] = struct{}{}
-		paths = append(paths, path)
-	}
-	for _, path := range s.uploadArtifactPaths(session.ThreadID) {
-		if _, ok := seen[path]; ok {
-			continue
-		}
-		seen[path] = struct{}{}
-		paths = append(paths, path)
-	}
 	return paths
 }
 

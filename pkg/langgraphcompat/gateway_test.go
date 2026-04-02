@@ -85,8 +85,14 @@ func TestGatewayOpenAPIDocumentationEndpoints(t *testing.T) {
 	if got := docsResp.Header().Get("Content-Type"); !strings.Contains(got, "text/html") {
 		t.Fatalf("docs content-type=%q want html", got)
 	}
-	if !strings.Contains(docsResp.Body.String(), "SwaggerUIBundle") {
-		t.Fatalf("docs body missing swagger ui bootstrap: %q", docsResp.Body.String())
+	if !strings.Contains(docsResp.Body.String(), "Open raw OpenAPI schema") {
+		t.Fatalf("docs body missing offline docs link: %q", docsResp.Body.String())
+	}
+	if !strings.Contains(docsResp.Body.String(), "/api/threads/{thread_id}/uploads") {
+		t.Fatalf("docs body missing route listing: %q", docsResp.Body.String())
+	}
+	if strings.Contains(docsResp.Body.String(), "unpkg.com") {
+		t.Fatalf("docs body unexpectedly depends on CDN: %q", docsResp.Body.String())
 	}
 
 	redocResp := performCompatRequest(t, handler, http.MethodGet, "/redoc", nil, nil)
@@ -96,8 +102,11 @@ func TestGatewayOpenAPIDocumentationEndpoints(t *testing.T) {
 	if got := redocResp.Header().Get("Content-Type"); !strings.Contains(got, "text/html") {
 		t.Fatalf("redoc content-type=%q want html", got)
 	}
-	if !strings.Contains(redocResp.Body.String(), "<redoc ") && !strings.Contains(redocResp.Body.String(), "<redoc>") {
-		t.Fatalf("redoc body missing redoc element: %q", redocResp.Body.String())
+	if !strings.Contains(redocResp.Body.String(), "Offline route index") {
+		t.Fatalf("redoc body missing offline description: %q", redocResp.Body.String())
+	}
+	if strings.Contains(redocResp.Body.String(), "unpkg.com") {
+		t.Fatalf("redoc body unexpectedly depends on CDN: %q", redocResp.Body.String())
 	}
 }
 
@@ -711,7 +720,7 @@ func TestPersistedSessionsReloadMessagesTodosAndArtifacts(t *testing.T) {
 	}
 }
 
-func TestPersistedSessionsReloadIncludesWorkspaceArtifacts(t *testing.T) {
+func TestPersistedSessionsReloadOnlyAutoDiscoversOutputArtifacts(t *testing.T) {
 	s, _ := newCompatTestServer(t)
 	threadID := "thread-persisted-workspace"
 	session := s.ensureSession(threadID, map[string]any{"title": "Saved thread"})
@@ -762,8 +771,8 @@ func TestPersistedSessionsReloadIncludesWorkspaceArtifacts(t *testing.T) {
 	if !slices.Contains(artifacts, "/mnt/user-data/outputs/report.md") {
 		t.Fatalf("artifacts=%#v missing output artifact", artifacts)
 	}
-	if !slices.Contains(artifacts, "/mnt/user-data/workspace/drafts/notes.txt") {
-		t.Fatalf("artifacts=%#v missing workspace artifact", artifacts)
+	if slices.Contains(artifacts, "/mnt/user-data/workspace/drafts/notes.txt") {
+		t.Fatalf("artifacts=%#v unexpectedly included workspace artifact", artifacts)
 	}
 }
 
@@ -2299,6 +2308,132 @@ func TestSuggestionsEndpointUsesLLMResponse(t *testing.T) {
 	}
 	if !strings.Contains(provider.lastReq.Messages[0].Content, "Assistant: Hello") {
 		t.Fatalf("prompt missing assistant conversation: %q", provider.lastReq.Messages[0].Content)
+	}
+}
+
+func TestSuggestionsEndpointIncludesThreadContextHints(t *testing.T) {
+	provider := &titleProvider{response: `["先总结需求文档"]`}
+	s, handler := newCompatTestServer(t)
+	s.llmProvider = provider
+	s.defaultModel = "default-model"
+	s.sessions["t1"] = &Session{
+		ThreadID: "t1",
+		Metadata: map[string]any{
+			"title":      "客户门户改版",
+			"agent_name": "writer-bot",
+		},
+		PresentFiles: tools.NewPresentFileRegistry(),
+	}
+	s.agents["writer-bot"] = gatewayAgent{
+		Name:        "writer-bot",
+		Description: "擅长整理需求和交付文档",
+	}
+
+	outputDir := filepath.Join(s.threadRoot("t1"), "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	artifactPath := filepath.Join(outputDir, "spec-summary.md")
+	if err := os.WriteFile(artifactPath, []byte("# summary"), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+	if err := s.sessions["t1"].PresentFiles.Register(tools.PresentFile{
+		Path:       "/mnt/user-data/outputs/spec-summary.md",
+		SourcePath: artifactPath,
+	}); err != nil {
+		t.Fatalf("register artifact: %v", err)
+	}
+
+	uploadDir := s.uploadsDir("t1")
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "requirements.pdf"), []byte("pdf"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+
+	payload := `{"messages":[{"role":"user","content":"帮我梳理客户门户改版需求"},{"role":"assistant","content":"我先整理范围。"}],"n":1}`
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/t1/suggestions", strings.NewReader(payload), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	prompt := provider.lastReq.Messages[0].Content
+	for _, want := range []string{
+		"Thread title: 客户门户改版",
+		"Custom agent: writer-bot - 擅长整理需求和交付文档",
+		"Uploaded files: requirements.pdf",
+		"Generated artifacts: spec-summary.md",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q: %q", want, prompt)
+		}
+	}
+}
+
+func TestGatewayThreadFilesEndpointListsUploadsWorkspaceAndArtifacts(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-files-gateway"
+	session := s.ensureSession(threadID, nil)
+
+	outputDir := filepath.Join(s.threadRoot(threadID), "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	reportPath := filepath.Join(outputDir, "report.md")
+	if err := os.WriteFile(reportPath, []byte("# report"), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+	if err := session.PresentFiles.Register(tools.PresentFile{
+		Path:       "/mnt/user-data/outputs/report.md",
+		SourcePath: reportPath,
+	}); err != nil {
+		t.Fatalf("register present file: %v", err)
+	}
+
+	workspaceDir := filepath.Join(s.threadRoot(threadID), "workspace")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceDir, "notes.txt"), []byte("notes"), 0o644); err != nil {
+		t.Fatalf("write workspace file: %v", err)
+	}
+
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "requirements.pdf"), []byte("pdf"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "requirements.md"), []byte("# requirements"), 0o644); err != nil {
+		t.Fatalf("write upload markdown companion: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/files", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		Files []tools.PresentFile `json:"files"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	got := make([]string, 0, len(payload.Files))
+	for _, file := range payload.Files {
+		got = append(got, file.Path)
+	}
+	want := []string{
+		"/mnt/user-data/outputs/report.md",
+		"/mnt/user-data/workspace/notes.txt",
+		"/mnt/user-data/uploads/requirements.md",
+		"/mnt/user-data/uploads/requirements.pdf",
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("files=%v want=%v", got, want)
 	}
 }
 

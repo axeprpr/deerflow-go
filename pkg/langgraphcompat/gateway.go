@@ -179,6 +179,7 @@ func (s *Server) registerGatewayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/mcp/config", s.handleMCPConfigGet)
 	mux.HandleFunc("PUT /api/mcp/config", s.handleMCPConfigPut)
 	mux.HandleFunc("DELETE /api/threads/{thread_id}", s.handleGatewayThreadDelete)
+	mux.HandleFunc("GET /api/threads/{thread_id}/files", s.handleGatewayThreadFiles)
 	mux.HandleFunc("POST /api/threads/{thread_id}/uploads", s.handleUploadsCreate)
 	mux.HandleFunc("GET /api/threads/{thread_id}/uploads/list", s.handleUploadsList)
 	mux.HandleFunc("DELETE /api/threads/{thread_id}/uploads/{filename}", s.handleUploadsDelete)
@@ -680,6 +681,26 @@ func (s *Server) handleGatewayThreadDelete(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+func (s *Server) handleGatewayThreadFiles(w http.ResponseWriter, r *http.Request) {
+	threadID := strings.TrimSpace(r.PathValue("thread_id"))
+	if err := validateThreadID(threadID); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": err.Error()})
+		return
+	}
+
+	s.sessionsMu.RLock()
+	session := s.sessions[threadID]
+	s.sessionsMu.RUnlock()
+	if session == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"detail": "thread not found"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"files": s.sessionFiles(session),
+	})
+}
+
 func (s *Server) handleUploadsCreate(w http.ResponseWriter, r *http.Request) {
 	threadID := strings.TrimSpace(r.PathValue("thread_id"))
 	if err := validateThreadID(threadID); err != nil {
@@ -972,6 +993,7 @@ func (s *Server) handleSkillArchiveArtifactGet(w http.ResponseWriter, r *http.Re
 }
 
 func (s *Server) handleSuggestions(w http.ResponseWriter, r *http.Request) {
+	threadID := strings.TrimSpace(r.PathValue("thread_id"))
 	var req struct {
 		Messages []struct {
 			Role    string `json:"role"`
@@ -996,7 +1018,7 @@ func (s *Server) handleSuggestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	suggestions := s.generateSuggestions(r.Context(), req.Messages, req.N, req.ModelName)
+	suggestions := s.generateSuggestions(r.Context(), threadID, req.Messages, req.N, req.ModelName)
 	writeJSON(w, http.StatusOK, map[string]any{"suggestions": suggestions})
 }
 
@@ -1509,7 +1531,15 @@ func compactSubject(text string) string {
 	return text
 }
 
-func (s *Server) generateSuggestions(ctx context.Context, messages []struct {
+type suggestionContext struct {
+	Title     string
+	AgentName string
+	AgentHint string
+	Uploads   []string
+	Artifacts []string
+}
+
+func (s *Server) generateSuggestions(ctx context.Context, threadID string, messages []struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }, n int, modelName string) []string {
@@ -1521,15 +1551,16 @@ func (s *Server) generateSuggestions(ctx context.Context, messages []struct {
 	if conversation == "" {
 		return []string{}
 	}
+	hints := s.suggestionContext(threadID)
 
 	return finalizeSuggestions(
-		s.generateSuggestionsWithLLM(ctx, conversation, n, modelName),
-		fallbackSuggestions(messages, n),
+		s.generateSuggestionsWithLLM(ctx, conversation, hints, n, modelName),
+		fallbackSuggestions(messages, hints, n),
 		n,
 	)
 }
 
-func (s *Server) generateSuggestionsWithLLM(ctx context.Context, conversation string, n int, modelName string) []string {
+func (s *Server) generateSuggestionsWithLLM(ctx context.Context, conversation string, hints suggestionContext, n int, modelName string) []string {
 	provider := s.llmProvider
 	if provider == nil {
 		return nil
@@ -1542,7 +1573,7 @@ func (s *Server) generateSuggestionsWithLLM(ctx context.Context, conversation st
 			ID:        "suggestions-user",
 			SessionID: "suggestions",
 			Role:      models.RoleHuman,
-			Content:   buildSuggestionsPrompt(conversation, n),
+			Content:   buildSuggestionsPrompt(conversation, hints, n),
 		}},
 		MaxTokens: &maxTokens,
 	})
@@ -1560,18 +1591,44 @@ func (s *Server) generateSuggestionsWithLLM(ctx context.Context, conversation st
 	return suggestions
 }
 
-func buildSuggestionsPrompt(conversation string, n int) string {
+func buildSuggestionsPrompt(conversation string, hints suggestionContext, n int) string {
+	var contextLines []string
+	if title := strings.TrimSpace(hints.Title); title != "" {
+		contextLines = append(contextLines, "Thread title: "+title)
+	}
+	if agentName := strings.TrimSpace(hints.AgentName); agentName != "" {
+		line := "Custom agent: " + agentName
+		if agentHint := strings.TrimSpace(hints.AgentHint); agentHint != "" {
+			line += " - " + agentHint
+		}
+		contextLines = append(contextLines, line)
+	}
+	if len(hints.Uploads) > 0 {
+		contextLines = append(contextLines, "Uploaded files: "+strings.Join(hints.Uploads, ", "))
+	}
+	if len(hints.Artifacts) > 0 {
+		contextLines = append(contextLines, "Generated artifacts: "+strings.Join(hints.Artifacts, ", "))
+	}
+
+	extraContext := "None"
+	if len(contextLines) > 0 {
+		extraContext = strings.Join(contextLines, "\n")
+	}
+
 	return fmt.Sprintf(
 		"You are generating follow-up questions to help the user continue the conversation.\n"+
 			"Based on the conversation below, produce EXACTLY %d short questions the user might ask next.\n"+
 			"Requirements:\n"+
 			"- Questions must be relevant to the conversation.\n"+
+			"- Prefer questions that make use of the thread context when relevant.\n"+
 			"- Questions must be written in the same language as the user.\n"+
 			"- Keep each question concise (ideally <= 20 words / <= 40 Chinese characters).\n"+
 			"- Do NOT include numbering, markdown, or any extra text.\n"+
 			"- Output MUST be a JSON array of strings only.\n\n"+
+			"Thread context:\n%s\n\n"+
 			"Conversation:\n%s\n",
 		n,
+		extraContext,
 		conversation,
 	)
 }
@@ -1673,7 +1730,7 @@ func finalizeSuggestions(primary, fallback []string, n int) []string {
 func fallbackSuggestions(messages []struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
-}, n int) []string {
+}, hints suggestionContext, n int) []string {
 	lastUser := ""
 	for i := len(messages) - 1; i >= 0; i-- {
 		if strings.EqualFold(messages[i].Role, "user") || strings.EqualFold(messages[i].Role, "human") {
@@ -1682,9 +1739,88 @@ func fallbackSuggestions(messages []struct {
 		}
 	}
 	if lastUser == "" {
-		return []string{}
+		return contextFallbackSuggestions(hints, n)
 	}
 	return localizedFallbackSuggestions(lastUser, n)
+}
+
+func contextFallbackSuggestions(hints suggestionContext, n int) []string {
+	if n <= 0 {
+		return []string{}
+	}
+
+	suggestions := make([]string, 0, n)
+	if len(hints.Uploads) > 0 {
+		suggestions = append(suggestions,
+			"先概括这些上传文件的关键内容",
+			"这些文件里最值得我优先关注什么",
+		)
+	}
+	if len(hints.Artifacts) > 0 {
+		suggestions = append(suggestions,
+			"基于当前产物，下一步建议我做什么",
+			"帮我检查这些产物还有哪些需要完善",
+		)
+	}
+	if strings.TrimSpace(hints.AgentName) != "" {
+		suggestions = append(suggestions,
+			"继续用这个 agent 帮我细化下一步方案",
+		)
+	}
+	if len(suggestions) > n {
+		suggestions = suggestions[:n]
+	}
+	return suggestions
+}
+
+func (s *Server) suggestionContext(threadID string) suggestionContext {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" || s == nil {
+		return suggestionContext{}
+	}
+
+	s.sessionsMu.RLock()
+	session := s.sessions[threadID]
+	s.sessionsMu.RUnlock()
+	if session == nil {
+		return suggestionContext{}
+	}
+
+	ctx := suggestionContext{
+		Title: stringValue(session.Metadata["title"]),
+	}
+	if agentName, ok := normalizeAgentName(stringValue(session.Metadata["agent_name"])); ok {
+		ctx.AgentName = agentName
+		if agentCfg, exists := s.currentGatewayAgents()[agentName]; exists {
+			ctx.AgentHint = strings.TrimSpace(firstNonEmpty(agentCfg.Description, agentCfg.Soul))
+		}
+	}
+
+	files := s.listUploadedFiles(threadID)
+	ctx.Uploads = make([]string, 0, min(4, len(files)))
+	for _, info := range files {
+		if name := strings.TrimSpace(asString(info["filename"])); name != "" {
+			ctx.Uploads = append(ctx.Uploads, name)
+			if len(ctx.Uploads) == 4 {
+				break
+			}
+		}
+	}
+
+	artifactPaths := s.sessionArtifactPaths(session)
+	ctx.Artifacts = make([]string, 0, min(4, len(artifactPaths)))
+	for _, path := range artifactPaths {
+		name := strings.TrimSpace(filepath.Base(path))
+		if name == "" {
+			continue
+		}
+		ctx.Artifacts = append(ctx.Artifacts, name)
+		if len(ctx.Artifacts) == 4 {
+			break
+		}
+	}
+
+	return ctx
 }
 
 func nowUnix() int64 { return time.Now().UTC().Unix() }

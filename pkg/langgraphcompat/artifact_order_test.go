@@ -100,10 +100,10 @@ func TestPersistedSessionsReloadArtifactsNewestFirstFromDisk(t *testing.T) {
 	}
 }
 
-func TestThreadStateListsUploadMarkdownBeforeOriginalFile(t *testing.T) {
+func TestThreadFilesListUploadMarkdownBeforeOriginalFile(t *testing.T) {
 	s, _ := newCompatTestServer(t)
 	threadID := "thread-upload-artifact-order"
-	s.ensureSession(threadID, nil)
+	session := s.ensureSession(threadID, nil)
 
 	uploadDir := s.uploadsDir(threadID)
 	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
@@ -116,16 +116,14 @@ func TestThreadStateListsUploadMarkdownBeforeOriginalFile(t *testing.T) {
 		t.Fatalf("write markdown companion: %v", err)
 	}
 
-	state := s.getThreadState(threadID)
-	if state == nil {
-		t.Fatal("state is nil")
+	files := s.sessionFiles(session)
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		if strings.HasPrefix(file.Path, "/mnt/user-data/uploads/") {
+			paths = append(paths, file.Path)
+		}
 	}
-
-	artifacts, ok := state.Values["artifacts"].([]string)
-	if !ok {
-		t.Fatalf("artifacts=%#v", state.Values["artifacts"])
-	}
-	if strings.Join(artifacts, ",") != "/mnt/user-data/uploads/report.md,/mnt/user-data/uploads/report.pdf" {
-		t.Fatalf("artifacts=%#v", artifacts)
+	if strings.Join(paths, ",") != "/mnt/user-data/uploads/report.md,/mnt/user-data/uploads/report.pdf" {
+		t.Fatalf("paths=%#v", paths)
 	}
 }

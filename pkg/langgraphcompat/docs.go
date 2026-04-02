@@ -1,6 +1,12 @@
 package langgraphcompat
 
-import "net/http"
+import (
+	"bytes"
+	"html/template"
+	"net/http"
+	"sort"
+	"strings"
+)
 
 func (s *Server) registerDocsRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
@@ -13,44 +19,19 @@ func (s *Server) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSwaggerUI(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(`<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DeerFlow API Gateway Docs</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
-</head>
-<body>
-  <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-  <script>
-    window.ui = SwaggerUIBundle({
-      url: '/openapi.json',
-      dom_id: '#swagger-ui'
-    });
-  </script>
-</body>
-</html>
-`))
+	renderDocsPage(w, docsPageData{
+		Title:    "DeerFlow API Gateway Docs",
+		Subtitle: "Offline API reference generated from the built-in OpenAPI schema.",
+		Groups:   gatewayDocsGroups(),
+	})
 }
 
 func (s *Server) handleReDoc(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(`<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DeerFlow API Gateway ReDoc</title>
-</head>
-<body>
-  <redoc spec-url="/openapi.json"></redoc>
-  <script src="https://unpkg.com/redoc@next/bundles/redoc.standalone.js"></script>
-</body>
-</html>
-`))
+	renderDocsPage(w, docsPageData{
+		Title:    "DeerFlow API Gateway ReDoc",
+		Subtitle: "Offline route index for the DeerFlow gateway and LangGraph-compatible endpoints.",
+		Groups:   gatewayDocsGroups(),
+	})
 }
 
 func gatewayOpenAPISpec() map[string]any {
@@ -61,21 +42,25 @@ func gatewayOpenAPISpec() map[string]any {
 			"version":     "0.1.0",
 			"description": "Gateway and LangGraph-compatible API for deerflow-go.",
 		},
-		"tags": []map[string]any{
-			{"name": "models", "description": "Operations for querying available AI models and their configurations"},
-			{"name": "mcp", "description": "Manage Model Context Protocol (MCP) server configurations"},
-			{"name": "memory", "description": "Access and manage global memory data for personalized conversations"},
-			{"name": "skills", "description": "Manage skills and their configurations"},
-			{"name": "artifacts", "description": "Access and download thread artifacts and generated files"},
-			{"name": "uploads", "description": "Upload and manage user files for threads"},
-			{"name": "threads", "description": "Manage DeerFlow thread-local filesystem data"},
-			{"name": "agents", "description": "Create and manage custom agents with per-agent config and prompts"},
-			{"name": "suggestions", "description": "Generate follow-up question suggestions for conversations"},
-			{"name": "channels", "description": "Manage IM channel integrations"},
-			{"name": "health", "description": "Health check and system status endpoints"},
-			{"name": "langgraph", "description": "LangGraph-compatible thread and run endpoints"},
-		},
+		"tags":  gatewayOpenAPITags(),
 		"paths": gatewayOpenAPIPaths(),
+	}
+}
+
+func gatewayOpenAPITags() []map[string]any {
+	return []map[string]any{
+		{"name": "models", "description": "Operations for querying available AI models and their configurations"},
+		{"name": "mcp", "description": "Manage Model Context Protocol (MCP) server configurations"},
+		{"name": "memory", "description": "Access and manage global memory data for personalized conversations"},
+		{"name": "skills", "description": "Manage skills and their configurations"},
+		{"name": "artifacts", "description": "Access and download thread artifacts and generated files"},
+		{"name": "uploads", "description": "Upload and manage user files for threads"},
+		{"name": "threads", "description": "Manage DeerFlow thread-local filesystem data"},
+		{"name": "agents", "description": "Create and manage custom agents with per-agent config and prompts"},
+		{"name": "suggestions", "description": "Generate follow-up question suggestions for conversations"},
+		{"name": "channels", "description": "Manage IM channel integrations"},
+		{"name": "health", "description": "Health check and system status endpoints"},
+		{"name": "langgraph", "description": "LangGraph-compatible thread and run endpoints"},
 	}
 }
 
@@ -159,6 +144,9 @@ func gatewayOpenAPIPaths() map[string]any {
 		}),
 		"/api/threads/{thread_id}": pathItem(map[string]any{
 			"delete": operation("threads", "Delete Thread Data", "Delete thread-local gateway data."),
+		}),
+		"/api/threads/{thread_id}/files": pathItem(map[string]any{
+			"get": operation("threads", "List Thread Files", "List thread files across uploads, workspace, and outputs."),
 		}),
 		"/api/threads/{thread_id}/uploads": pathItem(map[string]any{
 			"post": operation("uploads", "Upload Files", "Upload files to a thread."),
@@ -281,4 +269,225 @@ func operation(tag, summary, description string) map[string]any {
 			"200": map[string]any{"description": "Successful response"},
 		},
 	}
+}
+
+type docsPageData struct {
+	Title    string
+	Subtitle string
+	Groups   []docsGroup
+}
+
+type docsGroup struct {
+	Name        string
+	Description string
+	Operations  []docsOperation
+}
+
+type docsOperation struct {
+	Method      string
+	Path        string
+	Summary     string
+	Description string
+}
+
+var docsPageTemplate = template.Must(template.New("gateway-docs").Parse(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f1ea;
+      --panel: #fffdf8;
+      --ink: #1e252b;
+      --muted: #56636d;
+      --line: #d8d1c5;
+      --accent: #0b6b8a;
+      --method-bg: #e8f2f5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+      background: linear-gradient(180deg, #efe7da 0%, var(--bg) 100%);
+      color: var(--ink);
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 20px 56px;
+    }
+    h1 { margin: 0 0 10px; font-size: 2.2rem; }
+    p.lead { margin: 0 0 20px; color: var(--muted); max-width: 72ch; }
+    a.schema {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+    }
+    section {
+      margin-top: 28px;
+      background: rgba(255, 253, 248, 0.88);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 22px 20px;
+      box-shadow: 0 10px 30px rgba(46, 39, 27, 0.06);
+    }
+    h2 { margin: 0 0 6px; font-size: 1.35rem; }
+    p.group { margin: 0 0 16px; color: var(--muted); }
+    article {
+      padding: 14px 0;
+      border-top: 1px solid var(--line);
+    }
+    article:first-of-type { border-top: 0; padding-top: 0; }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .method {
+      display: inline-block;
+      min-width: 64px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--method-bg);
+      color: var(--accent);
+      font: 700 0.78rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+      text-align: center;
+      letter-spacing: 0.04em;
+    }
+    code.path {
+      font: 600 0.95rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      word-break: break-word;
+    }
+    .summary { font-weight: 700; }
+    .description {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>{{.Title}}</h1>
+    <p class="lead">{{.Subtitle}}</p>
+    <p><a class="schema" href="/openapi.json">Open raw OpenAPI schema</a></p>
+    {{range .Groups}}
+    <section>
+      <h2>{{.Name}}</h2>
+      <p class="group">{{.Description}}</p>
+      {{range .Operations}}
+      <article>
+        <div class="row">
+          <span class="method">{{.Method}}</span>
+          <code class="path">{{.Path}}</code>
+        </div>
+        <div class="summary">{{.Summary}}</div>
+        <p class="description">{{.Description}}</p>
+      </article>
+      {{end}}
+    </section>
+    {{end}}
+  </main>
+</body>
+</html>
+`))
+
+func renderDocsPage(w http.ResponseWriter, data docsPageData) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	var buf bytes.Buffer
+	if err := docsPageTemplate.Execute(&buf, data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_, _ = w.Write(buf.Bytes())
+}
+
+func gatewayDocsGroups() []docsGroup {
+	tagDescriptions := make(map[string]string)
+	groupOrder := make([]string, 0)
+	for _, tag := range gatewayOpenAPITags() {
+		name := strings.TrimSpace(stringValue(tag["name"]))
+		if name == "" {
+			continue
+		}
+		tagDescriptions[name] = strings.TrimSpace(stringValue(tag["description"]))
+		groupOrder = append(groupOrder, name)
+	}
+
+	groups := make(map[string][]docsOperation)
+	for path, rawItem := range gatewayOpenAPIPaths() {
+		item, ok := rawItem.(map[string]any)
+		if !ok {
+			continue
+		}
+		for method, rawOperation := range item {
+			op, ok := rawOperation.(map[string]any)
+			if !ok {
+				continue
+			}
+			tag := "other"
+			if rawTags, ok := op["tags"].([]string); ok && len(rawTags) > 0 {
+				tag = strings.TrimSpace(rawTags[0])
+			} else if rawTags, ok := op["tags"].([]any); ok && len(rawTags) > 0 {
+				tag = strings.TrimSpace(stringValue(rawTags[0]))
+			}
+			groups[tag] = append(groups[tag], docsOperation{
+				Method:      strings.ToUpper(method),
+				Path:        path,
+				Summary:     strings.TrimSpace(stringValue(op["summary"])),
+				Description: strings.TrimSpace(stringValue(op["description"])),
+			})
+		}
+	}
+
+	out := make([]docsGroup, 0, len(groups))
+	seen := make(map[string]struct{}, len(groups))
+	for _, tag := range groupOrder {
+		ops := groups[tag]
+		if len(ops) == 0 {
+			continue
+		}
+		sort.Slice(ops, func(i, j int) bool {
+			if ops[i].Path == ops[j].Path {
+				return ops[i].Method < ops[j].Method
+			}
+			return ops[i].Path < ops[j].Path
+		})
+		out = append(out, docsGroup{
+			Name:        tag,
+			Description: tagDescriptions[tag],
+			Operations:  ops,
+		})
+		seen[tag] = struct{}{}
+	}
+
+	var extras []string
+	for tag := range groups {
+		if _, ok := seen[tag]; ok {
+			continue
+		}
+		extras = append(extras, tag)
+	}
+	sort.Strings(extras)
+	for _, tag := range extras {
+		ops := groups[tag]
+		sort.Slice(ops, func(i, j int) bool {
+			if ops[i].Path == ops[j].Path {
+				return ops[i].Method < ops[j].Method
+			}
+			return ops[i].Path < ops[j].Path
+		})
+		out = append(out, docsGroup{
+			Name:        tag,
+			Description: tagDescriptions[tag],
+			Operations:  ops,
+		})
+	}
+
+	return out
 }

@@ -47,6 +47,7 @@ var (
 type webSearchResult struct {
 	Title   string `json:"title"`
 	URL     string `json:"url"`
+	Snippet string `json:"snippet,omitempty"`
 	Content string `json:"content,omitempty"`
 }
 
@@ -295,6 +296,7 @@ func parseDuckDuckGoResults(body string, maxResults int) []webSearchResult {
 		results = append(results, webSearchResult{
 			Title:   title,
 			URL:     link,
+			Snippet: snippet,
 			Content: snippet,
 		})
 		if len(results) >= maxResults {

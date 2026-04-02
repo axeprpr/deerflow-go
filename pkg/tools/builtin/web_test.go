@@ -91,6 +91,12 @@ func TestWebSearchHandler(t *testing.T) {
 	if !strings.Contains(result.Content, `"title":"Result One"`) || !strings.Contains(result.Content, `"title":"Result Two"`) {
 		t.Fatalf("content=%q missing result", result.Content)
 	}
+	if !strings.Contains(result.Content, `"snippet":"Snippet One"`) || !strings.Contains(result.Content, `"snippet":"Snippet Two"`) {
+		t.Fatalf("content=%q missing snippet field", result.Content)
+	}
+	if !strings.Contains(result.Content, `"content":"Snippet One"`) || !strings.Contains(result.Content, `"content":"Snippet Two"`) {
+		t.Fatalf("content=%q missing legacy content field", result.Content)
+	}
 }
 
 func TestWebFetchHandler(t *testing.T) {

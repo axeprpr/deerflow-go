@@ -954,6 +954,9 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 			Role:    "assistant",
 			Content: evt.Text,
 		}
+		if kwargs := decodeAdditionalKwargs(evt.Metadata); len(kwargs) > 0 {
+			msg.AdditionalKwargs = kwargs
+		}
 		if usage := usageMetadataFromAgentUsage(evt.Usage); len(usage) > 0 {
 			msg.UsageMetadata = usage
 		}

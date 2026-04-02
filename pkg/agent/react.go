@@ -263,6 +263,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 				Type:      AgentEventEnd,
 				MessageID: aiMessageID,
 				Text:      assistantMessage.Content,
+				Metadata:  assistantMessage.Metadata,
 				Usage:     cloneUsage(usage),
 			})
 			return &RunResult{
@@ -290,6 +291,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 					Type:      AgentEventEnd,
 					MessageID: aiMessageID,
 					Text:      finalOutput,
+					Metadata:  assistantMessage.Metadata,
 					Usage:     cloneUsage(usage),
 				})
 				return &RunResult{
