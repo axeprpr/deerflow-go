@@ -983,9 +983,7 @@ func uploadMarkdownPreview(absPath, artifactPath string, download bool) (string,
 	if !strings.HasPrefix(artifactPath, "mnt/user-data/uploads/") && !strings.HasPrefix(artifactPath, "/mnt/user-data/uploads/") {
 		return "", "", false
 	}
-	switch strings.ToLower(filepath.Ext(absPath)) {
-	case ".pdf", ".ppt", ".pptx", ".xls", ".xlsx", ".doc", ".docx":
-	default:
+	if !shouldPreferUploadMarkdownPreview(filepath.Ext(absPath)) {
 		return "", "", false
 	}
 
@@ -995,6 +993,15 @@ func uploadMarkdownPreview(absPath, artifactPath string, download bool) (string,
 		return "", "", false
 	}
 	return filepath.Base(previewPath), previewPath, true
+}
+
+func shouldPreferUploadMarkdownPreview(ext string) bool {
+	switch strings.ToLower(strings.TrimSpace(ext)) {
+	case ".pdf", ".ppt", ".pptx", ".xls", ".xlsx", ".doc", ".docx", ".csv", ".tsv", ".json", ".yaml", ".yml":
+		return true
+	default:
+		return false
+	}
 }
 
 func shouldRewriteArtifactText(filename, mimeType string) bool {

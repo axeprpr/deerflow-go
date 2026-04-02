@@ -1282,14 +1282,14 @@ func TestArtifactEndpointDownloadKeepsOriginalMarkdownPaths(t *testing.T) {
 	}
 }
 
-func TestArtifactEndpointServesUploadMarkdownPreviewForOfficeAndPDFFiles(t *testing.T) {
+func TestArtifactEndpointServesUploadMarkdownPreviewForConvertibleUploads(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	threadID := "thread-upload-preview"
 	uploadDir := s.uploadsDir(threadID)
 	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
 		t.Fatalf("mkdir uploads dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(uploadDir, "brief.pdf"), []byte("%PDF-1.7"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(uploadDir, "brief.json"), []byte(`{"title":"Brief"}`), 0o644); err != nil {
 		t.Fatalf("write upload: %v", err)
 	}
 	const preview = "# Brief\n\nConverted preview.\n"
@@ -1297,7 +1297,7 @@ func TestArtifactEndpointServesUploadMarkdownPreviewForOfficeAndPDFFiles(t *test
 		t.Fatalf("write upload preview: %v", err)
 	}
 
-	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/brief.pdf", nil, nil)
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/brief.json", nil, nil)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
 	}
