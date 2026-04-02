@@ -405,6 +405,44 @@ func TestConvertYAMLToMarkdownWrapsContentInCodeFence(t *testing.T) {
 	}
 }
 
+func TestConvertPlainTextToMarkdownPreservesReadableText(t *testing.T) {
+	path := writeTempFile(t, "notes.txt", []byte("first line\nsecond line\n"))
+
+	md, err := convertUploadedDocumentToMarkdown(path, ".txt")
+	if err != nil {
+		t.Fatalf("convert txt: %v", err)
+	}
+	for _, want := range []string{
+		"# notes.txt",
+		"first line",
+		"second line",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown missing %q: %q", want, md)
+		}
+	}
+	if strings.Contains(md, "```") {
+		t.Fatalf("plain text should not be wrapped in fences: %q", md)
+	}
+}
+
+func TestConvertHTMLToMarkdownWrapsMarkupInCodeFence(t *testing.T) {
+	path := writeTempFile(t, "page.html", []byte("<html><body><h1>Hello</h1></body></html>\n"))
+
+	md, err := convertUploadedDocumentToMarkdown(path, ".html")
+	if err != nil {
+		t.Fatalf("convert html: %v", err)
+	}
+	for _, want := range []string{
+		"```html",
+		"<h1>Hello</h1>",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown missing %q: %q", want, md)
+		}
+	}
+}
+
 type pdfCompressionMode int
 
 const (

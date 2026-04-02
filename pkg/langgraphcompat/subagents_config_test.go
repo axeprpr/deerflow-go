@@ -133,3 +133,26 @@ func TestGatewayDefaultSubagentConfigsMatchUpstreamTurns(t *testing.T) {
 		t.Fatalf("bash max turns=%d want=%d", bash.MaxTurns, defaultGatewayBashSubagentMaxTurns)
 	}
 }
+
+func TestLoadSubagentsAppConfigReadsModernEnvName(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+subagents:
+  timeout_seconds: 42
+  agents:
+    bash:
+      max_turns: 5
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("DEERFLOW_CONFIG_PATH", configPath)
+
+	cfg := loadSubagentsAppConfig()
+	if cfg.TimeoutSeconds != 42 {
+		t.Fatalf("TimeoutSeconds=%d want=42", cfg.TimeoutSeconds)
+	}
+	if got := cfg.maxTurnsFor(subagent.SubagentBash, 1); got != 5 {
+		t.Fatalf("maxTurnsFor bash=%d want=5", got)
+	}
+}

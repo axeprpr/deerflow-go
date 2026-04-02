@@ -22,18 +22,29 @@ import (
 )
 
 var convertibleUploadExtensions = map[string]struct{}{
-	".pdf":  {},
-	".ppt":  {},
-	".pptx": {},
-	".xls":  {},
-	".xlsx": {},
-	".doc":  {},
-	".docx": {},
-	".csv":  {},
-	".tsv":  {},
-	".json": {},
-	".yaml": {},
-	".yml":  {},
+	".pdf":   {},
+	".ppt":   {},
+	".pptx":  {},
+	".xls":   {},
+	".xlsx":  {},
+	".doc":   {},
+	".docx":  {},
+	".csv":   {},
+	".tsv":   {},
+	".json":  {},
+	".txt":   {},
+	".log":   {},
+	".ini":   {},
+	".cfg":   {},
+	".conf":  {},
+	".env":   {},
+	".toml":  {},
+	".xml":   {},
+	".html":  {},
+	".htm":   {},
+	".xhtml": {},
+	".yaml":  {},
+	".yml":   {},
 }
 
 const (
@@ -85,6 +96,18 @@ func convertUploadedDocumentToMarkdown(path string, ext string) (string, error) 
 		return convertDelimitedTextToMarkdown(path, '\t', "TSV")
 	case ".json":
 		return convertJSONToMarkdown(path)
+	case ".txt", ".log":
+		return convertPlainTextToMarkdown(path, "")
+	case ".ini", ".cfg", ".conf":
+		return convertPlainTextToMarkdown(path, "ini")
+	case ".env":
+		return convertPlainTextToMarkdown(path, "dotenv")
+	case ".toml":
+		return convertPlainTextToMarkdown(path, "toml")
+	case ".xml":
+		return convertPlainTextToMarkdown(path, "xml")
+	case ".html", ".htm", ".xhtml":
+		return convertPlainTextToMarkdown(path, "html")
 	case ".yaml", ".yml":
 		return convertYAMLToMarkdown(path)
 	default:
@@ -201,6 +224,25 @@ func convertYAMLToMarkdown(path string) (string, error) {
 		text,
 		"```",
 	}, "\n") + "\n", nil
+}
+
+func convertPlainTextToMarkdown(path string, language string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	text := strings.TrimSpace(string(data))
+	if text == "" {
+		return "", nil
+	}
+
+	sections := []string{"# " + filepath.Base(path), ""}
+	if language == "" {
+		sections = append(sections, text)
+		return strings.Join(sections, "\n") + "\n", nil
+	}
+	sections = append(sections, "```"+language, text, "```")
+	return strings.Join(sections, "\n") + "\n", nil
 }
 
 func convertDOCXToMarkdown(path string) (string, error) {

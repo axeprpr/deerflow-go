@@ -22,11 +22,11 @@ type channelInfo struct {
 }
 
 type gatewayChannelService struct {
-	mu            sync.RWMutex
-	configured    bool
-	config        gatewayChannelsConfig
-	running       bool
-	channels      map[string]channelInfo
+	mu         sync.RWMutex
+	configured bool
+	config     gatewayChannelsConfig
+	running    bool
+	channels   map[string]channelInfo
 }
 
 type gatewayChannelsConfig struct {
@@ -109,11 +109,13 @@ func loadGatewayChannelConfig() (gatewayChannelsConfig, bool) {
 }
 
 func resolveGatewayConfigPath() (string, bool) {
-	if path := strings.TrimSpace(os.Getenv("DEER_FLOW_CONFIG_PATH")); path != "" {
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			return path, true
+	for _, key := range []string{"DEERFLOW_CONFIG_PATH", "DEER_FLOW_CONFIG_PATH"} {
+		if path := strings.TrimSpace(os.Getenv(key)); path != "" {
+			if info, err := os.Stat(path); err == nil && !info.IsDir() {
+				return path, true
+			}
+			return "", false
 		}
-		return "", false
 	}
 
 	wd, err := os.Getwd()

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -110,6 +111,7 @@ var skillInstallSeq uint64
 var agentNameRE = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
 var threadIDRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 var skillFrontmatterNameRE = regexp.MustCompile(`^[a-z0-9-]+$`)
+var windowsAbsolutePathRE = regexp.MustCompile(`^[A-Za-z]:[\\/].*`)
 
 type gatewayAgent struct {
 	Name        string   `json:"name"`
@@ -204,6 +206,7 @@ func (s *Server) handleModelGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
+	s.refreshGatewayExtensionsConfig()
 	currentSkills := s.currentGatewaySkills()
 	skills := make([]gatewaySkill, 0, len(currentSkills))
 	for _, skill := range currentSkills {
@@ -219,6 +222,7 @@ func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSkillGet(w http.ResponseWriter, r *http.Request) {
+	s.refreshGatewayExtensionsConfig()
 	name := strings.TrimSpace(r.PathValue("skill_name"))
 	category := strings.TrimSpace(r.URL.Query().Get("category"))
 	skill, ok := findGatewaySkill(s.currentGatewaySkills(), name, category)
@@ -230,6 +234,7 @@ func (s *Server) handleSkillGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSkillSetEnabled(w http.ResponseWriter, r *http.Request) {
+	s.refreshGatewayExtensionsConfig()
 	var req struct {
 		Enabled bool `json:"enabled"`
 	}
@@ -258,6 +263,7 @@ func (s *Server) updateSkillEnabled(w http.ResponseWriter, r *http.Request, enab
 
 	currentSkills := s.currentGatewaySkills()
 	s.uiStateMu.Lock()
+	previousSkills := cloneGatewaySkills(s.skills)
 	key, skill, ok := findGatewaySkillEntry(currentSkills, name, category)
 	if !ok {
 		s.uiStateMu.Unlock()
@@ -268,6 +274,9 @@ func (s *Server) updateSkillEnabled(w http.ResponseWriter, r *http.Request, enab
 	s.skills[key] = skill
 	s.uiStateMu.Unlock()
 	if err := s.persistGatewayState(); err != nil {
+		s.uiStateMu.Lock()
+		s.skills = previousSkills
+		s.uiStateMu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
 		return
 	}
@@ -316,12 +325,14 @@ func (s *Server) handleSkillInstall(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMCPConfigGet(w http.ResponseWriter, r *http.Request) {
+	s.refreshGatewayExtensionsConfig()
 	s.uiStateMu.RLock()
 	defer s.uiStateMu.RUnlock()
 	writeJSON(w, http.StatusOK, s.mcpConfig)
 }
 
 func (s *Server) handleMCPConfigPut(w http.ResponseWriter, r *http.Request) {
+	s.refreshGatewayExtensionsConfig()
 	var req gatewayMCPConfig
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid request body"})
@@ -330,10 +341,15 @@ func (s *Server) handleMCPConfigPut(w http.ResponseWriter, r *http.Request) {
 	req = normalizeGatewayMCPConfig(req)
 
 	s.uiStateMu.Lock()
+	previousConfig := cloneGatewayMCPConfig(s.mcpConfig)
 	s.mcpConfig = req
 	s.uiStateMu.Unlock()
 	s.applyGatewayMCPConfig(r.Context(), req)
 	if err := s.persistGatewayState(); err != nil {
+		s.uiStateMu.Lock()
+		s.mcpConfig = previousConfig
+		s.uiStateMu.Unlock()
+		s.applyGatewayMCPConfig(r.Context(), previousConfig)
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
 		return
 	}
@@ -551,17 +567,28 @@ func (s *Server) handleUserProfilePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.uiStateMu.Lock()
+	previous := s.getUserProfileLocked()
 	s.setUserProfileLocked(req.Content)
 	s.uiStateMu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(s.userProfilePath()), 0o755); err != nil {
+		s.uiStateMu.Lock()
+		s.setUserProfileLocked(previous)
+		s.uiStateMu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist user profile"})
 		return
 	}
 	if err := os.WriteFile(s.userProfilePath(), []byte(req.Content), 0o644); err != nil {
+		s.uiStateMu.Lock()
+		s.setUserProfileLocked(previous)
+		s.uiStateMu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist user profile"})
 		return
 	}
 	if err := s.persistGatewayState(); err != nil {
+		_ = os.WriteFile(s.userProfilePath(), []byte(previous), 0o644)
+		s.uiStateMu.Lock()
+		s.setUserProfileLocked(previous)
+		s.uiStateMu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
 		return
 	}
@@ -2047,8 +2074,14 @@ func (s *Server) installSkillArchive(archivePath string) (gatewaySkill, error) {
 
 	var written int64
 	for _, f := range zipReader.File {
-		if strings.Contains(f.Name, "..") || strings.HasPrefix(f.Name, "/") || strings.HasPrefix(f.Name, "\\") {
+		if isUnsafeSkillArchiveMember(f.Name) {
 			return gatewaySkill{}, errors.New("archive contains unsafe path")
+		}
+		if shouldIgnoreSkillArchiveMember(f.Name) {
+			continue
+		}
+		if f.Mode()&os.ModeSymlink != 0 {
+			continue
 		}
 		target := filepath.Join(tempDir, filepath.FromSlash(f.Name))
 		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(tempDir)+string(filepath.Separator)) {
@@ -2116,37 +2149,112 @@ func (s *Server) installSkillArchive(archivePath string) (gatewaySkill, error) {
 	}
 
 	s.uiStateMu.Lock()
+	previousSkills := cloneGatewaySkills(s.skills)
 	if s.skills == nil {
 		s.skills = map[string]gatewaySkill{}
 	}
 	s.skills[skillStorageKey(skill.Category, skill.Name)] = skill
 	s.uiStateMu.Unlock()
 	if err := s.persistGatewayState(); err != nil {
+		s.uiStateMu.Lock()
+		s.skills = previousSkills
+		s.uiStateMu.Unlock()
+		_ = os.RemoveAll(targetDir)
 		return gatewaySkill{}, err
 	}
 	return skill, nil
 }
 
+func isUnsafeSkillArchiveMember(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	if strings.HasPrefix(name, "/") || strings.HasPrefix(name, "\\") || windowsAbsolutePathRE.MatchString(name) {
+		return true
+	}
+
+	cleaned := path.Clean(strings.ReplaceAll(name, "\\", "/"))
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return true
+	}
+	for _, part := range strings.Split(cleaned, "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldIgnoreSkillArchiveMember(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+
+	cleaned := path.Clean(strings.ReplaceAll(name, "\\", "/"))
+	if cleaned == "." {
+		return false
+	}
+	for _, part := range strings.Split(cleaned, "/") {
+		switch {
+		case part == "", part == ".":
+			continue
+		case part == "__MACOSX":
+			return true
+		case strings.HasPrefix(part, "."):
+			return true
+		}
+	}
+	return false
+}
+
 func resolveArchiveSkillRoot(tempDir string) (string, error) {
-	entries, err := os.ReadDir(tempDir)
+	var (
+		candidates []string
+		safeEntry  bool
+	)
+
+	err := filepath.WalkDir(tempDir, func(current string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if current == tempDir {
+			return nil
+		}
+
+		rel, err := filepath.Rel(tempDir, current)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if shouldIgnoreSkillArchiveMember(rel) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		safeEntry = true
+		if !d.IsDir() && strings.EqualFold(d.Name(), "SKILL.md") {
+			candidates = append(candidates, filepath.Dir(current))
+		}
+		return nil
+	})
 	if err != nil {
 		return "", err
 	}
-	filtered := make([]os.DirEntry, 0, len(entries))
-	for _, e := range entries {
-		name := e.Name()
-		if strings.HasPrefix(name, ".") || name == "__MACOSX" {
-			continue
-		}
-		filtered = append(filtered, e)
-	}
-	if len(filtered) == 0 {
+	if !safeEntry {
 		return "", errors.New("skill archive is empty")
 	}
-	if len(filtered) == 1 && filtered[0].IsDir() {
-		return filepath.Join(tempDir, filtered[0].Name()), nil
+	switch len(candidates) {
+	case 0:
+		return tempDir, nil
+	case 1:
+		return candidates[0], nil
+	default:
+		return "", errors.New("invalid skill: archive must contain exactly one SKILL.md")
 	}
-	return tempDir, nil
 }
 
 func validateSkillFrontmatter(content string) (map[string]string, error) {
@@ -2454,6 +2562,17 @@ func mergeGatewaySkills(base, overlay map[string]gatewaySkill) map[string]gatewa
 	return merged
 }
 
+func cloneGatewaySkills(src map[string]gatewaySkill) map[string]gatewaySkill {
+	if len(src) == 0 {
+		return map[string]gatewaySkill{}
+	}
+	out := make(map[string]gatewaySkill, len(src))
+	for key, skill := range src {
+		out[key] = skill
+	}
+	return out
+}
+
 func normalizeGatewaySkill(skill gatewaySkill, fallbackName, fallbackCategory string) gatewaySkill {
 	skill.Name = sanitizeSkillName(firstNonEmpty(skill.Name, fallbackName))
 	if fallbackCategory == "" {
@@ -2557,6 +2676,12 @@ func normalizeGatewayMCPConfig(cfg gatewayMCPConfig) gatewayMCPConfig {
 		merged.MCPServers[name] = cloneGatewayMCPServerConfig(server)
 	}
 	return merged
+}
+
+func cloneGatewayMCPConfig(cfg gatewayMCPConfig) gatewayMCPConfig {
+	return gatewayMCPConfig{
+		MCPServers: cloneGatewayMCPServers(cfg.MCPServers),
+	}
 }
 
 func defaultGatewayMemory() gatewayMemoryResponse {
@@ -2723,8 +2848,10 @@ func configuredGatewayModelsFromConfig(defaultModel string) []gatewayModel {
 }
 
 func gatewayModelCatalogConfigPath() string {
-	if path := strings.TrimSpace(os.Getenv("DEERFLOW_CONFIG_PATH")); path != "" {
-		return path
+	for _, key := range []string{"DEERFLOW_CONFIG_PATH", "DEER_FLOW_CONFIG_PATH"} {
+		if path := strings.TrimSpace(os.Getenv(key)); path != "" {
+			return path
+		}
 	}
 
 	const defaultConfigPath = "config.yaml"

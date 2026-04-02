@@ -108,6 +108,15 @@ func (s *Server) loadGatewayExtensionsConfig() error {
 	return nil
 }
 
+func (s *Server) refreshGatewayExtensionsConfig() {
+	if s == nil {
+		return
+	}
+	if err := s.loadGatewayExtensionsConfig(); err != nil && s.logger != nil {
+		s.logger.Printf("Warning: failed to refresh gateway extensions config: %v", err)
+	}
+}
+
 func resolveGatewayExtensionsEnvVariables(value any) any {
 	switch v := value.(type) {
 	case map[string]any:

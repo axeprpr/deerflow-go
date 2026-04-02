@@ -68,3 +68,25 @@ models:
 		t.Fatalf("first duplicate should win, got %q", models[0].Model)
 	}
 }
+
+func TestConfiguredGatewayModelsFromLegacyConfigEnvPath(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+models:
+  - name: legacy
+    model: provider/legacy
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	t.Setenv("DEER_FLOW_CONFIG_PATH", configPath)
+
+	models := configuredGatewayModels("fallback-model")
+	if len(models) != 1 {
+		t.Fatalf("models=%d want=1", len(models))
+	}
+	if models[0].Name != "legacy" || models[0].Model != "provider/legacy" {
+		t.Fatalf("models=%#v", models)
+	}
+}

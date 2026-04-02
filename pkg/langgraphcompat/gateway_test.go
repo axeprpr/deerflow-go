@@ -2938,6 +2938,48 @@ func TestLoadGatewayStateReadsExtensionsConfigCompatibilityFile(t *testing.T) {
 	}
 }
 
+func TestSkillsGetRefreshesExtensionsConfigCompatibilityFile(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "extensions_config.json")
+	t.Setenv("DEERFLOW_EXTENSIONS_CONFIG_PATH", configPath)
+
+	if err := os.WriteFile(configPath, []byte(`{
+  "mcpServers": {},
+  "skills": {
+    "deep-research": {
+      "enabled": false
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatalf("write initial extensions config: %v", err)
+	}
+
+	_, handler := newCompatTestServer(t)
+
+	if err := os.WriteFile(configPath, []byte(`{
+  "mcpServers": {},
+  "skills": {
+    "deep-research": {
+      "enabled": true
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatalf("write updated extensions config: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/skills/deep-research", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var skill gatewaySkill
+	if err := json.NewDecoder(resp.Body).Decode(&skill); err != nil {
+		t.Fatalf("decode skill: %v", err)
+	}
+	if !skill.Enabled {
+		t.Fatalf("skill.Enabled=%v want true after refresh", skill.Enabled)
+	}
+}
+
 func TestSkillSetEnabledPersistsExtensionsConfigCompatibilityFile(t *testing.T) {
 	_, handler := newCompatTestServer(t)
 	configPath := filepath.Join(t.TempDir(), "extensions_config.json")
@@ -2990,6 +3032,60 @@ func TestMCPConfigPutPersistsExtensionsConfigCompatibilityFile(t *testing.T) {
 	}
 	if !server.Enabled || server.Command != "npx" {
 		t.Fatalf("persisted github server=%#v", server)
+	}
+}
+
+func TestMCPConfigGetRefreshesExtensionsConfigCompatibilityFile(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "extensions_config.json")
+	t.Setenv("DEERFLOW_EXTENSIONS_CONFIG_PATH", configPath)
+
+	if err := os.WriteFile(configPath, []byte(`{
+  "mcpServers": {
+    "github": {
+      "enabled": false,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "description": "GitHub tools"
+    }
+  },
+  "skills": {}
+}`), 0o644); err != nil {
+		t.Fatalf("write initial extensions config: %v", err)
+	}
+
+	_, handler := newCompatTestServer(t)
+
+	if err := os.WriteFile(configPath, []byte(`{
+  "mcpServers": {
+    "github": {
+      "enabled": true,
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "description": "GitHub tools refreshed"
+    }
+  },
+  "skills": {}
+}`), 0o644); err != nil {
+		t.Fatalf("write updated extensions config: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/mcp/config", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var cfg gatewayMCPConfig
+	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
+		t.Fatalf("decode mcp config: %v", err)
+	}
+	server, ok := cfg.MCPServers["github"]
+	if !ok {
+		t.Fatalf("missing github server after refresh: %#v", cfg.MCPServers)
+	}
+	if !server.Enabled || server.Description != "GitHub tools refreshed" {
+		t.Fatalf("github server=%#v want enabled refreshed description", server)
 	}
 }
 
@@ -3659,6 +3755,129 @@ license: MIT
 	}
 	if !skill.Enabled {
 		t.Fatal("expected skill to be enabled")
+	}
+}
+
+func TestSkillToggleRollsBackOnPersistFailure(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	if err := os.MkdirAll(s.gatewayStatePath(), 0o755); err != nil {
+		t.Fatalf("mkdir gateway state path: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/skills/deep-research/disable", nil, nil)
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("disable status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	getResp := performCompatRequest(t, handler, http.MethodGet, "/api/skills/deep-research", nil, nil)
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", getResp.Code, getResp.Body.String())
+	}
+
+	var skill gatewaySkill
+	if err := json.NewDecoder(getResp.Body).Decode(&skill); err != nil {
+		t.Fatalf("decode skill: %v", err)
+	}
+	if !skill.Enabled {
+		t.Fatalf("skill=%#v want enabled after rollback", skill)
+	}
+}
+
+func TestMCPConfigPutRollsBackOnPersistFailure(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	if err := os.MkdirAll(s.gatewayStatePath(), 0o755); err != nil {
+		t.Fatalf("mkdir gateway state path: %v", err)
+	}
+
+	body := `{"mcp_servers":{"github":{"enabled":true,"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-github"],"env":{"GITHUB_TOKEN":"$GITHUB_TOKEN"},"description":"GitHub MCP server"}}}`
+	resp := performCompatRequest(t, handler, http.MethodPut, "/api/mcp/config", strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("put status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	getResp := performCompatRequest(t, handler, http.MethodGet, "/api/mcp/config", nil, nil)
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", getResp.Code, getResp.Body.String())
+	}
+
+	var cfg gatewayMCPConfig
+	if err := json.NewDecoder(getResp.Body).Decode(&cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.MCPServers["github"].Enabled {
+		t.Fatalf("github=%#v want disabled after rollback", cfg.MCPServers["github"])
+	}
+}
+
+func TestUserProfilePutRollsBackOnPersistFailure(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	s.uiStateMu.Lock()
+	s.setUserProfileLocked("before")
+	s.uiStateMu.Unlock()
+	if err := os.MkdirAll(filepath.Dir(s.userProfilePath()), 0o755); err != nil {
+		t.Fatalf("mkdir user profile dir: %v", err)
+	}
+	if err := os.WriteFile(s.userProfilePath(), []byte("before"), 0o644); err != nil {
+		t.Fatalf("write initial user profile: %v", err)
+	}
+	if err := os.MkdirAll(s.gatewayStatePath(), 0o755); err != nil {
+		t.Fatalf("mkdir gateway state path: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPut, "/api/user-profile", strings.NewReader(`{"content":"after"}`), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("put status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	getResp := performCompatRequest(t, handler, http.MethodGet, "/api/user-profile", nil, nil)
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", getResp.Code, getResp.Body.String())
+	}
+	var payload struct {
+		Content *string `json:"content"`
+	}
+	if err := json.NewDecoder(getResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode profile: %v", err)
+	}
+	if payload.Content == nil || *payload.Content != "before" {
+		t.Fatalf("content=%v want before", payload.Content)
+	}
+
+	data, err := os.ReadFile(s.userProfilePath())
+	if err != nil {
+		t.Fatalf("read user profile: %v", err)
+	}
+	if string(data) != "before" {
+		t.Fatalf("user profile file=%q want before", string(data))
+	}
+}
+
+func TestSkillInstallRollsBackOnPersistFailure(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	threadID := "thread-install-rollback"
+	archiveName := "sample.skill"
+	writeTestSkillArchive(t, filepath.Join(s.uploadsDir(threadID), archiveName))
+	if err := os.MkdirAll(s.gatewayStatePath(), 0o755); err != nil {
+		t.Fatalf("mkdir gateway state path: %v", err)
+	}
+
+	body := `{"thread_id":"` + threadID + `","path":"` + uploadArtifactURL(threadID, archiveName) + `"}`
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/skills/install", strings.NewReader(body), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("install status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	if _, err := os.Stat(filepath.Join(s.gatewayCustomSkillsRoot(), "sample-skill")); !os.IsNotExist(err) {
+		t.Fatalf("installed skill dir should be removed, stat err=%v", err)
+	}
+
+	getResp := performCompatRequest(t, handler, http.MethodGet, "/api/skills/sample-skill?category=custom", nil, nil)
+	if getResp.Code != http.StatusNotFound {
+		t.Fatalf("get status=%d body=%s", getResp.Code, getResp.Body.String())
 	}
 }
 

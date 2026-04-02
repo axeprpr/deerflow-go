@@ -141,6 +141,32 @@ guardrails:
 	}
 }
 
+func TestLoadConfigFromFileSupportsModernEnvName(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	data := `
+guardrails:
+  enabled: true
+  provider:
+    use: deerflow.guardrails.builtin:AllowlistProvider
+    config:
+      denied_tools:
+        - bash
+`
+	if err := os.WriteFile(configPath, []byte(strings.TrimSpace(data)), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	t.Setenv("DEERFLOW_CONFIG_PATH", configPath)
+
+	cfg := LoadConfigFromEnv()
+	if !cfg.Enabled {
+		t.Fatal("Enabled = false want true")
+	}
+	if got := len(cfg.DeniedTools); got != 1 || cfg.DeniedTools[0] != "bash" {
+		t.Fatalf("DeniedTools = %#v want [bash]", cfg.DeniedTools)
+	}
+}
+
 func TestLoadConfigFromEnvOverridesFile(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	data := `

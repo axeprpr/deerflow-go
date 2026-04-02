@@ -120,6 +120,40 @@ channels:
 	}
 }
 
+func TestChannelsStatusReadsConfigFromModernEnvName(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+channels:
+  telegram:
+    enabled: true
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("DEERFLOW_CONFIG_PATH", configPath)
+
+	_, handler := newCompatTestServer(t)
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/channels", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		ServiceRunning bool                   `json:"service_running"`
+		Channels       map[string]channelInfo `json:"channels"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !payload.ServiceRunning {
+		t.Fatalf("service_running=%v want true", payload.ServiceRunning)
+	}
+	if !payload.Channels["telegram"].Enabled || !payload.Channels["telegram"].Running {
+		t.Fatalf("telegram=%#v want enabled and running", payload.Channels["telegram"])
+	}
+}
+
 func TestChannelsRestartRejectsDisabledChannel(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
