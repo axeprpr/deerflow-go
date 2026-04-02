@@ -158,7 +158,8 @@ func gatewayOpenAPIPaths() map[string]any {
 			"delete": operation("uploads", "Delete Upload", "Delete one uploaded file."),
 		}),
 		"/api/threads/{thread_id}/artifacts/{artifact_path}": pathItem(map[string]any{
-			"get": operation("artifacts", "Get Artifact", "Download or inline-view an artifact."),
+			"get":  operation("artifacts", "Get Artifact", "Download or inline-view an artifact."),
+			"head": operation("artifacts", "Probe Artifact", "Fetch artifact headers without returning the body."),
 		}),
 		"/api/threads/{thread_id}/suggestions": pathItem(map[string]any{
 			"post": operation("suggestions", "Generate Suggestions", "Generate follow-up suggestions."),

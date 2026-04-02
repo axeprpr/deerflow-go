@@ -3,6 +3,7 @@ package langgraphcompat
 import (
 	"archive/zip"
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -190,6 +191,7 @@ func (s *Server) registerGatewayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/threads/{thread_id}/uploads/list", s.handleUploadsList)
 	mux.HandleFunc("DELETE /api/threads/{thread_id}/uploads/{filename}", s.handleUploadsDelete)
 	mux.HandleFunc("GET /api/threads/{thread_id}/artifacts/{artifact_path...}", s.handleArtifactGet)
+	mux.HandleFunc("HEAD /api/threads/{thread_id}/artifacts/{artifact_path...}", s.handleArtifactGet)
 	mux.HandleFunc("POST /api/threads/{thread_id}/suggestions", s.handleSuggestions)
 }
 
@@ -969,7 +971,7 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", contentDisposition("attachment", filename))
 	}
 	if !downloadRequested(r) && shouldRewriteArtifactText(filename, mimeType) {
-		if served, err := serveRewrittenArtifactText(w, filename, mimeType, absPath, threadID); err == nil && served {
+		if served, err := serveRewrittenArtifactText(w, r, filename, mimeType, absPath, threadID); err == nil && served {
 			return
 		}
 	}
@@ -1017,7 +1019,7 @@ func shouldRewriteArtifactText(filename, mimeType string) bool {
 	return base == "text/markdown" || base == "text/html" || base == "application/xhtml+xml"
 }
 
-func serveRewrittenArtifactText(w http.ResponseWriter, filename, mimeType, path, threadID string) (bool, error) {
+func serveRewrittenArtifactText(w http.ResponseWriter, r *http.Request, filename, mimeType, path, threadID string) (bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false, err
@@ -1030,7 +1032,7 @@ func serveRewrittenArtifactText(w http.ResponseWriter, filename, mimeType, path,
 	if rewritten == content {
 		return false, nil
 	}
-	serveArtifactContent(w, filename, mimeType, []byte(rewritten), false)
+	serveArtifactContent(w, r, filename, mimeType, []byte(rewritten), false)
 	return true, nil
 }
 
@@ -1132,7 +1134,7 @@ func (s *Server) handleSkillArchiveRootPreview(w http.ResponseWriter, r *http.Re
 		return false
 	}
 	w.Header().Set("Cache-Control", "private, max-age=300")
-	serveArtifactContent(w, "SKILL.md", "text/markdown", content, false)
+	serveArtifactContent(w, r, "SKILL.md", "text/markdown", content, false)
 	return true
 }
 
@@ -1164,7 +1166,7 @@ func (s *Server) handleSkillArchiveArtifactGet(w http.ResponseWriter, r *http.Re
 	if shouldForceAttachment(r, mimeType) {
 		w.Header().Set("Content-Disposition", contentDisposition("attachment", name))
 	}
-	serveArtifactContent(w, name, mimeType, content, downloadRequested(r))
+	serveArtifactContent(w, r, name, mimeType, content, downloadRequested(r))
 }
 
 func (s *Server) handleSuggestions(w http.ResponseWriter, r *http.Request) {
@@ -1436,7 +1438,7 @@ func serveArtifactFile(w http.ResponseWriter, r *http.Request, filename, mimeTyp
 	return nil
 }
 
-func serveArtifactContent(w http.ResponseWriter, filename, mimeType string, data []byte, download bool) {
+func serveArtifactContent(w http.ResponseWriter, r *http.Request, filename, mimeType string, data []byte, download bool) {
 	if mimeType == "" && looksLikeText(data) {
 		mimeType = "text/plain; charset=utf-8"
 	}
@@ -1448,32 +1450,21 @@ func serveArtifactContent(w http.ResponseWriter, filename, mimeType string, data
 		if w.Header().Get("Content-Disposition") == "" {
 			w.Header().Set("Content-Disposition", contentDisposition("attachment", filename))
 		}
-		if mimeType != "" {
-			w.Header().Set("Content-Type", mimeType)
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(data)
-		return
+	} else if isTextMIMEType(mimeType) && utf8.Valid(data) {
+		mimeType = withUTF8Charset(mimeType)
+	} else if looksLikeText(data) && utf8.Valid(data) {
+		mimeType = "text/plain; charset=utf-8"
+	} else {
+		w.Header().Set("Content-Disposition", contentDisposition("inline", filename))
 	}
 
-	if isTextMIMEType(mimeType) && utf8.Valid(data) {
-		w.Header().Set("Content-Type", withUTF8Charset(mimeType))
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(data)
-		return
+	if mimeType != "" {
+		w.Header().Set("Content-Type", mimeType)
 	}
-
-	if looksLikeText(data) && utf8.Valid(data) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(data)
-		return
+	if r == nil {
+		r = &http.Request{Method: http.MethodGet}
 	}
-
-	w.Header().Set("Content-Disposition", contentDisposition("inline", filename))
-	w.Header().Set("Content-Type", mimeType)
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	http.ServeContent(w, r, filename, time.Time{}, bytes.NewReader(data))
 }
 
 func downloadRequested(r *http.Request) bool {

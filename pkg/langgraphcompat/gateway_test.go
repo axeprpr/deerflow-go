@@ -79,6 +79,7 @@ func TestGatewayOpenAPIDocumentationEndpoints(t *testing.T) {
 	for _, path := range []string{
 		"/api/models",
 		"/api/threads/{thread_id}/uploads",
+		"/api/threads/{thread_id}/artifacts/{artifact_path}",
 		"/runs/stream",
 		"/threads/{thread_id}/runs/{run_id}",
 		"/api/langgraph/threads/{thread_id}/runs/{run_id}",
@@ -86,6 +87,13 @@ func TestGatewayOpenAPIDocumentationEndpoints(t *testing.T) {
 		if _, ok := spec.Paths[path]; !ok {
 			t.Fatalf("missing path %q in openapi spec", path)
 		}
+	}
+	artifactPath, ok := spec.Paths["/api/threads/{thread_id}/artifacts/{artifact_path}"].(map[string]any)
+	if !ok {
+		t.Fatalf("artifact path missing operation map: %#v", spec.Paths["/api/threads/{thread_id}/artifacts/{artifact_path}"])
+	}
+	if _, ok := artifactPath["head"]; !ok {
+		t.Fatalf("artifact path missing head operation: %#v", artifactPath)
 	}
 
 	docsResp := performCompatRequest(t, handler, http.MethodGet, "/docs", nil, nil)
@@ -1652,6 +1660,87 @@ func TestArtifactEndpointReadsSkillArchiveWithTopLevelDirectory(t *testing.T) {
 	}
 	if body := resp.Body.String(); !strings.Contains(body, "Prefixed Skill") {
 		t.Fatalf("body=%q missing prefixed skill content", body)
+	}
+	if got := resp.Header().Get("Cache-Control"); got != "private, max-age=300" {
+		t.Fatalf("cache-control=%q want private, max-age=300", got)
+	}
+}
+
+func TestArtifactEndpointSupportsHeadForRegularFiles(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-artifact-head"
+	outputDir := filepath.Join(s.threadRoot(threadID), "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "report.md"), []byte("# Report\n"), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodHead, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/report.md", nil)
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", resp.Code, resp.Body.String())
+	}
+	if resp.Body.Len() != 0 {
+		t.Fatalf("body length=%d want 0", resp.Body.Len())
+	}
+	if got := resp.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/markdown") {
+		t.Fatalf("content-type=%q", got)
+	}
+}
+
+func TestArtifactEndpointSupportsHeadForSkillArchiveEntries(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-skill-head"
+	archivePath := filepath.Join(s.threadRoot(threadID), "outputs", "sample.skill")
+	if err := os.MkdirAll(filepath.Dir(archivePath), 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	writeArtifactSkillArchive(t, archivePath, map[string]string{
+		"notes.txt": "hello from skill",
+	})
+
+	req := httptest.NewRequest(http.MethodHead, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/sample.skill/notes.txt", nil)
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", resp.Code, resp.Body.String())
+	}
+	if resp.Body.Len() != 0 {
+		t.Fatalf("body length=%d want 0", resp.Body.Len())
+	}
+	if got := resp.Header().Get("Cache-Control"); got != "private, max-age=300" {
+		t.Fatalf("cache-control=%q want private, max-age=300", got)
+	}
+}
+
+func TestArtifactEndpointSupportsHeadForSkillArchiveRootPreview(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-skill-root-head"
+	archivePath := filepath.Join(s.threadRoot(threadID), "outputs", "sample.skill")
+	if err := os.MkdirAll(filepath.Dir(archivePath), 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	writeArtifactSkillArchive(t, archivePath, map[string]string{
+		"SKILL.md": "# Sample Skill\n",
+	})
+
+	req := httptest.NewRequest(http.MethodHead, "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/sample.skill", nil)
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", resp.Code, resp.Body.String())
+	}
+	if resp.Body.Len() != 0 {
+		t.Fatalf("body length=%d want 0", resp.Body.Len())
+	}
+	if got := resp.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/markdown") {
+		t.Fatalf("content-type=%q", got)
 	}
 	if got := resp.Header().Get("Cache-Control"); got != "private, max-age=300" {
 		t.Fatalf("cache-control=%q want private, max-age=300", got)
