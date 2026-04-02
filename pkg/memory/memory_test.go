@@ -119,6 +119,46 @@ func TestServiceUpdateAndInject(t *testing.T) {
 	}
 }
 
+func TestServiceUpdateUsesConversationThreadAsDefaultFactSourceForAgentMemory(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeStorage{}
+	extractor := &stubExtractor{
+		update: Update{
+			Facts: []Fact{
+				{ID: "pref", Content: "Prefers terse review summaries.", Category: "preference", Confidence: 0.9},
+			},
+		},
+	}
+
+	service := NewService(store, extractor)
+	msgs := []models.Message{{
+		ID:        "m1",
+		SessionID: "thread-agent-review",
+		Role:      models.RoleHuman,
+		Content:   "Review this patch and keep it terse.",
+		CreatedAt: time.Now().UTC(),
+	}}
+
+	if err := service.Update(context.Background(), "agent:code-reviewer", msgs); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	doc, err := store.Load(context.Background(), "agent:code-reviewer")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(doc.Facts) != 1 {
+		t.Fatalf("facts len = %d want 1", len(doc.Facts))
+	}
+	if got := doc.Facts[0].Source; got != "thread-agent-review" {
+		t.Fatalf("fact source = %q want %q", got, "thread-agent-review")
+	}
+	if got := doc.Source; got != "agent:code-reviewer" {
+		t.Fatalf("document source = %q want %q", got, "agent:code-reviewer")
+	}
+}
+
 func TestFileStoreDelete(t *testing.T) {
 	t.Parallel()
 

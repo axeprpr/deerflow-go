@@ -144,7 +144,7 @@ func (s *Service) Update(ctx context.Context, sessionID string, messages []model
 	}
 	update = sanitizeUpdateForStorage(update)
 
-	merged := Merge(current, update, sessionID, time.Now().UTC())
+	merged := MergeWithFactSource(current, update, sessionID, factSourceFromMessages(filteredMessages), time.Now().UTC())
 	return s.storage.Save(ctx, merged)
 }
 
@@ -190,6 +190,10 @@ func (s *Service) InjectWithContext(ctx context.Context, sessionID string, curre
 }
 
 func Merge(current Document, update Update, sessionID string, now time.Time) Document {
+	return MergeWithFactSource(current, update, sessionID, "", now)
+}
+
+func MergeWithFactSource(current Document, update Update, sessionID string, factSource string, now time.Time) Document {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
@@ -225,9 +229,23 @@ func Merge(current Document, update Update, sessionID string, now time.Time) Doc
 		merged.Source = merged.SessionID
 	}
 
-	merged.Facts = mergeFacts(current.Facts, update.Facts, merged.Source, now)
+	defaultFactSource := strings.TrimSpace(factSource)
+	if defaultFactSource == "" {
+		defaultFactSource = merged.Source
+	}
+	merged.Facts = mergeFacts(current.Facts, update.Facts, defaultFactSource, now)
 	merged.UpdatedAt = now
 	return merged
+}
+
+func factSourceFromMessages(messages []models.Message) string {
+	for _, msg := range messages {
+		source := strings.TrimSpace(msg.SessionID)
+		if source != "" {
+			return source
+		}
+	}
+	return ""
 }
 
 func mergeFacts(existing, incoming []Fact, defaultSource string, now time.Time) []Fact {
