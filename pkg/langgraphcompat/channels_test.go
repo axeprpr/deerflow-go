@@ -24,8 +24,8 @@ func TestChannelsStatusIncludesSupportedChannelsWithoutConfig(t *testing.T) {
 	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if payload.ServiceRunning {
-		t.Fatalf("service_running=%v want=false", payload.ServiceRunning)
+	if !payload.ServiceRunning {
+		t.Fatalf("service_running=%v want=true", payload.ServiceRunning)
 	}
 	if len(payload.Channels) != len(supportedGatewayChannels) {
 		t.Fatalf("channels=%#v", payload.Channels)

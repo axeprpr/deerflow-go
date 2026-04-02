@@ -67,12 +67,14 @@ func (e *SubagentExecutor) Execute(ctx context.Context, task *subagent.Task, emi
 	}
 
 	runAgent := New(AgentConfig{
-		LLMProvider:    e.llm,
-		Tools:          registry,
-		MaxTurns:       task.Config.MaxTurns,
-		Model:          e.model,
-		Sandbox:        sandboxRef,
-		RequestTimeout: task.Config.Timeout,
+		LLMProvider:     e.llm,
+		Tools:           registry,
+		MaxTurns:        task.Config.MaxTurns,
+		Model:           inheritedSubagentModel(ctx, e.model),
+		ReasoningEffort: inheritedSubagentReasoningEffort(ctx),
+		Sandbox:         sandboxRef,
+		RequestTimeout:  task.Config.Timeout,
+		SystemPrompt:    inheritedSubagentSystemPrompt(ctx, task),
 	})
 
 	eventsDone := make(chan struct{})
@@ -93,7 +95,7 @@ func (e *SubagentExecutor) Execute(ctx context.Context, task *subagent.Task, emi
 			ID:        newSubagentMessageID("system"),
 			SessionID: task.ID,
 			Role:      models.RoleSystem,
-			Content:   subagentSystemPrompt(task),
+			Content:   inheritedSubagentSystemPrompt(ctx, task),
 			CreatedAt: time.Now().UTC(),
 		},
 		{
@@ -365,6 +367,35 @@ func subagentSystemPrompt(task *subagent.Task) string {
 		return "You are a bash execution specialist. Execute commands carefully, summarize what ran, and report relevant output or failures."
 	}
 	return "You are a general-purpose subagent working on a delegated task. Complete it autonomously and return a concise, actionable result."
+}
+
+func inheritedSubagentSystemPrompt(ctx context.Context, task *subagent.Task) string {
+	base := subagentSystemPrompt(task)
+	skillsPrompt := runtimeContextString(tools.RuntimeContextFromContext(ctx), "skills_prompt")
+	if skillsPrompt == "" {
+		return base
+	}
+	return strings.TrimSpace(base + "\n\n" + skillsPrompt)
+}
+
+func inheritedSubagentModel(ctx context.Context, fallback string) string {
+	modelName := runtimeContextString(tools.RuntimeContextFromContext(ctx), "model_name")
+	if modelName != "" {
+		return modelName
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func inheritedSubagentReasoningEffort(ctx context.Context) string {
+	return runtimeContextString(tools.RuntimeContextFromContext(ctx), "reasoning_effort")
+}
+
+func runtimeContextString(runtimeContext map[string]any, key string) string {
+	if len(runtimeContext) == 0 {
+		return ""
+	}
+	value, _ := runtimeContext[key].(string)
+	return strings.TrimSpace(value)
 }
 
 func newSubagentMessageID(prefix string) string {

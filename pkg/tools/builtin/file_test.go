@@ -107,7 +107,7 @@ func TestWriteFileHandlerWritesToResolvedVirtualPath(t *testing.T) {
 
 	threadID := "thread-write-tool"
 	ctx := tools.WithThreadID(context.Background(), threadID)
-	_, err := WriteFileHandler(ctx, models.ToolCall{
+	result, err := WriteFileHandler(ctx, models.ToolCall{
 		ID:   "call-2",
 		Name: "write_file",
 		Arguments: map[string]any{
@@ -117,6 +117,9 @@ func TestWriteFileHandlerWritesToResolvedVirtualPath(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("WriteFileHandler() error = %v", err)
+	}
+	if result.Content != "OK" {
+		t.Fatalf("content=%q want OK", result.Content)
 	}
 
 	data, err := os.ReadFile(filepath.Join(root, "threads", threadID, "user-data", "uploads", "out.txt"))
@@ -165,11 +168,17 @@ func TestLsHandlerListsResolvedVirtualDirectory(t *testing.T) {
 
 	threadID := "thread-ls-tool"
 	dir := filepath.Join(root, "threads", threadID, "user-data", "uploads")
-	if err := os.MkdirAll(filepath.Join(dir, "nested"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "nested", "deep"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "nested", "child.txt"), []byte("child"), 0o644); err != nil {
+		t.Fatalf("write nested file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "nested", "deep", "ignored.txt"), []byte("ignored"), 0o644); err != nil {
+		t.Fatalf("write deep file: %v", err)
 	}
 
 	ctx := tools.WithThreadID(context.Background(), threadID)
@@ -185,6 +194,12 @@ func TestLsHandlerListsResolvedVirtualDirectory(t *testing.T) {
 	}
 	if !strings.Contains(result.Content, "a.txt") || !strings.Contains(result.Content, "nested/") {
 		t.Fatalf("ls result=%q", result.Content)
+	}
+	if !strings.Contains(result.Content, "  child.txt") {
+		t.Fatalf("ls result=%q missing nested child", result.Content)
+	}
+	if strings.Contains(result.Content, "ignored.txt") {
+		t.Fatalf("ls result=%q should not include entries deeper than two levels", result.Content)
 	}
 }
 
@@ -305,6 +320,37 @@ func TestWriteFileHandlerAppendMode(t *testing.T) {
 	}
 }
 
+func TestReadFileHandlerSupportsLineRanges(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	threadID := "thread-read-range"
+	target := filepath.Join(root, "threads", threadID, "user-data", "workspace", "notes.txt")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("one\ntwo\nthree\nfour\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	ctx := tools.WithThreadID(context.Background(), threadID)
+	result, err := ReadFileHandler(ctx, models.ToolCall{
+		ID:   "call-read-range-1",
+		Name: "read_file",
+		Arguments: map[string]any{
+			"path":       "notes.txt",
+			"start_line": 2.0,
+			"end_line":   3.0,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ReadFileHandler() error = %v", err)
+	}
+	if result.Content != "two\nthree" {
+		t.Fatalf("content=%q want %q", result.Content, "two\nthree")
+	}
+}
+
 func TestStrReplaceHandlerUpdatesResolvedFile(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DEERFLOW_DATA_ROOT", root)
@@ -341,6 +387,34 @@ func TestStrReplaceHandlerUpdatesResolvedFile(t *testing.T) {
 	}
 	if string(data) != "hello deerflow" {
 		t.Fatalf("content=%q want %q", string(data), "hello deerflow")
+	}
+}
+
+func TestStrReplaceHandlerRequiresSingleMatchUnlessReplaceAll(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	threadID := "thread-str-replace-multi"
+	target := filepath.Join(root, "threads", threadID, "user-data", "workspace", "draft.txt")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("world world"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	ctx := tools.WithThreadID(context.Background(), threadID)
+	_, err := StrReplaceHandler(ctx, models.ToolCall{
+		ID:   "call-replace-multi-1",
+		Name: "str_replace",
+		Arguments: map[string]any{
+			"path":    "draft.txt",
+			"old_str": "world",
+			"new_str": "deerflow",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "exactly once") {
+		t.Fatalf("error=%v want exactly once failure", err)
 	}
 }
 

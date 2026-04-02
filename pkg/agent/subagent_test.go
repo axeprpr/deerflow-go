@@ -222,3 +222,52 @@ func TestSubagentExecutorUsesLazySandboxProvider(t *testing.T) {
 		t.Fatalf("result=%q want Sandbox check complete.", result.Result)
 	}
 }
+
+func TestSubagentExecutorInheritsRuntimeContext(t *testing.T) {
+	provider := &scriptedStreamProvider{
+		t: t,
+		steps: []streamStep{
+			{
+				check: func(t *testing.T, req llm.ChatRequest) {
+					if req.Model != "gpt-5" {
+						t.Fatalf("model=%q want gpt-5", req.Model)
+					}
+					if req.ReasoningEffort != "high" {
+						t.Fatalf("reasoning_effort=%q want high", req.ReasoningEffort)
+					}
+					if !strings.Contains(req.SystemPrompt, "general-purpose subagent") {
+						t.Fatalf("system prompt missing base prompt: %q", req.SystemPrompt)
+					}
+					if !strings.Contains(req.SystemPrompt, "<skill_system>") {
+						t.Fatalf("system prompt missing skills prompt: %q", req.SystemPrompt)
+					}
+				},
+				content: "Inherited runtime context.",
+			},
+		},
+	}
+
+	executor := NewSubagentExecutor(provider, tools.NewRegistry(), nil)
+	ctx := tools.WithRuntimeContext(context.Background(), map[string]any{
+		"model_name":       "gpt-5",
+		"reasoning_effort": "high",
+		"skills_prompt":    "<skill_system>\nUse the bootstrap skill.\n</skill_system>",
+	})
+
+	result, err := executor.Execute(ctx, &subagent.Task{
+		ID:          "task-runtime-context",
+		Description: "inherit runtime context",
+		Prompt:      "Do the thing.",
+		Config: subagent.SubagentConfig{
+			Type:     subagent.SubagentGeneralPurpose,
+			MaxTurns: 2,
+			Timeout:  time.Second,
+		},
+	}, func(subagent.TaskEvent) {})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Result != "Inherited runtime context." {
+		t.Fatalf("result=%q want inherited result", result.Result)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -29,8 +30,75 @@ func ReadFileHandler(ctx context.Context, call models.ToolCall) (models.ToolResu
 	if limit, ok := args["limit"].(float64); ok && limit > 0 && int(limit) < len(data) {
 		data = data[:int(limit)]
 	}
+	if startLine, endLine, ok := resolveLineRange(args); ok {
+		data = []byte(sliceContentLines(string(data), startLine, endLine))
+	}
 
 	return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: string(data)}, nil
+}
+
+func resolveLineRange(args map[string]any) (int, int, bool) {
+	start, startOK := intArg(args["start_line"])
+	end, endOK := intArg(args["end_line"])
+	if !startOK && !endOK {
+		return 0, 0, false
+	}
+	if !startOK {
+		start = 1
+	}
+	if !endOK {
+		end = int(^uint(0) >> 1)
+	}
+	if start < 1 {
+		start = 1
+	}
+	if end < start {
+		end = start
+	}
+	return start, end, true
+}
+
+func intArg(raw any) (int, bool) {
+	switch value := raw.(type) {
+	case int:
+		return value, true
+	case int32:
+		return int(value), true
+	case int64:
+		return int(value), true
+	case float64:
+		return int(value), true
+	case json.Number:
+		parsed, err := strconv.Atoi(value.String())
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
+	default:
+		return 0, false
+	}
+}
+
+func sliceContentLines(content string, startLine, endLine int) string {
+	lines := strings.Split(content, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if startLine > len(lines) {
+		return ""
+	}
+	startIdx := startLine - 1
+	endIdx := endLine
+	if endIdx > len(lines) {
+		endIdx = len(lines)
+	}
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if endIdx < startIdx {
+		endIdx = startIdx
+	}
+	return strings.Join(lines[startIdx:endIdx], "\n")
 }
 
 func resolveReadableFilePath(ctx context.Context, path string) string {
@@ -93,7 +161,7 @@ func WriteFileHandler(ctx context.Context, call models.ToolCall) (models.ToolRes
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("write failed: %w", err)
 	}
 
-	return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: fmt.Sprintf("Written %d bytes to %s", len(content), path)}, nil
+	return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: "OK"}, nil
 }
 
 func GlobHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
@@ -137,16 +205,36 @@ func LsHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, er
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: "(empty)"}, nil
 	}
 
+	return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: renderDirTree(path, entries, 0)}, nil
+}
+
+func renderDirTree(root string, entries []os.DirEntry, depth int) string {
 	lines := make([]string, 0, len(entries))
+	sort.Slice(entries, func(i, j int) bool {
+		left := entries[i]
+		right := entries[j]
+		if left.IsDir() != right.IsDir() {
+			return left.IsDir()
+		}
+		return left.Name() < right.Name()
+	})
+
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() {
 			name += "/"
 		}
-		lines = append(lines, name)
+		lines = append(lines, strings.Repeat("  ", depth)+name)
+		if !entry.IsDir() || depth >= 1 {
+			continue
+		}
+		children, err := os.ReadDir(filepath.Join(root, entry.Name()))
+		if err != nil || len(children) == 0 {
+			continue
+		}
+		lines = append(lines, renderDirTree(filepath.Join(root, entry.Name()), children, depth+1))
 	}
-	sort.Strings(lines)
-	return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: strings.Join(lines, "\n")}, nil
+	return strings.Join(lines, "\n")
 }
 
 func StrReplaceHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
@@ -173,6 +261,9 @@ func StrReplaceHandler(ctx context.Context, call models.ToolCall) (models.ToolRe
 	content := string(data)
 	if !strings.Contains(content, oldStr) {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("string to replace not found")
+	}
+	if !replaceAll && strings.Count(content, oldStr) != 1 {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("string to replace must appear exactly once")
 	}
 	if replaceAll {
 		content = strings.ReplaceAll(content, oldStr, newStr)
@@ -226,8 +317,10 @@ func ReadFileTool() models.Tool {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":  map[string]any{"type": "string", "description": "File path to read"},
-				"limit": map[string]any{"type": "number", "description": "Maximum bytes to read"},
+				"path":       map[string]any{"type": "string", "description": "File path to read"},
+				"limit":      map[string]any{"type": "number", "description": "Maximum bytes to read"},
+				"start_line": map[string]any{"type": "integer", "description": "Optional starting line number (1-indexed, inclusive)"},
+				"end_line":   map[string]any{"type": "integer", "description": "Optional ending line number (1-indexed, inclusive)"},
 			},
 			"required": []any{"path"},
 		},

@@ -151,6 +151,7 @@ func (s *gatewayChannelService) start() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reloadLocked()
+	s.running = true
 	s.syncRunningStateLocked()
 }
 
@@ -239,29 +240,11 @@ func (s *gatewayChannelService) reloadLocked() {
 }
 
 func (s *gatewayChannelService) syncRunningStateLocked() {
-	if !s.configPresent {
-		s.running = false
-		return
-	}
-	anyRunning := false
 	for _, name := range supportedGatewayChannels {
 		info := s.channels[name]
-		if info.Enabled && info.Running {
-			anyRunning = true
-			break
-		}
+		info.Running = s.running && info.Enabled
+		s.channels[name] = info
 	}
-	if !anyRunning {
-		for _, name := range supportedGatewayChannels {
-			info := s.channels[name]
-			if info.Enabled {
-				info.Running = true
-				s.channels[name] = info
-				anyRunning = true
-			}
-		}
-	}
-	s.running = anyRunning
 }
 
 func (s *gatewayChannelService) shouldReloadLocked() bool {

@@ -2283,6 +2283,33 @@ func TestSuggestionsEndpointUsesLLMResponse(t *testing.T) {
 	}
 }
 
+func TestAugmentToolRuntimeContext(t *testing.T) {
+	runtimeContext := map[string]any{
+		"thinking_enabled": true,
+	}
+
+	got := augmentToolRuntimeContext(runtimeContext, runConfig{
+		ModelName:       "gpt-5",
+		ReasoningEffort: "minimal",
+	}, "<skill_system>\nRead skills first.\n</skill_system>")
+
+	if got["thinking_enabled"] != true {
+		t.Fatalf("thinking_enabled=%#v want true", got["thinking_enabled"])
+	}
+	if got["model_name"] != "gpt-5" {
+		t.Fatalf("model_name=%#v want gpt-5", got["model_name"])
+	}
+	if got["reasoning_effort"] != "minimal" {
+		t.Fatalf("reasoning_effort=%#v want minimal", got["reasoning_effort"])
+	}
+	if got["skills_prompt"] != "<skill_system>\nRead skills first.\n</skill_system>" {
+		t.Fatalf("skills_prompt=%#v", got["skills_prompt"])
+	}
+	if _, exists := runtimeContext["model_name"]; exists {
+		t.Fatalf("augmentToolRuntimeContext mutated input: %#v", runtimeContext)
+	}
+}
+
 func TestParseJSONStringList(t *testing.T) {
 	tests := []struct {
 		name string

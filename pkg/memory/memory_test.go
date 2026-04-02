@@ -396,6 +396,80 @@ func TestServiceUpdateStripsUploadMentionsFromMemory(t *testing.T) {
 	}
 }
 
+func TestServiceUpdateExcludesIntermediateAIToolCallMessages(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeStorage{}
+	extractor := &capturingExtractor{
+		update: Update{
+			User: UserMemory{TopOfMind: "Prefers direct answers"},
+		},
+	}
+	service := NewService(store, extractor)
+
+	msgs := []models.Message{
+		{
+			ID:        "u1",
+			SessionID: "session-tools",
+			Role:      models.RoleHuman,
+			Content:   "Search for the latest release notes.",
+			CreatedAt: time.Now().UTC(),
+		},
+		{
+			ID:        "a1",
+			SessionID: "session-tools",
+			Role:      models.RoleAI,
+			Content:   "Calling search tool",
+			ToolCalls: []models.ToolCall{{
+				ID:          "call-1",
+				Name:        "search",
+				Status:      models.CallStatusCompleted,
+				RequestedAt: time.Now().UTC(),
+				StartedAt:   time.Now().UTC(),
+				CompletedAt: time.Now().UTC(),
+			}},
+			CreatedAt: time.Now().UTC(),
+		},
+		{
+			ID:        "t1",
+			SessionID: "session-tools",
+			Role:      models.RoleTool,
+			ToolResult: &models.ToolResult{
+				CallID:      "call-1",
+				ToolName:    "search",
+				Status:      models.CallStatusCompleted,
+				Content:     "Search results",
+				CompletedAt: time.Now().UTC(),
+			},
+			CreatedAt: time.Now().UTC(),
+		},
+		{
+			ID:        "a2",
+			SessionID: "session-tools",
+			Role:      models.RoleAI,
+			Content:   "Here are the latest release notes.",
+			CreatedAt: time.Now().UTC(),
+		},
+	}
+
+	if err := service.Update(context.Background(), "session-tools", msgs); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	if !extractor.called {
+		t.Fatal("extractor should be called")
+	}
+	if len(extractor.messages) != 2 {
+		t.Fatalf("extractor messages len = %d want=2", len(extractor.messages))
+	}
+	if got := extractor.messages[0].Content; got != "Search for the latest release notes." {
+		t.Fatalf("first extractor message = %q", got)
+	}
+	if got := extractor.messages[1].Content; got != "Here are the latest release notes." {
+		t.Fatalf("second extractor message = %q", got)
+	}
+}
+
 func TestPostgresStoreSaveLoadUsesTransaction(t *testing.T) {
 	t.Parallel()
 

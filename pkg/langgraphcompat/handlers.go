@@ -244,7 +244,7 @@ func (s *Server) executeRun(ctx context.Context, req RunCreateRequest, routeThre
 		ctx = subagent.WithConcurrencyLimit(ctx, *maxConcurrent)
 	}
 	ctx = tools.WithThreadID(ctx, threadID)
-	ctx = tools.WithRuntimeContext(ctx, runtimeContext)
+	ctx = tools.WithRuntimeContext(ctx, augmentToolRuntimeContext(runtimeContext, resolvedRunCfg, s.skillsPrompt()))
 	ctx = clarification.WithThreadID(ctx, threadID)
 	ctx = clarification.WithEventSink(ctx, func(item *clarification.Clarification) {
 		if item == nil {
@@ -1430,6 +1430,20 @@ func cloneRuntimeContext(runtimeContext map[string]any) map[string]any {
 	cloned := make(map[string]any, len(runtimeContext))
 	for key, value := range runtimeContext {
 		cloned[key] = value
+	}
+	return cloned
+}
+
+func augmentToolRuntimeContext(runtimeContext map[string]any, cfg runConfig, skillsPrompt string) map[string]any {
+	cloned := cloneRuntimeContext(runtimeContext)
+	if modelName := firstNonEmpty(stringFromAny(cloned["model_name"]), cfg.ModelName); modelName != "" {
+		cloned["model_name"] = modelName
+	}
+	if effort := firstNonEmpty(stringFromAny(cloned["reasoning_effort"]), cfg.ReasoningEffort); effort != "" {
+		cloned["reasoning_effort"] = effort
+	}
+	if prompt := strings.TrimSpace(skillsPrompt); prompt != "" {
+		cloned["skills_prompt"] = prompt
 	}
 	return cloned
 }

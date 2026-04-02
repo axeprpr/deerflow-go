@@ -22,6 +22,9 @@ func filterMessagesForMemory(messages []models.Message) []models.Message {
 		if msg.Role == models.RoleTool {
 			continue
 		}
+		if msg.Role == models.RoleAI && len(msg.ToolCalls) > 0 {
+			continue
+		}
 
 		if msg.Role != models.RoleHuman {
 			filtered = append(filtered, msg)
