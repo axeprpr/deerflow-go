@@ -407,6 +407,79 @@ func TestThreadSearchMatchesArtifactsAndThreadDataPaths(t *testing.T) {
 	}
 }
 
+func TestThreadSearchMatchesUploadMarkdownCompanionContent(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	threadID := "thread-upload-search"
+	s.ensureSession(threadID, map[string]any{
+		"title": "Document review",
+	})
+
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "requirements.pdf"), []byte("%PDF"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "requirements.md"), []byte("# Requirements\n\nCustomer impact analysis and rollback criteria.\n"), 0o644); err != nil {
+		t.Fatalf("write markdown companion: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/threads/search", strings.NewReader(`{"query":"rollback criteria"}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var threads []map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(threads) != 1 {
+		t.Fatalf("threads=%d want=1 body=%s", len(threads), resp.Body.String())
+	}
+	if got := asString(threads[0]["thread_id"]); got != threadID {
+		t.Fatalf("thread_id=%q want=%s", got, threadID)
+	}
+}
+
+func TestThreadSearchMatchesArtifactTextContent(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	threadID := "thread-artifact-content"
+	s.ensureSession(threadID, map[string]any{
+		"title": "Launch prep",
+	})
+
+	outputDir := filepath.Join(s.threadRoot(threadID), "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "launch-notes.md"), []byte("# Launch Notes\n\nMitigation owner: platform-oncall.\n"), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/threads/search", strings.NewReader(`{"query":"platform-oncall"}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var threads []map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(threads) != 1 {
+		t.Fatalf("threads=%d want=1 body=%s", len(threads), resp.Body.String())
+	}
+	if got := asString(threads[0]["thread_id"]); got != threadID {
+		t.Fatalf("thread_id=%q want=%s", got, threadID)
+	}
+}
+
 func TestThreadSearchHonorsZeroLimit(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	s.ensureSession("thread-a", map[string]any{"title": "A"})

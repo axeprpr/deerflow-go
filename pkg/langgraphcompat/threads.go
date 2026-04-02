@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,6 +31,40 @@ type threadSearchRequest struct {
 	Metadata  map[string]any `json:"metadata"`
 	Values    map[string]any `json:"values"`
 	Select    []string       `json:"select"`
+}
+
+const (
+	threadSearchMaxScannedFiles = 24
+	threadSearchMaxReadBytes    = 256 << 10
+)
+
+var threadSearchTextExtensions = map[string]struct{}{
+	".c":    {},
+	".cc":   {},
+	".cpp":  {},
+	".css":  {},
+	".csv":  {},
+	".go":   {},
+	".h":    {},
+	".hpp":  {},
+	".htm":  {},
+	".html": {},
+	".java": {},
+	".js":   {},
+	".json": {},
+	".md":   {},
+	".py":   {},
+	".rb":   {},
+	".rs":   {},
+	".sh":   {},
+	".sql":  {},
+	".svg":  {},
+	".ts":   {},
+	".tsv":  {},
+	".txt":  {},
+	".xml":  {},
+	".yaml": {},
+	".yml":  {},
 }
 
 func (s *Server) handleThreadsList(w http.ResponseWriter, r *http.Request) {
@@ -153,7 +188,7 @@ func (s *Server) writeThreadSearchResponse(w http.ResponseWriter, req threadSear
 	threads := make([]map[string]any, 0, len(s.sessions))
 	for _, session := range s.sessions {
 		thread := s.threadResponse(session)
-		if !threadMatchesSearch(session, thread, req) {
+		if !s.threadMatchesSearch(session, thread, req) {
 			continue
 		}
 		threads = append(threads, thread)
@@ -321,7 +356,7 @@ func stringFromAnyValue(v any) string {
 	}
 }
 
-func threadMatchesSearch(session *Session, thread map[string]any, req threadSearchRequest) bool {
+func (s *Server) threadMatchesSearch(session *Session, thread map[string]any, req threadSearchRequest) bool {
 	if len(req.Metadata) > 0 {
 		threadMetadata, _ := thread["metadata"].(map[string]any)
 		if !mapContainsSubset(threadMetadata, req.Metadata) {
@@ -352,13 +387,13 @@ func threadMatchesSearch(session *Session, thread map[string]any, req threadSear
 	if strings.Contains(threadID, query) || strings.Contains(title, query) {
 		return true
 	}
-	if sessionContainsQuery(session, query) {
+	if s.sessionContainsQuery(session, query) {
 		return true
 	}
 	return false
 }
 
-func sessionContainsQuery(session *Session, query string) bool {
+func (s *Server) sessionContainsQuery(session *Session, query string) bool {
 	if session == nil || query == "" {
 		return false
 	}
@@ -370,7 +405,78 @@ func sessionContainsQuery(session *Session, query string) bool {
 			return true
 		}
 	}
+	return s.threadFilesContainQuery(session.ThreadID, query)
+}
+
+func (s *Server) threadFilesContainQuery(threadID, query string) bool {
+	if s == nil || strings.TrimSpace(threadID) == "" || strings.TrimSpace(query) == "" {
+		return false
+	}
+
+	scanned := 0
+	for _, root := range []string{
+		s.uploadsDir(threadID),
+		filepath.Join(s.threadRoot(threadID), "outputs"),
+		filepath.Join(s.threadRoot(threadID), "workspace"),
+	} {
+		if s.searchThreadRootForQuery(root, query, &scanned) {
+			return true
+		}
+		if scanned >= threadSearchMaxScannedFiles {
+			return false
+		}
+	}
 	return false
+}
+
+func (s *Server) searchThreadRootForQuery(root, query string, scanned *int) bool {
+	if scanned == nil || *scanned >= threadSearchMaxScannedFiles {
+		return false
+	}
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+
+	found := false
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if *scanned >= threadSearchMaxScannedFiles {
+			return fs.SkipAll
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !isThreadSearchTextFile(path) {
+			return nil
+		}
+		*scanned = *scanned + 1
+		if fileContainsQuery(path, query) {
+			found = true
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return found
+}
+
+func isThreadSearchTextFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	_, ok := threadSearchTextExtensions[ext]
+	return ok
+}
+
+func fileContainsQuery(path, query string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	if len(data) > threadSearchMaxReadBytes {
+		data = data[:threadSearchMaxReadBytes]
+	}
+	return strings.Contains(strings.ToLower(string(data)), query)
 }
 
 func messageContainsQuery(msg models.Message, query string) bool {
