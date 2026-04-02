@@ -38,8 +38,11 @@ func TestResolveRunConfigIncludesWorkingDirectoryGuidance(t *testing.T) {
 	if strings.Contains(cfg.SystemPrompt, "<subagent_system>") {
 		t.Fatalf("system prompt unexpectedly included subagent guidance: %q", cfg.SystemPrompt)
 	}
-	if !strings.Contains(cfg.SystemPrompt, "[citation:TITLE](URL)") {
-		t.Fatalf("system prompt missing citations guidance: %q", cfg.SystemPrompt)
+	if strings.Contains(cfg.SystemPrompt, "<citations>") {
+		t.Fatalf("system prompt unexpectedly included citations guidance: %q", cfg.SystemPrompt)
+	}
+	if strings.Contains(cfg.SystemPrompt, "[citation:TITLE](URL)") {
+		t.Fatalf("system prompt unexpectedly included citation link format guidance: %q", cfg.SystemPrompt)
 	}
 	if !strings.Contains(cfg.SystemPrompt, "Language Consistency") {
 		t.Fatalf("system prompt missing critical reminders: %q", cfg.SystemPrompt)

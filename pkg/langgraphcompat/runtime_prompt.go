@@ -51,14 +51,6 @@ const responseStylePrompt = "<response_style>\n" +
 	"- Action-Oriented: Focus on delivering results, not explaining processes\n" +
 	"</response_style>"
 
-const citationsPrompt = "<citations>\n" +
-	"CRITICAL: Always include citations when using web search results.\n\n" +
-	"- When to Use: Mandatory after `web_search`, `web_fetch`, or any external information source.\n" +
-	"- Format: Use Markdown links in the form `[citation:TITLE](URL)` immediately after the supported claim.\n" +
-	"- Sources Section: For reports and research-style answers, add a `Sources` section at the end with standard Markdown links `[Title](URL) - Description`.\n" +
-	"- Never present externally sourced factual claims without citations when source URLs are available.\n" +
-	"</citations>"
-
 const criticalRemindersPrompt = "<critical_reminders>\n" +
 	"- Clarification First: Clarify unclear, missing, or ambiguous requirements before committing to a path.\n" +
 	"- Skill First: Load the relevant skill before starting complex work when a skill matches the task.\n" +
@@ -99,7 +91,6 @@ func (s *Server) environmentPrompt(runtimeContext map[string]any, skillNames ...
 		parts = append(parts, acpAgentPrompt)
 	}
 	parts = append(parts, responseStylePrompt)
-	parts = append(parts, citationsPrompt)
 	parts = append(parts, criticalRemindersPrompt)
 	return strings.Join(parts, "\n\n")
 }
