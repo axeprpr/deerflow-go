@@ -4275,6 +4275,12 @@ func TestResolveRunConfigAllowsBootstrapForNewAgent(t *testing.T) {
 	if !strings.Contains(cfg.SystemPrompt, "create a brand-new custom agent") {
 		t.Fatalf("system prompt missing bootstrap guidance: %q", cfg.SystemPrompt)
 	}
+	if !strings.Contains(cfg.SystemPrompt, "<name>bootstrap</name>") {
+		t.Fatalf("system prompt missing bootstrap skill: %q", cfg.SystemPrompt)
+	}
+	if strings.Contains(cfg.SystemPrompt, "<name>deep-research</name>") {
+		t.Fatalf("bootstrap prompt should not expose unrelated skills: %q", cfg.SystemPrompt)
+	}
 }
 
 func TestThreadRunsCreateAndList(t *testing.T) {

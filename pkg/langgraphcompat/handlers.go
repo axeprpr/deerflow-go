@@ -1117,11 +1117,15 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 	if basePrompt == "" {
 		basePrompt = agent.GetAgentTypeConfig(cfg.AgentType).SystemPrompt
 	}
+	var skillNames []string
+	if cfg.IsBootstrap {
+		skillNames = []string{"bootstrap"}
+	}
 	cfg.SystemPrompt = joinPromptSections(
 		basePrompt,
 		s.userProfilePromptSection(),
 		s.runtimeModePrompt(runtimeContext),
-		s.environmentPrompt(),
+		s.environmentPrompt(skillNames...),
 	)
 	if boolFromAny(runtimeContext["is_plan_mode"]) {
 		cfg.SystemPrompt = joinPromptSections(cfg.SystemPrompt, planModeTodoPrompt)

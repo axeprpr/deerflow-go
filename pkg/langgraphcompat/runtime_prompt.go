@@ -47,9 +47,9 @@ const criticalRemindersPrompt = "<critical_reminders>\n" +
 	"- Always Respond: Thinking is internal; always provide a visible response to the user.\n" +
 	"</critical_reminders>"
 
-func (s *Server) environmentPrompt() string {
+func (s *Server) environmentPrompt(skillNames ...string) string {
 	parts := make([]string, 0, 6)
-	if skills := s.skillsPrompt(); skills != "" {
+	if skills := s.skillsPrompt(skillNames...); skills != "" {
 		parts = append(parts, skills)
 	}
 	parts = append(parts, workingDirectoryPrompt)
@@ -62,15 +62,29 @@ func (s *Server) environmentPrompt() string {
 	return strings.Join(parts, "\n\n")
 }
 
-func (s *Server) skillsPrompt() string {
+func (s *Server) skillsPrompt(skillNames ...string) string {
 	if s == nil {
 		return ""
+	}
+
+	allowed := make(map[string]struct{}, len(skillNames))
+	for _, name := range skillNames {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		allowed[name] = struct{}{}
 	}
 
 	skills := make([]gatewaySkill, 0)
 	for _, skill := range s.currentGatewaySkills() {
 		if !skill.Enabled {
 			continue
+		}
+		if len(allowed) > 0 {
+			if _, ok := allowed[skill.Name]; !ok {
+				continue
+			}
 		}
 		if _, ok := s.loadGatewaySkillBody(skill.Name, skill.Category); !ok {
 			continue
