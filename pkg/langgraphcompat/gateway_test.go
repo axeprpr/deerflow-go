@@ -4536,8 +4536,8 @@ func TestRunsStreamAppliesCustomAgentRuntimeConfig(t *testing.T) {
 	for _, tool := range provider.lastReq.Tools {
 		gotTools = append(gotTools, tool.Name)
 	}
-	if strings.Join(gotTools, ",") != "ask_clarification,bash,ls,present_files,read_file" {
-		t.Fatalf("tools=%q want=%q", strings.Join(gotTools, ","), "ask_clarification,bash,ls,present_files,read_file")
+	if strings.Join(gotTools, ",") != "ask_clarification,bash,ls,present_file,present_files,read_file" {
+		t.Fatalf("tools=%q want=%q", strings.Join(gotTools, ","), "ask_clarification,bash,ls,present_file,present_files,read_file")
 	}
 }
 

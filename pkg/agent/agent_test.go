@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -87,6 +88,52 @@ func TestAgent_New_WithTools(t *testing.T) {
 
 	if agent.tools != registry {
 		t.Error("Tools registry not set correctly")
+	}
+}
+
+func TestCloneRegistryWithPresentFileToolSupportsLegacySingleFileAlias(t *testing.T) {
+	dataRoot := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", dataRoot)
+
+	threadID := "thread-present-alias"
+	outputsDir := filepath.Join(dataRoot, "threads", threadID, "user-data", "outputs")
+	if err := os.MkdirAll(outputsDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	sourcePath := filepath.Join(outputsDir, "report.md")
+	if err := os.WriteFile(sourcePath, []byte("# report\n"), 0o644); err != nil {
+		t.Fatalf("write output file: %v", err)
+	}
+
+	presentRegistry := tools.NewPresentFileRegistry()
+	registry := cloneRegistryWithPresentFileTool(nil, presentRegistry)
+
+	if registry.Get("present_file") == nil {
+		t.Fatal("expected present_file alias to be registered")
+	}
+	if registry.Get("present_files") == nil {
+		t.Fatal("expected present_files tool to be registered")
+	}
+
+	content, err := registry.Call(
+		tools.WithThreadID(context.Background(), threadID),
+		"present_file",
+		map[string]any{"path": sourcePath},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("present_file alias failed: %v", err)
+	}
+	if !strings.Contains(content, "/mnt/user-data/outputs/report.md") {
+		t.Fatalf("content=%q missing normalized output path", content)
+	}
+
+	files := presentRegistry.List()
+	if len(files) != 1 {
+		t.Fatalf("registered files=%d want=1", len(files))
+	}
+	if files[0].Path != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("registered path=%q want=%q", files[0].Path, "/mnt/user-data/outputs/report.md")
 	}
 }
 

@@ -115,6 +115,7 @@ func cloneRegistryWithPresentFileTool(base *tools.Registry, presentFiles *tools.
 			_ = cloned.Register(tool)
 		}
 	}
+	_ = cloned.Register(tools.PresentFileTool(presentFiles))
 	_ = cloned.Register(tools.PresentFilesTool(presentFiles))
 	return cloned
 }
