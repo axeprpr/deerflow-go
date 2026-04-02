@@ -1575,6 +1575,9 @@ func (s *Server) sessionArtifactPaths(session *Session) []string {
 			if file.Path == "" {
 				continue
 			}
+			if !presentFileAccessible(file) {
+				continue
+			}
 			if _, ok := seen[file.Path]; ok {
 				continue
 			}
@@ -1614,6 +1617,9 @@ func (s *Server) sessionFiles(session *Session) []tools.PresentFile {
 			if file.Path == "" {
 				continue
 			}
+			if !presentFileAccessible(file) {
+				continue
+			}
 			if _, ok := seen[file.Path]; ok {
 				continue
 			}
@@ -1640,6 +1646,18 @@ func (s *Server) sessionFiles(session *Session) []tools.PresentFile {
 	}
 
 	return files
+}
+
+func presentFileAccessible(file tools.PresentFile) bool {
+	sourcePath := strings.TrimSpace(file.SourcePath)
+	if sourcePath == "" {
+		sourcePath = strings.TrimSpace(file.Path)
+	}
+	if sourcePath == "" || strings.HasPrefix(sourcePath, "/mnt/") {
+		return false
+	}
+	info, err := os.Stat(sourcePath)
+	return err == nil && !info.IsDir()
 }
 
 func (s *Server) threadFiles(threadID string, session *Session) []tools.PresentFile {

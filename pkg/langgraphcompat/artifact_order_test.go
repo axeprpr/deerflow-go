@@ -172,3 +172,47 @@ func TestThreadStateArtifactsAppendUploadMarkdownAfterOutputs(t *testing.T) {
 		t.Fatalf("artifacts=%#v", artifacts)
 	}
 }
+
+func TestThreadStateSkipsDeletedPresentedArtifacts(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	threadID := "thread-artifacts-skip-deleted"
+	session := s.ensureSession(threadID, nil)
+
+	outputDir := filepath.Join(s.threadRoot(threadID), "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	livePath := filepath.Join(outputDir, "report.md")
+	if err := os.WriteFile(livePath, []byte("# Report"), 0o644); err != nil {
+		t.Fatalf("write live artifact: %v", err)
+	}
+	deletedPath := filepath.Join(outputDir, "deleted.md")
+	if err := os.WriteFile(deletedPath, []byte("# Deleted"), 0o644); err != nil {
+		t.Fatalf("write deleted artifact: %v", err)
+	}
+
+	for _, file := range []tools.PresentFile{
+		{Path: "/mnt/user-data/outputs/report.md", SourcePath: livePath},
+		{Path: "/mnt/user-data/outputs/deleted.md", SourcePath: deletedPath},
+	} {
+		if err := session.PresentFiles.Register(file); err != nil {
+			t.Fatalf("register %s: %v", file.Path, err)
+		}
+	}
+	if err := os.Remove(deletedPath); err != nil {
+		t.Fatalf("remove deleted artifact: %v", err)
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("state is nil")
+	}
+
+	artifacts, ok := state.Values["artifacts"].([]string)
+	if !ok {
+		t.Fatalf("artifacts=%#v", state.Values["artifacts"])
+	}
+	if strings.Join(artifacts, ",") != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("artifacts=%#v", artifacts)
+	}
+}

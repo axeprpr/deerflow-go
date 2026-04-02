@@ -238,6 +238,55 @@ func TestThreadFilesIncludeAutoDiscoveredArtifacts(t *testing.T) {
 	}
 }
 
+func TestThreadFilesSkipDeletedPresentedArtifacts(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-files-skip-deleted-presented"
+	session := s.ensureSession(threadID, nil)
+
+	outputDir := filepath.Join(s.threadRoot(threadID), "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	livePath := filepath.Join(outputDir, "report.md")
+	if err := os.WriteFile(livePath, []byte("# Report"), 0o644); err != nil {
+		t.Fatalf("write live output: %v", err)
+	}
+	deletedPath := filepath.Join(outputDir, "deleted.md")
+	if err := os.WriteFile(deletedPath, []byte("# Deleted"), 0o644); err != nil {
+		t.Fatalf("write deleted output: %v", err)
+	}
+
+	for _, file := range []tools.PresentFile{
+		{Path: "/mnt/user-data/outputs/report.md", SourcePath: livePath},
+		{Path: "/mnt/user-data/outputs/deleted.md", SourcePath: deletedPath},
+	} {
+		if err := session.PresentFiles.Register(file); err != nil {
+			t.Fatalf("register presented file %s: %v", file.Path, err)
+		}
+	}
+	if err := os.Remove(deletedPath); err != nil {
+		t.Fatalf("remove deleted output: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/threads/"+threadID+"/files", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		Files []tools.PresentFile `json:"files"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(payload.Files) != 1 {
+		t.Fatalf("files=%d want=1 payload=%#v", len(payload.Files), payload.Files)
+	}
+	if got := payload.Files[0].Path; got != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("path=%q want=/mnt/user-data/outputs/report.md", got)
+	}
+}
+
 func TestThreadStateFallsBackToMetadataAgentName(t *testing.T) {
 	s, _ := newCompatTestServer(t)
 	s.ensureSession("thread-agent-name", map[string]any{
