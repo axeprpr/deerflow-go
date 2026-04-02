@@ -187,6 +187,86 @@ func TestWebFetchPrefersMainContent(t *testing.T) {
 	}
 }
 
+func TestWebFetchScoresReadableContainerOverCookieBanner(t *testing.T) {
+	restore := stubHTTPClient(t, func(r *http.Request) (*http.Response, error) {
+		return newHTTPResponse(r, `<!doctype html>
+<html>
+  <head><title>Launch Notes</title></head>
+  <body>
+    <div class="cookie-banner">
+      <p>Accept cookies to continue browsing this website.</p>
+    </div>
+    <div class="page-shell">
+      <div class="sidebar">Share this story</div>
+      <div class="article-content">
+        <h2>Launch plan</h2>
+        <p>Ship the migration in three phases.</p>
+        <p>Validate metrics after each phase before continuing.</p>
+      </div>
+    </div>
+  </body>
+</html>`), nil
+	})
+	defer restore()
+
+	result, err := WebFetchHandler(context.Background(), models.ToolCall{
+		ID:   "call-web-fetch-readable-container",
+		Name: "web_fetch",
+		Arguments: map[string]any{
+			"url": "https://example.com/launch",
+		},
+	})
+	if err != nil {
+		t.Fatalf("WebFetchHandler() error = %v", err)
+	}
+	if !strings.Contains(result.Content, "Launch plan") || !strings.Contains(result.Content, "Ship the migration in three phases.") {
+		t.Fatalf("content=%q missing article body", result.Content)
+	}
+	if strings.Contains(result.Content, "Accept cookies") || strings.Contains(result.Content, "Share this story") {
+		t.Fatalf("content=%q should exclude banner/sidebar noise", result.Content)
+	}
+}
+
+func TestWebFetchMarkdownifiesLinksAndLists(t *testing.T) {
+	restore := stubHTTPClient(t, func(r *http.Request) (*http.Response, error) {
+		return newHTTPResponse(r, `<!doctype html>
+<html>
+  <head><title>Guide</title></head>
+  <body>
+    <article>
+      <h2>Checklist</h2>
+      <p>Read the <a href="/docs/start">quickstart guide</a> first.</p>
+      <ul>
+        <li>Review requirements</li>
+        <li>Run validation</li>
+      </ul>
+    </article>
+  </body>
+</html>`), nil
+	})
+	defer restore()
+
+	result, err := WebFetchHandler(context.Background(), models.ToolCall{
+		ID:   "call-web-fetch-markdown",
+		Name: "web_fetch",
+		Arguments: map[string]any{
+			"url": "https://example.com/guide",
+		},
+	})
+	if err != nil {
+		t.Fatalf("WebFetchHandler() error = %v", err)
+	}
+	if !strings.Contains(result.Content, "## Checklist") {
+		t.Fatalf("content=%q missing heading markdown", result.Content)
+	}
+	if !strings.Contains(result.Content, "[quickstart guide](https://example.com/docs/start)") {
+		t.Fatalf("content=%q missing resolved markdown link", result.Content)
+	}
+	if !strings.Contains(result.Content, "- Review requirements") || !strings.Contains(result.Content, "- Run validation") {
+		t.Fatalf("content=%q missing list markdown", result.Content)
+	}
+}
+
 func TestSearchDuckDuckGoReturnsParsedResults(t *testing.T) {
 	restore := stubHTTPClient(t, func(r *http.Request) (*http.Response, error) {
 		return newHTTPResponse(r, `<a class="result__a" href="https://example.com/article">Example Article</a><a class="result__snippet">Useful summary</a>`), nil

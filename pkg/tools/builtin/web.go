@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,17 +36,27 @@ var (
 		regexp.MustCompile(`vqd='([^']+)'`),
 		regexp.MustCompile(`vqd="([^"]+)"`),
 	}
-	titleTagRE   = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
-	articleTagRE = regexp.MustCompile(`(?is)<article\b[^>]*>(.*?)</article>`)
-	mainTagRE    = regexp.MustCompile(`(?is)<main\b[^>]*>(.*?)</main>`)
-	bodyTagRE    = regexp.MustCompile(`(?is)<body\b[^>]*>(.*?)</body>`)
-	scriptTagRE  = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
-	styleTagRE   = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
-	noiseTagRE   = regexp.MustCompile(`(?is)<(?:aside|footer|form|nav|noscript|script|style|svg)[^>]*>.*?</(?:aside|footer|form|nav|noscript|script|style|svg)>`)
-	blockTagRE   = regexp.MustCompile(`(?is)</?(?:article|aside|blockquote|br|div|h[1-6]|header|footer|li|main|nav|p|pre|section|tr|table|ul|ol)[^>]*>`)
-	anyTagRE     = regexp.MustCompile(`(?is)<[^>]+>`)
-	spaceRE      = regexp.MustCompile(`[ \t\r\f\v]+`)
-	blankLineRE  = regexp.MustCompile(`\n{3,}`)
+	titleTagRE            = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+	articleTagRE          = regexp.MustCompile(`(?is)<article\b[^>]*>(.*?)</article>`)
+	mainTagRE             = regexp.MustCompile(`(?is)<main\b[^>]*>(.*?)</main>`)
+	bodyTagRE             = regexp.MustCompile(`(?is)<body\b[^>]*>(.*?)</body>`)
+	sectionTagRE          = regexp.MustCompile(`(?is)<section\b([^>]*)>(.*?)</section>`)
+	divTagRE              = regexp.MustCompile(`(?is)<div\b([^>]*)>(.*?)</div>`)
+	scriptTagRE           = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
+	styleTagRE            = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
+	noiseTagRE            = regexp.MustCompile(`(?is)<(?:aside|button|dialog|footer|form|header|nav|noscript|script|style|svg)[^>]*>.*?</(?:aside|button|dialog|footer|form|header|nav|noscript|script|style|svg)>`)
+	blockTagRE            = regexp.MustCompile(`(?is)</?(?:article|aside|blockquote|br|div|h[1-6]|header|footer|li|main|nav|p|pre|section|tr|table|ul|ol)[^>]*>`)
+	anyTagRE              = regexp.MustCompile(`(?is)<[^>]+>`)
+	anchorTagRE           = regexp.MustCompile(`(?is)<a\b([^>]*)href\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))([^>]*)>(.*?)</a>`)
+	listItemTagRE         = regexp.MustCompile(`(?is)<li\b[^>]*>(.*?)</li>`)
+	paragraphTagRE        = regexp.MustCompile(`(?is)<p\b[^>]*>(.*?)</p>`)
+	headingTagRE          = regexp.MustCompile(`(?is)<h([1-6])\b[^>]*>(.*?)</h[1-6]>`)
+	brTagRE               = regexp.MustCompile(`(?is)<br\s*/?>`)
+	containerAttrRE       = regexp.MustCompile(`(?i)(?:class|id)\s*=\s*("([^"]*)"|'([^']*)')`)
+	negativeContentHintRE = regexp.MustCompile(`(?i)\b(ad|banner|breadcrumb|comment|cookie|footer|header|hero|menu|modal|nav|newsletter|popup|promo|related|share|sidebar|social|subscribe|toolbar)\b`)
+	positiveContentHintRE = regexp.MustCompile(`(?i)\b(article|body|content|entry|main|page|post|primary|prose|story|text)\b`)
+	spaceRE               = regexp.MustCompile(`[ \t\r\f\v]+`)
+	blankLineRE           = regexp.MustCompile(`\n{3,}`)
 )
 
 type webSearchResult struct {
@@ -536,27 +547,7 @@ func extractReadableContent(pageURL, body string, maxChars int) string {
 		title = cleanHTMLText(match[1])
 	}
 
-	text := extractPrimaryContent(body)
-	text = scriptTagRE.ReplaceAllString(text, " ")
-	text = styleTagRE.ReplaceAllString(text, " ")
-	text = noiseTagRE.ReplaceAllString(text, " ")
-	text = strings.ReplaceAll(text, "</li>", "\n")
-	text = strings.ReplaceAll(text, "<li", "\n<li")
-	text = blockTagRE.ReplaceAllString(text, "\n")
-	text = anyTagRE.ReplaceAllString(text, " ")
-	text = html.UnescapeString(text)
-
-	lines := strings.Split(text, "\n")
-	filtered := make([]string, 0, len(lines))
-	for _, line := range lines {
-		line = strings.TrimSpace(spaceRE.ReplaceAllString(line, " "))
-		if line == "" {
-			continue
-		}
-		filtered = append(filtered, line)
-	}
-	text = strings.Join(filtered, "\n\n")
-	text = blankLineRE.ReplaceAllString(text, "\n\n")
+	text := markdownifyReadableHTML(pageURL, extractPrimaryContent(body))
 
 	var b strings.Builder
 	if title != "" {
@@ -579,12 +570,217 @@ func extractReadableContent(pageURL, body string, maxChars int) string {
 }
 
 func extractPrimaryContent(body string) string {
-	for _, re := range []*regexp.Regexp{articleTagRE, mainTagRE, bodyTagRE} {
+	for _, re := range []*regexp.Regexp{articleTagRE, mainTagRE} {
 		if match := re.FindStringSubmatch(body); len(match) >= 2 && strings.TrimSpace(match[1]) != "" {
 			return match[1]
 		}
 	}
-	return body
+	bodyContent := body
+	if match := bodyTagRE.FindStringSubmatch(body); len(match) >= 2 && strings.TrimSpace(match[1]) != "" {
+		bodyContent = match[1]
+	}
+	bodyContent = scriptTagRE.ReplaceAllString(bodyContent, " ")
+	bodyContent = styleTagRE.ReplaceAllString(bodyContent, " ")
+	bodyContent = noiseTagRE.ReplaceAllString(bodyContent, " ")
+
+	best := readableCandidate{html: bodyContent}
+	for _, item := range collectContainerCandidates(sectionTagRE, bodyContent) {
+		if item.score > best.score {
+			best = item
+		}
+	}
+	for _, item := range collectContainerCandidates(divTagRE, bodyContent) {
+		if item.score > best.score {
+			best = item
+		}
+	}
+	if best.score > 0 && strings.TrimSpace(best.html) != "" {
+		return best.html
+	}
+	return bodyContent
+}
+
+type readableCandidate struct {
+	score int
+	html  string
+}
+
+func collectContainerCandidates(re *regexp.Regexp, body string) []readableCandidate {
+	matches := re.FindAllStringSubmatch(body, -1)
+	out := make([]readableCandidate, 0, len(matches))
+	for _, match := range matches {
+		if len(match) < 3 {
+			continue
+		}
+		attrs := strings.TrimSpace(match[1])
+		content := strings.TrimSpace(match[2])
+		score := scoreReadableContainer(attrs, content)
+		if score <= 0 {
+			continue
+		}
+		out = append(out, readableCandidate{
+			score: score,
+			html:  content,
+		})
+	}
+	return out
+}
+
+func scoreReadableContainer(attrs, content string) int {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return 0
+	}
+	text := cleanHTMLText(content)
+	if len(text) < 120 {
+		return 0
+	}
+	score := len(text)
+	score += strings.Count(strings.ToLower(content), "<p") * 160
+	score += strings.Count(strings.ToLower(content), "<li") * 80
+	score += strings.Count(strings.ToLower(content), "<h") * 40
+
+	attrText := strings.Join(extractContainerHints(attrs), " ")
+	if positiveContentHintRE.MatchString(attrText) {
+		score += 500
+	}
+	if negativeContentHintRE.MatchString(attrText) {
+		score -= 700
+	}
+	if negativeContentHintRE.MatchString(text) && len(text) < 320 {
+		score -= 300
+	}
+	return score
+}
+
+func extractContainerHints(attrs string) []string {
+	matches := containerAttrRE.FindAllStringSubmatch(attrs, -1)
+	values := make([]string, 0, len(matches))
+	for _, match := range matches {
+		switch {
+		case len(match) >= 3 && strings.TrimSpace(match[2]) != "":
+			values = append(values, strings.TrimSpace(match[2]))
+		case len(match) >= 4 && strings.TrimSpace(match[3]) != "":
+			values = append(values, strings.TrimSpace(match[3]))
+		}
+	}
+	return values
+}
+
+func markdownifyReadableHTML(pageURL, rawHTML string) string {
+	text := scriptTagRE.ReplaceAllString(rawHTML, " ")
+	text = styleTagRE.ReplaceAllString(text, " ")
+	text = noiseTagRE.ReplaceAllString(text, " ")
+	text = stripNegativeHintContainers(text)
+	text = anchorTagRE.ReplaceAllStringFunc(text, func(match string) string {
+		parts := anchorTagRE.FindStringSubmatch(match)
+		if len(parts) < 8 {
+			return cleanHTMLText(match)
+		}
+		href := firstNonEmptyString(parts[3], parts[4], parts[5])
+		label := cleanHTMLText(parts[7])
+		if href == "" {
+			return label
+		}
+		if resolved := resolveRelativeURL(pageURL, href); resolved != "" {
+			href = resolved
+		}
+		if label == "" {
+			return href
+		}
+		return "[" + label + "](" + href + ")"
+	})
+	text = headingTagRE.ReplaceAllStringFunc(text, func(match string) string {
+		parts := headingTagRE.FindStringSubmatch(match)
+		if len(parts) < 3 {
+			return "\n"
+		}
+		level := 1
+		if parsed, err := strconv.Atoi(parts[1]); err == nil && parsed > 0 && parsed <= 6 {
+			level = parsed
+		}
+		label := cleanHTMLText(parts[2])
+		if label == "" {
+			return "\n"
+		}
+		return "\n\n" + strings.Repeat("#", level) + " " + label + "\n\n"
+	})
+	text = paragraphTagRE.ReplaceAllStringFunc(text, func(match string) string {
+		parts := paragraphTagRE.FindStringSubmatch(match)
+		if len(parts) < 2 {
+			return "\n"
+		}
+		label := cleanHTMLText(parts[1])
+		if label == "" {
+			return "\n"
+		}
+		return "\n\n" + label + "\n\n"
+	})
+	text = listItemTagRE.ReplaceAllStringFunc(text, func(match string) string {
+		parts := listItemTagRE.FindStringSubmatch(match)
+		if len(parts) < 2 {
+			return "\n"
+		}
+		label := cleanHTMLText(parts[1])
+		if label == "" {
+			return "\n"
+		}
+		return "\n- " + label
+	})
+	text = brTagRE.ReplaceAllString(text, "\n")
+	text = blockTagRE.ReplaceAllString(text, "\n")
+	text = anyTagRE.ReplaceAllString(text, " ")
+	text = html.UnescapeString(text)
+
+	lines := strings.Split(text, "\n")
+	filtered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(spaceRE.ReplaceAllString(line, " "))
+		if line == "" {
+			continue
+		}
+		if negativeContentHintRE.MatchString(line) && len(line) <= 80 {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	text = strings.Join(filtered, "\n\n")
+	return blankLineRE.ReplaceAllString(strings.TrimSpace(text), "\n\n")
+}
+
+func stripNegativeHintContainers(content string) string {
+	for _, re := range []*regexp.Regexp{sectionTagRE, divTagRE} {
+		content = re.ReplaceAllStringFunc(content, func(match string) string {
+			parts := re.FindStringSubmatch(match)
+			if len(parts) < 3 {
+				return match
+			}
+			if negativeContentHintRE.MatchString(strings.Join(extractContainerHints(parts[1]), " ")) {
+				return " "
+			}
+			return match
+		})
+	}
+	return content
+}
+
+func resolveRelativeURL(pageURL, raw string) string {
+	raw = strings.TrimSpace(html.UnescapeString(raw))
+	if raw == "" {
+		return ""
+	}
+	target, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	if target.IsAbs() {
+		return target.String()
+	}
+	base, err := url.Parse(pageURL)
+	if err != nil {
+		return raw
+	}
+	return base.ResolveReference(target).String()
 }
 
 func normalizeDuckDuckGoURL(raw string) string {
