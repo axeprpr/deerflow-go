@@ -1308,6 +1308,21 @@ func (s *Server) setThreadMetadata(threadID string, key string, value any) {
 	_ = s.persistSessionSnapshot(snapshot)
 }
 
+func (s *Server) setThreadValue(threadID string, key string, value any) {
+	s.sessionsMu.Lock()
+	var snapshot *Session
+	if session, exists := s.sessions[threadID]; exists {
+		if session.Values == nil {
+			session.Values = make(map[string]any)
+		}
+		session.Values[key] = value
+		session.UpdatedAt = time.Now().UTC()
+		snapshot = cloneSession(session)
+	}
+	s.sessionsMu.Unlock()
+	_ = s.persistSessionSnapshot(snapshot)
+}
+
 func (s *Server) setThreadConfig(threadID string, values map[string]any) {
 	if len(values) == 0 {
 		return

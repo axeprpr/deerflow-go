@@ -938,6 +938,8 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 				s.sendThreadUpdateEvent(w, flusher, run, "todos")
 			case "present_file", "present_files":
 				s.sendThreadUpdateEvent(w, flusher, run, "artifacts")
+			case "setup_agent":
+				s.sendThreadUpdateEvent(w, flusher, run, "created_agent_name")
 			default:
 				if toolMayAffectArtifacts(resolvedToolNameForArtifacts(evt)) {
 					s.sendThreadUpdateEvent(w, flusher, run, "artifacts")

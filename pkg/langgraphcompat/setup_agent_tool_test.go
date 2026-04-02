@@ -76,3 +76,32 @@ func TestSetupAgentToolRequiresRuntimeAgentName(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestSetupAgentToolStoresCreatedAgentNameInThreadState(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	tool := s.setupAgentTool()
+	threadID := "thread-bootstrap"
+	s.ensureSession(threadID, nil)
+
+	ctx := toolctx.WithThreadID(toolctx.WithRuntimeContext(context.Background(), map[string]any{
+		"agent_name": "code-reviewer",
+	}), threadID)
+	if _, err := tool.Handler(ctx, models.ToolCall{
+		ID:   "call-setup-thread-state",
+		Name: "setup_agent",
+		Arguments: map[string]any{
+			"soul":        "# SOUL\nBe rigorous.",
+			"description": "Reviews code changes carefully",
+		},
+	}); err != nil {
+		t.Fatalf("setup_agent error: %v", err)
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("expected thread state")
+	}
+	if got := asString(state.Values["created_agent_name"]); got != "code-reviewer" {
+		t.Fatalf("created_agent_name=%q want %q", got, "code-reviewer")
+	}
+}

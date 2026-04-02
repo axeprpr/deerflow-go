@@ -196,6 +196,70 @@ func TestForwardAgentEventEmitsLangChainToolEndEvent(t *testing.T) {
 	}
 }
 
+func TestForwardAgentEventEmitsCreatedAgentNameUpdateAfterSetupAgent(t *testing.T) {
+	s := &Server{
+		sessions:   map[string]*Session{},
+		runs:       map[string]*Run{},
+		runStreams: map[string]map[uint64]chan StreamEvent{},
+	}
+	s.ensureSession("thread-bootstrap", nil)
+	s.setThreadValue("thread-bootstrap", "created_agent_name", "code-reviewer")
+
+	run := &Run{
+		RunID:       "run-bootstrap",
+		ThreadID:    "thread-bootstrap",
+		AssistantID: "lead_agent",
+		Status:      "running",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.saveRun(run)
+
+	s.forwardAgentEvent(nil, nil, run, agent.AgentEvent{
+		Type:      agent.AgentEventToolCallEnd,
+		MessageID: "msg-tool-bootstrap",
+		ToolEvent: &agent.ToolCallEvent{
+			ID:          "call-bootstrap",
+			Name:        "setup_agent",
+			Status:      models.CallStatusCompleted,
+			CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		},
+		Result: &models.ToolResult{
+			CallID:   "call-bootstrap",
+			ToolName: "setup_agent",
+			Status:   models.CallStatusCompleted,
+			Content:  "Agent 'code-reviewer' created successfully!",
+		},
+	})
+
+	stored := s.getRun(run.RunID)
+	if stored == nil {
+		t.Fatal("stored run missing")
+	}
+
+	var found bool
+	for _, evt := range stored.Events {
+		if evt.Event != "updates" {
+			continue
+		}
+		payload, ok := evt.Data.(map[string]any)
+		if !ok {
+			t.Fatalf("updates payload type=%T", evt.Data)
+		}
+		agentUpdate, ok := payload["agent"].(map[string]any)
+		if !ok {
+			t.Fatalf("agent update payload=%#v", payload["agent"])
+		}
+		if got := stringFromAny(agentUpdate["created_agent_name"]); got != "code-reviewer" {
+			continue
+		}
+		found = true
+	}
+	if !found {
+		t.Fatal("missing created_agent_name updates payload")
+	}
+}
+
 func TestForwardAgentEventEmitsLangChainToolStartEvent(t *testing.T) {
 	s := &Server{
 		runs:       map[string]*Run{},

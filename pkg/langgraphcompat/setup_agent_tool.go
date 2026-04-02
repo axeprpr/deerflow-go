@@ -96,6 +96,9 @@ func (s *Server) handleSetupAgentTool(ctx context.Context, call models.ToolCall)
 		err = fmt.Errorf("failed to persist state: %w", err)
 		return failedToolResult(call, err), err
 	}
+	if threadID := strings.TrimSpace(tools.ThreadIDFromContext(ctx)); threadID != "" {
+		s.setThreadValue(threadID, "created_agent_name", agentName)
+	}
 
 	return models.ToolResult{
 		CallID:   call.ID,
