@@ -134,11 +134,14 @@ func shouldPreferMarkdownCompanion(path string) bool {
 
 func WriteFileHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
 	args := call.Arguments
-	path, ok := args["path"].(string)
-	if !ok || strings.TrimSpace(path) == "" {
+	requestedPath, ok := args["path"].(string)
+	if !ok || strings.TrimSpace(requestedPath) == "" {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("path is required")
 	}
-	path = tools.ResolveVirtualPath(ctx, path)
+	path := tools.ResolveVirtualPath(ctx, requestedPath)
+	if err := tools.ValidateWritableToolPath(ctx, requestedPath, path); err != nil {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, err
+	}
 	content, ok := args["content"].(string)
 	if !ok {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("content is required")
@@ -242,8 +245,8 @@ func renderDirTree(root string, entries []os.DirEntry, depth int) string {
 
 func StrReplaceHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
 	args := call.Arguments
-	path, ok := args["path"].(string)
-	if !ok || strings.TrimSpace(path) == "" {
+	requestedPath, ok := args["path"].(string)
+	if !ok || strings.TrimSpace(requestedPath) == "" {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("path is required")
 	}
 	oldStr, ok := args["old_str"].(string)
@@ -255,7 +258,10 @@ func StrReplaceHandler(ctx context.Context, call models.ToolCall) (models.ToolRe
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("new_str is required")
 	}
 	replaceAll, _ := args["replace_all"].(bool)
-	path = tools.ResolveVirtualPath(ctx, path)
+	path := tools.ResolveVirtualPath(ctx, requestedPath)
+	if err := tools.ValidateWritableToolPath(ctx, requestedPath, path); err != nil {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, err
+	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {

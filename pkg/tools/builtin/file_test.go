@@ -323,6 +323,76 @@ func TestWriteFileHandlerAppendMode(t *testing.T) {
 	}
 }
 
+func TestWriteFileHandlerBlocksSkillsWrites(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_SKILLS_ROOT", root)
+
+	skillPath := filepath.Join(root, "public", "bootstrap", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(skillPath, []byte("original"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	ctx := tools.WithThreadID(context.Background(), "thread-skills-write-blocked")
+	_, err := WriteFileHandler(ctx, models.ToolCall{
+		ID:   "call-skills-write-1",
+		Name: "write_file",
+		Arguments: map[string]any{
+			"path":    "/mnt/skills/public/bootstrap/SKILL.md",
+			"content": "mutated",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "Write access to skills path is not allowed") {
+		t.Fatalf("error=%v want skills write denied", err)
+	}
+
+	data, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if string(data) != "original" {
+		t.Fatalf("content=%q want %q", string(data), "original")
+	}
+}
+
+func TestStrReplaceHandlerBlocksACPWorkspaceWrites(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	threadID := "thread-acp-replace-blocked"
+	target := filepath.Join(root, "threads", threadID, "acp-workspace", "notes.txt")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(target, []byte("from acp"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	ctx := tools.WithThreadID(context.Background(), threadID)
+	_, err := StrReplaceHandler(ctx, models.ToolCall{
+		ID:   "call-acp-replace-1",
+		Name: "str_replace",
+		Arguments: map[string]any{
+			"path":    "/mnt/acp-workspace/notes.txt",
+			"old_str": "acp",
+			"new_str": "agent",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "Write access to ACP workspace is not allowed") {
+		t.Fatalf("error=%v want acp write denied", err)
+	}
+
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if string(data) != "from acp" {
+		t.Fatalf("content=%q want %q", string(data), "from acp")
+	}
+}
+
 func TestReadFileHandlerSupportsLineRanges(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DEERFLOW_DATA_ROOT", root)
