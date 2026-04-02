@@ -261,8 +261,11 @@ func TestImageSearchHandler(t *testing.T) {
 			if got := r.URL.Query().Get("vqd"); got != "3-abc123" {
 				t.Fatalf("image token=%q want %q", got, "3-abc123")
 			}
-			if got := r.URL.Query().Get("f"); got != "size:large,type:photo,layout:wide" {
-				t.Fatalf("filters=%q want %q", got, "size:large,type:photo,layout:wide")
+			if got := r.URL.Query().Get("l"); got != "us-en" {
+				t.Fatalf("region=%q want %q", got, "us-en")
+			}
+			if got := r.URL.Query().Get("f"); got != "size:large,color:monochrome,type:photo,layout:wide,license:share" {
+				t.Fatalf("filters=%q want %q", got, "size:large,color:monochrome,type:photo,layout:wide,license:share")
 			}
 			return &http.Response{
 				StatusCode: http.StatusOK,
@@ -298,11 +301,14 @@ func TestImageSearchHandler(t *testing.T) {
 		ID:   "call-image-search-1",
 		Name: "image_search",
 		Arguments: map[string]any{
-			"query":       "retro robot illustration",
-			"max_results": float64(1),
-			"size":        "Large",
-			"type_image":  "photo",
-			"layout":      "Wide",
+			"query":         "retro robot illustration",
+			"max_results":   float64(1),
+			"region":        "us-en",
+			"size":          "Large",
+			"color":         "Monochrome",
+			"type_image":    "photo",
+			"layout":        "Wide",
+			"license_image": "share",
 		},
 	})
 	if err != nil {
@@ -319,5 +325,22 @@ func TestImageSearchHandler(t *testing.T) {
 	}
 	if !strings.Contains(result.Content, `"source_url":"https://source.example.com/robot"`) {
 		t.Fatalf("content=%q missing source_url", result.Content)
+	}
+}
+
+func TestDuckDuckGoImageFilters(t *testing.T) {
+	got := duckDuckGoImageFilters("Large", "Monochrome", "photo", "Wide", "share")
+	want := "size:large,color:monochrome,type:photo,layout:wide,license:share"
+	if got != want {
+		t.Fatalf("duckDuckGoImageFilters()=%q want %q", got, want)
+	}
+}
+
+func TestNormalizedDuckDuckGoRegionDefaults(t *testing.T) {
+	if got := normalizedDuckDuckGoRegion(""); got != "wt-wt" {
+		t.Fatalf("normalizedDuckDuckGoRegion(\"\")=%q want %q", got, "wt-wt")
+	}
+	if got := normalizedDuckDuckGoRegion(" US-EN "); got != "us-en" {
+		t.Fatalf("normalizedDuckDuckGoRegion(\" US-EN \")=%q want %q", got, "us-en")
 	}
 }

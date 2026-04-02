@@ -169,11 +169,14 @@ func ImageSearchHandler(ctx context.Context, call models.ToolCall) (models.ToolR
 		maxResults = 10
 	}
 
+	region := firstNonEmptyString(optionalStringArg(call.Arguments, "region"), "wt-wt")
 	size := optionalStringArg(call.Arguments, "size")
+	color := optionalStringArg(call.Arguments, "color")
 	imageType := optionalStringArg(call.Arguments, "type_image")
 	layout := optionalStringArg(call.Arguments, "layout")
+	licenseImage := optionalStringArg(call.Arguments, "license_image")
 
-	results, err := searchDuckDuckGoImages(query, maxResults, size, imageType, layout)
+	results, err := searchDuckDuckGoImages(query, maxResults, region, size, color, imageType, layout, licenseImage)
 	if err != nil {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("image search failed: %w", err)
 	}
@@ -238,11 +241,14 @@ func ImageSearchTool() models.Tool {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"query":       map[string]any{"type": "string", "description": "Search keywords for the desired images"},
-				"max_results": map[string]any{"type": "number", "description": "Maximum number of images to return"},
-				"size":        map[string]any{"type": "string", "description": "Optional size filter such as Small, Medium, Large, or Wallpaper"},
-				"type_image":  map[string]any{"type": "string", "description": "Optional image type filter such as photo, clipart, gif, transparent, or line"},
-				"layout":      map[string]any{"type": "string", "description": "Optional layout filter such as Square, Tall, or Wide"},
+				"query":         map[string]any{"type": "string", "description": "Search keywords for the desired images"},
+				"max_results":   map[string]any{"type": "number", "description": "Maximum number of images to return"},
+				"region":        map[string]any{"type": "string", "description": "Optional DuckDuckGo region such as wt-wt, us-en, or cn-zh"},
+				"size":          map[string]any{"type": "string", "description": "Optional size filter such as Small, Medium, Large, or Wallpaper"},
+				"color":         map[string]any{"type": "string", "description": "Optional color filter such as color, monochrome, red, blue, or transparent"},
+				"type_image":    map[string]any{"type": "string", "description": "Optional image type filter such as photo, clipart, gif, transparent, or line"},
+				"layout":        map[string]any{"type": "string", "description": "Optional layout filter such as Square, Tall, or Wide"},
+				"license_image": map[string]any{"type": "string", "description": "Optional license filter such as any, public, share, sharecommercially, modify, or modifycommercially"},
 			},
 			"required": []any{"query"},
 		},
@@ -352,7 +358,7 @@ func fetchWebPage(rawURL string, maxChars int) (string, error) {
 	return extractReadableContent(parsed.String(), string(body), maxChars), nil
 }
 
-func searchDuckDuckGoImages(query string, maxResults int, size, imageType, layout string) ([]imageSearchResult, error) {
+func searchDuckDuckGoImages(query string, maxResults int, region, size, color, imageType, layout, licenseImage string) ([]imageSearchResult, error) {
 	vqd, err := fetchDuckDuckGoImageToken(query)
 	if err != nil {
 		return nil, err
@@ -365,10 +371,10 @@ func searchDuckDuckGoImages(query string, maxResults int, size, imageType, layou
 	params := endpoint.Query()
 	params.Set("q", query)
 	params.Set("o", "json")
-	params.Set("l", "wt-wt")
+	params.Set("l", normalizedDuckDuckGoRegion(region))
 	params.Set("p", "1")
 	params.Set("vqd", vqd)
-	if filters := duckDuckGoImageFilters(size, imageType, layout); filters != "" {
+	if filters := duckDuckGoImageFilters(size, color, imageType, layout, licenseImage); filters != "" {
 		params.Set("f", filters)
 	}
 	endpoint.RawQuery = params.Encode()
@@ -482,10 +488,13 @@ func extractDuckDuckGoImageToken(body string) string {
 	return ""
 }
 
-func duckDuckGoImageFilters(size, imageType, layout string) string {
-	parts := make([]string, 0, 3)
+func duckDuckGoImageFilters(size, color, imageType, layout, licenseImage string) string {
+	parts := make([]string, 0, 5)
 	if value := strings.TrimSpace(size); value != "" {
 		parts = append(parts, "size:"+strings.ToLower(value))
+	}
+	if value := strings.TrimSpace(color); value != "" {
+		parts = append(parts, "color:"+strings.ToLower(value))
 	}
 	if value := strings.TrimSpace(imageType); value != "" {
 		parts = append(parts, "type:"+strings.ToLower(value))
@@ -493,7 +502,18 @@ func duckDuckGoImageFilters(size, imageType, layout string) string {
 	if value := strings.TrimSpace(layout); value != "" {
 		parts = append(parts, "layout:"+strings.ToLower(value))
 	}
+	if value := strings.TrimSpace(licenseImage); value != "" {
+		parts = append(parts, "license:"+strings.ToLower(value))
+	}
 	return strings.Join(parts, ",")
+}
+
+func normalizedDuckDuckGoRegion(region string) string {
+	region = strings.TrimSpace(strings.ToLower(region))
+	if region == "" {
+		return "wt-wt"
+	}
+	return region
 }
 
 func optionalStringArg(args map[string]any, key string) string {
