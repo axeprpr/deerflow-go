@@ -110,7 +110,7 @@ var suggestionBulletRE = regexp.MustCompile(`^(?:[-*•]|\d+[.)])\s+`)
 
 var skillInstallSeq uint64
 var agentNameRE = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
-var threadIDRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+var threadIDRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 var skillFrontmatterNameRE = regexp.MustCompile(`^[a-z0-9-]+$`)
 var windowsAbsolutePathRE = regexp.MustCompile(`^[A-Za-z]:[\\/].*`)
 
@@ -1543,7 +1543,7 @@ func validateThreadID(threadID string) error {
 		return errors.New("thread_id is required")
 	}
 	if !threadIDRE.MatchString(threadID) {
-		return fmt.Errorf("invalid thread_id %q: only alphanumeric characters, dots, hyphens, and underscores are allowed", threadID)
+		return fmt.Errorf("invalid thread_id %q: only alphanumeric characters, hyphens, and underscores are allowed", threadID)
 	}
 	return nil
 }

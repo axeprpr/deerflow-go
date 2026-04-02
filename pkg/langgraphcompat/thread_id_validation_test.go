@@ -2,47 +2,38 @@ package langgraphcompat
 
 import (
 	"bytes"
-	"encoding/json"
 	"mime/multipart"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestValidateThreadIDAcceptsDots(t *testing.T) {
-	if err := validateThreadID("thread.with.dot"); err != nil {
-		t.Fatalf("validateThreadID returned error: %v", err)
+func TestValidateThreadIDRejectsDots(t *testing.T) {
+	err := validateThreadID("thread.with.dot")
+	if err == nil {
+		t.Fatal("expected validateThreadID to reject dots")
+	}
+	if !strings.Contains(err.Error(), "invalid thread_id") {
+		t.Fatalf("error=%q", err)
 	}
 }
 
-func TestLangGraphRoutesSupportThreadIDsWithDots(t *testing.T) {
+func TestLangGraphRoutesRejectThreadIDsWithDots(t *testing.T) {
 	_, handler := newCompatTestServer(t)
 
 	createResp := performCompatRequest(t, handler, http.MethodPost, "/threads", strings.NewReader(`{"thread_id":"thread.with.dot"}`), map[string]string{
 		"Content-Type": "application/json",
 	})
-	if createResp.Code != http.StatusCreated {
+	if createResp.Code != http.StatusBadRequest {
 		t.Fatalf("create status=%d body=%s", createResp.Code, createResp.Body.String())
 	}
-
-	stateResp := performCompatRequest(t, handler, http.MethodGet, "/threads/thread.with.dot/state", nil, nil)
-	if stateResp.Code != http.StatusOK {
-		t.Fatalf("state status=%d body=%s", stateResp.Code, stateResp.Body.String())
-	}
-
-	var state ThreadState
-	if err := json.Unmarshal(stateResp.Body.Bytes(), &state); err != nil {
-		t.Fatalf("unmarshal state: %v", err)
-	}
-	if got := asString(state.Metadata["thread_id"]); got != "thread.with.dot" {
-		t.Fatalf("thread_id=%q want=thread.with.dot", got)
+	if !strings.Contains(createResp.Body.String(), "invalid thread_id") {
+		t.Fatalf("body=%q", createResp.Body.String())
 	}
 }
 
-func TestGatewayRoutesSupportThreadIDsWithDots(t *testing.T) {
-	s, handler := newCompatTestServer(t)
+func TestGatewayRoutesRejectThreadIDsWithDots(t *testing.T) {
+	_, handler := newCompatTestServer(t)
 	threadID := "thread.with.dot"
 
 	var body bytes.Buffer
@@ -61,22 +52,18 @@ func TestGatewayRoutesSupportThreadIDsWithDots(t *testing.T) {
 	uploadResp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/"+threadID+"/uploads", &body, map[string]string{
 		"Content-Type": writer.FormDataContentType(),
 	})
-	if uploadResp.Code != http.StatusOK {
+	if uploadResp.Code != http.StatusBadRequest {
 		t.Fatalf("upload status=%d body=%s", uploadResp.Code, uploadResp.Body.String())
 	}
-
-	if _, err := os.Stat(filepath.Join(s.uploadsDir(threadID), "hello.txt")); err != nil {
-		t.Fatalf("expected uploaded file to exist: %v", err)
+	if !strings.Contains(uploadResp.Body.String(), "invalid thread_id") {
+		t.Fatalf("body=%q", uploadResp.Body.String())
 	}
 
 	deleteResp := performCompatRequest(t, handler, http.MethodDelete, "/api/threads/"+threadID, nil, nil)
-	if deleteResp.Code != http.StatusOK {
+	if deleteResp.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("delete status=%d body=%s", deleteResp.Code, deleteResp.Body.String())
 	}
-	if _, err := os.Stat(s.threadDir(threadID)); err != nil {
-		t.Fatalf("expected thread dir preserved, stat err=%v", err)
-	}
-	if _, err := os.Stat(s.threadRoot(threadID)); !os.IsNotExist(err) {
-		t.Fatalf("expected user-data removal, stat err=%v", err)
+	if !strings.Contains(deleteResp.Body.String(), "invalid thread_id") {
+		t.Fatalf("body=%q", deleteResp.Body.String())
 	}
 }
