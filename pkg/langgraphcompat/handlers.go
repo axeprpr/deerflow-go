@@ -65,6 +65,10 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 	s.handleRunCreateRequest(w, r, r.PathValue("thread_id"))
 }
 
+func (s *Server) handleThreadClarificationList(w http.ResponseWriter, r *http.Request) {
+	s.clarifyAPI.HandleList(w, r, r.PathValue("thread_id"))
+}
+
 func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, routeThreadID string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {

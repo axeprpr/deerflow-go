@@ -607,6 +607,32 @@ curl -N http://localhost:8080/threads/<thread_id>/stream
 
 **Response:** Server-Sent Events
 
+### GET /threads/{thread_id}/clarifications
+
+List clarification items for a thread in creation order.
+
+**Request:**
+
+```bash
+curl http://localhost:8080/threads/<thread_id>/clarifications
+```
+
+**Response:**
+
+```json
+{
+  "clarifications": [
+    {
+      "id": "clar_1",
+      "thread_id": "df3a8ab9-...",
+      "type": "choice",
+      "question": "Which environment should I deploy to?",
+      "created_at": "2026-03-29T10:00:04Z"
+    }
+  ]
+}
+```
+
 ### POST /threads/{thread_id}/clarifications
 
 Create a clarification item manually.

@@ -1,6 +1,7 @@
 package langgraphcompat
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axeprpr/deerflow-go/pkg/clarification"
 )
 
 func TestGatewayThreadsListReturnsGatewayThreadEnvelopes(t *testing.T) {
@@ -87,6 +90,47 @@ func TestGatewayThreadCreateRejectsInvalidThreadID(t *testing.T) {
 	}
 	if !strings.Contains(resp.Body.String(), "invalid thread_id") {
 		t.Fatalf("body=%q", resp.Body.String())
+	}
+}
+
+func TestGatewayThreadClarificationsListReturnsThreadItems(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	s.ensureSession("thread-gateway-clarify", nil)
+
+	first, err := s.clarify.Request(clarification.WithThreadID(context.Background(), "thread-gateway-clarify"), clarification.ClarificationRequest{
+		Question: "First?",
+	})
+	if err != nil {
+		t.Fatalf("first request error = %v", err)
+	}
+	second, err := s.clarify.Request(clarification.WithThreadID(context.Background(), "thread-gateway-clarify"), clarification.ClarificationRequest{
+		Question: "Second?",
+	})
+	if err != nil {
+		t.Fatalf("second request error = %v", err)
+	}
+	if _, err := s.clarify.Request(clarification.WithThreadID(context.Background(), "thread-other"), clarification.ClarificationRequest{
+		Question: "Other?",
+	}); err != nil {
+		t.Fatalf("other request error = %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/thread-gateway-clarify/clarifications", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		Clarifications []clarification.Clarification `json:"clarifications"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Clarifications) != 2 {
+		t.Fatalf("clarifications=%d want=2 body=%s", len(payload.Clarifications), resp.Body.String())
+	}
+	if payload.Clarifications[0].ID != first.ID || payload.Clarifications[1].ID != second.ID {
+		t.Fatalf("ids=[%s %s] want=[%s %s]", payload.Clarifications[0].ID, payload.Clarifications[1].ID, first.ID, second.ID)
 	}
 }
 

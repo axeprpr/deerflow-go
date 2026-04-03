@@ -3,6 +3,7 @@ package clarification
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -120,6 +121,12 @@ func (m *Manager) ListByThread(threadID string) []Clarification {
 			items = append(items, *clone(item))
 		}
 	}
+	slices.SortFunc(items, func(a, b Clarification) int {
+		if cmp := a.CreatedAt.Compare(b.CreatedAt); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
 	return items
 }
 

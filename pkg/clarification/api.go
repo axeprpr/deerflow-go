@@ -36,6 +36,17 @@ func (a *API) HandleCreate(w http.ResponseWriter, r *http.Request, threadID stri
 	writeJSON(w, http.StatusCreated, item)
 }
 
+func (a *API) HandleList(w http.ResponseWriter, _ *http.Request, threadID string) {
+	if a == nil || a.Manager == nil {
+		http.Error(w, "clarification manager is not configured", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"clarifications": a.Manager.ListByThread(threadID),
+	})
+}
+
 func (a *API) HandleGet(w http.ResponseWriter, _ *http.Request, threadID string, id string) {
 	if a == nil || a.Manager == nil {
 		http.Error(w, "clarification manager is not configured", http.StatusInternalServerError)

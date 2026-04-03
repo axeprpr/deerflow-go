@@ -3,6 +3,7 @@ package clarification
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func TestManagerRequestResolveAndGet(t *testing.T) {
@@ -82,5 +83,37 @@ func TestManagerEmitsEventAndPending(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected clarification on pending channel")
+	}
+}
+
+func TestManagerListByThreadSorted(t *testing.T) {
+	manager := NewManager(1)
+	now := time.Now().UTC()
+
+	manager.clarifications["later"] = &Clarification{
+		ID:        "later",
+		ThreadID:  "thread-1",
+		Question:  "Later",
+		CreatedAt: now.Add(2 * time.Minute),
+	}
+	manager.clarifications["other"] = &Clarification{
+		ID:        "other",
+		ThreadID:  "thread-2",
+		Question:  "Other",
+		CreatedAt: now.Add(time.Minute),
+	}
+	manager.clarifications["first"] = &Clarification{
+		ID:        "first",
+		ThreadID:  "thread-1",
+		Question:  "First",
+		CreatedAt: now,
+	}
+
+	items := manager.ListByThread("thread-1")
+	if len(items) != 2 {
+		t.Fatalf("ListByThread() len = %d, want 2", len(items))
+	}
+	if items[0].ID != "first" || items[1].ID != "later" {
+		t.Fatalf("ListByThread() order = [%s %s], want [first later]", items[0].ID, items[1].ID)
 	}
 }

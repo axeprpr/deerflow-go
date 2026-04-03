@@ -184,6 +184,7 @@ func gatewayOpenAPIPaths() map[string]any {
 			"get": operation("threads", "List Thread Files", "List thread files across uploads, workspace, and outputs."),
 		}),
 		"/api/threads/{thread_id}/clarifications": pathItem(map[string]any{
+			"get":  operation("threads", "List Clarifications", "List clarification requests for a thread through the gateway prefix."),
 			"post": operation("threads", "Create Clarification", "Create a clarification request through the gateway prefix."),
 		}),
 		"/api/threads/{thread_id}/clarifications/{id}": pathItem(map[string]any{
@@ -267,6 +268,7 @@ func gatewayOpenAPIPaths() map[string]any {
 			"get": operation("langgraph", "Join Thread Stream", "Join the latest active thread stream."),
 		}),
 		"/threads/{thread_id}/clarifications": pathItem(map[string]any{
+			"get":  operation("langgraph", "List Clarifications", "List clarification requests for a thread."),
 			"post": operation("langgraph", "Create Clarification", "Create a clarification request."),
 		}),
 		"/threads/{thread_id}/clarifications/{id}": pathItem(map[string]any{
@@ -334,6 +336,7 @@ func gatewayOpenAPIPaths() map[string]any {
 			"get": operation("langgraph", "Join Thread Stream (Prefixed)", "Join the latest active thread stream via the prefixed API."),
 		}),
 		"/api/langgraph/threads/{thread_id}/clarifications": pathItem(map[string]any{
+			"get":  operation("langgraph", "List Clarifications (Prefixed)", "List clarification requests for a thread via the prefixed API."),
 			"post": operation("langgraph", "Create Clarification (Prefixed)", "Create a clarification request via the prefixed API."),
 		}),
 		"/api/langgraph/threads/{thread_id}/clarifications/{id}": pathItem(map[string]any{

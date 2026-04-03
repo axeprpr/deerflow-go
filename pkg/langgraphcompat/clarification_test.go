@@ -2,6 +2,7 @@ package langgraphcompat
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -81,5 +82,55 @@ func TestThreadClarificationHandlers(t *testing.T) {
 	}
 	if resolved.Answer != "safe" {
 		t.Fatalf("resolved answer = %q, want safe", resolved.Answer)
+	}
+}
+
+func TestThreadClarificationListHandler(t *testing.T) {
+	manager := clarification.NewManager(4)
+	server := &Server{
+		clarify:    manager,
+		clarifyAPI: clarification.NewAPI(manager),
+		sessions:   make(map[string]*Session),
+		runs:       make(map[string]*Run),
+	}
+	server.ensureSession("thread-1", nil)
+
+	first, err := manager.Request(clarification.WithThreadID(context.Background(), "thread-1"), clarification.ClarificationRequest{
+		Question: "First?",
+	})
+	if err != nil {
+		t.Fatalf("first request error = %v", err)
+	}
+	second, err := manager.Request(clarification.WithThreadID(context.Background(), "thread-1"), clarification.ClarificationRequest{
+		Question: "Second?",
+	})
+	if err != nil {
+		t.Fatalf("second request error = %v", err)
+	}
+	if _, err := manager.Request(clarification.WithThreadID(context.Background(), "thread-2"), clarification.ClarificationRequest{
+		Question: "Other thread?",
+	}); err != nil {
+		t.Fatalf("other request error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/threads/thread-1/clarifications", nil)
+	req.SetPathValue("thread_id", "thread-1")
+	res := httptest.NewRecorder()
+	server.handleThreadClarificationList(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d", res.Code, http.StatusOK)
+	}
+
+	var payload struct {
+		Clarifications []clarification.Clarification `json:"clarifications"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(payload.Clarifications) != 2 {
+		t.Fatalf("clarifications len = %d, want 2", len(payload.Clarifications))
+	}
+	if payload.Clarifications[0].ID != first.ID || payload.Clarifications[1].ID != second.ID {
+		t.Fatalf("clarification ids = [%s %s], want [%s %s]", payload.Clarifications[0].ID, payload.Clarifications[1].ID, first.ID, second.ID)
 	}
 }

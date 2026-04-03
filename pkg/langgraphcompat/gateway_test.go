@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
+	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -38,7 +39,10 @@ func newCompatTestServer(t *testing.T) (*Server, http.Handler) {
 		t.Fatalf("mkdir data root: %v", err)
 	}
 	t.Setenv(compatRootEnv, compatRoot)
+	clarify := clarification.NewManager(16)
 	s := &Server{
+		clarify:    clarify,
+		clarifyAPI: clarification.NewAPI(clarify),
 		sessions:   make(map[string]*Session),
 		runs:       make(map[string]*Run),
 		runStreams: make(map[string]map[uint64]chan StreamEvent),

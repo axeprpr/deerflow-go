@@ -205,6 +205,7 @@ func (s *Server) registerGatewayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/threads/{thread_id}/runs/{run_id}/stream", s.handleGatewayThreadRunStream)
 	mux.HandleFunc("POST /api/threads/{thread_id}/runs/{run_id}/cancel", s.handleGatewayThreadRunCancel)
 	mux.HandleFunc("GET /api/threads/{thread_id}/stream", s.handleGatewayThreadStreamJoin)
+	mux.HandleFunc("GET /api/threads/{thread_id}/clarifications", s.handleGatewayThreadClarificationList)
 	mux.HandleFunc("POST /api/threads/{thread_id}/clarifications", s.handleGatewayThreadClarificationCreate)
 	mux.HandleFunc("GET /api/threads/{thread_id}/clarifications/{id}", s.handleGatewayThreadClarificationGet)
 	mux.HandleFunc("POST /api/threads/{thread_id}/clarifications/{id}/resolve", s.handleGatewayThreadClarificationResolve)
@@ -346,6 +347,13 @@ func (s *Server) handleGatewayThreadStreamJoin(w http.ResponseWriter, r *http.Re
 		return
 	}
 	s.handleThreadJoinStream(w, r)
+}
+
+func (s *Server) handleGatewayThreadClarificationList(w http.ResponseWriter, r *http.Request) {
+	if !s.validateGatewayThreadPath(w, r) {
+		return
+	}
+	s.handleThreadClarificationList(w, r)
 }
 
 func (s *Server) handleGatewayThreadClarificationCreate(w http.ResponseWriter, r *http.Request) {
