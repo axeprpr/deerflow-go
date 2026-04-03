@@ -118,6 +118,7 @@ func gatewayOpenAPIPaths() map[string]any {
 		}),
 		"/api/memory": pathItem(map[string]any{
 			"get":    operation("memory", "Get Memory", "Get current memory data."),
+			"put":    operation("memory", "Update Memory", "Replace the persisted memory snapshot."),
 			"delete": operation("memory", "Clear Memory", "Delete all persisted memory."),
 		}),
 		"/api/memory/reload": pathItem(map[string]any{
@@ -147,6 +148,9 @@ func gatewayOpenAPIPaths() map[string]any {
 			"patch":  operation("threads", "Update Thread Data", "Update thread metadata, values, and config through the gateway prefix."),
 			"delete": operation("threads", "Delete Thread Data", "Delete thread-local gateway data."),
 		}),
+		"/api/threads/{thread_id}/runs/{run_id}/cancel": pathItem(map[string]any{
+			"post": operation("threads", "Cancel Thread Run", "Request cancellation for an in-flight thread run through the gateway prefix."),
+		}),
 		"/api/threads/{thread_id}/files": pathItem(map[string]any{
 			"get": operation("threads", "List Thread Files", "List thread files across uploads, workspace, and outputs."),
 		}),
@@ -175,10 +179,14 @@ func gatewayOpenAPIPaths() map[string]any {
 		"/runs/{run_id}": pathItem(map[string]any{
 			"get": operation("langgraph", "Get Run", "Get run metadata."),
 		}),
+		"/runs/{run_id}/cancel": pathItem(map[string]any{
+			"post": operation("langgraph", "Cancel Run", "Request cancellation for an in-flight run."),
+		}),
 		"/runs/{run_id}/stream": pathItem(map[string]any{
 			"get": operation("langgraph", "Replay Run Stream", "Replay recorded run events."),
 		}),
 		"/threads": pathItem(map[string]any{
+			"get":  operation("langgraph", "List Threads", "List threads."),
 			"post": operation("langgraph", "Create Thread", "Create a thread."),
 		}),
 		"/threads/search": pathItem(map[string]any{
@@ -208,6 +216,9 @@ func gatewayOpenAPIPaths() map[string]any {
 		"/threads/{thread_id}/runs/{run_id}": pathItem(map[string]any{
 			"get": operation("langgraph", "Get Thread Run", "Get run metadata for a thread-scoped run."),
 		}),
+		"/threads/{thread_id}/runs/{run_id}/cancel": pathItem(map[string]any{
+			"post": operation("langgraph", "Cancel Thread Run", "Request cancellation for an in-flight thread-scoped run."),
+		}),
 		"/threads/{thread_id}/runs/stream": pathItem(map[string]any{
 			"post": operation("langgraph", "Stream Thread Run", "Stream a run bound to a thread."),
 		}),
@@ -235,10 +246,14 @@ func gatewayOpenAPIPaths() map[string]any {
 		"/api/langgraph/runs/{run_id}": pathItem(map[string]any{
 			"get": operation("langgraph", "Get Run (Prefixed)", "Get run metadata via the prefixed API."),
 		}),
+		"/api/langgraph/runs/{run_id}/cancel": pathItem(map[string]any{
+			"post": operation("langgraph", "Cancel Run (Prefixed)", "Request cancellation for an in-flight run via the prefixed API."),
+		}),
 		"/api/langgraph/runs/{run_id}/stream": pathItem(map[string]any{
 			"get": operation("langgraph", "Replay Run Stream (Prefixed)", "Replay run events via the prefixed API."),
 		}),
 		"/api/langgraph/threads": pathItem(map[string]any{
+			"get":  operation("langgraph", "List Threads (Prefixed)", "List threads via the prefixed API."),
 			"post": operation("langgraph", "Create Thread (Prefixed)", "Create a thread via the prefixed API."),
 		}),
 		"/api/langgraph/threads/search": pathItem(map[string]any{
@@ -249,8 +264,45 @@ func gatewayOpenAPIPaths() map[string]any {
 			"patch":  operation("langgraph", "Update Thread (Prefixed)", "Update a thread via the prefixed API."),
 			"delete": operation("langgraph", "Delete Thread (Prefixed)", "Delete a thread via the prefixed API."),
 		}),
+		"/api/langgraph/threads/{thread_id}/files": pathItem(map[string]any{
+			"get": operation("langgraph", "List Thread Files (Prefixed)", "List presented files for a thread via the prefixed API."),
+		}),
+		"/api/langgraph/threads/{thread_id}/state": pathItem(map[string]any{
+			"get":   operation("langgraph", "Get Thread State (Prefixed)", "Get thread state via the prefixed API."),
+			"post":  operation("langgraph", "Replace Thread State (Prefixed)", "Replace thread state via the prefixed API."),
+			"patch": operation("langgraph", "Patch Thread State (Prefixed)", "Patch thread state via the prefixed API."),
+		}),
+		"/api/langgraph/threads/{thread_id}/history": pathItem(map[string]any{
+			"get":  operation("langgraph", "Get Thread History (Prefixed)", "Get thread history via the prefixed API."),
+			"post": operation("langgraph", "Get Thread History (Prefixed)", "Get thread history with request body filters via the prefixed API."),
+		}),
+		"/api/langgraph/threads/{thread_id}/runs": pathItem(map[string]any{
+			"get":  operation("langgraph", "List Thread Runs (Prefixed)", "List runs for a thread via the prefixed API."),
+			"post": operation("langgraph", "Create Thread Run (Prefixed)", "Create a run bound to a thread via the prefixed API."),
+		}),
 		"/api/langgraph/threads/{thread_id}/runs/{run_id}": pathItem(map[string]any{
 			"get": operation("langgraph", "Get Thread Run (Prefixed)", "Get run metadata for a thread-scoped run via the prefixed API."),
+		}),
+		"/api/langgraph/threads/{thread_id}/runs/{run_id}/cancel": pathItem(map[string]any{
+			"post": operation("langgraph", "Cancel Thread Run (Prefixed)", "Request cancellation for an in-flight thread-scoped run via the prefixed API."),
+		}),
+		"/api/langgraph/threads/{thread_id}/runs/stream": pathItem(map[string]any{
+			"post": operation("langgraph", "Stream Thread Run (Prefixed)", "Stream a run bound to a thread via the prefixed API."),
+		}),
+		"/api/langgraph/threads/{thread_id}/runs/{run_id}/stream": pathItem(map[string]any{
+			"get": operation("langgraph", "Replay Thread Run Stream (Prefixed)", "Replay a thread run event stream via the prefixed API."),
+		}),
+		"/api/langgraph/threads/{thread_id}/stream": pathItem(map[string]any{
+			"get": operation("langgraph", "Join Thread Stream (Prefixed)", "Join the latest active thread stream via the prefixed API."),
+		}),
+		"/api/langgraph/threads/{thread_id}/clarifications": pathItem(map[string]any{
+			"post": operation("langgraph", "Create Clarification (Prefixed)", "Create a clarification request via the prefixed API."),
+		}),
+		"/api/langgraph/threads/{thread_id}/clarifications/{id}": pathItem(map[string]any{
+			"get": operation("langgraph", "Get Clarification (Prefixed)", "Get a clarification request via the prefixed API."),
+		}),
+		"/api/langgraph/threads/{thread_id}/clarifications/{id}/resolve": pathItem(map[string]any{
+			"post": operation("langgraph", "Resolve Clarification (Prefixed)", "Resolve a clarification request via the prefixed API."),
 		}),
 	}
 }

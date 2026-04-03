@@ -78,15 +78,53 @@ func TestGatewayOpenAPIDocumentationEndpoints(t *testing.T) {
 	}
 	for _, path := range []string{
 		"/api/models",
+		"/api/memory",
 		"/api/threads/{thread_id}/uploads",
+		"/api/threads/{thread_id}/runs/{run_id}/cancel",
 		"/api/threads/{thread_id}/artifacts/{artifact_path}",
 		"/runs/stream",
+		"/runs/{run_id}/cancel",
+		"/threads",
 		"/threads/{thread_id}/runs/{run_id}",
+		"/threads/{thread_id}/runs/{run_id}/cancel",
+		"/api/langgraph/threads",
+		"/api/langgraph/threads/{thread_id}/files",
+		"/api/langgraph/threads/{thread_id}/state",
+		"/api/langgraph/threads/{thread_id}/history",
+		"/api/langgraph/threads/{thread_id}/runs",
 		"/api/langgraph/threads/{thread_id}/runs/{run_id}",
+		"/api/langgraph/threads/{thread_id}/runs/{run_id}/cancel",
+		"/api/langgraph/threads/{thread_id}/runs/stream",
+		"/api/langgraph/threads/{thread_id}/runs/{run_id}/stream",
+		"/api/langgraph/threads/{thread_id}/stream",
+		"/api/langgraph/threads/{thread_id}/clarifications",
+		"/api/langgraph/threads/{thread_id}/clarifications/{id}",
+		"/api/langgraph/threads/{thread_id}/clarifications/{id}/resolve",
 	} {
 		if _, ok := spec.Paths[path]; !ok {
 			t.Fatalf("missing path %q in openapi spec", path)
 		}
+	}
+	memoryPath, ok := spec.Paths["/api/memory"].(map[string]any)
+	if !ok {
+		t.Fatalf("memory path missing operation map: %#v", spec.Paths["/api/memory"])
+	}
+	if _, ok := memoryPath["put"]; !ok {
+		t.Fatalf("memory path missing put operation: %#v", memoryPath)
+	}
+	threadsPath, ok := spec.Paths["/threads"].(map[string]any)
+	if !ok {
+		t.Fatalf("threads path missing operation map: %#v", spec.Paths["/threads"])
+	}
+	if _, ok := threadsPath["get"]; !ok {
+		t.Fatalf("threads path missing get operation: %#v", threadsPath)
+	}
+	prefixedThreadsPath, ok := spec.Paths["/api/langgraph/threads"].(map[string]any)
+	if !ok {
+		t.Fatalf("prefixed threads path missing operation map: %#v", spec.Paths["/api/langgraph/threads"])
+	}
+	if _, ok := prefixedThreadsPath["get"]; !ok {
+		t.Fatalf("prefixed threads path missing get operation: %#v", prefixedThreadsPath)
 	}
 	artifactPath, ok := spec.Paths["/api/threads/{thread_id}/artifacts/{artifact_path}"].(map[string]any)
 	if !ok {
@@ -189,6 +227,128 @@ func TestThreadRunGetReturnsOnlyMatchingThreadRun(t *testing.T) {
 	resp = performCompatRequest(t, handler, http.MethodGet, "/api/langgraph/threads/"+threadID+"/runs/"+run.RunID, nil, nil)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("prefixed status=%d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestRunCancelEndpointCancelsActiveRun(t *testing.T) {
+	provider := &blockingStreamProvider{
+		started: make(chan llm.ChatRequest, 1),
+		release: make(chan struct{}),
+	}
+	s := &Server{
+		llmProvider:  provider,
+		defaultModel: "default-model",
+		tools:        newRuntimeToolRegistry(t),
+		sessions:     make(map[string]*Session),
+		runs:         make(map[string]*Run),
+		runStreams:   make(map[string]map[uint64]chan StreamEvent),
+		dataRoot:     t.TempDir(),
+		agents:       map[string]gatewayAgent{},
+	}
+	mux := http.NewServeMux()
+	s.registerRoutes(mux)
+
+	body := `{"thread_id":"thread-cancel-global","input":{"messages":[{"role":"user","content":"keep going"}]}}`
+	req := httptest.NewRequest(http.MethodPost, "/runs/stream", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	streamDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		s.handleRunsStream(rec, req)
+		streamDone <- rec
+	}()
+
+	select {
+	case <-provider.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for run to start")
+	}
+
+	runID := findRunIDForThread(s, "thread-cancel-global")
+	if runID == "" {
+		t.Fatal("expected active run")
+	}
+
+	cancelResp := performCompatRequest(t, mux, http.MethodPost, "/runs/"+runID+"/cancel", nil, nil)
+	if cancelResp.Code != http.StatusAccepted {
+		t.Fatalf("cancel status=%d body=%s", cancelResp.Code, cancelResp.Body.String())
+	}
+	if !strings.Contains(cancelResp.Body.String(), `"run_id":"`+runID+`"`) {
+		t.Fatalf("unexpected cancel body: %s", cancelResp.Body.String())
+	}
+
+	select {
+	case rec := <-streamDone:
+		if rec.Code != http.StatusOK {
+			t.Fatalf("stream status=%d body=%s", rec.Code, rec.Body.String())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for canceled run to finish")
+	}
+
+	stored := s.getRun(runID)
+	if stored == nil {
+		t.Fatal("stored run missing")
+	}
+	if stored.Status != "error" {
+		t.Fatalf("run status=%q want=error err=%q", stored.Status, stored.Error)
+	}
+	if !strings.Contains(strings.ToLower(stored.Error), "canceled") {
+		t.Fatalf("run error=%q want cancellation", stored.Error)
+	}
+}
+
+func TestThreadRunCancelEndpointRejectsCompletedRun(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-run-cancel-complete"
+	s.ensureSession(threadID, nil)
+	s.saveRun(&Run{
+		RunID:     "run-complete",
+		ThreadID:  threadID,
+		Status:    "success",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	})
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/threads/"+threadID+"/runs/run-complete/cancel", nil, nil)
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), "run is not active") {
+		t.Fatalf("unexpected body: %s", resp.Body.String())
+	}
+}
+
+func TestGatewayThreadRunCancelEndpointCancelsMatchingRun(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-run-cancel-gateway"
+	s.ensureSession(threadID, nil)
+
+	canceled := make(chan struct{}, 1)
+	s.saveRun(&Run{
+		RunID:     "run-gateway-cancel",
+		ThreadID:  threadID,
+		Status:    "running",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+		cancel: func() {
+			select {
+			case canceled <- struct{}{}:
+			default:
+			}
+		},
+	})
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/"+threadID+"/runs/run-gateway-cancel/cancel", nil, nil)
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	select {
+	case <-canceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected cancel func to be invoked")
 	}
 }
 
