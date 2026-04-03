@@ -147,6 +147,9 @@ func gatewayOpenAPIPaths() map[string]any {
 			"get":  operation("threads", "List Threads", "List gateway threads with pagination and filtering."),
 			"post": operation("threads", "Create Thread", "Create a gateway thread and return the thread envelope."),
 		}),
+		"/api/threads/search": pathItem(map[string]any{
+			"post": operation("threads", "Search Threads", "Search gateway threads with structured filters."),
+		}),
 		"/api/threads/{thread_id}": pathItem(map[string]any{
 			"get":    operation("threads", "Get Thread Data", "Get thread metadata, values, and config through the gateway prefix."),
 			"patch":  operation("threads", "Update Thread Data", "Update thread metadata, values, and config through the gateway prefix."),
@@ -200,6 +203,8 @@ func gatewayOpenAPIPaths() map[string]any {
 			"get": operation("uploads", "List Uploads", "List uploaded files for a thread."),
 		}),
 		"/api/threads/{thread_id}/uploads/{filename}": pathItem(map[string]any{
+			"get":    operation("uploads", "Get Upload", "Download or inline-view one uploaded file."),
+			"head":   operation("uploads", "Probe Upload", "Fetch upload headers without returning the body."),
 			"delete": operation("uploads", "Delete Upload", "Delete one uploaded file."),
 		}),
 		"/api/threads/{thread_id}/artifacts/{artifact_path}": pathItem(map[string]any{

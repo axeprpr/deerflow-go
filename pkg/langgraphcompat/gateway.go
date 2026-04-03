@@ -189,6 +189,7 @@ func (s *Server) registerGatewayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/mcp/config", s.handleMCPConfigPut)
 	mux.HandleFunc("GET /api/threads", s.handleGatewayThreadsList)
 	mux.HandleFunc("POST /api/threads", s.handleGatewayThreadCreate)
+	mux.HandleFunc("POST /api/threads/search", s.handleGatewayThreadSearch)
 	mux.HandleFunc("GET /api/threads/{thread_id}", s.handleGatewayThreadGet)
 	mux.HandleFunc("PATCH /api/threads/{thread_id}", s.handleGatewayThreadPatch)
 	mux.HandleFunc("DELETE /api/threads/{thread_id}", s.handleGatewayThreadDelete)
@@ -211,6 +212,7 @@ func (s *Server) registerGatewayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/threads/{thread_id}/clarifications/{id}/resolve", s.handleGatewayThreadClarificationResolve)
 	mux.HandleFunc("POST /api/threads/{thread_id}/uploads", s.handleUploadsCreate)
 	mux.HandleFunc("GET /api/threads/{thread_id}/uploads/list", s.handleUploadsList)
+	mux.HandleFunc("GET /api/threads/{thread_id}/uploads/{filename}", s.handleUploadsGet)
 	mux.HandleFunc("DELETE /api/threads/{thread_id}/uploads/{filename}", s.handleUploadsDelete)
 	mux.HandleFunc("GET /api/threads/{thread_id}/artifacts/{artifact_path...}", s.handleArtifactGet)
 	mux.HandleFunc("HEAD /api/threads/{thread_id}/artifacts/{artifact_path...}", s.handleArtifactGet)
@@ -219,6 +221,10 @@ func (s *Server) registerGatewayRoutes(mux *http.ServeMux) {
 
 func (s *Server) handleGatewayThreadsList(w http.ResponseWriter, r *http.Request) {
 	s.handleThreadsList(w, r)
+}
+
+func (s *Server) handleGatewayThreadSearch(w http.ResponseWriter, r *http.Request) {
+	s.handleThreadSearch(w, r)
 }
 
 func (s *Server) handleGatewayThreadCreate(w http.ResponseWriter, r *http.Request) {
@@ -1071,6 +1077,35 @@ func (s *Server) handleUploadsList(w http.ResponseWriter, r *http.Request) {
 		"files": files,
 		"count": len(files),
 	})
+}
+
+func (s *Server) handleUploadsGet(w http.ResponseWriter, r *http.Request) {
+	threadID := strings.TrimSpace(r.PathValue("thread_id"))
+	filename := sanitizePathFilename(r.PathValue("filename"))
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if filename == "" {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	uploadDir := s.uploadsDir(threadID)
+	target := filepath.Join(uploadDir, filename)
+	if err := ensureResolvedPathWithinBase(uploadDir, target); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if _, err := os.Lstat(target); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	artifactReq := r.Clone(r.Context())
+	artifactReq.SetPathValue("thread_id", threadID)
+	artifactReq.SetPathValue("artifact_path", "mnt/user-data/uploads/"+filename)
+	s.handleArtifactGet(w, artifactReq)
 }
 
 func (s *Server) handleUploadsDelete(w http.ResponseWriter, r *http.Request) {

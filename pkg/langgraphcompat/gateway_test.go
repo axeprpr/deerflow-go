@@ -137,6 +137,16 @@ func TestGatewayOpenAPIDocumentationEndpoints(t *testing.T) {
 	if _, ok := artifactPath["head"]; !ok {
 		t.Fatalf("artifact path missing head operation: %#v", artifactPath)
 	}
+	uploadPath, ok := spec.Paths["/api/threads/{thread_id}/uploads/{filename}"].(map[string]any)
+	if !ok {
+		t.Fatalf("upload path missing operation map: %#v", spec.Paths["/api/threads/{thread_id}/uploads/{filename}"])
+	}
+	if _, ok := uploadPath["get"]; !ok {
+		t.Fatalf("upload path missing get operation: %#v", uploadPath)
+	}
+	if _, ok := uploadPath["head"]; !ok {
+		t.Fatalf("upload path missing head operation: %#v", uploadPath)
+	}
 
 	docsResp := performCompatRequest(t, handler, http.MethodGet, "/docs", nil, nil)
 	if docsResp.Code != http.StatusOK {
@@ -195,6 +205,56 @@ func TestTrailingSlashCompatibilityForLangGraphRoutes(t *testing.T) {
 	resp = performCompatRequest(t, handler, http.MethodGet, "/api/langgraph/threads/", nil, nil)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("GET /api/langgraph/threads/ status=%d want=%d", resp.Code, http.StatusOK)
+	}
+}
+
+func TestUploadGetRouteServesOriginalFile(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-upload-get"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "hello.txt"), []byte("hello from upload"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/uploads/hello.txt", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Body.String(); got != "hello from upload" {
+		t.Fatalf("body=%q want original upload", got)
+	}
+	if got := resp.Header().Get("Content-Type"); !strings.Contains(got, "text/plain") {
+		t.Fatalf("content-type=%q want text/plain", got)
+	}
+}
+
+func TestUploadGetRouteUsesMarkdownPreviewForConvertibleFiles(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-upload-get-preview"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "brief.pdf"), []byte("%PDF-1.7"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+	const preview = "# Brief\n\nConverted preview.\n"
+	if err := os.WriteFile(filepath.Join(uploadDir, "brief.md"), []byte(preview), 0o644); err != nil {
+		t.Fatalf("write preview: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/uploads/brief.pdf", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Body.String(); got != preview {
+		t.Fatalf("body=%q want markdown preview", got)
+	}
+	if got := resp.Header().Get("Content-Type"); !strings.Contains(got, "text/markdown") {
+		t.Fatalf("content-type=%q want text/markdown", got)
 	}
 }
 

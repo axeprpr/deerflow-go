@@ -45,6 +45,53 @@ func TestGatewayThreadsListReturnsGatewayThreadEnvelopes(t *testing.T) {
 	}
 }
 
+func TestGatewayThreadSearchReturnsGatewayThreadEnvelopes(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	first := s.ensureSession("thread-gateway-search-1", map[string]any{"agent_name": "writer-bot"})
+	applyThreadStateUpdate(first, map[string]any{"title": "Alpha brief"}, nil)
+	second := s.ensureSession("thread-gateway-search-2", map[string]any{"agent_name": "coder-bot"})
+	applyThreadStateUpdate(second, map[string]any{"title": "Beta launch"}, nil)
+
+	body := `{"query":"Beta","limit":1,"select":["thread_id","values","config"]}`
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/search", strings.NewReader(body), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var threads []map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) != 1 {
+		t.Fatalf("threads=%d want=1 body=%s", len(threads), resp.Body.String())
+	}
+	if got := asString(threads[0]["thread_id"]); got != "thread-gateway-search-2" {
+		t.Fatalf("thread_id=%q want=thread-gateway-search-2", got)
+	}
+
+	values, ok := threads[0]["values"].(map[string]any)
+	if !ok {
+		t.Fatalf("values=%#v", threads[0]["values"])
+	}
+	if got := asString(values["title"]); got != "Beta launch" {
+		t.Fatalf("title=%q want=Beta launch", got)
+	}
+
+	config, ok := threads[0]["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("config=%#v", threads[0]["config"])
+	}
+	configurable, ok := config["configurable"].(map[string]any)
+	if !ok {
+		t.Fatalf("configurable=%#v", config["configurable"])
+	}
+	if got := asString(configurable["agent_name"]); got != "coder-bot" {
+		t.Fatalf("agent_name=%q want=coder-bot", got)
+	}
+}
+
 func TestGatewayThreadCreateReturnsThreadEnvelope(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 

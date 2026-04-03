@@ -54,4 +54,4 @@ require (
 	golang.org/x/sync v0.17.0 // indirect
 )
 
-replace golang.org/x/text => /tmp/text-local
+replace golang.org/x/text => ./third_party/x_text
