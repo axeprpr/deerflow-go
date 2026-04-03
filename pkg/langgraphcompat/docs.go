@@ -161,6 +161,7 @@ func gatewayOpenAPIPaths() map[string]any {
 		}),
 		"/api/threads/{thread_id}/state": pathItem(map[string]any{
 			"get":   operation("threads", "Get Thread State", "Get thread state through the gateway prefix."),
+			"put":   operation("threads", "Replace Thread State", "Replace thread state through the gateway prefix."),
 			"post":  operation("threads", "Replace Thread State", "Replace thread state through the gateway prefix."),
 			"patch": operation("threads", "Patch Thread State", "Patch thread state through the gateway prefix."),
 		}),
@@ -251,6 +252,7 @@ func gatewayOpenAPIPaths() map[string]any {
 		}),
 		"/threads/{thread_id}/state": pathItem(map[string]any{
 			"get":   operation("langgraph", "Get Thread State", "Get thread state."),
+			"put":   operation("langgraph", "Replace Thread State", "Replace thread state."),
 			"post":  operation("langgraph", "Replace Thread State", "Replace thread state."),
 			"patch": operation("langgraph", "Patch Thread State", "Patch thread state."),
 		}),
@@ -319,6 +321,7 @@ func gatewayOpenAPIPaths() map[string]any {
 		}),
 		"/api/langgraph/threads/{thread_id}/state": pathItem(map[string]any{
 			"get":   operation("langgraph", "Get Thread State (Prefixed)", "Get thread state via the prefixed API."),
+			"put":   operation("langgraph", "Replace Thread State (Prefixed)", "Replace thread state via the prefixed API."),
 			"post":  operation("langgraph", "Replace Thread State (Prefixed)", "Replace thread state via the prefixed API."),
 			"patch": operation("langgraph", "Patch Thread State (Prefixed)", "Patch thread state via the prefixed API."),
 		}),

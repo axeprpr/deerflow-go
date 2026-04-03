@@ -60,6 +60,80 @@ func TestThreadStatePostMergesValuesAndMetadata(t *testing.T) {
 	}
 }
 
+func TestThreadStatePutMergesValuesAndMetadata(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	s.ensureSession("thread-state-put", map[string]any{"title": "Old title", "agent_type": "writer"})
+
+	resp := performCompatRequest(t, handler, http.MethodPut, "/threads/thread-state-put/state", strings.NewReader(`{"values":{"title":"Updated title","view_mode":"canvas"},"metadata":{"agent_type":"coder"}}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	s.sessionsMu.RLock()
+	session := s.sessions["thread-state-put"]
+	s.sessionsMu.RUnlock()
+	if session == nil {
+		t.Fatal("session is nil")
+	}
+	if got := asString(session.Metadata["title"]); got != "Updated title" {
+		t.Fatalf("title=%q want=Updated title", got)
+	}
+	if got := asString(session.Values["view_mode"]); got != "canvas" {
+		t.Fatalf("view_mode=%q want=canvas", got)
+	}
+	if got := asString(session.Metadata["agent_type"]); got != "coder" {
+		t.Fatalf("agent_type=%q want=coder", got)
+	}
+}
+
+func TestGatewayThreadStatePutUsesGatewayAlias(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	s.ensureSession("thread-gateway-state-put", map[string]any{"title": "Old title"})
+
+	resp := performCompatRequest(t, handler, http.MethodPut, "/api/threads/thread-gateway-state-put/state", strings.NewReader(`{"values":{"title":"Gateway title","sidebar_tab":"artifacts"}}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	state := s.getThreadState("thread-gateway-state-put")
+	if state == nil {
+		t.Fatal("state is nil")
+	}
+	if got := asString(state.Values["title"]); got != "Gateway title" {
+		t.Fatalf("title=%q want=Gateway title", got)
+	}
+	if got := asString(state.Values["sidebar_tab"]); got != "artifacts" {
+		t.Fatalf("sidebar_tab=%q want=artifacts", got)
+	}
+}
+
+func TestPrefixedLangGraphThreadStatePutUsesAPIAlias(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	s.ensureSession("thread-prefixed-state-put", map[string]any{"title": "Old title"})
+
+	resp := performCompatRequest(t, handler, http.MethodPut, "/api/langgraph/threads/thread-prefixed-state-put/state", strings.NewReader(`{"values":{"title":"Prefixed title","draft_id":"draft-42"}}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	state := s.getThreadState("thread-prefixed-state-put")
+	if state == nil {
+		t.Fatal("state is nil")
+	}
+	if got := asString(state.Values["title"]); got != "Prefixed title" {
+		t.Fatalf("title=%q want=Prefixed title", got)
+	}
+	if got := asString(state.Values["draft_id"]); got != "draft-42" {
+		t.Fatalf("draft_id=%q want=draft-42", got)
+	}
+}
+
 func TestThreadStatePatchPersistsCustomValuesAcrossReload(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	s.ensureSession("thread-custom-values", map[string]any{"title": "Custom values"})

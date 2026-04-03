@@ -42,6 +42,9 @@
     },
     "deep-research": {
       "enabled": true
+    },
+    "my-skill": {
+      "enabled": true
     }
   }
 }
