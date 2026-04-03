@@ -25,6 +25,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
+
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/memory"
@@ -185,17 +187,65 @@ func (s *Server) registerGatewayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/channels/{name}/restart", s.handleChannelRestart)
 	mux.HandleFunc("GET /api/mcp/config", s.handleMCPConfigGet)
 	mux.HandleFunc("PUT /api/mcp/config", s.handleMCPConfigPut)
+	mux.HandleFunc("GET /api/threads", s.handleGatewayThreadsList)
+	mux.HandleFunc("POST /api/threads", s.handleGatewayThreadCreate)
 	mux.HandleFunc("GET /api/threads/{thread_id}", s.handleGatewayThreadGet)
 	mux.HandleFunc("PATCH /api/threads/{thread_id}", s.handleGatewayThreadPatch)
 	mux.HandleFunc("DELETE /api/threads/{thread_id}", s.handleGatewayThreadDelete)
 	mux.HandleFunc("GET /api/threads/{thread_id}/files", s.handleGatewayThreadFiles)
+	mux.HandleFunc("GET /api/threads/{thread_id}/state", s.handleGatewayThreadStateGet)
+	mux.HandleFunc("POST /api/threads/{thread_id}/state", s.handleGatewayThreadStatePost)
+	mux.HandleFunc("PATCH /api/threads/{thread_id}/state", s.handleGatewayThreadStatePatch)
+	mux.HandleFunc("GET /api/threads/{thread_id}/history", s.handleGatewayThreadHistory)
+	mux.HandleFunc("POST /api/threads/{thread_id}/history", s.handleGatewayThreadHistory)
+	mux.HandleFunc("GET /api/threads/{thread_id}/runs", s.handleGatewayThreadRunsList)
+	mux.HandleFunc("POST /api/threads/{thread_id}/runs", s.handleGatewayThreadRunsCreate)
+	mux.HandleFunc("POST /api/threads/{thread_id}/runs/stream", s.handleGatewayThreadRunsStream)
+	mux.HandleFunc("GET /api/threads/{thread_id}/runs/{run_id}", s.handleGatewayThreadRunGet)
+	mux.HandleFunc("GET /api/threads/{thread_id}/runs/{run_id}/stream", s.handleGatewayThreadRunStream)
 	mux.HandleFunc("POST /api/threads/{thread_id}/runs/{run_id}/cancel", s.handleGatewayThreadRunCancel)
+	mux.HandleFunc("GET /api/threads/{thread_id}/stream", s.handleGatewayThreadStreamJoin)
+	mux.HandleFunc("POST /api/threads/{thread_id}/clarifications", s.handleGatewayThreadClarificationCreate)
+	mux.HandleFunc("GET /api/threads/{thread_id}/clarifications/{id}", s.handleGatewayThreadClarificationGet)
+	mux.HandleFunc("POST /api/threads/{thread_id}/clarifications/{id}/resolve", s.handleGatewayThreadClarificationResolve)
 	mux.HandleFunc("POST /api/threads/{thread_id}/uploads", s.handleUploadsCreate)
 	mux.HandleFunc("GET /api/threads/{thread_id}/uploads/list", s.handleUploadsList)
 	mux.HandleFunc("DELETE /api/threads/{thread_id}/uploads/{filename}", s.handleUploadsDelete)
 	mux.HandleFunc("GET /api/threads/{thread_id}/artifacts/{artifact_path...}", s.handleArtifactGet)
 	mux.HandleFunc("HEAD /api/threads/{thread_id}/artifacts/{artifact_path...}", s.handleArtifactGet)
 	mux.HandleFunc("POST /api/threads/{thread_id}/suggestions", s.handleSuggestions)
+}
+
+func (s *Server) handleGatewayThreadsList(w http.ResponseWriter, r *http.Request) {
+	s.handleThreadsList(w, r)
+}
+
+func (s *Server) handleGatewayThreadCreate(w http.ResponseWriter, r *http.Request) {
+	var req map[string]any
+	if r.Body != nil {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid JSON"})
+			return
+		}
+	}
+
+	threadID := strings.TrimSpace(stringFromAny(req["thread_id"]))
+	if threadID != "" {
+		if err := validateThreadID(threadID); err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": err.Error()})
+			return
+		}
+	}
+
+	if threadID == "" {
+		threadID = uuid.New().String()
+		req["thread_id"] = threadID
+	}
+
+	session := s.ensureSession(threadID, mapFromAny(req["metadata"]))
+	applyThreadEnvelope(session, req)
+	writeJSON(w, http.StatusCreated, s.threadResponse(session))
 }
 
 func (s *Server) handleGatewayThreadGet(w http.ResponseWriter, r *http.Request) {
@@ -226,6 +276,106 @@ func (s *Server) handleGatewayThreadRunCancel(w http.ResponseWriter, r *http.Req
 	}
 
 	s.handleThreadRunCancel(w, r)
+}
+
+func (s *Server) handleGatewayThreadStateGet(w http.ResponseWriter, r *http.Request) {
+	if !s.validateGatewayThreadPath(w, r) {
+		return
+	}
+	s.handleThreadStateGet(w, r)
+}
+
+func (s *Server) handleGatewayThreadStatePost(w http.ResponseWriter, r *http.Request) {
+	if !s.validateGatewayThreadPath(w, r) {
+		return
+	}
+	s.handleThreadStatePost(w, r)
+}
+
+func (s *Server) handleGatewayThreadStatePatch(w http.ResponseWriter, r *http.Request) {
+	if !s.validateGatewayThreadPath(w, r) {
+		return
+	}
+	s.handleThreadStatePatch(w, r)
+}
+
+func (s *Server) handleGatewayThreadHistory(w http.ResponseWriter, r *http.Request) {
+	if !s.validateGatewayThreadPath(w, r) {
+		return
+	}
+	s.handleThreadHistory(w, r)
+}
+
+func (s *Server) handleGatewayThreadRunsList(w http.ResponseWriter, r *http.Request) {
+	if !s.validateGatewayThreadPath(w, r) {
+		return
+	}
+	s.handleThreadRunsList(w, r)
+}
+
+func (s *Server) handleGatewayThreadRunsCreate(w http.ResponseWriter, r *http.Request) {
+	if !s.validateGatewayThreadPath(w, r) {
+		return
+	}
+	s.handleThreadRunsCreate(w, r)
+}
+
+func (s *Server) handleGatewayThreadRunsStream(w http.ResponseWriter, r *http.Request) {
+	if !s.validateGatewayThreadPath(w, r) {
+		return
+	}
+	s.handleThreadRunsStream(w, r)
+}
+
+func (s *Server) handleGatewayThreadRunGet(w http.ResponseWriter, r *http.Request) {
+	if !s.validateGatewayThreadPath(w, r) {
+		return
+	}
+	s.handleThreadRunGet(w, r)
+}
+
+func (s *Server) handleGatewayThreadRunStream(w http.ResponseWriter, r *http.Request) {
+	if !s.validateGatewayThreadPath(w, r) {
+		return
+	}
+	s.handleThreadRunStream(w, r)
+}
+
+func (s *Server) handleGatewayThreadStreamJoin(w http.ResponseWriter, r *http.Request) {
+	if !s.validateGatewayThreadPath(w, r) {
+		return
+	}
+	s.handleThreadJoinStream(w, r)
+}
+
+func (s *Server) handleGatewayThreadClarificationCreate(w http.ResponseWriter, r *http.Request) {
+	if !s.validateGatewayThreadPath(w, r) {
+		return
+	}
+	s.handleThreadClarificationCreate(w, r)
+}
+
+func (s *Server) handleGatewayThreadClarificationGet(w http.ResponseWriter, r *http.Request) {
+	if !s.validateGatewayThreadPath(w, r) {
+		return
+	}
+	s.handleThreadClarificationGet(w, r)
+}
+
+func (s *Server) handleGatewayThreadClarificationResolve(w http.ResponseWriter, r *http.Request) {
+	if !s.validateGatewayThreadPath(w, r) {
+		return
+	}
+	s.handleThreadClarificationResolve(w, r)
+}
+
+func (s *Server) validateGatewayThreadPath(w http.ResponseWriter, r *http.Request) bool {
+	threadID := strings.TrimSpace(r.PathValue("thread_id"))
+	if err := validateThreadID(threadID); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": err.Error()})
+		return false
+	}
+	return true
 }
 
 func (s *Server) handleModelsList(w http.ResponseWriter, r *http.Request) {

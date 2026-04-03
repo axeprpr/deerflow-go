@@ -143,16 +143,54 @@ func gatewayOpenAPIPaths() map[string]any {
 			"get": operation("mcp", "Get MCP Config", "Get MCP configuration."),
 			"put": operation("mcp", "Update MCP Config", "Update MCP configuration."),
 		}),
+		"/api/threads": pathItem(map[string]any{
+			"get":  operation("threads", "List Threads", "List gateway threads with pagination and filtering."),
+			"post": operation("threads", "Create Thread", "Create a gateway thread and return the thread envelope."),
+		}),
 		"/api/threads/{thread_id}": pathItem(map[string]any{
 			"get":    operation("threads", "Get Thread Data", "Get thread metadata, values, and config through the gateway prefix."),
 			"patch":  operation("threads", "Update Thread Data", "Update thread metadata, values, and config through the gateway prefix."),
 			"delete": operation("threads", "Delete Thread Data", "Delete thread-local gateway data."),
 		}),
+		"/api/threads/{thread_id}/state": pathItem(map[string]any{
+			"get":   operation("threads", "Get Thread State", "Get thread state through the gateway prefix."),
+			"post":  operation("threads", "Replace Thread State", "Replace thread state through the gateway prefix."),
+			"patch": operation("threads", "Patch Thread State", "Patch thread state through the gateway prefix."),
+		}),
+		"/api/threads/{thread_id}/history": pathItem(map[string]any{
+			"get":  operation("threads", "Get Thread History", "Get thread history through the gateway prefix."),
+			"post": operation("threads", "Get Thread History", "Get thread history with request body filters through the gateway prefix."),
+		}),
+		"/api/threads/{thread_id}/runs": pathItem(map[string]any{
+			"get":  operation("threads", "List Thread Runs", "List runs for a thread through the gateway prefix."),
+			"post": operation("threads", "Create Thread Run", "Create a run bound to a thread through the gateway prefix."),
+		}),
+		"/api/threads/{thread_id}/runs/stream": pathItem(map[string]any{
+			"post": operation("threads", "Stream Thread Run", "Stream a run bound to a thread through the gateway prefix."),
+		}),
+		"/api/threads/{thread_id}/runs/{run_id}": pathItem(map[string]any{
+			"get": operation("threads", "Get Thread Run", "Get run metadata for a thread-scoped run through the gateway prefix."),
+		}),
 		"/api/threads/{thread_id}/runs/{run_id}/cancel": pathItem(map[string]any{
 			"post": operation("threads", "Cancel Thread Run", "Request cancellation for an in-flight thread run through the gateway prefix."),
 		}),
+		"/api/threads/{thread_id}/runs/{run_id}/stream": pathItem(map[string]any{
+			"get": operation("threads", "Replay Thread Run Stream", "Replay a thread run event stream through the gateway prefix."),
+		}),
+		"/api/threads/{thread_id}/stream": pathItem(map[string]any{
+			"get": operation("threads", "Join Thread Stream", "Join the latest active thread stream through the gateway prefix."),
+		}),
 		"/api/threads/{thread_id}/files": pathItem(map[string]any{
 			"get": operation("threads", "List Thread Files", "List thread files across uploads, workspace, and outputs."),
+		}),
+		"/api/threads/{thread_id}/clarifications": pathItem(map[string]any{
+			"post": operation("threads", "Create Clarification", "Create a clarification request through the gateway prefix."),
+		}),
+		"/api/threads/{thread_id}/clarifications/{id}": pathItem(map[string]any{
+			"get": operation("threads", "Get Clarification", "Get a clarification request through the gateway prefix."),
+		}),
+		"/api/threads/{thread_id}/clarifications/{id}/resolve": pathItem(map[string]any{
+			"post": operation("threads", "Resolve Clarification", "Resolve a clarification request through the gateway prefix."),
 		}),
 		"/api/threads/{thread_id}/uploads": pathItem(map[string]any{
 			"post": operation("uploads", "Upload Files", "Upload files to a thread."),
