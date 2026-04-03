@@ -106,6 +106,35 @@ func TestDefaultGatewayMCPConnectorSupportsStreamableHTTPAlias(t *testing.T) {
 	}
 }
 
+func TestDefaultGatewayMCPConnectorSupportsStreamableHTTPTransportVariants(t *testing.T) {
+	restore := stubGatewayMCPConnectors(t)
+	defer restore()
+
+	for _, transportType := range []string{"streamable-http", "streamableHttp", "STREAMABLE_HTTP"} {
+		t.Run(transportType, func(t *testing.T) {
+			called := false
+			gatewayMCPConnectHTTP = func(ctx context.Context, name, baseURL string, headers map[string]string, headerFunc func(context.Context) map[string]string) (gatewayMCPClient, error) {
+				called = true
+				return &fakeGatewayMCPClientAdapter{}, nil
+			}
+
+			client, err := defaultGatewayMCPConnector(context.Background(), "demo", gatewayMCPServerConfig{
+				Type: transportType,
+				URL:  "https://example.com/mcp",
+			})
+			if err != nil {
+				t.Fatalf("connect %s: %v", transportType, err)
+			}
+			if !called {
+				t.Fatalf("expected http connector to be used for %s", transportType)
+			}
+			if client == nil {
+				t.Fatalf("expected client for %s", transportType)
+			}
+		})
+	}
+}
+
 func stubGatewayMCPConnectors(t *testing.T) func() {
 	t.Helper()
 	prevStdio := gatewayMCPConnectStdio
@@ -258,6 +287,73 @@ func TestDefaultGatewayMCPConnectorExpandsEnvInHeadersAndOAuth(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("connect http oauth env: %v", err)
+	}
+}
+
+func TestDefaultGatewayMCPConnectorExpandsBracedAndDefaultEnvPlaceholders(t *testing.T) {
+	restore := stubGatewayMCPConnectors(t)
+	defer restore()
+
+	t.Setenv("DEERFLOW_MCP_HOST", "docs.example.com")
+	t.Setenv("DEERFLOW_MCP_CLIENT_ID", "env-client")
+
+	prevClientFactory := gatewayMCPOAuthHTTPClient
+	defer func() { gatewayMCPOAuthHTTPClient = prevClientFactory }()
+
+	gatewayMCPOAuthHTTPClient = func() *http.Client {
+		return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse form: %v", err)
+			}
+			if got := r.Form.Get("client_id"); got != "env-client" {
+				t.Fatalf("client_id=%q", got)
+			}
+			if got := r.Form.Get("client_secret"); got != "fallback-secret" {
+				t.Fatalf("client_secret=%q", got)
+			}
+			if got := r.Form.Get("resource"); got != "docs-api" {
+				t.Fatalf("resource=%q", got)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"access_token":"token-braced","token_type":"Bearer","expires_in":3600}`)),
+			}, nil
+		})}
+	}
+
+	gatewayMCPConnectHTTP = func(ctx context.Context, name, baseURL string, headers map[string]string, headerFunc func(context.Context) map[string]string) (gatewayMCPClient, error) {
+		if got := baseURL; got != "https://docs.example.com/mcp" {
+			t.Fatalf("baseURL=%q", got)
+		}
+		if got := headers["X-Api-Key"]; got != "fallback-header" {
+			t.Fatalf("X-Api-Key=%q", got)
+		}
+		if got := headers["Authorization"]; got != "Bearer token-braced" {
+			t.Fatalf("authorization=%q", got)
+		}
+		return &fakeGatewayMCPClientAdapter{}, nil
+	}
+
+	_, err := defaultGatewayMCPConnector(context.Background(), "demo", gatewayMCPServerConfig{
+		Type: "streamableHttp",
+		URL:  "https://${DEERFLOW_MCP_HOST}/mcp",
+		Headers: map[string]string{
+			"X-Api-Key": "${DEERFLOW_MCP_HEADER_TOKEN:-fallback-header}",
+		},
+		OAuth: &gatewayMCPOAuthConfig{
+			Enabled:      true,
+			TokenURL:     "https://${DEERFLOW_MCP_HOST}/oauth/token",
+			GrantType:    "client_credentials",
+			ClientID:     "${DEERFLOW_MCP_CLIENT_ID}",
+			ClientSecret: "${DEERFLOW_MCP_CLIENT_SECRET:-fallback-secret}",
+			ExtraTokenParams: map[string]string{
+				"resource": "${DEERFLOW_MCP_RESOURCE:-docs-api}",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("connect http oauth braced env: %v", err)
 	}
 }
 

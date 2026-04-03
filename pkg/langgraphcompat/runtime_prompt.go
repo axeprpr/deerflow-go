@@ -116,7 +116,7 @@ func (s *Server) skillsPrompt(skillNames ...string) string {
 		allowed[name] = struct{}{}
 	}
 
-	skills := make([]gatewaySkill, 0)
+	skillsByKey := make(map[string]gatewaySkill)
 	for _, skill := range s.currentGatewaySkills() {
 		if !skill.Enabled {
 			continue
@@ -129,6 +129,29 @@ func (s *Server) skillsPrompt(skillNames ...string) string {
 		if _, ok := s.loadGatewaySkillBody(skill.Name, skill.Category); !ok {
 			continue
 		}
+		skillsByKey[skillStorageKey(skill.Category, skill.Name)] = skill
+	}
+	for name := range allowed {
+		if name == "" {
+			continue
+		}
+		if _, ok := findGatewaySkill(skillsByKey, name, ""); ok {
+			continue
+		}
+		body, ok := s.loadGatewaySkillBody(name, "")
+		if !ok || strings.TrimSpace(body) == "" {
+			continue
+		}
+		skillsByKey[skillStorageKey(skillCategoryPublic, name)] = gatewaySkill{
+			Name:        name,
+			Description: "Internal skill loaded by explicit runtime request.",
+			Category:    skillCategoryPublic,
+			Enabled:     true,
+		}
+	}
+
+	skills := make([]gatewaySkill, 0, len(skillsByKey))
+	for _, skill := range skillsByKey {
 		skills = append(skills, skill)
 	}
 	if len(skills) == 0 {

@@ -37,6 +37,8 @@ func (s *Server) gatewaySkillRoots() []string {
 		roots = append(roots, executableRelativeSkillRoots(gatewayExecutablePath)...)
 		if cwd, err := os.Getwd(); err == nil {
 			roots = append(roots, filepath.Join(cwd, "skills"))
+			roots = append(roots, filepath.Join(cwd, "..", "skills"))
+			roots = append(roots, filepath.Join(cwd, "..", "..", "skills"))
 			roots = append(roots, filepath.Join(cwd, "..", "deerflow-ui", "skills"))
 			roots = append(roots, filepath.Join(cwd, "..", "..", "deerflow-ui", "skills"))
 		}

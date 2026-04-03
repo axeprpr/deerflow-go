@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -16,6 +17,8 @@ type gatewayExtensionsConfig struct {
 	MCPServers map[string]gatewayMCPServerConfig      `json:"mcpServers"`
 	Skills     map[string]gatewayExtensionsSkillState `json:"skills"`
 }
+
+var gatewayEnvPlaceholderRE = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(:-([^}]*))?\}|\$([A-Za-z_][A-Za-z0-9_]*)`)
 
 func resolveGatewayExtensionsConfigPath() string {
 	if raw := strings.TrimSpace(os.Getenv("DEERFLOW_EXTENSIONS_CONFIG_PATH")); raw != "" {
@@ -141,16 +144,36 @@ func resolveGatewayExtensionsEnvVariables(value any) any {
 		}
 		return resolved
 	case string:
-		if strings.HasPrefix(v, "$") {
-			if envValue, ok := os.LookupEnv(strings.TrimPrefix(v, "$")); ok {
-				return envValue
-			}
-			return ""
-		}
-		return v
+		return expandGatewayEnvString(v)
 	default:
 		return value
 	}
+}
+
+func expandGatewayEnvString(raw string) string {
+	if raw == "" || !strings.Contains(raw, "$") {
+		return raw
+	}
+	return gatewayEnvPlaceholderRE.ReplaceAllStringFunc(raw, func(match string) string {
+		submatches := gatewayEnvPlaceholderRE.FindStringSubmatch(match)
+		if len(submatches) == 0 {
+			return match
+		}
+		name := strings.TrimSpace(submatches[1])
+		if name == "" {
+			name = strings.TrimSpace(submatches[4])
+		}
+		if name == "" {
+			return ""
+		}
+		if value, ok := os.LookupEnv(name); ok {
+			return value
+		}
+		if submatches[3] != "" {
+			return expandGatewayEnvString(submatches[3])
+		}
+		return ""
+	})
 }
 
 func (s *Server) persistGatewayExtensionsConfig() error {

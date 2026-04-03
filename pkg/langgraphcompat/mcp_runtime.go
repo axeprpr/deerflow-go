@@ -32,19 +32,19 @@ var (
 )
 
 func defaultGatewayMCPConnector(ctx context.Context, name string, cfg gatewayMCPServerConfig) (gatewayMCPClient, error) {
-	transportType := strings.TrimSpace(cfg.Type)
+	transportType := strings.ToLower(strings.TrimSpace(cfg.Type))
 	if transportType == "" {
 		transportType = "stdio"
 	}
 	switch transportType {
 	case "stdio":
-		command := strings.TrimSpace(cfg.Command)
+		command := strings.TrimSpace(expandGatewayEnvString(cfg.Command))
 		if command == "" {
 			return nil, fmt.Errorf("stdio MCP server %q requires command", name)
 		}
 		return gatewayMCPConnectStdio(ctx, name, command, gatewayMCPEnv(cfg.Env), cfg.Args...)
 	case "sse":
-		baseURL := strings.TrimSpace(cfg.URL)
+		baseURL := strings.TrimSpace(expandGatewayEnvString(cfg.URL))
 		if baseURL == "" {
 			return nil, fmt.Errorf("sse MCP server %q requires url", name)
 		}
@@ -53,8 +53,8 @@ func defaultGatewayMCPConnector(ctx context.Context, name string, cfg gatewayMCP
 			return nil, fmt.Errorf("sse MCP server %q oauth: %w", name, err)
 		}
 		return gatewayMCPConnectSSE(ctx, name, baseURL, headers, headerFunc)
-	case "http", "streamable_http":
-		baseURL := strings.TrimSpace(cfg.URL)
+	case "http", "streamable_http", "streamable-http", "streamablehttp":
+		baseURL := strings.TrimSpace(expandGatewayEnvString(cfg.URL))
 		if baseURL == "" {
 			return nil, fmt.Errorf("http MCP server %q requires url", name)
 		}
@@ -99,7 +99,7 @@ func cloneGatewayMCPHeaders(src map[string]string) map[string]string {
 	}
 	dst := make(map[string]string, len(src))
 	for key, value := range src {
-		dst[key] = os.ExpandEnv(value)
+		dst[key] = expandGatewayEnvString(value)
 	}
 	return dst
 }
@@ -120,7 +120,7 @@ func gatewayMCPEnv(values map[string]string) []string {
 
 	env := make([]string, 0, len(keys))
 	for _, key := range keys {
-		env = append(env, key+"="+os.ExpandEnv(values[key]))
+		env = append(env, key+"="+expandGatewayEnvString(values[key]))
 	}
 	return env
 }

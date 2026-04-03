@@ -185,6 +185,8 @@ func (s *Server) registerGatewayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/channels/{name}/restart", s.handleChannelRestart)
 	mux.HandleFunc("GET /api/mcp/config", s.handleMCPConfigGet)
 	mux.HandleFunc("PUT /api/mcp/config", s.handleMCPConfigPut)
+	mux.HandleFunc("GET /api/threads/{thread_id}", s.handleGatewayThreadGet)
+	mux.HandleFunc("PATCH /api/threads/{thread_id}", s.handleGatewayThreadPatch)
 	mux.HandleFunc("DELETE /api/threads/{thread_id}", s.handleGatewayThreadDelete)
 	mux.HandleFunc("GET /api/threads/{thread_id}/files", s.handleGatewayThreadFiles)
 	mux.HandleFunc("POST /api/threads/{thread_id}/uploads", s.handleUploadsCreate)
@@ -193,6 +195,26 @@ func (s *Server) registerGatewayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/threads/{thread_id}/artifacts/{artifact_path...}", s.handleArtifactGet)
 	mux.HandleFunc("HEAD /api/threads/{thread_id}/artifacts/{artifact_path...}", s.handleArtifactGet)
 	mux.HandleFunc("POST /api/threads/{thread_id}/suggestions", s.handleSuggestions)
+}
+
+func (s *Server) handleGatewayThreadGet(w http.ResponseWriter, r *http.Request) {
+	threadID := strings.TrimSpace(r.PathValue("thread_id"))
+	if err := validateThreadID(threadID); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": err.Error()})
+		return
+	}
+
+	s.handleThreadGet(w, r)
+}
+
+func (s *Server) handleGatewayThreadPatch(w http.ResponseWriter, r *http.Request) {
+	threadID := strings.TrimSpace(r.PathValue("thread_id"))
+	if err := validateThreadID(threadID); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": err.Error()})
+		return
+	}
+
+	s.handleThreadUpdate(w, r)
 }
 
 func (s *Server) handleModelsList(w http.ResponseWriter, r *http.Request) {

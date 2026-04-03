@@ -143,6 +143,8 @@ func gatewayOpenAPIPaths() map[string]any {
 			"put": operation("mcp", "Update MCP Config", "Update MCP configuration."),
 		}),
 		"/api/threads/{thread_id}": pathItem(map[string]any{
+			"get":    operation("threads", "Get Thread Data", "Get thread metadata, values, and config through the gateway prefix."),
+			"patch":  operation("threads", "Update Thread Data", "Update thread metadata, values, and config through the gateway prefix."),
 			"delete": operation("threads", "Delete Thread Data", "Delete thread-local gateway data."),
 		}),
 		"/api/threads/{thread_id}/files": pathItem(map[string]any{
