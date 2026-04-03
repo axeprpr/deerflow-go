@@ -121,6 +121,7 @@ func TestThreadStateIncludesThreadDataAndConfigurableContext(t *testing.T) {
 	session := s.ensureSession("thread-context", map[string]any{"title": "Context thread", "agent_type": "coder"})
 	session.Configurable["model_name"] = "gpt-5"
 	session.Configurable["is_plan_mode"] = true
+	session.Configurable["auto_accepted_plan"] = false
 	session.Configurable["reasoning_effort"] = "high"
 
 	state := s.getThreadState("thread-context")
@@ -153,6 +154,9 @@ func TestThreadStateIncludesThreadDataAndConfigurableContext(t *testing.T) {
 	}
 	if got, _ := config["is_plan_mode"].(bool); !got {
 		t.Fatalf("is_plan_mode=%v want=true", config["is_plan_mode"])
+	}
+	if got, ok := config["auto_accepted_plan"].(bool); !ok || got {
+		t.Fatalf("auto_accepted_plan=%#v want false", config["auto_accepted_plan"])
 	}
 	if got := asString(config["reasoning_effort"]); got != "high" {
 		t.Fatalf("reasoning_effort=%q want=high", got)

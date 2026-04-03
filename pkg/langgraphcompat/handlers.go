@@ -39,6 +39,10 @@ type runConfig struct {
 const planModeTodoPrompt = `When the task is multi-step or likely to take several actions, maintain a concise todo list with the write_todos tool.
 Write the initial todo list early, keep exactly one item in_progress when work is active, update statuses immediately after progress, and clear or complete the list when finished.`
 
+const humanPlanReviewPrompt = `Human-in-the-loop planning mode is active.
+Before substantial execution, produce a concise, actionable plan for the user to review.
+Do not present the task as completed, do not fabricate results, and do not continue into full execution until the user explicitly approves the plan or sends follow-up feedback.`
+
 const bootstrapAgentPrompt = `You are helping the user create a brand-new custom agent.
 Focus on clarifying the agent's purpose, behavior, tool needs, and boundaries.
 When you have enough information, call the setup_agent tool exactly once to save the agent's description and full SOUL content.`
@@ -1143,6 +1147,15 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 	if boolFromAny(runtimeContext["is_plan_mode"]) {
 		cfg.SystemPrompt = joinPromptSections(cfg.SystemPrompt, planModeTodoPrompt)
 	}
+	if autoAcceptedPlanDisabled(runtimeContext) {
+		cfg.SystemPrompt = joinPromptSections(cfg.SystemPrompt, humanPlanReviewPrompt)
+	}
+	if feedback := strings.TrimSpace(stringFromAny(runtimeContext["feedback"])); feedback != "" {
+		cfg.SystemPrompt = joinPromptSections(
+			cfg.SystemPrompt,
+			"User feedback on the current plan:\n"+feedback+"\n\nRevise the plan to address this feedback before execution. If approval is still required, stop after presenting the revised plan.",
+		)
+	}
 	if cfg.IsBootstrap {
 		if cfg.AgentName != "" {
 			name, ok := normalizeAgentName(cfg.AgentName)
@@ -1475,6 +1488,12 @@ func augmentToolRuntimeContext(runtimeContext map[string]any, cfg runConfig, ski
 func runtimeContextFromRequest(req RunCreateRequest) map[string]any {
 	runtimeContext := cloneRuntimeContext(req.Context)
 	configurable, _ := req.Config["configurable"].(map[string]any)
+	if req.AutoAcceptedPlan != nil {
+		runtimeContext["auto_accepted_plan"] = *req.AutoAcceptedPlan
+	}
+	if feedback := strings.TrimSpace(req.Feedback); feedback != "" {
+		runtimeContext["feedback"] = feedback
+	}
 	if len(configurable) == 0 {
 		return runtimeContext
 	}
@@ -1500,6 +1519,8 @@ func runtimeContextFromRequest(req RunCreateRequest) map[string]any {
 		"max_concurrent_subagents",
 		"agent_name",
 		"is_bootstrap",
+		"auto_accepted_plan",
+		"feedback",
 	} {
 		if _, exists := runtimeContext[key]; exists {
 			continue
@@ -1649,7 +1670,7 @@ func threadConfigFromRuntimeContext(threadID string, runtimeContext map[string]a
 	if modelName != "" {
 		configurable["model_name"] = modelName
 	}
-	for _, key := range []string{"thinking_enabled", "is_plan_mode", "subagent_enabled", "max_concurrent_subagents", "is_bootstrap"} {
+	for _, key := range []string{"thinking_enabled", "is_plan_mode", "subagent_enabled", "max_concurrent_subagents", "is_bootstrap", "auto_accepted_plan"} {
 		if value, ok := runtimeContext[key]; ok {
 			configurable[key] = value
 		}
@@ -1678,6 +1699,15 @@ func threadMetadataFromRuntimeContext(runtimeContext map[string]any, cfg runConf
 		return nil
 	}
 	return metadata
+}
+
+func autoAcceptedPlanDisabled(runtimeContext map[string]any) bool {
+	value, ok := runtimeContext["auto_accepted_plan"]
+	if !ok {
+		return false
+	}
+	accepted, ok := optionalBoolFromAny(value)
+	return ok && !accepted
 }
 
 func firstNonEmpty(values ...string) string {

@@ -1377,6 +1377,52 @@ func TestRuntimeContextFromRequestMergesConfigurableFlags(t *testing.T) {
 	}
 }
 
+func TestRuntimeContextFromRequestIncludesPlanReviewFields(t *testing.T) {
+	autoAcceptedPlan := false
+	req := RunCreateRequest{
+		AutoAcceptedPlan: &autoAcceptedPlan,
+		Feedback:         "Please narrow the plan to a one-week rollout.",
+		Config: map[string]any{
+			"configurable": map[string]any{
+				"auto_accepted_plan": true,
+				"feedback":           "config feedback should not override root field",
+			},
+		},
+	}
+
+	runtimeContext := runtimeContextFromRequest(req)
+	if got, ok := optionalBoolFromAny(runtimeContext["auto_accepted_plan"]); !ok || got {
+		t.Fatalf("auto_accepted_plan=%#v want false", runtimeContext["auto_accepted_plan"])
+	}
+	if got := stringFromAny(runtimeContext["feedback"]); got != "Please narrow the plan to a one-week rollout." {
+		t.Fatalf("feedback=%q", got)
+	}
+}
+
+func TestResolveRunConfigAddsHumanPlanReviewPrompt(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+
+	cfg, err := s.resolveRunConfig(runConfig{}, map[string]any{"auto_accepted_plan": false})
+	if err != nil {
+		t.Fatalf("resolveRunConfig error: %v", err)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "Human-in-the-loop planning mode is active.") {
+		t.Fatalf("system prompt missing human plan review guidance: %q", cfg.SystemPrompt)
+	}
+}
+
+func TestResolveRunConfigAddsPlanFeedbackPrompt(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+
+	cfg, err := s.resolveRunConfig(runConfig{}, map[string]any{"feedback": "Add rollback criteria."})
+	if err != nil {
+		t.Fatalf("resolveRunConfig error: %v", err)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "User feedback on the current plan:\nAdd rollback criteria.") {
+		t.Fatalf("system prompt missing feedback guidance: %q", cfg.SystemPrompt)
+	}
+}
+
 func TestResolveRunConfigDisablesTaskToolWhenSubagentsDisabled(t *testing.T) {
 	s, _ := newCompatTestServer(t)
 	s.tools = newRuntimeToolRegistry(t)
@@ -1574,6 +1620,24 @@ func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 	}
 	if got := asString(listed.Files[0]["path"]); got != filepath.Join(s.uploadsDir(threadID), "hello.txt") {
 		t.Fatalf("path=%q want=%q", got, filepath.Join(s.uploadsDir(threadID), "hello.txt"))
+	}
+
+	aliasResp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/uploads", nil, nil)
+	if aliasResp.Code != http.StatusOK {
+		t.Fatalf("alias list status=%d", aliasResp.Code)
+	}
+	var aliased struct {
+		Count int              `json:"count"`
+		Files []map[string]any `json:"files"`
+	}
+	if err := json.NewDecoder(aliasResp.Body).Decode(&aliased); err != nil {
+		t.Fatalf("decode alias list: %v", err)
+	}
+	if aliased.Count != listed.Count {
+		t.Fatalf("alias count=%d want=%d", aliased.Count, listed.Count)
+	}
+	if got := asString(aliased.Files[0]["path"]); got != asString(listed.Files[0]["path"]) {
+		t.Fatalf("alias path=%q want=%q", got, asString(listed.Files[0]["path"]))
 	}
 
 	artifactResp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/hello.txt", nil, nil)

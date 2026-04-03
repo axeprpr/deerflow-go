@@ -213,6 +213,7 @@ func (s *Server) registerGatewayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/threads/{thread_id}/clarifications/{id}", s.handleGatewayThreadClarificationGet)
 	mux.HandleFunc("POST /api/threads/{thread_id}/clarifications/{id}/resolve", s.handleGatewayThreadClarificationResolve)
 	mux.HandleFunc("POST /api/threads/{thread_id}/uploads", s.handleUploadsCreate)
+	mux.HandleFunc("GET /api/threads/{thread_id}/uploads", s.handleUploadsList)
 	mux.HandleFunc("GET /api/threads/{thread_id}/uploads/list", s.handleUploadsList)
 	// GET handlers also serve HEAD requests; registering HEAD here conflicts with /uploads/list.
 	mux.HandleFunc("GET /api/threads/{thread_id}/uploads/{filename}", s.handleUploadsGet)

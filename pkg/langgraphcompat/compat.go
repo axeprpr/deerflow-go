@@ -138,11 +138,13 @@ const bashSubagentPrompt = "You are a bash command execution specialist. Execute
 
 // LangGraph API types
 type RunCreateRequest struct {
-	AssistantID string         `json:"assistant_id"`
-	ThreadID    string         `json:"thread_id,omitempty"`
-	Input       map[string]any `json:"input,omitempty"`
-	Config      map[string]any `json:"config,omitempty"`
-	Context     map[string]any `json:"context,omitempty"`
+	AssistantID      string         `json:"assistant_id"`
+	ThreadID         string         `json:"thread_id,omitempty"`
+	Input            map[string]any `json:"input,omitempty"`
+	Config           map[string]any `json:"config,omitempty"`
+	Context          map[string]any `json:"context,omitempty"`
+	AutoAcceptedPlan *bool          `json:"auto_accepted_plan,omitempty"`
+	Feedback         string         `json:"feedback,omitempty"`
 }
 
 // Message represents a LangGraph-compatible message

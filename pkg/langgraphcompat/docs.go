@@ -201,6 +201,7 @@ func gatewayOpenAPIPaths() map[string]any {
 			"post": operation("threads", "Resolve Clarification", "Resolve a clarification request through the gateway prefix."),
 		}),
 		"/api/threads/{thread_id}/uploads": pathItem(map[string]any{
+			"get":  operation("uploads", "List Uploads", "List uploaded files for a thread."),
 			"post": operation("uploads", "Upload Files", "Upload files to a thread."),
 		}),
 		"/api/threads/{thread_id}/uploads/list": pathItem(map[string]any{
