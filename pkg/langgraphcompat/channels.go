@@ -1,8 +1,10 @@
 package langgraphcompat
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -21,12 +23,15 @@ type channelInfo struct {
 	Running bool `json:"running"`
 }
 
+type gatewayChannelStarter func(map[string]any) error
+
 type gatewayChannelService struct {
 	mu         sync.RWMutex
 	configured bool
 	config     gatewayChannelsConfig
 	running    bool
 	channels   map[string]channelInfo
+	starters   map[string]gatewayChannelStarter
 }
 
 type gatewayChannelsConfig struct {
@@ -36,6 +41,7 @@ type gatewayChannelsConfig struct {
 func newGatewayChannelService() *gatewayChannelService {
 	svc := &gatewayChannelService{
 		channels: make(map[string]channelInfo, len(supportedGatewayChannels)),
+		starters: defaultGatewayChannelStarters(),
 	}
 	for _, name := range supportedGatewayChannels {
 		svc.channels[name] = channelInfo{}
@@ -162,7 +168,7 @@ func (s *gatewayChannelService) start() {
 	defer s.mu.Unlock()
 	s.reloadLocked()
 	s.running = s.configured
-	s.syncRunningStateLocked()
+	s.startEnabledChannelsLocked()
 }
 
 func (s *gatewayChannelService) stop() {
@@ -188,7 +194,9 @@ func (s *gatewayChannelService) snapshot() channelStatusSnapshot {
 	if needsReload {
 		s.mu.Lock()
 		s.reloadLocked()
-		s.syncRunningStateLocked()
+		if s.running {
+			s.startEnabledChannelsLocked()
+		}
 		snap := s.snapshotLocked()
 		s.mu.Unlock()
 		return snap
@@ -225,14 +233,11 @@ func (s *gatewayChannelService) restart(name string) (bool, string) {
 		info.Enabled = false
 		info.Running = false
 		s.channels[name] = info
-		s.syncRunningStateLocked()
 		return false, "channel is not enabled in config.yaml"
 	}
-	info := s.channels[name]
-	info.Enabled = true
-	info.Running = true
-	s.channels[name] = info
-	s.syncRunningStateLocked()
+	if err := s.startChannelLocked(name); err != nil {
+		return false, err.Error()
+	}
 	return true, "restarted successfully"
 }
 
@@ -249,19 +254,48 @@ func (s *gatewayChannelService) reloadLocked() {
 		info := s.channels[name]
 		enabled := ok && config.enabled(name)
 		info.Enabled = enabled
-		if !enabled {
-			info.Running = false
-		}
+		info.Running = false
 		s.channels[name] = info
 	}
 }
 
-func (s *gatewayChannelService) syncRunningStateLocked() {
+func (s *gatewayChannelService) startEnabledChannelsLocked() {
 	for _, name := range supportedGatewayChannels {
 		info := s.channels[name]
-		info.Running = s.running && info.Enabled
-		s.channels[name] = info
+		if !s.running || !info.Enabled {
+			info.Running = false
+			s.channels[name] = info
+			continue
+		}
+		if err := s.startChannelLocked(name); err != nil {
+			info.Running = false
+			s.channels[name] = info
+		}
 	}
+}
+
+func (s *gatewayChannelService) startChannelLocked(name string) error {
+	info := s.channels[name]
+	if !info.Enabled {
+		info.Running = false
+		s.channels[name] = info
+		return fmt.Errorf("channel is not enabled in config.yaml")
+	}
+	starter := s.starters[name]
+	if starter == nil {
+		info.Running = s.running
+		s.channels[name] = info
+		return nil
+	}
+	cfg := s.config.Channels[name]
+	if err := starter(cfg); err != nil {
+		info.Running = false
+		s.channels[name] = info
+		return err
+	}
+	info.Running = s.running
+	s.channels[name] = info
+	return nil
 }
 
 func (s *gatewayChannelService) shouldReloadLocked() bool {
@@ -274,6 +308,9 @@ func (s *gatewayChannelService) shouldReloadLocked() bool {
 	}
 	for _, name := range supportedGatewayChannels {
 		if s.config.enabled(name) != config.enabled(name) {
+			return true
+		}
+		if !reflect.DeepEqual(s.config.Channels[name], config.Channels[name]) {
 			return true
 		}
 	}
@@ -293,4 +330,25 @@ func isSupportedGatewayChannel(name string) bool {
 		}
 	}
 	return false
+}
+
+func defaultGatewayChannelStarters() map[string]gatewayChannelStarter {
+	return map[string]gatewayChannelStarter{
+		"feishu": func(cfg map[string]any) error {
+			if strings.TrimSpace(stringConfigValue(cfg, "app_id")) == "" || strings.TrimSpace(stringConfigValue(cfg, "app_secret")) == "" {
+				return fmt.Errorf("feishu channel requires app_id and app_secret")
+			}
+			return nil
+		},
+		"slack":    func(map[string]any) error { return nil },
+		"telegram": func(map[string]any) error { return nil },
+	}
+}
+
+func stringConfigValue(cfg map[string]any, key string) string {
+	if cfg == nil {
+		return ""
+	}
+	value, _ := cfg[key].(string)
+	return value
 }

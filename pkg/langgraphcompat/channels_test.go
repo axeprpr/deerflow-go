@@ -51,6 +51,8 @@ func TestChannelsStatusReadsConfigAndRestartExplainsState(t *testing.T) {
 channels:
   feishu:
     enabled: true
+    app_id: cli_xxx
+    app_secret: sec_xxx
   slack:
     enabled: false
 `), 0o644); err != nil {
@@ -222,6 +224,8 @@ func TestChannelsStatusReloadsConfigWithoutRestart(t *testing.T) {
 channels:
   feishu:
     enabled: true
+    app_id: cli_xxx
+    app_secret: sec_xxx
 `), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -262,6 +266,77 @@ channels:
 	}
 	if !payload.Channels["slack"].Enabled || !payload.Channels["slack"].Running {
 		t.Fatalf("slack=%#v want enabled+running after reload", payload.Channels["slack"])
+	}
+}
+
+func TestChannelsStatusMarksFeishuStoppedWithoutCredentials(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+channels:
+  feishu:
+    enabled: true
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("DEER_FLOW_CONFIG_PATH", configPath)
+
+	_, handler := newCompatTestServer(t)
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/channels", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		ServiceRunning bool                   `json:"service_running"`
+		Channels       map[string]channelInfo `json:"channels"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !payload.ServiceRunning {
+		t.Fatalf("service_running=%v want true", payload.ServiceRunning)
+	}
+	if !payload.Channels["feishu"].Enabled {
+		t.Fatalf("feishu=%#v want enabled", payload.Channels["feishu"])
+	}
+	if payload.Channels["feishu"].Running {
+		t.Fatalf("feishu=%#v want stopped without credentials", payload.Channels["feishu"])
+	}
+}
+
+func TestChannelsRestartReportsFeishuCredentialError(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+channels:
+  feishu:
+    enabled: true
+    app_id: cli_xxx
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("DEER_FLOW_CONFIG_PATH", configPath)
+
+	_, handler := newCompatTestServer(t)
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/channels/feishu/restart", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("restart status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var payload struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if payload.Success {
+		t.Fatalf("success=%v want false", payload.Success)
+	}
+	if !strings.Contains(payload.Message, "app_id and app_secret") {
+		t.Fatalf("message=%q want feishu credential error", payload.Message)
 	}
 }
 
