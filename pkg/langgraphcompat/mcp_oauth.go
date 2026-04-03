@@ -166,12 +166,13 @@ func (p *gatewayMCPOAuthProvider) fetchToken(ctx context.Context) (string, strin
 		return "", "", time.Time{}, "", fmt.Errorf("read oauth token response: %w", err)
 	}
 
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", "", time.Time{}, "", fmt.Errorf("oauth token request failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return "", "", time.Time{}, "", fmt.Errorf("decode oauth token response: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", "", time.Time{}, "", fmt.Errorf("oauth token request failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	accessToken := strings.TrimSpace(asString(payload[p.cfg.TokenField]))

@@ -401,6 +401,82 @@ func TestGatewayMCPOAuthProviderRefreshTokenGrant(t *testing.T) {
 	}
 }
 
+func TestGatewayMCPOAuthProviderCachesTokenAcrossCalls(t *testing.T) {
+	prevClientFactory := gatewayMCPOAuthHTTPClient
+	defer func() { gatewayMCPOAuthHTTPClient = prevClientFactory }()
+
+	tokenCalls := 0
+	gatewayMCPOAuthHTTPClient = func() *http.Client {
+		return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			tokenCalls++
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"access_token":"cached-token","token_type":"Bearer","expires_in":3600}`)),
+			}, nil
+		})}
+	}
+
+	provider, err := newGatewayMCPOAuthProvider(&gatewayMCPOAuthConfig{
+		Enabled:      true,
+		TokenURL:     "https://auth.example.com/token",
+		GrantType:    "client_credentials",
+		ClientID:     "demo-client",
+		ClientSecret: "demo-secret",
+	})
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+
+	first, err := provider.HeaderValue(context.Background())
+	if err != nil {
+		t.Fatalf("first header: %v", err)
+	}
+	second, err := provider.HeaderValue(context.Background())
+	if err != nil {
+		t.Fatalf("second header: %v", err)
+	}
+	if first != "Bearer cached-token" || second != first {
+		t.Fatalf("headers=(%q,%q)", first, second)
+	}
+	if tokenCalls != 1 {
+		t.Fatalf("tokenCalls=%d want=1", tokenCalls)
+	}
+}
+
+func TestGatewayMCPOAuthProviderReturnsHTTPStatusErrorBeforeJSONDecode(t *testing.T) {
+	prevClientFactory := gatewayMCPOAuthHTTPClient
+	defer func() { gatewayMCPOAuthHTTPClient = prevClientFactory }()
+	gatewayMCPOAuthHTTPClient = func() *http.Client {
+		return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Header:     http.Header{"Content-Type": []string{"text/plain"}},
+				Body:       io.NopCloser(strings.NewReader("upstream temporary failure")),
+			}, nil
+		})}
+	}
+
+	provider, err := newGatewayMCPOAuthProvider(&gatewayMCPOAuthConfig{
+		Enabled:      true,
+		TokenURL:     "https://auth.example.com/token",
+		GrantType:    "client_credentials",
+		ClientID:     "demo-client",
+		ClientSecret: "demo-secret",
+	})
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+
+	_, err = provider.HeaderValue(context.Background())
+	if err == nil {
+		t.Fatal("expected oauth status error")
+	}
+	if !strings.Contains(err.Error(), "status 502") || !strings.Contains(err.Error(), "upstream temporary failure") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestGatewayMCPOAuthProviderReturnsErrorForInvalidConfig(t *testing.T) {
 	_, err := newGatewayMCPOAuthProvider(&gatewayMCPOAuthConfig{
 		Enabled: true,
