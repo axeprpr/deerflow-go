@@ -192,6 +192,7 @@ func (s *Server) registerGatewayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/threads", s.handleGatewayThreadCreate)
 	mux.HandleFunc("POST /api/threads/search", s.handleGatewayThreadSearch)
 	mux.HandleFunc("GET /api/threads/{thread_id}", s.handleGatewayThreadGet)
+	mux.HandleFunc("PUT /api/threads/{thread_id}", s.handleGatewayThreadPatch)
 	mux.HandleFunc("PATCH /api/threads/{thread_id}", s.handleGatewayThreadPatch)
 	mux.HandleFunc("DELETE /api/threads/{thread_id}", s.handleGatewayThreadDelete)
 	mux.HandleFunc("GET /api/threads/{thread_id}/files", s.handleGatewayThreadFiles)

@@ -104,3 +104,33 @@ func TestThreadUpdateAppliesValuesConfigAndStatus(t *testing.T) {
 		t.Fatalf("thinking_enabled=%#v want false", updated.Configurable["thinking_enabled"])
 	}
 }
+
+func TestThreadPutAppliesValuesConfigAndStatus(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	session := s.ensureSession("thread-put-configured", map[string]any{"title": "Old title"})
+	session.Status = "idle"
+
+	body := `{
+		"metadata":{"agent_type":"coder"},
+		"values":{"title":"New title","draft_id":"draft-42"},
+		"status":"running",
+		"config":{"configurable":{"thinking_enabled":false}}
+	}`
+	resp := performCompatRequest(t, handler, http.MethodPut, "/threads/thread-put-configured", strings.NewReader(body), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	reloaded := s.getThreadState("thread-put-configured")
+	if reloaded == nil {
+		t.Fatal("expected thread state")
+	}
+	if got := asString(reloaded.Values["title"]); got != "New title" {
+		t.Fatalf("title=%q want=New title", got)
+	}
+	if got := asString(reloaded.Values["draft_id"]); got != "draft-42" {
+		t.Fatalf("draft_id=%q want=draft-42", got)
+	}
+}

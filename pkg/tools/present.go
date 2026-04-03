@@ -23,6 +23,11 @@ var presentFileSeq uint64
 type PresentFile struct {
 	ID            string    `json:"id"`
 	Path          string    `json:"path"`
+	VirtualPath   string    `json:"virtual_path,omitempty"`
+	ArtifactURL   string    `json:"artifact_url,omitempty"`
+	Extension     string    `json:"extension,omitempty"`
+	Size          int64     `json:"size,omitempty"`
+	Source        string    `json:"source,omitempty"`
 	SourcePath    string    `json:"-"`
 	Description   string    `json:"description,omitempty"`
 	MimeType      string    `json:"mime_type"`

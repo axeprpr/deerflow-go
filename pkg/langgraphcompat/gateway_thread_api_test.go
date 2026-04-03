@@ -278,6 +278,52 @@ func TestGatewayThreadPatchUpdatesThreadEnvelope(t *testing.T) {
 	}
 }
 
+func TestGatewayThreadPutUpdatesThreadEnvelope(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	session := s.ensureSession("thread-gateway-put", map[string]any{"title": "Old title"})
+	session.Status = "idle"
+
+	body := `{
+		"metadata":{"agent_name":"writer-bot"},
+		"values":{"title":"New title","draft_id":"draft-99"},
+		"status":"busy",
+		"config":{"configurable":{"model_name":"openai/gpt-5"}}
+	}`
+	resp := performCompatRequest(t, handler, http.MethodPut, "/api/threads/thread-gateway-put", strings.NewReader(body), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	reloaded := s.getThreadState("thread-gateway-put")
+	if reloaded == nil {
+		t.Fatal("expected thread state")
+	}
+	if got := asString(reloaded.Values["title"]); got != "New title" {
+		t.Fatalf("title=%q want=New title", got)
+	}
+	if got := asString(reloaded.Values["draft_id"]); got != "draft-99" {
+		t.Fatalf("draft_id=%q want=draft-99", got)
+	}
+
+	s.sessionsMu.RLock()
+	updated := s.sessions["thread-gateway-put"]
+	s.sessionsMu.RUnlock()
+	if updated == nil {
+		t.Fatal("expected stored session")
+	}
+	if got := updated.Status; got != "busy" {
+		t.Fatalf("status=%q want=busy", got)
+	}
+	if got := asString(updated.Metadata["agent_name"]); got != "writer-bot" {
+		t.Fatalf("agent_name=%q want=writer-bot", got)
+	}
+	if got := asString(updated.Configurable["model_name"]); got != "openai/gpt-5" {
+		t.Fatalf("model_name=%q want=openai/gpt-5", got)
+	}
+}
+
 func TestGatewayThreadGetRejectsInvalidThreadID(t *testing.T) {
 	_, handler := newCompatTestServer(t)
 
@@ -294,6 +340,20 @@ func TestGatewayThreadPatchRejectsInvalidThreadID(t *testing.T) {
 	_, handler := newCompatTestServer(t)
 
 	resp := performCompatRequest(t, handler, http.MethodPatch, "/api/threads/bad.id", strings.NewReader(`{"values":{"title":"ignored"}}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), "invalid thread_id") {
+		t.Fatalf("body=%q", resp.Body.String())
+	}
+}
+
+func TestGatewayThreadPutRejectsInvalidThreadID(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	resp := performCompatRequest(t, handler, http.MethodPut, "/api/threads/bad.id", strings.NewReader(`{"values":{"title":"ignored"}}`), map[string]string{
 		"Content-Type": "application/json",
 	})
 	if resp.Code != http.StatusUnprocessableEntity {

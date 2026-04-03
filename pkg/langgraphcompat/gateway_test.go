@@ -3304,6 +3304,50 @@ func TestGatewayThreadFilesEndpointListsUploadsWorkspaceAndArtifacts(t *testing.
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("files=%v want=%v", got, want)
 	}
+
+	byPath := make(map[string]tools.PresentFile, len(payload.Files))
+	for _, file := range payload.Files {
+		byPath[file.Path] = file
+	}
+
+	uploadMD := byPath["/mnt/user-data/uploads/requirements.md"]
+	if uploadMD.Source != "uploads" {
+		t.Fatalf("upload markdown source=%q want uploads", uploadMD.Source)
+	}
+	if uploadMD.VirtualPath != uploadMD.Path {
+		t.Fatalf("upload markdown virtual_path=%q want path", uploadMD.VirtualPath)
+	}
+	if uploadMD.ArtifactURL != "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/requirements.md" {
+		t.Fatalf("upload markdown artifact_url=%q", uploadMD.ArtifactURL)
+	}
+	if uploadMD.Extension != ".md" {
+		t.Fatalf("upload markdown extension=%q want .md", uploadMD.Extension)
+	}
+	if uploadMD.Size != int64(len("# requirements")) {
+		t.Fatalf("upload markdown size=%d want=%d", uploadMD.Size, len("# requirements"))
+	}
+
+	workspaceFile := byPath["/mnt/user-data/workspace/notes.txt"]
+	if workspaceFile.Source != "workspace" {
+		t.Fatalf("workspace source=%q want workspace", workspaceFile.Source)
+	}
+	if workspaceFile.ArtifactURL != "/api/threads/"+threadID+"/artifacts/mnt/user-data/workspace/notes.txt" {
+		t.Fatalf("workspace artifact_url=%q", workspaceFile.ArtifactURL)
+	}
+	if workspaceFile.Extension != ".txt" {
+		t.Fatalf("workspace extension=%q want .txt", workspaceFile.Extension)
+	}
+	if workspaceFile.Size != int64(len("notes")) {
+		t.Fatalf("workspace size=%d want=%d", workspaceFile.Size, len("notes"))
+	}
+
+	outputFile := byPath["/mnt/user-data/outputs/report.md"]
+	if outputFile.Source != "outputs" {
+		t.Fatalf("output source=%q want outputs", outputFile.Source)
+	}
+	if outputFile.ArtifactURL != "/api/threads/"+threadID+"/artifacts/mnt/user-data/outputs/report.md" {
+		t.Fatalf("output artifact_url=%q", outputFile.ArtifactURL)
+	}
 }
 
 func TestGatewayThreadFilesEndpointFallsBackToDiskWithoutSession(t *testing.T) {
@@ -3382,6 +3426,77 @@ func TestGatewayThreadFilesEndpointFallsBackToDiskWithoutSession(t *testing.T) {
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("files=%v want=%v", got, want)
+	}
+
+	byPath := make(map[string]tools.PresentFile, len(payload.Files))
+	for _, file := range payload.Files {
+		byPath[file.Path] = file
+	}
+
+	uploadPDF := byPath["/mnt/user-data/uploads/requirements.pdf"]
+	if uploadPDF.Source != "uploads" {
+		t.Fatalf("upload pdf source=%q want uploads", uploadPDF.Source)
+	}
+	if uploadPDF.ArtifactURL != "/api/threads/"+threadID+"/artifacts/mnt/user-data/uploads/requirements.pdf" {
+		t.Fatalf("upload pdf artifact_url=%q", uploadPDF.ArtifactURL)
+	}
+	if uploadPDF.Extension != ".pdf" {
+		t.Fatalf("upload pdf extension=%q want .pdf", uploadPDF.Extension)
+	}
+	if uploadPDF.Size != int64(len("pdf")) {
+		t.Fatalf("upload pdf size=%d want=%d", uploadPDF.Size, len("pdf"))
+	}
+}
+
+func TestGatewayThreadFilesEndpointAnnotatesExternalPresentedFiles(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-files-external-presented"
+	session := s.ensureSession(threadID, nil)
+
+	externalPath := filepath.Join(t.TempDir(), "summary.md")
+	if err := os.WriteFile(externalPath, []byte("# Summary\n"), 0o644); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+	if err := session.PresentFiles.Register(tools.PresentFile{
+		Path:       externalPath,
+		SourcePath: externalPath,
+	}); err != nil {
+		t.Fatalf("register external file: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/files", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		Files []tools.PresentFile `json:"files"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Files) != 1 {
+		t.Fatalf("files=%d want=1", len(payload.Files))
+	}
+
+	file := payload.Files[0]
+	if file.Path != filepath.Clean(externalPath) {
+		t.Fatalf("path=%q want=%q", file.Path, filepath.Clean(externalPath))
+	}
+	if file.Source != "presented" {
+		t.Fatalf("source=%q want presented", file.Source)
+	}
+	if file.VirtualPath != "" {
+		t.Fatalf("virtual_path=%q want empty", file.VirtualPath)
+	}
+	if file.ArtifactURL != "" {
+		t.Fatalf("artifact_url=%q want empty", file.ArtifactURL)
+	}
+	if file.Extension != ".md" {
+		t.Fatalf("extension=%q want .md", file.Extension)
+	}
+	if file.Size != int64(len("# Summary\n")) {
+		t.Fatalf("size=%d want=%d", file.Size, len("# Summary\n"))
 	}
 }
 

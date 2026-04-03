@@ -1776,7 +1776,7 @@ func (s *Server) sessionFiles(session *Session) []tools.PresentFile {
 	}
 
 	sortPresentFilesByCreatedAt(files)
-	return files
+	return s.annotateThreadFiles(session.ThreadID, files)
 }
 
 func presentFileAccessible(file tools.PresentFile) bool {
@@ -1816,7 +1816,7 @@ func (s *Server) threadFiles(threadID string, session *Session) []tools.PresentF
 	}
 
 	sortPresentFilesByCreatedAt(files)
-	return files
+	return s.annotateThreadFiles(threadID, files)
 }
 
 func sortPresentFilesByCreatedAt(files []tools.PresentFile) {
@@ -1826,6 +1826,77 @@ func sortPresentFilesByCreatedAt(files []tools.PresentFile) {
 		}
 		return files[i].CreatedAt.After(files[j].CreatedAt)
 	})
+}
+
+func (s *Server) annotateThreadFiles(threadID string, files []tools.PresentFile) []tools.PresentFile {
+	if len(files) == 0 {
+		return []tools.PresentFile{}
+	}
+
+	annotated := make([]tools.PresentFile, 0, len(files))
+	for _, file := range files {
+		annotated = append(annotated, s.annotateThreadFile(threadID, file))
+	}
+	return annotated
+}
+
+func (s *Server) annotateThreadFile(threadID string, file tools.PresentFile) tools.PresentFile {
+	path := strings.TrimSpace(file.Path)
+	switch {
+	case strings.HasPrefix(path, "/mnt/user-data/uploads/"):
+		file.Source = "uploads"
+	case strings.HasPrefix(path, "/mnt/user-data/workspace/"):
+		file.Source = "workspace"
+	case strings.HasPrefix(path, "/mnt/user-data/outputs/"):
+		file.Source = "outputs"
+	default:
+		file.Source = "presented"
+	}
+
+	if strings.HasPrefix(path, "/mnt/") {
+		file.VirtualPath = path
+		file.ArtifactURL = artifactURLForVirtualPath(threadID, path)
+	}
+	if file.Extension == "" {
+		file.Extension = strings.ToLower(filepath.Ext(path))
+	}
+
+	sourcePath := s.threadFileSourcePath(threadID, file)
+	if sourcePath != "" {
+		if file.Extension == "" {
+			file.Extension = strings.ToLower(filepath.Ext(sourcePath))
+		}
+		if file.Size == 0 {
+			if info, err := os.Stat(sourcePath); err == nil && !info.IsDir() {
+				file.Size = info.Size()
+			}
+		}
+	}
+
+	return file
+}
+
+func (s *Server) threadFileSourcePath(threadID string, file tools.PresentFile) string {
+	if sourcePath := strings.TrimSpace(file.SourcePath); sourcePath != "" {
+		return sourcePath
+	}
+
+	path := strings.TrimSpace(file.Path)
+	switch {
+	case strings.HasPrefix(path, "/mnt/user-data/uploads/"):
+		rel := strings.TrimPrefix(path, "/mnt/user-data/uploads/")
+		return filepath.Join(s.uploadsDir(threadID), filepath.FromSlash(rel))
+	case strings.HasPrefix(path, "/mnt/user-data/workspace/"):
+		rel := strings.TrimPrefix(path, "/mnt/user-data/workspace/")
+		return filepath.Join(s.threadRoot(threadID), "workspace", filepath.FromSlash(rel))
+	case strings.HasPrefix(path, "/mnt/user-data/outputs/"):
+		rel := strings.TrimPrefix(path, "/mnt/user-data/outputs/")
+		return filepath.Join(s.threadRoot(threadID), "outputs", filepath.FromSlash(rel))
+	case filepath.IsAbs(path):
+		return path
+	default:
+		return ""
+	}
 }
 
 func (s *Server) uploadArtifactPaths(threadID string) []string {
