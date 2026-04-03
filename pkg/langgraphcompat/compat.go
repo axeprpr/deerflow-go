@@ -460,6 +460,7 @@ func (s *Server) registerLangGraphRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("POST "+prefix+"/runs", s.handleRunsCreate)
 	mux.HandleFunc("GET "+prefix+"/runs/{run_id}", s.handleRunGet)
 	mux.HandleFunc("GET "+prefix+"/runs/{run_id}/stream", s.handleRunStream)
+	mux.HandleFunc("POST "+prefix+"/runs/{run_id}/cancel", s.handleRunCancel)
 
 	mux.HandleFunc("GET "+prefix+"/threads", s.handleThreadsList)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}", s.handleThreadGet)
@@ -478,6 +479,7 @@ func (s *Server) registerLangGraphRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/runs", s.handleThreadRunsCreate)
 	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/runs/stream", s.handleThreadRunsStream)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/runs/{run_id}/stream", s.handleThreadRunStream)
+	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/runs/{run_id}/cancel", s.handleThreadRunCancel)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/stream", s.handleThreadJoinStream)
 	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/clarifications", s.handleThreadClarificationCreate)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/clarifications/{id}", s.handleThreadClarificationGet)

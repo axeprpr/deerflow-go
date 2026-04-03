@@ -189,6 +189,7 @@ func (s *Server) registerGatewayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/threads/{thread_id}", s.handleGatewayThreadPatch)
 	mux.HandleFunc("DELETE /api/threads/{thread_id}", s.handleGatewayThreadDelete)
 	mux.HandleFunc("GET /api/threads/{thread_id}/files", s.handleGatewayThreadFiles)
+	mux.HandleFunc("POST /api/threads/{thread_id}/runs/{run_id}/cancel", s.handleGatewayThreadRunCancel)
 	mux.HandleFunc("POST /api/threads/{thread_id}/uploads", s.handleUploadsCreate)
 	mux.HandleFunc("GET /api/threads/{thread_id}/uploads/list", s.handleUploadsList)
 	mux.HandleFunc("DELETE /api/threads/{thread_id}/uploads/{filename}", s.handleUploadsDelete)
@@ -215,6 +216,16 @@ func (s *Server) handleGatewayThreadPatch(w http.ResponseWriter, r *http.Request
 	}
 
 	s.handleThreadUpdate(w, r)
+}
+
+func (s *Server) handleGatewayThreadRunCancel(w http.ResponseWriter, r *http.Request) {
+	threadID := strings.TrimSpace(r.PathValue("thread_id"))
+	if err := validateThreadID(threadID); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": err.Error()})
+		return
+	}
+
+	s.handleThreadRunCancel(w, r)
 }
 
 func (s *Server) handleModelsList(w http.ResponseWriter, r *http.Request) {
@@ -1212,11 +1223,6 @@ func (s *Server) handleSuggestions(w http.ResponseWriter, r *http.Request) {
 		req.N = 5
 	}
 
-	if len(req.Messages) == 0 {
-		writeJSON(w, http.StatusOK, map[string]any{"suggestions": []string{}})
-		return
-	}
-
 	suggestions := s.generateSuggestions(r.Context(), threadID, req.Messages, req.N, req.ModelName)
 	writeJSON(w, http.StatusOK, map[string]any{"suggestions": suggestions})
 }
@@ -1753,7 +1759,13 @@ func (s *Server) generateSuggestions(ctx context.Context, threadID string, messa
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }, n int, modelName string) []string {
-	if len(messages) == 0 || n <= 0 {
+	if n <= 0 {
+		return []string{}
+	}
+	if len(messages) == 0 {
+		messages = s.suggestionMessagesFromThread(threadID, 8)
+	}
+	if len(messages) == 0 {
 		return []string{}
 	}
 
@@ -2064,6 +2076,59 @@ func fallbackSuggestions(messages []struct {
 
 func contextFallbackSuggestions(hints suggestionContext, languageHint string, n int) []string {
 	return localizedContextFallbackSuggestions(hints, languageHint, n)
+}
+
+func (s *Server) suggestionMessagesFromThread(threadID string, limit int) []struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+} {
+	if s == nil || limit <= 0 {
+		return nil
+	}
+
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return nil
+	}
+
+	s.sessionsMu.RLock()
+	session := s.sessions[threadID]
+	if session == nil || len(session.Messages) == 0 {
+		s.sessionsMu.RUnlock()
+		return nil
+	}
+	history := append([]models.Message(nil), session.Messages...)
+	s.sessionsMu.RUnlock()
+
+	if limit > len(history) {
+		limit = len(history)
+	}
+	history = history[len(history)-limit:]
+
+	messages := make([]struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}, 0, len(history))
+	for _, msg := range history {
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			continue
+		}
+
+		switch msg.Role {
+		case models.RoleHuman:
+			messages = append(messages, struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			}{Role: "user", Content: content})
+		case models.RoleAI:
+			messages = append(messages, struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			}{Role: "assistant", Content: content})
+		}
+	}
+	return messages
 }
 
 func (s *Server) suggestionContext(threadID string) suggestionContext {

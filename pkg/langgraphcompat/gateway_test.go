@@ -2689,6 +2689,47 @@ func TestSuggestionsEndpointUsesLLMResponse(t *testing.T) {
 	}
 }
 
+func TestSuggestionsEndpointUsesThreadHistoryWhenMessagesOmitted(t *testing.T) {
+	provider := &titleProvider{response: `["下一步做什么？","需要我先总结吗？"]`}
+	s, handler := newCompatTestServer(t)
+	s.llmProvider = provider
+	s.defaultModel = "default-model"
+
+	session := s.ensureSession("t1", map[string]any{"title": "Release planning"})
+	session.Messages = []models.Message{
+		{ID: "sys-1", SessionID: "t1", Role: models.RoleSystem, Content: "system"},
+		{ID: "tool-1", SessionID: "t1", Role: models.RoleTool, Content: "tool output"},
+		{ID: "user-1", SessionID: "t1", Role: models.RoleHuman, Content: "帮我推进发布计划"},
+		{ID: "ai-1", SessionID: "t1", Role: models.RoleAI, Content: "我先整理执行步骤。"},
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/t1/suggestions", strings.NewReader(`{"n":2}`), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var data struct {
+		Suggestions []string `json:"suggestions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got := strings.Join(data.Suggestions, ","); got != "下一步做什么？,需要我先总结吗？" {
+		t.Fatalf("suggestions=%q", got)
+	}
+
+	prompt := provider.lastReq.Messages[0].Content
+	if !strings.Contains(prompt, "User: 帮我推进发布计划") {
+		t.Fatalf("prompt missing thread user history: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Assistant: 我先整理执行步骤。") {
+		t.Fatalf("prompt missing thread assistant history: %q", prompt)
+	}
+	if strings.Contains(prompt, "system") || strings.Contains(prompt, "tool output") {
+		t.Fatalf("prompt unexpectedly included non-conversation history: %q", prompt)
+	}
+}
+
 func TestSuggestionsEndpointIncludesThreadContextHints(t *testing.T) {
 	provider := &titleProvider{response: `["先总结需求文档"]`}
 	s, handler := newCompatTestServer(t)

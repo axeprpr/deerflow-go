@@ -870,6 +870,15 @@ func (s *Server) handleRunGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.runResponse(run))
 }
 
+func (s *Server) handleRunCancel(w http.ResponseWriter, r *http.Request) {
+	run, err := s.cancelRun(r.PathValue("run_id"))
+	if err != nil {
+		http.Error(w, err.Error(), cancelRunStatus(err))
+		return
+	}
+	writeJSON(w, http.StatusAccepted, s.runResponse(run))
+}
+
 func (s *Server) handleThreadRunGet(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if err := validateThreadID(threadID); err != nil {
@@ -889,6 +898,25 @@ func (s *Server) handleThreadRunGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, s.runResponse(run))
+}
+
+func (s *Server) handleThreadRunCancel(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if s.getThreadState(threadID) == nil {
+		http.Error(w, "thread not found", http.StatusNotFound)
+		return
+	}
+
+	run, err := s.cancelThreadRun(threadID, r.PathValue("run_id"))
+	if err != nil {
+		http.Error(w, err.Error(), cancelRunStatus(err))
+		return
+	}
+	writeJSON(w, http.StatusAccepted, s.runResponse(run))
 }
 
 func (s *Server) handleThreadRunsList(w http.ResponseWriter, r *http.Request) {
@@ -1437,6 +1465,58 @@ func (s *Server) getLatestActiveRunForThread(threadID string) *Run {
 		}
 	}
 	return latest
+}
+
+var (
+	errRunNotFound   = errors.New("run not found")
+	errRunNotRunning = errors.New("run is not active")
+)
+
+func (s *Server) cancelRun(runID string) (*Run, error) {
+	return s.cancelRunLocked(runID, "")
+}
+
+func (s *Server) cancelThreadRun(threadID string, runID string) (*Run, error) {
+	return s.cancelRunLocked(runID, threadID)
+}
+
+func (s *Server) cancelRunLocked(runID string, threadID string) (*Run, error) {
+	s.runsMu.Lock()
+	run, exists := s.runs[runID]
+	if !exists || (threadID != "" && run.ThreadID != threadID) {
+		s.runsMu.Unlock()
+		return nil, errRunNotFound
+	}
+	if run.Status != "running" || run.cancel == nil {
+		s.runsMu.Unlock()
+		return nil, errRunNotRunning
+	}
+
+	cancel := run.cancel
+	if run.abandonTimer != nil {
+		run.abandonTimer.Stop()
+		run.abandonTimer = nil
+	}
+	run.cancel = nil
+	run.UpdatedAt = time.Now().UTC()
+
+	copyRun := *run
+	copyRun.Events = append([]StreamEvent(nil), run.Events...)
+	s.runsMu.Unlock()
+
+	cancel()
+	return &copyRun, nil
+}
+
+func cancelRunStatus(err error) int {
+	switch {
+	case errors.Is(err, errRunNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, errRunNotRunning):
+		return http.StatusConflict
+	default:
+		return http.StatusInternalServerError
+	}
 }
 
 func (s *Server) subscribeRun(runID string) (*Run, <-chan StreamEvent) {
