@@ -132,6 +132,23 @@ Assign confidence based on source quality:
 
 Save report as: `research_{topic}_{YYYYMMDD}.md`
 
+### HTML Report Generation
+
+**IMPORTANT**: After completing the markdown report, ALWAYS convert it to HTML format using the provided `md2html.py` script:
+
+```bash
+python /root/.openclaw/workspace/deer-flow/skills/public/github-deep-research/scripts/md2html.py research_{topic}_{YYYYMMDD}.md
+```
+
+This will generate a beautifully styled HTML file with:
+- Professional typography and readable layout
+- Syntax highlighted code blocks
+- Styled tables and blockquotes
+- Responsive design for all devices
+- Print-friendly styling
+
+The HTML file will be saved alongside the markdown file and can be directly opened in browser or hosted.
+
 ### Formatting Rules
 
 - Chinese content: Use full-width punctuation（，。：；！？）

@@ -68,12 +68,44 @@ func TestTaskToolFailed(t *testing.T) {
 	result, err := tool.Handler(context.Background(), models.ToolCall{
 		ID:        "call-2",
 		Name:      "task",
-		Arguments: map[string]any{"description": "bad", "prompt": "fail"},
+		Arguments: map[string]any{"description": "bad", "prompt": "fail", "subagent_type": "general-purpose"},
 	})
 	if err == nil {
 		t.Fatal("Handler() expected error")
 	}
 	if result.Error != "boom" {
 		t.Fatalf("error = %q, want boom", result.Error)
+	}
+}
+
+func TestTaskToolRejectsUnknownSubagentType(t *testing.T) {
+	tool := TaskTool(fakeTaskPool{
+		startTask: func(ctx context.Context, description, prompt string, cfg subagent.SubagentConfig) (*subagent.Task, error) {
+			t.Fatal("StartTask should not be called for invalid subagent type")
+			return nil, nil
+		},
+		wait: func(ctx context.Context, taskID string) (*subagent.Task, error) {
+			t.Fatal("Wait should not be called for invalid subagent type")
+			return nil, nil
+		},
+	})
+
+	result, err := tool.Handler(context.Background(), models.ToolCall{
+		ID:   "call-3",
+		Name: "task",
+		Arguments: map[string]any{
+			"description":   "bad",
+			"prompt":        "fail",
+			"subagent_type": "unknown",
+		},
+	})
+	if err == nil {
+		t.Fatal("Handler() expected error")
+	}
+	if result.Status != models.CallStatusFailed {
+		t.Fatalf("status = %s, want %s", result.Status, models.CallStatusFailed)
+	}
+	if result.Error != `unknown subagent type "unknown"` {
+		t.Fatalf("error = %q", result.Error)
 	}
 }

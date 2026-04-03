@@ -240,6 +240,194 @@ The script automatically caches loaded data to avoid re-parsing files on every c
 
 This is especially useful when running multiple queries against the same data files (inspect → query → summary).
 
+---
+
+# Enhanced Capabilities (v2.0)
+
+The following enhanced capabilities are available in addition to the core features above:
+
+## Advanced Analytics
+
+### 1. Time Series Forecasting
+
+Predict future values based on historical data:
+
+```bash
+python /mnt/skills/public/data-analysis/scripts/analyze.py \
+  --files /mnt/user-data/uploads/sales.csv \
+  --action forecast \
+  --column revenue \
+  --periods 12
+```
+
+Parameters:
+- `--column`: Numeric column to forecast
+- `--periods`: Number of periods to predict (e.g., 12 for next 12 months)
+- `--frequency`: Time frequency (daily/weekly/monthly/quarterly, default: infer from data)
+
+Returns: Forecast values with confidence intervals
+
+### 2. Anomaly Detection
+
+Automatically detect outliers and anomalies:
+
+```bash
+python /mnt/skills/public/data-analysis/scripts/analyze.py \
+  --files /mnt/user-data/uploads/transactions.csv \
+  --action anomaly \
+  --column amount \
+  --method iqr
+```
+
+Parameters:
+- `--column`: Column to analyze
+- `--method`: Detection method (iqr/zscore/isolation_forest)
+- `--threshold`: Sensitivity threshold (default: auto)
+
+Returns: Rows identified as anomalies with scores
+
+### 3. Correlation Analysis
+
+Find relationships between variables:
+
+```bash
+python /mnt/skills/public/data-analysis/scripts/analyze.py \
+  --files /mnt/user-data/uploads/data.csv \
+  --action correlate
+```
+
+Returns: Correlation matrix for all numeric columns, heatmap data
+
+### 4. Trend Analysis
+
+Identify trends, seasonality, and patterns:
+
+```bash
+python /mnt/skills/public/data-analysis/scripts/analyze.py \
+  --files /mnt/user-data/uploads/timeseries.csv \
+  --action trend \
+  --column value \
+  --period 12
+```
+
+Parameters:
+- `--column`: Numeric column to analyze
+- `--period`: Period for seasonality detection (e.g., 12 for monthly data)
+
+Returns: Trend direction, seasonality strength, pattern components
+
+### 5. Clustering Analysis
+
+Group similar data points:
+
+```bash
+python /mnt/skills/public/data-analysis/scripts/analyze.py \
+  --files /mnt/user-data/uploads/customers.csv \
+  --action cluster \
+  --columns age,income,spending_score \
+  --k 4
+```
+
+Parameters:
+- `--columns`: Comma-separated columns to use for clustering
+- `--k`: Number of clusters (default: auto-detect using elbow method)
+
+Returns: Cluster assignments, cluster centers, silhouette score
+
+### 6. Data Quality Assessment
+
+Comprehensive data quality report:
+
+```bash
+python /mnt/skills/public/data-analysis/scripts/analyze.py \
+  --files /mnt/user-data/uploads/data.csv \
+  --action quality
+```
+
+Returns:
+- Missing value analysis
+- Duplicate detection
+- Data type validation
+- Consistency checks
+- Quality score (0-100)
+
+---
+
+## Usage Guidelines
+
+### When to Use Basic Analysis
+- Simple aggregations and summaries
+- Filtering and grouping
+- Cross-file joins
+- Ad-hoc queries
+
+### When to Use Advanced Analysis
+- **Forecasting**: "predict next quarter sales", "forecast demand"
+- **Anomaly Detection**: "find unusual transactions", "detect fraud"
+- **Correlation**: "relationship between variables", "what affects X"
+- **Trend Analysis**: "growth pattern", "seasonality"
+- **Clustering**: "customer segmentation", "group similar items"
+- **Quality**: "data health check", "cleanliness report"
+
+### Combining Basic + Advanced
+
+For comprehensive analysis, combine both:
+
+```bash
+# Step 1: Understand data
+python /mnt/skills/public/data-analysis/scripts/analyze.py \
+  --files /mnt/user-data/uploads/sales.csv \
+  --action inspect
+
+# Step 2: Check quality
+python /mnt/skills/public/data-analysis/scripts/analyze.py \
+  --files /mnt/user-data/uploads/sales.csv \
+  --action quality
+
+# Step 3: Basic analysis
+python /mnt/skills/public/data-analysis/scripts/analyze.py \
+  --files /mnt/user-data/uploads/sales.csv \
+  --action query \
+  --sql "SELECT region, SUM(revenue) as total FROM sales GROUP BY region"
+
+# Step 4: Advanced analysis
+python /mnt/skills/public/data-analysis/scripts/analyze.py \
+  --files /mnt/user-data/uploads/sales.csv \
+  --action forecast \
+  --column revenue \
+  --periods 6
+```
+
+---
+
+## Output Formats
+
+Advanced analysis outputs can be:
+- Formatted tables (default)
+- CSV export with `--output-file`
+- JSON for programmatic use
+- Markdown for reports
+
+Example with export:
+```bash
+python /mnt/skills/public/data-analysis/scripts/analyze.py \
+  --files /mnt/user-data/uploads/sales.csv \
+  --action forecast \
+  --column revenue \
+  --periods 12 \
+  --output-file /mnt/user-data/outputs/forecast-results.csv
+```
+
+---
+
+## Notes
+
+- Advanced analysis requires sufficient data points (minimum 30 for forecasting, 50+ for clustering)
+- Forecasting works best with regular time intervals
+- Anomaly detection sensitivity can be adjusted with `--threshold`
+- Clustering automatically suggests optimal k if not specified
+- All advanced methods include confidence scores where applicable
+
 ## Notes
 
 - DuckDB supports full SQL including window functions, CTEs, subqueries, and advanced aggregations

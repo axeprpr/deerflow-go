@@ -473,6 +473,59 @@ Every insight must connect **Data → User Psychology → Strategy Implication**
 - **Immediate Start**: Begin directly with `# Report Title` — no introductory text
 - **No Separators**: Do NOT use horizontal rules (`---`)
 
+---
+
+# Phase 3: HTML Report Generation (Optional)
+
+## Purpose
+
+Convert the Markdown report to a professional HTML report with:
+- Responsive design
+- Professional consulting-grade styling
+- Embedded charts
+- Print-friendly layout
+
+## When to Use
+
+- User requests HTML format
+- User needs a presentation-ready report
+- User wants a more visually appealing output
+
+## HTML Output Workflow
+
+### Step 3.1: Convert Markdown to HTML
+
+Run the conversion script:
+
+```bash
+python3 /root/.openclaw/workspace/deer-flow/scripts/md2html.py report.md report.html
+```
+
+This will generate a professional HTML report with:
+- Gradient header styling
+- Responsive design
+- Table highlighting
+- Code block formatting
+- Print-friendly CSS
+
+### Step 3.2: Deliver HTML Report
+
+Provide the user with:
+- `report.html` - The professional HTML report
+- `report.md` - The original Markdown (optional)
+
+## Output Format Options
+
+| Format | Use Case | Delivery |
+|--------|----------|----------|
+| Markdown | Editable, lightweight | `.md` file |
+| HTML | Professional presentation | `.html` file |
+| Both | Full flexibility | Both files |
+
+When user requests a report, ask: **"需要输出 Markdown 格式还是 HTML 格式？"**
+
+---
+
 ## Report Structure Template
 
 ```markdown
@@ -609,6 +662,20 @@ After data collection, user provides: Analysis Framework + Data Summary with bra
 
 - **Phase 1**: Output the complete Analysis Framework in **Markdown** format
 - **Phase 2**: Output the complete Report in **Markdown** format
+
+### HTML Report Generation (Recommended)
+
+After completing the Markdown report, convert it to HTML for better readability and sharing:
+
+```bash
+python3 /root/.openclaw/workspace/deer-flow/skills/public/github-deep-research/scripts/md2html.py <report_filename>.md
+```
+
+The HTML output includes:
+- Professional typography and clean layout
+- Styled tables, code blocks, and blockquotes
+- Responsive design for mobile/desktop
+- Print-friendly styling
 
 ## Settings
 

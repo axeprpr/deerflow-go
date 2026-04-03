@@ -27,7 +27,7 @@ func TaskTool(pool taskPool) models.Tool {
 				"subagent_type": map[string]any{"type": "string", "enum": []any{string(subagent.SubagentGeneralPurpose), string(subagent.SubagentBash)}},
 				"max_turns":     map[string]any{"type": "integer", "description": "Optional max turns override"},
 			},
-			"required": []any{"description", "prompt"},
+			"required": []any{"description", "prompt", "subagent_type"},
 		},
 		Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
 			if pool == nil {
@@ -36,7 +36,16 @@ func TaskTool(pool taskPool) models.Tool {
 
 			description, _ := call.Arguments["description"].(string)
 			prompt, _ := call.Arguments["prompt"].(string)
-			subagentType := parseSubagentType(call.Arguments["subagent_type"])
+			subagentType, ok := parseSubagentType(call.Arguments["subagent_type"])
+			if !ok {
+				err := fmt.Errorf("unknown subagent type %q", strings.TrimSpace(fmt.Sprint(call.Arguments["subagent_type"])))
+				return models.ToolResult{
+					CallID:   call.ID,
+					ToolName: call.Name,
+					Status:   models.CallStatusFailed,
+					Error:    err.Error(),
+				}, err
+			}
 			maxTurns := intFromArg(call.Arguments["max_turns"])
 
 			task, err := pool.StartTask(ctx, strings.TrimSpace(description), strings.TrimSpace(prompt), subagent.SubagentConfig{
@@ -87,13 +96,15 @@ func TaskTool(pool taskPool) models.Tool {
 	}
 }
 
-func parseSubagentType(raw any) subagent.SubagentType {
+func parseSubagentType(raw any) (subagent.SubagentType, bool) {
 	value, _ := raw.(string)
 	switch strings.TrimSpace(value) {
 	case string(subagent.SubagentBash):
-		return subagent.SubagentBash
+		return subagent.SubagentBash, true
+	case string(subagent.SubagentGeneralPurpose):
+		return subagent.SubagentGeneralPurpose, true
 	default:
-		return subagent.SubagentGeneralPurpose
+		return "", false
 	}
 }
 
