@@ -565,6 +565,50 @@ func TestThreadSearchMatchesArtifactTextContent(t *testing.T) {
 	}
 }
 
+func TestThreadSearchMatchesWorkspaceConfigAndLogContent(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	threadID := "thread-workspace-config-search"
+	s.ensureSession(threadID, map[string]any{
+		"title": "Runtime tuning",
+	})
+
+	workspaceDir := filepath.Join(s.threadRoot(threadID), "workspace")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	files := map[string]string{
+		"service.env": "DEPLOY_REGION=ap-southeast-1\n",
+		"agent.toml":  "checkpoint_label = \"blue-canary\"\n",
+		"runtime.log": "tail latency exceeded threshold during canary\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(workspaceDir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	for _, query := range []string{"ap-southeast-1", "blue-canary", "latency exceeded threshold"} {
+		resp := performCompatRequest(t, handler, http.MethodPost, "/threads/search", strings.NewReader(`{"query":"`+query+`"}`), map[string]string{
+			"Content-Type": "application/json",
+		})
+		if resp.Code != http.StatusOK {
+			t.Fatalf("query=%q status=%d body=%s", query, resp.Code, resp.Body.String())
+		}
+
+		var threads []map[string]any
+		if err := json.Unmarshal(resp.Body.Bytes(), &threads); err != nil {
+			t.Fatalf("query=%q unmarshal response: %v", query, err)
+		}
+		if len(threads) != 1 {
+			t.Fatalf("query=%q threads=%d want=1 body=%s", query, len(threads), resp.Body.String())
+		}
+		if got := asString(threads[0]["thread_id"]); got != threadID {
+			t.Fatalf("query=%q thread_id=%q want=%s", query, got, threadID)
+		}
+	}
+}
+
 func TestThreadSearchHonorsZeroLimit(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	s.ensureSession("thread-a", map[string]any{"title": "A"})

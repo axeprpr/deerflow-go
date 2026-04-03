@@ -49,6 +49,7 @@ func gatewayOpenAPISpec() map[string]any {
 
 func gatewayOpenAPITags() []map[string]any {
 	return []map[string]any{
+		{"name": "tts", "description": "Convert generated text or reports into speech audio"},
 		{"name": "models", "description": "Operations for querying available AI models and their configurations"},
 		{"name": "mcp", "description": "Manage Model Context Protocol (MCP) server configurations"},
 		{"name": "memory", "description": "Access and manage global memory data for personalized conversations"},
@@ -77,6 +78,9 @@ func gatewayOpenAPIPaths() map[string]any {
 		}),
 		"/redoc": pathItem(map[string]any{
 			"get": operation("docs", "ReDoc", "ReDoc-based API reference."),
+		}),
+		"/api/tts": pathItem(map[string]any{
+			"post": operation("tts", "Text To Speech", "Convert text into speech audio via an OpenAI-compatible TTS backend."),
 		}),
 		"/api/models": pathItem(map[string]any{
 			"get": operation("models", "List Models", "List configured models."),

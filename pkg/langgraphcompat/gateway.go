@@ -160,6 +160,7 @@ type gatewayMemoryResponse struct {
 }
 
 func (s *Server) registerGatewayRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/tts", s.handleTTS)
 	mux.HandleFunc("GET /api/models", s.handleModelsList)
 	mux.HandleFunc("GET /api/models/{model_name...}", s.handleModelGet)
 	mux.HandleFunc("GET /api/skills", s.handleSkillsList)
@@ -212,6 +213,7 @@ func (s *Server) registerGatewayRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/threads/{thread_id}/clarifications/{id}/resolve", s.handleGatewayThreadClarificationResolve)
 	mux.HandleFunc("POST /api/threads/{thread_id}/uploads", s.handleUploadsCreate)
 	mux.HandleFunc("GET /api/threads/{thread_id}/uploads/list", s.handleUploadsList)
+	// GET handlers also serve HEAD requests; registering HEAD here conflicts with /uploads/list.
 	mux.HandleFunc("GET /api/threads/{thread_id}/uploads/{filename}", s.handleUploadsGet)
 	mux.HandleFunc("DELETE /api/threads/{thread_id}/uploads/{filename}", s.handleUploadsDelete)
 	mux.HandleFunc("GET /api/threads/{thread_id}/artifacts/{artifact_path...}", s.handleArtifactGet)

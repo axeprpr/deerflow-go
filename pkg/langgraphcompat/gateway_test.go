@@ -81,6 +81,7 @@ func TestGatewayOpenAPIDocumentationEndpoints(t *testing.T) {
 		t.Fatalf("title=%v want %q", spec.Info["title"], "DeerFlow API Gateway")
 	}
 	for _, path := range []string{
+		"/api/tts",
 		"/api/models",
 		"/api/memory",
 		"/api/threads/{thread_id}/uploads",
@@ -228,6 +229,109 @@ func TestUploadGetRouteServesOriginalFile(t *testing.T) {
 	}
 	if got := resp.Header().Get("Content-Type"); !strings.Contains(got, "text/plain") {
 		t.Fatalf("content-type=%q want text/plain", got)
+	}
+}
+
+func TestUploadHeadRouteServesHeadersWithoutBody(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-upload-head"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "hello.txt"), []byte("hello from upload"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodHead, "/api/threads/"+threadID+"/uploads/hello.txt", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); got != "" {
+		t.Fatalf("body=%q want empty", got)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "text/plain") {
+		t.Fatalf("content-type=%q want text/plain", got)
+	}
+}
+
+type ttsRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn ttsRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return fn(r)
+}
+
+func TestTTSProxyReturnsAudio(t *testing.T) {
+	t.Setenv("TTS_API_KEY", "tts-test-key")
+	t.Setenv("TTS_MODEL", "tts-model")
+	t.Setenv("TTS_VOICE", "verse")
+	t.Setenv("TTS_API_BASE_URL", "https://tts.example.test/v1")
+
+	previousClient := gatewayTTSHTTPClient
+	gatewayTTSHTTPClient = &http.Client{
+		Transport: ttsRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if got := r.URL.String(); got != "https://tts.example.test/v1/audio/speech" {
+				t.Fatalf("url=%q", got)
+			}
+			if got := r.Header.Get("Authorization"); got != "Bearer tts-test-key" {
+				t.Fatalf("authorization=%q", got)
+			}
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if got := asString(body["input"]); got != "hello world" {
+				t.Fatalf("input=%q", got)
+			}
+			if got := asString(body["model"]); got != "tts-model" {
+				t.Fatalf("model=%q", got)
+			}
+			if got := asString(body["voice"]); got != "verse" {
+				t.Fatalf("voice=%q", got)
+			}
+			if got := asString(body["response_format"]); got != "wav" {
+				t.Fatalf("format=%q", got)
+			}
+			if got := body["speed"]; got != 1.25 {
+				t.Fatalf("speed=%v", got)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"audio/wav"}},
+				Body:       io.NopCloser(strings.NewReader("RIFFtest")),
+			}, nil
+		}),
+	}
+	t.Cleanup(func() { gatewayTTSHTTPClient = previousClient })
+
+	_, handler := newCompatTestServer(t)
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/tts", strings.NewReader(`{"text":"hello world","format":"wav","speed_ratio":1.25}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if got := resp.Body.String(); got != "RIFFtest" {
+		t.Fatalf("body=%q", got)
+	}
+	if got := resp.Header().Get("Content-Type"); got != "audio/wav" {
+		t.Fatalf("content-type=%q", got)
+	}
+}
+
+func TestTTSReturnsServiceUnavailableWhenUnconfigured(t *testing.T) {
+	t.Setenv("TTS_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+
+	_, handler := newCompatTestServer(t)
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/tts", strings.NewReader(`{"text":"hello world"}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
 	}
 }
 
