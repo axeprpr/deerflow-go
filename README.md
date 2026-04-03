@@ -19,6 +19,11 @@ A Go reimplementation of [DeerFlow](https://github.com/bytedance/deerflow) - a m
 - **Sandbox Isolation**: Secure execution via Bubblewrap + Landlock (Linux)
 - **MCP Support**: Connect to Model Context Protocol servers
 
+### 🔊 Gateway UX
+- **Text-to-Speech Gateway**: `POST /api/tts` proxies OpenAI-compatible speech synthesis for reading reports aloud
+- **Upload Probing**: `HEAD /api/threads/{id}/uploads/{filename}` returns headers without downloading the file body
+- **Broader Thread Search**: Search now indexes workspace config and log files such as `.env`, `.toml`, `.cfg`, and `.log`
+
 ### 📊 Present Files
 - Track and display generated artifacts
 - Auto MIME type detection
@@ -118,6 +123,7 @@ Set `NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://localhost:8080` in your deerflow-ui `
 | `/threads/{id}/state` | GET/PATCH | Thread state |
 | `/threads/{id}/clarifications` | GET/POST | Clarification |
 | `/health` | GET | Health check |
+| `/api/tts` | POST | Generate speech audio from text |
 
 ## Configuration
 
@@ -126,6 +132,10 @@ Set `NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://localhost:8080` in your deerflow-ui `
 | `SILICONFLOW_API_KEY` | LLM API key | Required |
 | `OPENAI_API_KEY` | OpenAI-compatible provider API key | Optional |
 | `OPENAI_API_BASE_URL` | OpenAI-compatible provider base URL | Optional |
+| `TTS_API_KEY` | Override API key for `/api/tts` | Optional |
+| `TTS_API_BASE_URL` | Override base URL for `/api/tts` | `OPENAI_API_BASE_URL` or OpenAI |
+| `TTS_MODEL` | Override model for `/api/tts` | `gpt-4o-mini-tts` |
+| `TTS_VOICE` | Override voice for `/api/tts` | `alloy` |
 | `ANTHROPIC_API_KEY` | Anthropic gateway API key | Optional |
 | `DEFAULT_LLM_MODEL` | Default model | `qwen/Qwen3.5-9B` |
 | `DEERFLOW_TITLE_ENABLED` | Enable automatic thread title generation | `true` |

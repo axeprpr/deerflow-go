@@ -326,7 +326,7 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 
 	s.httpServer = &http.Server{
 		Addr:    addr,
-		Handler: wrapTrailingSlashCompat(mux),
+		Handler: wrapTrailingSlashCompat(wrapCORSCompat(mux)),
 	}
 
 	return s, nil
@@ -363,6 +363,42 @@ func wrapTrailingSlashCompat(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, cloned)
 	})
+}
+
+func wrapCORSCompat(next http.Handler) http.Handler {
+	if next == nil {
+		return http.NotFoundHandler()
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setCORSHeaders(w, r)
+		if r != nil && r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func setCORSHeaders(w http.ResponseWriter, r *http.Request) {
+	if w == nil {
+		return
+	}
+	header := w.Header()
+	header.Add("Vary", "Origin")
+	header.Add("Vary", "Access-Control-Request-Method")
+	header.Add("Vary", "Access-Control-Request-Headers")
+
+	origin := "*"
+	if r != nil {
+		if candidate := strings.TrimSpace(r.Header.Get("Origin")); candidate != "" {
+			origin = candidate
+		}
+	}
+	header.Set("Access-Control-Allow-Origin", origin)
+	header.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS")
+	header.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Last-Event-ID, X-Requested-With")
+	header.Set("Access-Control-Expose-Headers", "Content-Disposition, Content-Length, Content-Type, Content-Location, Location")
+	header.Set("Access-Control-Max-Age", "600")
 }
 
 func cloneURL(src *url.URL) *url.URL {

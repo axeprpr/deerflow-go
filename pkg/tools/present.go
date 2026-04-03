@@ -21,13 +21,14 @@ import (
 var presentFileSeq uint64
 
 type PresentFile struct {
-	ID          string    `json:"id"`
-	Path        string    `json:"path"`
-	SourcePath  string    `json:"-"`
-	Description string    `json:"description,omitempty"`
-	MimeType    string    `json:"mime_type"`
-	Content     string    `json:"content,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	Path          string    `json:"path"`
+	SourcePath    string    `json:"-"`
+	Description   string    `json:"description,omitempty"`
+	MimeType      string    `json:"mime_type"`
+	Content       string    `json:"content,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	AutoCreatedAt bool      `json:"-"`
 }
 
 type PresentFileRegistry struct {
@@ -88,25 +89,28 @@ func (r *PresentFileRegistry) Register(file PresentFile) error {
 			id = existingID
 			if file.CreatedAt.IsZero() {
 				file.CreatedAt = existing.CreatedAt
+				file.AutoCreatedAt = existing.AutoCreatedAt
 			}
 		} else {
 			id = newPresentFileID()
 		}
 	}
 
+	autoCreatedAt := file.CreatedAt.IsZero()
 	createdAt := file.CreatedAt.UTC()
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
 
 	r.files[id] = PresentFile{
-		ID:          id,
-		Path:        normalizedPath,
-		SourcePath:  absSourcePath,
-		Description: description,
-		MimeType:    mimeType,
-		Content:     content,
-		CreatedAt:   createdAt,
+		ID:            id,
+		Path:          normalizedPath,
+		SourcePath:    absSourcePath,
+		Description:   description,
+		MimeType:      mimeType,
+		Content:       content,
+		CreatedAt:     createdAt,
+		AutoCreatedAt: autoCreatedAt,
 	}
 	return nil
 }

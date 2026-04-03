@@ -889,6 +889,9 @@ export NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://api:8080
 - Thread management: `POST /threads`, `GET /threads/{thread_id}`, `PATCH /threads/{thread_id}`
 - Artifact listing: `GET /threads/{thread_id}/files`
 - Clarification flows: `POST /threads/{thread_id}/clarifications/...`
+- Gateway speech synthesis: `POST /api/tts`
+- Upload listing and header probes: `GET /api/threads/{thread_id}/uploads/list`, `HEAD /api/threads/{thread_id}/uploads/{filename}`
+- Thread search across metadata, artifacts, uploads, and workspace config/log files: `POST /threads/search`, `POST /api/threads/search`
 
 ### Compose-based UI startup
 

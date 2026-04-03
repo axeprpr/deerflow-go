@@ -1654,8 +1654,37 @@ func (s *Server) sessionArtifactPaths(session *Session) []string {
 		return []string{}
 	}
 
+	type artifactEntry struct {
+		path     string
+		modified time.Time
+	}
+
 	seen := make(map[string]struct{})
-	paths := make([]string, 0)
+	ordered := make([]string, 0)
+	timed := make([]artifactEntry, 0)
+	appendOrdered := func(path string) {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return
+		}
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		ordered = append(ordered, path)
+	}
+	appendTimed := func(path string, modified time.Time) {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return
+		}
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		timed = append(timed, artifactEntry{path: path, modified: modified})
+	}
+
 	if session.PresentFiles != nil {
 		files := session.PresentFiles.List()
 		for _, file := range files {
@@ -1665,29 +1694,43 @@ func (s *Server) sessionArtifactPaths(session *Session) []string {
 			if !presentFileAccessible(file) {
 				continue
 			}
-			if _, ok := seen[file.Path]; ok {
+			if file.AutoCreatedAt {
+				appendOrdered(file.Path)
 				continue
 			}
-			seen[file.Path] = struct{}{}
-			paths = append(paths, file.Path)
+			appendTimed(file.Path, file.CreatedAt)
 		}
 	}
-	for _, path := range collectArtifactPaths(
+	for _, file := range collectArtifactFiles(
 		filepath.Join(s.threadRoot(session.ThreadID), "outputs"),
 		"/mnt/user-data/outputs",
 	) {
-		if _, ok := seen[path]; ok {
-			continue
-		}
-		seen[path] = struct{}{}
-		paths = append(paths, path)
+		appendTimed(file.Path, file.CreatedAt)
 	}
-	for _, path := range s.uploadArtifactPaths(session.ThreadID) {
-		if _, ok := seen[path]; ok {
+	for _, info := range s.listUploadedFiles(session.ThreadID) {
+		path := strings.TrimSpace(asString(info["markdown_virtual_path"]))
+		if path == "" {
 			continue
 		}
-		seen[path] = struct{}{}
-		paths = append(paths, path)
+		markdownPath := filepath.Join(s.uploadsDir(session.ThreadID), filepath.Base(path))
+		modified := time.Unix(toInt64(info["modified"]), 0).UTC()
+		if stat, err := os.Stat(markdownPath); err == nil {
+			modified = stat.ModTime().UTC()
+		}
+		appendTimed(path, modified)
+	}
+
+	sort.Slice(timed, func(i, j int) bool {
+		if timed[i].modified.Equal(timed[j].modified) {
+			return timed[i].path < timed[j].path
+		}
+		return timed[i].modified.After(timed[j].modified)
+	})
+
+	paths := make([]string, 0, len(ordered)+len(timed))
+	paths = append(paths, ordered...)
+	for _, entry := range timed {
+		paths = append(paths, entry.path)
 	}
 	return paths
 }
@@ -1732,6 +1775,7 @@ func (s *Server) sessionFiles(session *Session) []tools.PresentFile {
 		}
 	}
 
+	sortPresentFilesByCreatedAt(files)
 	return files
 }
 
@@ -1770,7 +1814,18 @@ func (s *Server) threadFiles(threadID string, session *Session) []tools.PresentF
 			files = append(files, file)
 		}
 	}
+
+	sortPresentFilesByCreatedAt(files)
 	return files
+}
+
+func sortPresentFilesByCreatedAt(files []tools.PresentFile) {
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].CreatedAt.Equal(files[j].CreatedAt) {
+			return files[i].Path < files[j].Path
+		}
+		return files[i].CreatedAt.After(files[j].CreatedAt)
+	})
 }
 
 func (s *Server) uploadArtifactPaths(threadID string) []string {

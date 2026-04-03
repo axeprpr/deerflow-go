@@ -56,7 +56,7 @@ func newCompatTestServer(t *testing.T) (*Server, http.Handler) {
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
 	t.Cleanup(s.waitForBackgroundTasks)
-	return s, wrapTrailingSlashCompat(mux)
+	return s, wrapTrailingSlashCompat(wrapCORSCompat(mux))
 }
 
 func TestGatewayOpenAPIDocumentationEndpoints(t *testing.T) {
@@ -206,6 +206,52 @@ func TestTrailingSlashCompatibilityForLangGraphRoutes(t *testing.T) {
 	resp = performCompatRequest(t, handler, http.MethodGet, "/api/langgraph/threads/", nil, nil)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("GET /api/langgraph/threads/ status=%d want=%d", resp.Code, http.StatusOK)
+	}
+}
+
+func TestGatewayCORSHeadersAllowCrossOriginRequests(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/channels", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:3000" {
+		t.Fatalf("allow-origin=%q want=%q", got, "http://localhost:3000")
+	}
+	if got := rec.Header().Values("Vary"); !slices.Contains(got, "Origin") {
+		t.Fatalf("vary=%v want Origin", got)
+	}
+	if got := rec.Header().Get("Access-Control-Expose-Headers"); !strings.Contains(got, "Content-Disposition") {
+		t.Fatalf("expose-headers=%q missing Content-Disposition", got)
+	}
+}
+
+func TestGatewayCORSPreflightReturnsNoContent(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	req := httptest.NewRequest(http.MethodOptions, "/runs/stream", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	req.Header.Set("Access-Control-Request-Headers", "content-type,last-event-id")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, "POST") {
+		t.Fatalf("allow-methods=%q missing POST", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(strings.ToLower(got), "last-event-id") {
+		t.Fatalf("allow-headers=%q missing Last-Event-ID", got)
+	}
+	if body := rec.Body.String(); body != "" {
+		t.Fatalf("body=%q want empty", body)
 	}
 }
 
@@ -3201,6 +3247,7 @@ func TestGatewayThreadFilesEndpointListsUploadsWorkspaceAndArtifacts(t *testing.
 	if err := os.WriteFile(filepath.Join(workspaceDir, "notes.txt"), []byte("notes"), 0o644); err != nil {
 		t.Fatalf("write workspace file: %v", err)
 	}
+	workspacePath := filepath.Join(workspaceDir, "notes.txt")
 
 	uploadDir := s.uploadsDir(threadID)
 	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
@@ -3211,6 +3258,25 @@ func TestGatewayThreadFilesEndpointListsUploadsWorkspaceAndArtifacts(t *testing.
 	}
 	if err := os.WriteFile(filepath.Join(uploadDir, "requirements.md"), []byte("# requirements"), 0o644); err != nil {
 		t.Fatalf("write upload markdown companion: %v", err)
+	}
+	uploadMarkdownPath := filepath.Join(uploadDir, "requirements.md")
+	uploadPDFPath := filepath.Join(uploadDir, "requirements.pdf")
+
+	baseTime := time.Date(2026, 4, 3, 13, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(reportPath, baseTime, baseTime); err != nil {
+		t.Fatalf("chtimes artifact: %v", err)
+	}
+	workspaceTime := baseTime.Add(2 * time.Minute)
+	if err := os.Chtimes(workspacePath, workspaceTime, workspaceTime); err != nil {
+		t.Fatalf("chtimes workspace: %v", err)
+	}
+	uploadMarkdownTime := baseTime.Add(4 * time.Minute)
+	if err := os.Chtimes(uploadMarkdownPath, uploadMarkdownTime, uploadMarkdownTime); err != nil {
+		t.Fatalf("chtimes upload markdown: %v", err)
+	}
+	uploadPDFTime := baseTime.Add(4 * time.Minute)
+	if err := os.Chtimes(uploadPDFPath, uploadPDFTime, uploadPDFTime); err != nil {
+		t.Fatalf("chtimes upload pdf: %v", err)
 	}
 
 	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/files", nil, nil)
@@ -3230,10 +3296,10 @@ func TestGatewayThreadFilesEndpointListsUploadsWorkspaceAndArtifacts(t *testing.
 		got = append(got, file.Path)
 	}
 	want := []string{
-		"/mnt/user-data/outputs/report.md",
-		"/mnt/user-data/workspace/notes.txt",
 		"/mnt/user-data/uploads/requirements.md",
 		"/mnt/user-data/uploads/requirements.pdf",
+		"/mnt/user-data/workspace/notes.txt",
+		"/mnt/user-data/outputs/report.md",
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("files=%v want=%v", got, want)
@@ -3251,6 +3317,7 @@ func TestGatewayThreadFilesEndpointFallsBackToDiskWithoutSession(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(outputDir, "report.md"), []byte("# report"), 0o644); err != nil {
 		t.Fatalf("write output: %v", err)
 	}
+	reportPath := filepath.Join(outputDir, "report.md")
 
 	workspaceDir := filepath.Join(s.threadRoot(threadID), "workspace")
 	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
@@ -3259,6 +3326,7 @@ func TestGatewayThreadFilesEndpointFallsBackToDiskWithoutSession(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspaceDir, "notes.txt"), []byte("notes"), 0o644); err != nil {
 		t.Fatalf("write workspace file: %v", err)
 	}
+	workspacePath := filepath.Join(workspaceDir, "notes.txt")
 
 	uploadDir := s.uploadsDir(threadID)
 	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
@@ -3269,6 +3337,25 @@ func TestGatewayThreadFilesEndpointFallsBackToDiskWithoutSession(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(uploadDir, "requirements.md"), []byte("# requirements"), 0o644); err != nil {
 		t.Fatalf("write upload markdown companion: %v", err)
+	}
+	uploadMarkdownPath := filepath.Join(uploadDir, "requirements.md")
+	uploadPDFPath := filepath.Join(uploadDir, "requirements.pdf")
+
+	baseTime := time.Date(2026, 4, 3, 14, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(reportPath, baseTime, baseTime); err != nil {
+		t.Fatalf("chtimes output: %v", err)
+	}
+	workspaceTime := baseTime.Add(2 * time.Minute)
+	if err := os.Chtimes(workspacePath, workspaceTime, workspaceTime); err != nil {
+		t.Fatalf("chtimes workspace: %v", err)
+	}
+	uploadMarkdownTime := baseTime.Add(4 * time.Minute)
+	if err := os.Chtimes(uploadMarkdownPath, uploadMarkdownTime, uploadMarkdownTime); err != nil {
+		t.Fatalf("chtimes upload markdown: %v", err)
+	}
+	uploadPDFTime := baseTime.Add(4 * time.Minute)
+	if err := os.Chtimes(uploadPDFPath, uploadPDFTime, uploadPDFTime); err != nil {
+		t.Fatalf("chtimes upload pdf: %v", err)
 	}
 
 	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/files", nil, nil)
@@ -3288,10 +3375,10 @@ func TestGatewayThreadFilesEndpointFallsBackToDiskWithoutSession(t *testing.T) {
 		got = append(got, file.Path)
 	}
 	want := []string{
-		"/mnt/user-data/outputs/report.md",
-		"/mnt/user-data/workspace/notes.txt",
 		"/mnt/user-data/uploads/requirements.md",
 		"/mnt/user-data/uploads/requirements.pdf",
+		"/mnt/user-data/workspace/notes.txt",
+		"/mnt/user-data/outputs/report.md",
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("files=%v want=%v", got, want)

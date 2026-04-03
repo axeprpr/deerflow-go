@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
@@ -188,9 +189,25 @@ func TestThreadFilesIncludeAutoDiscoveredArtifacts(t *testing.T) {
 		t.Fatalf("write upload: %v", err)
 	}
 
+	baseTime := time.Date(2026, 4, 3, 9, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(outputPath, baseTime, baseTime); err != nil {
+		t.Fatalf("chtimes output: %v", err)
+	}
+	workspacePath := filepath.Join(workspaceDir, "notes.txt")
+	workspaceTime := baseTime.Add(2 * time.Minute)
+	if err := os.Chtimes(workspacePath, workspaceTime, workspaceTime); err != nil {
+		t.Fatalf("chtimes workspace: %v", err)
+	}
+	uploadPath := filepath.Join(uploadDir, "brief.pdf")
+	uploadTime := baseTime.Add(4 * time.Minute)
+	if err := os.Chtimes(uploadPath, uploadTime, uploadTime); err != nil {
+		t.Fatalf("chtimes upload: %v", err)
+	}
+
 	if err := session.PresentFiles.Register(tools.PresentFile{
 		Path:       "/mnt/user-data/outputs/report.md",
 		SourcePath: outputPath,
+		CreatedAt:  baseTime,
 	}); err != nil {
 		t.Fatalf("register presented file: %v", err)
 	}
@@ -212,21 +229,21 @@ func TestThreadFilesIncludeAutoDiscoveredArtifacts(t *testing.T) {
 
 	got := []string{payload.Files[0].Path, payload.Files[1].Path, payload.Files[2].Path}
 	want := []string{
-		"/mnt/user-data/outputs/report.md",
-		"/mnt/user-data/workspace/notes.txt",
 		"/mnt/user-data/uploads/brief.pdf",
+		"/mnt/user-data/workspace/notes.txt",
+		"/mnt/user-data/outputs/report.md",
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("paths=%q want=%q", strings.Join(got, ","), strings.Join(want, ","))
 	}
-	if payload.Files[0].MimeType != "text/markdown; charset=utf-8" {
-		t.Fatalf("output mime=%q want text/markdown; charset=utf-8", payload.Files[0].MimeType)
+	if payload.Files[0].MimeType != "application/pdf" {
+		t.Fatalf("upload mime=%q want application/pdf", payload.Files[0].MimeType)
 	}
 	if payload.Files[1].MimeType != "text/plain; charset=utf-8" {
 		t.Fatalf("workspace mime=%q want text/plain; charset=utf-8", payload.Files[1].MimeType)
 	}
-	if payload.Files[2].MimeType != "application/pdf" {
-		t.Fatalf("upload mime=%q want application/pdf", payload.Files[2].MimeType)
+	if payload.Files[2].MimeType != "text/markdown; charset=utf-8" {
+		t.Fatalf("output mime=%q want text/markdown; charset=utf-8", payload.Files[2].MimeType)
 	}
 	for i, file := range payload.Files {
 		if strings.TrimSpace(file.ID) == "" {
@@ -235,6 +252,75 @@ func TestThreadFilesIncludeAutoDiscoveredArtifacts(t *testing.T) {
 		if file.CreatedAt.IsZero() {
 			t.Fatalf("files[%d] missing created_at: %#v", i, file)
 		}
+	}
+}
+
+func TestThreadFilesSortAcrossRootsByNewestModifiedTime(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	threadID := "thread-files-global-sort"
+	session := s.ensureSession(threadID, nil)
+
+	outputDir := filepath.Join(s.threadRoot(threadID), "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	outputPath := filepath.Join(outputDir, "report.md")
+	if err := os.WriteFile(outputPath, []byte("# Report"), 0o644); err != nil {
+		t.Fatalf("write output: %v", err)
+	}
+
+	workspaceDir := filepath.Join(s.threadRoot(threadID), "workspace")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	workspacePath := filepath.Join(workspaceDir, "notes.txt")
+	if err := os.WriteFile(workspacePath, []byte("draft"), 0o644); err != nil {
+		t.Fatalf("write workspace: %v", err)
+	}
+
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+	uploadPath := filepath.Join(uploadDir, "brief.pdf")
+	if err := os.WriteFile(uploadPath, []byte("%PDF"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+
+	baseTime := time.Date(2026, 4, 3, 10, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(outputPath, baseTime, baseTime); err != nil {
+		t.Fatalf("chtimes output: %v", err)
+	}
+	workspaceTime := baseTime.Add(3 * time.Minute)
+	if err := os.Chtimes(workspacePath, workspaceTime, workspaceTime); err != nil {
+		t.Fatalf("chtimes workspace: %v", err)
+	}
+	uploadTime := baseTime.Add(6 * time.Minute)
+	if err := os.Chtimes(uploadPath, uploadTime, uploadTime); err != nil {
+		t.Fatalf("chtimes upload: %v", err)
+	}
+
+	if err := session.PresentFiles.Register(tools.PresentFile{
+		Path:       "/mnt/user-data/outputs/report.md",
+		SourcePath: outputPath,
+		CreatedAt:  baseTime,
+	}); err != nil {
+		t.Fatalf("register presented file: %v", err)
+	}
+
+	files := s.sessionFiles(session)
+	if len(files) != 3 {
+		t.Fatalf("files=%d want=3", len(files))
+	}
+
+	got := []string{files[0].Path, files[1].Path, files[2].Path}
+	want := []string{
+		"/mnt/user-data/uploads/brief.pdf",
+		"/mnt/user-data/workspace/notes.txt",
+		"/mnt/user-data/outputs/report.md",
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("paths=%q want=%q", strings.Join(got, ","), strings.Join(want, ","))
 	}
 }
 

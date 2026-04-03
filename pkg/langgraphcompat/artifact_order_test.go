@@ -173,6 +173,55 @@ func TestThreadStateArtifactsAppendUploadMarkdownAfterOutputs(t *testing.T) {
 	}
 }
 
+func TestThreadStateArtifactsSortAcrossRootsByNewestModifiedTime(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	threadID := "thread-artifacts-global-sort"
+	s.ensureSession(threadID, nil)
+
+	outputDir := filepath.Join(s.threadRoot(threadID), "outputs")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatalf("mkdir outputs: %v", err)
+	}
+	outputPath := filepath.Join(outputDir, "report.md")
+	if err := os.WriteFile(outputPath, []byte("# Report"), 0o644); err != nil {
+		t.Fatalf("write output: %v", err)
+	}
+
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "brief.pdf"), []byte("pdf"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+	uploadMarkdownPath := filepath.Join(uploadDir, "brief.md")
+	if err := os.WriteFile(uploadMarkdownPath, []byte("# Brief"), 0o644); err != nil {
+		t.Fatalf("write upload markdown: %v", err)
+	}
+
+	baseTime := time.Date(2026, 4, 3, 12, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(outputPath, baseTime, baseTime); err != nil {
+		t.Fatalf("chtimes output: %v", err)
+	}
+	uploadTime := baseTime.Add(5 * time.Minute)
+	if err := os.Chtimes(uploadMarkdownPath, uploadTime, uploadTime); err != nil {
+		t.Fatalf("chtimes upload markdown: %v", err)
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("state is nil")
+	}
+
+	artifacts, ok := state.Values["artifacts"].([]string)
+	if !ok {
+		t.Fatalf("artifacts=%#v", state.Values["artifacts"])
+	}
+	if strings.Join(artifacts, ",") != "/mnt/user-data/uploads/brief.md,/mnt/user-data/outputs/report.md" {
+		t.Fatalf("artifacts=%#v", artifacts)
+	}
+}
+
 func TestThreadStateSkipsDeletedPresentedArtifacts(t *testing.T) {
 	s, _ := newCompatTestServer(t)
 	threadID := "thread-artifacts-skip-deleted"
