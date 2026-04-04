@@ -13,16 +13,30 @@ import (
 )
 
 func main() {
+	yolo := flag.Bool("yolo", false, "YOLO mode: use defaults for all settings (no config required)")
 	addr := flag.String("addr", defaultAddr(), "Server address")
 	dbURL := flag.String("db", firstNonEmpty(os.Getenv("POSTGRES_URL")), "Postgres database URL")
 	model := flag.String("model", firstNonEmpty(os.Getenv("DEFAULT_LLM_MODEL"), "qwen/Qwen3.5-9B"), "Default LLM model")
 	flag.Parse()
 
 	logger := log.Default()
-	logger.Printf("Starting LangGraph-compatible server...")
-	logger.Printf("  Address: %s", *addr)
-	logger.Printf("  Database: %s", *dbURL)
-	logger.Printf("  Model: %s", *model)
+	logger.SetPrefix("[deerflow] ")
+
+	if *yolo {
+		os.Setenv("ADDR", ":8080")
+		os.Setenv("DEFAULT_LLM_MODEL", "qwen/Qwen3.5-9B")
+		os.Setenv("DEERFLOW_DATA_ROOT", "./data")
+		os.Setenv("LOG_LEVEL", "info")
+		*addr = ":8080"
+		*model = "qwen/Qwen3.5-9B"
+	}
+
+	logger.Printf("Starting deerflow-go LangGraph-compatible server...")
+	logger.Printf("  YOLO mode: %v", *yolo)
+	logger.Printf("  Address:   %s", *addr)
+	logger.Printf("  Database:  %s", describeDB(*dbURL))
+	logger.Printf("  Model:     %s", *model)
+
 	if level := strings.TrimSpace(os.Getenv("LOG_LEVEL")); level != "" {
 		logger.Printf("  Log Level: %s", level)
 	}
@@ -32,7 +46,6 @@ func main() {
 		log.Fatalf("Failed to create server: %v", err)
 	}
 
-	// Graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -47,6 +60,7 @@ func main() {
 	}()
 
 	logger.Printf("Server ready on %s", *addr)
+	logger.Printf("  API docs: http://%s/docs", *addr)
 	if err := server.Start(); err != nil {
 		logger.Fatalf("Server error: %v", err)
 	}
@@ -72,4 +86,11 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func describeDB(dbURL string) string {
+	if dbURL == "" {
+		return "(file storage: $DEERFLOW_DATA_ROOT or /tmp/deerflow-go-data)"
+	}
+	return dbURL
 }
