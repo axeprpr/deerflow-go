@@ -25,7 +25,7 @@ func defaultAuthConfig() AuthConfig {
 	}
 }
 
-// wrapAuth returns an http.Handler that enforces Bearer token auth.
+// wrapAuth returns an http.Handler that enforces token auth.
 // Public paths (no auth required):
 //   - GET /health
 //   - GET /api/skills (read-only)
@@ -56,30 +56,28 @@ func wrapAuth(next http.Handler, cfg AuthConfig) http.Handler {
 
 		// Check Bearer token
 		auth := r.Header.Get("Authorization")
-		if auth == "" {
-			writeJSONAuth(w, http.StatusUnauthorized, map[string]any{
-				"detail": "missing Authorization header",
-			})
-			return
+		if auth != "" {
+			parts := strings.SplitN(auth, " ", 2)
+			if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+				given := parts[1]
+				if subtle.ConstantTimeCompare([]byte(given), []byte(cfg.Token)) == 1 {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
 		}
 
-		parts := strings.SplitN(auth, " ", 2)
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-			writeJSONAuth(w, http.StatusUnauthorized, map[string]any{
-				"detail": "invalid Authorization format, expected: Bearer <token>",
-			})
-			return
+		// Check query param api_key
+		if token := r.URL.Query().Get("api_key"); token != "" {
+			if subtle.ConstantTimeCompare([]byte(token), []byte(cfg.Token)) == 1 {
+				next.ServeHTTP(w, r)
+				return
+			}
 		}
 
-		given := parts[1]
-		if subtle.ConstantTimeCompare([]byte(given), []byte(cfg.Token)) != 1 {
-			writeJSONAuth(w, http.StatusUnauthorized, map[string]any{
-				"detail": "invalid token",
-			})
-			return
-		}
-
-		next.ServeHTTP(w, r)
+		writeJSONAuth(w, http.StatusUnauthorized, map[string]any{
+			"detail": "invalid token",
+		})
 	})
 }
 
