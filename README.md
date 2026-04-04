@@ -2,7 +2,7 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go&logoColor=white)](./go.mod)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
-[![Build Status](https://github.com/axeprpr/deerflow-go/actions/workflows/release.yml/badge.svg)](https://github.com/axeprpr/deerflow-go/actions/workflows/release.yml)
+[![Build Status](https://github.com/axeprpr/deerflow-go/actions/workflows/ci.yml/badge.svg)](https://github.com/axeprpr/deerflow-go/actions/workflows/ci.yml)
 
 `deerflow-go` is a Go-native DeerFlow runtime that preserves the LangGraph-style thread/run API while replacing the original Python + LangChain + multi-service stack with a single self-hostable Go backend.
 

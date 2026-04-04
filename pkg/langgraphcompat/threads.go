@@ -1742,21 +1742,6 @@ func (s *Server) sessionFiles(session *Session) []tools.PresentFile {
 
 	seen := make(map[string]struct{})
 	files := make([]tools.PresentFile, 0)
-	if session.PresentFiles != nil {
-		for _, file := range session.PresentFiles.List() {
-			if file.Path == "" {
-				continue
-			}
-			if !presentFileAccessible(file) {
-				continue
-			}
-			if _, ok := seen[file.Path]; ok {
-				continue
-			}
-			seen[file.Path] = struct{}{}
-			files = append(files, file)
-		}
-	}
 
 	for _, root := range []struct {
 		path          string
@@ -1767,6 +1752,22 @@ func (s *Server) sessionFiles(session *Session) []tools.PresentFile {
 		{path: s.uploadsDir(session.ThreadID), virtualPrefix: "/mnt/user-data/uploads"},
 	} {
 		for _, file := range collectArtifactFiles(root.path, root.virtualPrefix) {
+			if _, ok := seen[file.Path]; ok {
+				continue
+			}
+			seen[file.Path] = struct{}{}
+			files = append(files, file)
+		}
+	}
+
+	if session.PresentFiles != nil {
+		for _, file := range session.PresentFiles.List() {
+			if file.Path == "" {
+				continue
+			}
+			if !presentFileAccessible(file) {
+				continue
+			}
 			if _, ok := seen[file.Path]; ok {
 				continue
 			}

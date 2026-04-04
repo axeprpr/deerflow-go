@@ -472,7 +472,7 @@ func (s *Server) updateSkillEnabled(w http.ResponseWriter, r *http.Request, enab
 
 	currentSkills := s.currentGatewaySkills()
 	s.uiStateMu.Lock()
-	previousSkills := cloneGatewaySkills(s.skills)
+	previousSkills := cloneGatewaySkills(currentSkills)
 	key, skill, ok, ambiguous := findGatewaySkillEntryForAPI(currentSkills, name, category)
 	if ambiguous {
 		s.uiStateMu.Unlock()
