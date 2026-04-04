@@ -148,7 +148,7 @@ func (p *Pool) runTask(parentCtx context.Context, task *Task) {
 	defer close(task.done)
 
 	if !acquireSemaphore(parentCtx, p.sem) {
-		p.finishTask(parentCtx, task, TaskStatusFailed, "", parentCtx.Err(), nil)
+		p.finishTask(parentCtx, task, TaskStatusFailed, "", fmt.Errorf("subagent pool at capacity"), nil)
 		return
 	}
 	defer func() { <-p.sem }()
@@ -156,7 +156,8 @@ func (p *Pool) runTask(parentCtx context.Context, task *Task) {
 	runSem := concurrencySemaphoreFromContext(parentCtx)
 	if runSem != nil {
 		if !acquireSemaphore(parentCtx, runSem) {
-			p.finishTask(parentCtx, task, TaskStatusFailed, "", parentCtx.Err(), nil)
+			maxConcurrent := cap(concurrencySemaphoreFromContext(parentCtx))
+			p.finishTask(parentCtx, task, TaskStatusFailed, "", fmt.Errorf("subagent concurrency limit (%d) exceeded", maxConcurrent), nil)
 			return
 		}
 		defer func() { <-runSem }()
