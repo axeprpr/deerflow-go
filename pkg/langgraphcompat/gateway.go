@@ -2995,14 +2995,14 @@ func findGatewaySkillEntry(skills map[string]gatewaySkill, name, category string
 		return key, skill, ok
 	}
 
-	customKey := skillStorageKey(skillCategoryCustom, normalizedName)
-	if skill, ok := skills[customKey]; ok {
-		return customKey, skill, true
-	}
-
 	publicKey := skillStorageKey(skillCategoryPublic, normalizedName)
 	if skill, ok := skills[publicKey]; ok {
 		return publicKey, skill, true
+	}
+
+	customKey := skillStorageKey(skillCategoryCustom, normalizedName)
+	if skill, ok := skills[customKey]; ok {
+		return customKey, skill, true
 	}
 
 	if skill, ok := skills[normalizedName]; ok {
@@ -3015,22 +3015,8 @@ func gatewaySkillsForAPIList(skills map[string]gatewaySkill) []gatewaySkill {
 	if len(skills) == 0 {
 		return nil
 	}
-
-	visible := make(map[string]gatewaySkill, len(skills))
+	out := make([]gatewaySkill, 0, len(skills))
 	for _, skill := range skills {
-		if existing, ok := visible[skill.Name]; ok {
-			if existing.Category == skillCategoryCustom {
-				continue
-			}
-			if skill.Category != skillCategoryCustom {
-				continue
-			}
-		}
-		visible[skill.Name] = skill
-	}
-
-	out := make([]gatewaySkill, 0, len(visible))
-	for _, skill := range visible {
 		out = append(out, skill)
 	}
 	return out
