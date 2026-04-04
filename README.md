@@ -1,152 +1,371 @@
 # deerflow-go
 
-A Go reimplementation of [DeerFlow](https://github.com/bytedance/deerflow) - a multi-agent research framework with LangChain-compatible API.
+[![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go&logoColor=white)](./go.mod)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Build Status](https://github.com/axeprpr/deerflow-go/actions/workflows/release.yml/badge.svg)](https://github.com/axeprpr/deerflow-go/actions/workflows/release.yml)
+
+`deerflow-go` is a Go-native DeerFlow runtime that preserves the LangGraph-style thread/run API while replacing the original Python + LangChain + multi-service stack with a single self-hostable Go backend.
+
+Core difference from the original DeerFlow: `deerflow-go` keeps the protocol shape and DeerFlow UI compatibility goals, but swaps LangGraph/LangChain internals for a custom Go agent core, tool registry, memory service, and Linux sandbox pipeline.
 
 ## Features
 
-### 🔄 Multi-Agent System
-- **Subagent Pool**: Spawn background agents for parallel task execution
-- **Task Tool**: Delegate subtasks with `description`, `prompt`, and `subagent_type`
-- **Task Events**: Real-time SSE events (`task_started`, `task_running`, `task_completed/failed`)
+### LangGraph-compatible runs and threads
 
-### 🧠 Memory & Context
-- **LLM-based Memory Service**: Automatically summarize and maintain conversation context
-- **Long-term Memory**: Persistent memory across sessions via Postgres checkpointing
-- **Gateway Memory Editing**: Read and replace memory snapshots through `/api/memory`
+The server exposes thread, run, state, history, clarification, upload, artifact, and SSE streaming endpoints under the same shape that DeerFlow-style frontends expect.
 
-### 🛠️ Tool System
-- **Built-in Tools**: bash, file_read, file_write, file_search, web_search, visit_page
-- **Sandbox Isolation**: Secure execution via Bubblewrap + Landlock (Linux)
-- **MCP Support**: Connect to Model Context Protocol servers
-
-### 🔊 Gateway UX
-- **Text-to-Speech Gateway**: `POST /api/tts` proxies OpenAI-compatible speech synthesis for reading reports aloud
-- **Upload Probing**: `HEAD /api/threads/{id}/uploads/{filename}` returns headers without downloading the file body
-- **Broader Thread Search**: Search now indexes workspace config and log files such as `.env`, `.toml`, `.cfg`, and `.log`
-
-### 📊 Present Files
-- Track and display generated artifacts
-- Auto MIME type detection
-- Support text and binary files
-
-### ❓ Clarification
-- Agent can request user clarification
-- Support choice/text/confirm types
-- Async resolution via SSE events
-
-### 🤖 Agent Types
-Pre-configured agent profiles:
-
-| Type | Description | Default Tools |
-|------|-------------|---------------|
-| `general-purpose` | Balanced assistant | bash, file |
-| `researcher` | Research tasks | web_search, file_read |
-| `coder` | Code generation | bash, file_write |
-| `analyst` | Data analysis | file_read, python |
-
-## Architecture
-
+```bash
+curl -N \
+  -H "Content-Type: application/json" \
+  -X POST http://localhost:8080/runs/stream \
+  -d '{
+    "input": {
+      "messages": [
+        {"role": "human", "content": "Research the key features of deerflow-go."}
+      ]
+    },
+    "config": {
+      "configurable": {
+        "model_name": "qwen/Qwen3.5-9B",
+        "agent_type": "general-purpose"
+      }
+    }
+  }'
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      Frontend (UI)                      │
-└─────────────────────────┬───────────────────────────────┘
-                          │ LangGraph API (SSE)
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│                 LangGraph Compat Layer                  │
-│  ┌──────────┐ ┌──────────┐ ┌───────────────────────┐  │
-│  │ Threads  │ │   Runs   │ │   Clarifications      │  │
-│  └──────────┘ └──────────┘ └───────────────────────┘  │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────┐
-│                       Agent Core                         │
-│  ┌────────────┐ ┌────────────┐ ┌────────────────────┐  │
-│  │   ReAct    │ │   Tools    │ │   Subagent Pool    │  │
-│  │   Loop     │ │  Registry  │ │                    │  │
-│  └────────────┘ └────────────┘ └────────────────────┘  │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-        ┌─────────────────┼─────────────────┐
-        ▼                 ▼                 ▼
-┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-│  LLM Layer   │ │ Memory Svc   │ │  Sandbox     │
-│  (OpenAI/    │ │              │ │ (Bubblewrap) │
-│  SiliconFlow)│ │              │ │              │
-└──────────────┘ └──────────────┘ └──────────────┘
+
+### Go-native agent core
+
+- Custom ReAct-style runtime instead of LangChain/LangGraph execution internals
+- Thread-scoped checkpoint persistence with PostgreSQL fallback to local file storage
+- Native SSE event streaming for token chunks, tool calls, clarifications, and subagent lifecycle events
+- Optional Bearer auth with `DEERFLOW_AUTH_TOKEN`
+
+### Subagents and delegated work
+
+- Built-in subagent pool with bounded concurrency and task lifecycle events
+- `task` delegation tool for background work
+- Agent profiles for general, research, code, and analysis workflows
+
+```json
+{
+  "description": "Compare deployment paths",
+  "prompt": "List the differences between Docker deployment and source deployment in this repository.",
+  "subagent_type": "general-purpose"
+}
 ```
+
+### Memory and checkpointing
+
+- LLM-based memory extraction and durable memory snapshots
+- Gateway endpoints to read, replace, delete, and edit memory state
+- PostgreSQL-backed checkpoint store for thread continuity
+
+```bash
+curl http://localhost:8080/api/memory
+```
+
+### Tool system with sandbox isolation
+
+- Built-in tools for shell, files, web access, image viewing, artifacts, clarification, ACP, skills, and subagents
+- JSON-schema-based tool registration and validation
+- Per-thread sandbox execution with Landlock when available, Bubblewrap fallback on Linux
+- MCP tool import through Go clients instead of `langchain-mcp-adapters`
+
+```go
+registry := tools.NewRegistry()
+registry.Register(models.Tool{
+    Name:        "my_tool",
+    Description: "Example tool",
+    InputSchema: map[string]any{
+        "type": "object",
+        "properties": map[string]any{
+            "query": map[string]any{"type": "string"},
+        },
+        "required": []string{"query"},
+    },
+    Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+        return models.ToolResult{CallID: call.ID, ToolName: call.Name, Status: models.CallStatusCompleted, Content: "ok"}, nil
+    },
+})
+```
+
+### Gateway extensions beyond baseline LangGraph routes
+
+- `POST /api/tts` for OpenAI-compatible speech synthesis
+- `GET /api/models` for model catalog discovery
+- `GET/PUT /api/mcp/config` for MCP runtime configuration
+- `GET/PUT/DELETE /api/memory` for editable gateway memory
+- upload HEAD probing for frontend UX
+- skill discovery and `.skill` installation endpoints
 
 ## Quick Start
 
-### 1. Clone & Build
+Run the backend in 3 steps.
+
+### 1. Configure environment
 
 ```bash
 git clone https://github.com/axeprpr/deerflow-go.git
 cd deerflow-go
-make build
+cp .env.example .env
 ```
 
-### 2. Configure
+Set at least one model key in `.env`:
+
+```bash
+SILICONFLOW_API_KEY=sk-your-key-here
+DEFAULT_LLM_MODEL=qwen/Qwen3.5-9B
+```
+
+### 2. Start with Docker
+
+```bash
+docker compose up -d --build api db
+```
+
+If you also have `../deerflow-ui/frontend`, you can start the optional UI service too:
+
+```bash
+docker compose up -d --build api db ui
+```
+
+### 3. Verify health
+
+```bash
+curl -fsS http://localhost:8080/health
+```
+
+Expected response:
+
+```json
+{"status":"ok"}
+```
+
+## Deployment Guide
+
+### Docker single-command deployment
+
+Current `docker-compose.yml` ships with:
+
+- `api`: Go API server on `:8080`
+- `db`: PostgreSQL 16 for checkpoints and memory
+- `ui`: optional DeerFlow UI dev container mounted from `../deerflow-ui/frontend`
+
+Minimum deployment:
 
 ```bash
 cp .env.example .env
-# Edit .env and add the provider key you use:
-# SILICONFLOW_API_KEY=
-# OPENAI_API_KEY=
-# OPENAI_API_BASE_URL=
-# ANTHROPIC_API_KEY=
+docker compose up -d --build api db
 ```
 
-### 3. Run
+Optional full stack with adjacent frontend checkout:
 
 ```bash
-# With Docker
-docker-compose up -d
-
-# Or directly
-./bin/langgraph --addr :8080 --model "qwen/Qwen3.5-9B"
+docker compose up -d --build api db ui
 ```
 
-### 4. Connect Frontend
+Health check:
 
-Set `NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://localhost:8080` in your deerflow-ui `.env.local`
+```bash
+curl -fsS http://localhost:8080/health
+```
 
-## API Endpoints
+Smoke test:
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/runs/stream` | POST | Stream run execution |
-| `/threads` | GET/POST | List/create threads |
-| `/threads/{id}` | GET/PUT/DELETE | Thread CRUD |
-| `/threads/{id}/history` | GET | Get message history |
-| `/threads/{id}/files` | GET | Get presented files |
-| `/threads/{id}/state` | GET/PATCH | Thread state |
-| `/threads/{id}/clarifications` | GET/POST | Clarification |
-| `/health` | GET | Health check |
-| `/api/tts` | POST | Generate speech audio from text |
+```bash
+curl -N \
+  -H "Content-Type: application/json" \
+  -X POST http://localhost:8080/runs/stream \
+  -d '{"input":{"messages":[{"role":"human","content":"hello"}]}}'
+```
 
-## Configuration
+### Source deployment
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `SILICONFLOW_API_KEY` | LLM API key | Required |
-| `OPENAI_API_KEY` | OpenAI-compatible provider API key | Optional |
-| `OPENAI_API_BASE_URL` | OpenAI-compatible provider base URL | Optional |
-| `TTS_API_KEY` | Override API key for `/api/tts` | Optional |
-| `TTS_API_BASE_URL` | Override base URL for `/api/tts` | `OPENAI_API_BASE_URL` or OpenAI |
-| `TTS_MODEL` | Override model for `/api/tts` | `gpt-4o-mini-tts` |
-| `TTS_VOICE` | Override voice for `/api/tts` | `alloy` |
-| `ANTHROPIC_API_KEY` | Anthropic gateway API key | Optional |
-| `DEFAULT_LLM_MODEL` | Default model | `qwen/Qwen3.5-9B` |
-| `DEERFLOW_TITLE_ENABLED` | Enable automatic thread title generation | `true` |
-| `DEERFLOW_TITLE_MAX_WORDS` | Max words for generated thread titles (1-20) | `6` |
-| `DEERFLOW_TITLE_MAX_CHARS` | Max characters for generated thread titles (10-200) | `60` |
-| `DEERFLOW_TITLE_MODEL` | Optional model override for title generation | unset |
-| `DEERFLOW_MODELS` | Optional model catalog, e.g. `gpt-5=openai/gpt-5,claude=anthropic/claude-3-7-sonnet` | Optional |
-| `DEERFLOW_MODELS_JSON` | Optional JSON model catalog for `/api/models` metadata | Optional |
-| `POSTGRES_URL` | Postgres connection | Optional |
-| `PORT` | Server port | `8080` |
-| `LOG_LEVEL` | Log level | `info` |
+```bash
+cp .env.example .env
+make build
+./bin/deerflow --addr :8080
+```
+
+With explicit model override:
+
+```bash
+./bin/deerflow --addr :8080 --model "qwen/Qwen3.5-9B"
+```
+
+With optional Bearer auth:
+
+```bash
+DEERFLOW_AUTH_TOKEN=change-me ./bin/deerflow --addr :8080
+```
+
+### Required and useful environment variables
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `SILICONFLOW_API_KEY` | Usually yes | Default provider key for the out-of-box model path |
+| `OPENAI_API_KEY` | Optional | OpenAI-compatible provider key |
+| `OPENAI_API_BASE_URL` | Optional | OpenAI-compatible base URL override |
+| `ANTHROPIC_API_KEY` | Optional | Anthropic-compatible provider key |
+| `DEFAULT_LLM_MODEL` | Recommended | Default model name used when requests do not override it |
+| `POSTGRES_URL` | Optional | Enables durable checkpoint and memory persistence |
+| `PORT` | Optional | HTTP port, default `8080` |
+| `LOG_LEVEL` | Optional | Startup log verbosity |
+| `DEERFLOW_AUTH_TOKEN` | Optional | Enables simple Bearer-token protection on the API |
+| `TTS_API_KEY` | Optional | Key override for `POST /api/tts` |
+| `TTS_API_BASE_URL` | Optional | Base URL override for TTS proxying |
+| `TTS_MODEL` | Optional | TTS model override |
+| `TTS_VOICE` | Optional | TTS voice override |
+
+### Frontend integration
+
+`deerflow-go` is designed to be consumed by DeerFlow-compatible frontends.
+
+For `deerflow-ui`:
+
+```bash
+NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://localhost:8080
+NEXT_PUBLIC_BACKEND_BASE_URL=http://localhost:8080
+```
+
+In the provided Compose file, the optional `ui` service already points to `http://api:8080` internally.
+
+## API Documentation
+
+### LangGraph API endpoints
+
+These routes are exposed at both `/` and `/api/langgraph`.
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/health` | `GET` | Liveness and readiness check |
+| `/runs` | `POST` | Create a non-streaming run |
+| `/runs/stream` | `POST` | Create a streaming run over SSE |
+| `/runs/{run_id}` | `GET` | Get run status |
+| `/runs/{run_id}/stream` | `GET` | Subscribe to run events |
+| `/runs/{run_id}/cancel` | `POST` | Cancel a running task |
+| `/threads` | `GET`, `POST` | List or create threads |
+| `/threads/search` | `POST` | Search thread metadata and artifacts |
+| `/threads/{id}` | `GET`, `PUT`, `PATCH`, `DELETE` | Thread CRUD |
+| `/threads/{id}/state` | `GET`, `PUT`, `PATCH` | Read or mutate thread state |
+| `/threads/{id}/history` | `GET`, `POST` | Get or append history |
+| `/threads/{id}/runs` | `GET`, `POST` | List or create thread-scoped runs |
+| `/threads/{id}/runs/stream` | `POST` | Create thread-scoped streaming run |
+| `/threads/{id}/runs/{run_id}/stream` | `GET` | Stream a thread-scoped run |
+| `/threads/{id}/clarifications` | `GET`, `POST` | List or create clarification requests |
+| `/threads/{id}/clarifications/{id}/resolve` | `POST` | Resolve a clarification |
+| `/uploads` | `GET`, `POST`, `DELETE` | Upload lifecycle |
+| `/artifacts/{path...}` | `GET` | Download generated artifacts |
+| `/suggestions` | `POST` | Generate follow-up suggestions |
+
+### Gateway API endpoints
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/api/models` | `GET` | List configured models |
+| `/api/skills` | `GET` | List available skills |
+| `/api/skills/{name}` | `GET`, `PUT` | Read or enable/disable a skill |
+| `/api/skills/install` | `POST` | Install a `.skill` archive |
+| `/api/agents` | `GET`, `POST` | List or create gateway agent profiles |
+| `/api/agents/{name}` | `GET`, `PUT`, `DELETE` | Agent profile CRUD |
+| `/api/channels` | `GET` | Inspect gateway channel status |
+| `/api/channels/{name}/restart` | `POST` | Restart a configured channel |
+| `/api/mcp/config` | `GET`, `PUT` | Read or update MCP config |
+| `/api/memory` | `GET`, `PUT`, `DELETE` | Read, replace, or clear gateway memory |
+| `/api/user-profile` | `GET`, `PUT` | User profile data |
+| `/api/tts` | `POST` | OpenAI-compatible speech synthesis proxy |
+
+## 与原版 DeerFlow 对比
+
+以下结论基于对原版 DeerFlow 当前主干代码与 `deerflow-go` 实现的逐项对照。原版主干已经是 DeerFlow 2.0，但依然保留 Python、LangChain、LangGraph、多服务部署这些核心特征。
+
+| 维度 | 原版 DeerFlow | deerflow-go |
+| --- | --- | --- |
+| 核心架构 | LangGraph Server + FastAPI Gateway + Next.js + nginx | 单 Go 运行时，LangGraph 兼容层直接内嵌在服务内 |
+| 多 Agent / Subagent | LangChain agent + middleware + Python subagent executor | Go 原生 ReAct runtime + Go subagent pool |
+| Memory | LangGraph store/checkpointer + middleware 队列更新 | Go LLM memory service + PostgreSQL/文件持久化 |
+| Tool 系统 | LangChain `BaseTool`、community tools、MCP adapters | 自研 JSON Schema tool registry + Go MCP client |
+| Sandbox | local provider / Docker AioSandboxProvider / provisioner | Landlock 优先，Bubblewrap 回退，线程目录隔离 |
+| LangGraph API | 原生 LangGraph | 兼容实现，目标是前端与协议复用 |
+| Gateway API | 模型、skills、memory、uploads、artifacts、suggestions 更完整 | 已覆盖核心路由，并增加简单 Bearer auth 与 TTS；部分 agents/channels 仍偏轻量 |
+| 前端集成 | 官方 Next.js 前端 + nginx rewrite | 可直接对接 DeerFlow UI，也可只跑 API |
+| 部署方式 | Python + Node + nginx + Docker，多进程 | Docker Compose 或单二进制，后端部署明显更简单 |
+| 依赖与性能 | 生态成熟但依赖重、进程多 | 后端依赖轻、冷启动和资源占用更友好，但生态适配面更窄 |
+
+结论：
+
+- `deerflow-go` 不是把原版逐行翻译成 Go，而是保留协议兼容目标后重新做了 runtime。
+- 如果你要的是原版最完整的生态能力，Python 版仍然更成熟。
+- 如果你要的是更容易私有部署、更容易裁剪、后端链路更短的 DeerFlow 形态，`deerflow-go` 更合适。
+- 详细分析见生成报告 `/tmp/deerflow-comparison.md`。
+
+## Development Guide
+
+### Local development
+
+```bash
+make tidy
+make build
+make run
+```
+
+### Run tests
+
+```bash
+make test
+```
+
+### Useful binaries
+
+- `./cmd/langgraph`: main LangGraph-compatible HTTP server
+- `./cmd/checkpoint`: checkpoint migrations and inspection helpers
+- `./cmd/memory`: memory migrations and one-shot memory update tooling
+- `./cmd/agent`: lower-level agent runtime entrypoint
+
+### Debugging notes
+
+- Thread and run compatibility lives in `pkg/langgraphcompat`
+- Tool registration and execution live in `pkg/tools`
+- Memory extraction and storage live in `pkg/memory`
+- Sandbox backends live in `pkg/sandbox`
+- Subagent orchestration lives in `pkg/subagent`
+
+## Architecture
+
+```text
+                    +------------------------------+
+                    | DeerFlow UI / API Clients    |
+                    +---------------+--------------+
+                                    |
+                                    v
+                    +------------------------------+
+                    | LangGraph Compatibility API  |
+                    | threads, runs, SSE, uploads  |
+                    +---------------+--------------+
+                                    |
+          +-------------------------+-------------------------+
+          |                         |                         |
+          v                         v                         v
+ +------------------+   +---------------------+   +------------------+
+ | Go Agent Core    |   | Gateway Extensions  |   | Checkpoints      |
+ | ReAct loop       |   | models/memory/tts   |   | Postgres or file |
+ | tool execution   |   | skills/mcp/channels |   | persistence      |
+ +---------+--------+   +----------+----------+   +------------------+
+           |                       |
+           v                       v
+ +------------------+   +---------------------+
+ | Tool Registry    |   | Memory Service      |
+ | JSON Schema      |   | extract/summarize   |
+ | MCP + built-ins  |   | inject durable ctx  |
+ +---------+--------+   +---------------------+
+           |
+           v
+ +------------------+     +-------------------+
+ | Sandbox          |<--->| Subagent Pool     |
+ | Landlock/Bwrap   |     | bounded parallel  |
+ | per-thread FS    |     | delegated tasks   |
+ +------------------+     +-------------------+
+```
 
 ## License
 
