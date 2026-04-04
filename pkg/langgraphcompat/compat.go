@@ -3,6 +3,7 @@ package langgraphcompat
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
@@ -68,6 +69,7 @@ type Server struct {
 	channelMu         sync.Mutex
 	channelService    *gatewayChannelService
 	backgroundTasks   sync.WaitGroup
+	frontend          http.Handler
 }
 
 type HealthStatus struct {
@@ -180,7 +182,23 @@ type StreamEvent struct {
 
 const defaultGatewaySubagentMaxConcurrent = 3
 
-func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) {
+type ServerOption func(*Server) error
+
+func WithFrontendFS(frontend fs.FS) ServerOption {
+	return func(s *Server) error {
+		if s == nil {
+			return errors.New("server is nil")
+		}
+		if frontend == nil {
+			return nil
+		}
+
+		s.frontend = http.FileServer(http.FS(frontend))
+		return nil
+	}
+}
+
+func NewServer(addr string, dbURL string, defaultModel string, opts ...ServerOption) (*Server, error) {
 	logger := log.Default()
 	ctx := context.Background()
 
@@ -309,6 +327,14 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 	}
 	s.channelService = newGatewayChannelService()
 	s.channelService.start()
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		if err := opt(s); err != nil {
+			return nil, err
+		}
+	}
 	subagentExecutor.SetSandboxProvider(s.getOrCreateSandbox)
 	registry.Register(s.setupAgentTool())
 	registry.Register(s.todoTool())
@@ -491,6 +517,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Health check
 	mux.HandleFunc("GET /health", s.handleHealth)
+	if s.frontend != nil {
+		mux.Handle("/", s.frontend)
+	}
 }
 
 func (s *Server) registerLangGraphRoutes(mux *http.ServeMux, prefix string) {

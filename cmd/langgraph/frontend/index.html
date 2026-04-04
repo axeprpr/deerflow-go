@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>deerflow-go</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: "Segoe UI", sans-serif;
+      background: #f5f1e8;
+      color: #1e1b16;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at top, rgba(199, 162, 91, 0.28), transparent 42%),
+        linear-gradient(180deg, #fcfaf5 0%, #f2ead8 100%);
+    }
+    main {
+      width: min(42rem, calc(100vw - 2rem));
+      padding: 2.5rem;
+      border-radius: 1.25rem;
+      background: rgba(255, 252, 245, 0.9);
+      box-shadow: 0 24px 60px rgba(55, 37, 10, 0.12);
+    }
+    h1 {
+      margin: 0 0 0.75rem;
+      font-size: clamp(2rem, 5vw, 3.5rem);
+      line-height: 1;
+    }
+    p {
+      margin: 0.75rem 0;
+      font-size: 1.05rem;
+      line-height: 1.6;
+    }
+    code {
+      padding: 0.15rem 0.35rem;
+      border-radius: 0.35rem;
+      background: #efe2bf;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>deerflow-go frontend stub</h1>
+    <p>This page is embedded into the <code>deerflow-go</code> binary with <code>go:embed</code>.</p>
+    <p>API documentation is available at <code>/docs</code>, and the LangGraph-compatible routes remain available under <code>/api/langgraph</code>.</p>
+  </main>
+</body>
+</html>

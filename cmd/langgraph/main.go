@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"embed"
 	"flag"
+	"io/fs"
 	"log"
 	"os"
 	"os/signal"
@@ -11,6 +13,9 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/langgraphcompat"
 )
+
+//go:embed frontend/*
+var frontendFS embed.FS
 
 func main() {
 	yolo := flag.Bool("yolo", false, "YOLO mode: no auth, defaults for all settings")
@@ -54,7 +59,12 @@ func main() {
 		logger.Printf("  Log Level: %s", level)
 	}
 
-	server, err := langgraphcompat.NewServer(*addr, *dbURL, *model)
+	embeddedFrontend, err := fs.Sub(frontendFS, "frontend")
+	if err != nil {
+		log.Fatalf("Failed to prepare embedded frontend: %v", err)
+	}
+
+	server, err := langgraphcompat.NewServer(*addr, *dbURL, *model, langgraphcompat.WithFrontendFS(embeddedFrontend))
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}
