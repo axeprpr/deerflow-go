@@ -33,6 +33,7 @@ type channelInfo struct {
 type gatewayChannelStarter func(map[string]any) error
 
 type gatewayChannelService struct {
+	owner      *Server
 	mu         sync.RWMutex
 	configured bool
 	config     gatewayChannelsConfig
@@ -45,8 +46,9 @@ type gatewayChannelsConfig struct {
 	Channels map[string]map[string]any `yaml:"channels"`
 }
 
-func newGatewayChannelService() *gatewayChannelService {
+func newGatewayChannelService(owner *Server) *gatewayChannelService {
 	svc := &gatewayChannelService{
+		owner:    owner,
 		channels: make(map[string]channelInfo, len(supportedGatewayChannels)),
 		starters: defaultGatewayChannelStarters(),
 	}
@@ -59,12 +61,12 @@ func newGatewayChannelService() *gatewayChannelService {
 
 func (s *Server) ensureGatewayChannelService() *gatewayChannelService {
 	if s == nil {
-		return newGatewayChannelService()
+		return newGatewayChannelService(nil)
 	}
 	s.channelMu.Lock()
 	defer s.channelMu.Unlock()
 	if s.channelService == nil {
-		s.channelService = newGatewayChannelService()
+		s.channelService = newGatewayChannelService(s)
 		s.channelService.start()
 	}
 	return s.channelService
@@ -119,6 +121,51 @@ func loadGatewayChannelConfig() (gatewayChannelsConfig, bool) {
 		return gatewayChannelsConfig{}, false
 	}
 	return cfg, true
+}
+
+func normalizeGatewayChannelsConfig(cfg gatewayChannelsConfig) gatewayChannelsConfig {
+	if len(cfg.Channels) == 0 {
+		return gatewayChannelsConfig{}
+	}
+	out := gatewayChannelsConfig{Channels: make(map[string]map[string]any, len(cfg.Channels))}
+	for name, values := range cfg.Channels {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "" {
+			continue
+		}
+		cloned := make(map[string]any, len(values))
+		for key, value := range values {
+			cloned[key] = value
+		}
+		out.Channels[name] = cloned
+	}
+	if len(out.Channels) == 0 {
+		return gatewayChannelsConfig{}
+	}
+	return out
+}
+
+func cloneGatewayChannelsConfig(cfg gatewayChannelsConfig) gatewayChannelsConfig {
+	return normalizeGatewayChannelsConfig(cfg)
+}
+
+func (s *Server) loadGatewayChannelConfig() (gatewayChannelsConfig, bool) {
+	if cfg, ok := loadGatewayChannelConfig(); ok {
+		normalized := normalizeGatewayChannelsConfig(cfg)
+		s.uiStateMu.Lock()
+		s.channelConfig = normalized
+		s.uiStateMu.Unlock()
+		return normalized, true
+	}
+	if s == nil {
+		return gatewayChannelsConfig{}, false
+	}
+	s.uiStateMu.RLock()
+	defer s.uiStateMu.RUnlock()
+	if len(s.channelConfig.Channels) == 0 {
+		return gatewayChannelsConfig{}, false
+	}
+	return cloneGatewayChannelsConfig(s.channelConfig), true
 }
 
 func resolveGatewayConfigPath() (string, bool) {
@@ -249,7 +296,18 @@ func (s *gatewayChannelService) restart(name string) (bool, string) {
 }
 
 func (s *gatewayChannelService) reloadLocked() {
-	config, ok := loadGatewayChannelConfig()
+	var (
+		config gatewayChannelsConfig
+		ok     bool
+	)
+	if s.owner != nil {
+		config, ok = s.owner.loadGatewayChannelConfig()
+	} else {
+		config, ok = loadGatewayChannelConfig()
+		if ok {
+			config = normalizeGatewayChannelsConfig(config)
+		}
+	}
 	s.configured = ok
 	if ok {
 		s.config = config
@@ -306,7 +364,18 @@ func (s *gatewayChannelService) startChannelLocked(name string) error {
 }
 
 func (s *gatewayChannelService) shouldReloadLocked() bool {
-	config, ok := loadGatewayChannelConfig()
+	var (
+		config gatewayChannelsConfig
+		ok     bool
+	)
+	if s.owner != nil {
+		config, ok = s.owner.loadGatewayChannelConfig()
+	} else {
+		config, ok = loadGatewayChannelConfig()
+		if ok {
+			config = normalizeGatewayChannelsConfig(config)
+		}
+	}
 	if ok != s.configured {
 		return true
 	}

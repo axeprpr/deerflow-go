@@ -89,6 +89,7 @@ type gatewayMCPOAuthConfig struct {
 type gatewayPersistedState struct {
 	Skills       map[string]gatewaySkill `json:"skills"`
 	MCPConfig    gatewayMCPConfig        `json:"mcp_config"`
+	Channels     gatewayChannelsConfig   `json:"channels,omitempty"`
 	Agents       map[string]gatewayAgent `json:"agents,omitempty"`
 	UserProfile  string                  `json:"user_profile,omitempty"`
 	MemoryThread string                  `json:"memory_thread,omitempty"`
@@ -2902,12 +2903,14 @@ func (s *Server) loadGatewayState() error {
 		return err
 	}
 	s.uiStateMu.Lock()
-	defer s.uiStateMu.Unlock()
 	if state.Skills != nil {
 		s.skills = mergeGatewaySkills(defaultGatewaySkills(), normalizePersistedSkills(state.Skills))
 	}
 	if state.MCPConfig.MCPServers != nil {
 		s.mcpConfig = normalizeGatewayMCPConfig(state.MCPConfig)
+	}
+	if len(state.Channels.Channels) > 0 {
+		s.channelConfig = normalizeGatewayChannelsConfig(state.Channels)
 	}
 	if state.Agents != nil {
 		s.setAgentsLocked(state.Agents)
@@ -2917,14 +2920,24 @@ func (s *Server) loadGatewayState() error {
 	if state.Memory.Version != "" {
 		s.setMemoryLocked(state.Memory)
 	}
+	s.uiStateMu.Unlock()
 	return s.loadGatewayExtensionsConfig()
 }
 
 func (s *Server) persistGatewayState() error {
 	s.uiStateMu.RLock()
+	channelConfig := cloneGatewayChannelsConfig(s.channelConfig)
+	s.uiStateMu.RUnlock()
+	s.channelMu.Lock()
+	if s.channelService != nil && len(s.channelService.config.Channels) > 0 {
+		channelConfig = cloneGatewayChannelsConfig(s.channelService.config)
+	}
+	s.channelMu.Unlock()
+	s.uiStateMu.RLock()
 	state := gatewayPersistedState{
 		Skills:       s.skills,
 		MCPConfig:    s.mcpConfig,
+		Channels:     channelConfig,
 		Agents:       s.getAgentsLocked(),
 		UserProfile:  s.getUserProfileLocked(),
 		MemoryThread: s.memoryThread,

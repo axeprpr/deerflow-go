@@ -3852,6 +3852,89 @@ func TestLoadGatewayStateReadsExtensionsConfigCompatibilityFile(t *testing.T) {
 	}
 }
 
+func TestLoadGatewayStateRestoresPersistedSkillsAgentsAndChannels(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+
+	state := gatewayPersistedState{
+		Skills: map[string]gatewaySkill{
+			skillStorageKey(skillCategoryPublic, "deep-research"): {
+				Name:        "deep-research",
+				Category:    skillCategoryPublic,
+				Description: "Research and summarize a topic with structured outputs.",
+				License:     "MIT",
+				Enabled:     false,
+			},
+		},
+		Channels: gatewayChannelsConfig{
+			Channels: map[string]map[string]any{
+				"slack": {
+					"enabled": true,
+				},
+			},
+		},
+		Agents: map[string]gatewayAgent{
+			"persisted-agent": {
+				Name:        "persisted-agent",
+				Description: "Recovered from gateway_state.json",
+				ToolGroups:  []string{"bash"},
+			},
+		},
+	}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal state: %v", err)
+	}
+	if err := os.WriteFile(s.gatewayStatePath(), data, 0o644); err != nil {
+		t.Fatalf("write gateway state: %v", err)
+	}
+
+	restored, handler := newCompatTestServer(t)
+	restored.dataRoot = s.dataRoot
+	if err := restored.loadGatewayState(); err != nil {
+		t.Fatalf("loadGatewayState: %v", err)
+	}
+
+	skillResp := performCompatRequest(t, handler, http.MethodGet, "/api/skills/deep-research", nil, nil)
+	if skillResp.Code != http.StatusOK {
+		t.Fatalf("skill status=%d body=%s", skillResp.Code, skillResp.Body.String())
+	}
+	var skill gatewaySkill
+	if err := json.NewDecoder(skillResp.Body).Decode(&skill); err != nil {
+		t.Fatalf("decode skill: %v", err)
+	}
+	if skill.Enabled {
+		t.Fatalf("skill=%#v want disabled from persisted state", skill)
+	}
+
+	restored.uiStateMu.RLock()
+	gotAgent, ok := restored.getAgentsLocked()["persisted-agent"]
+	restored.uiStateMu.RUnlock()
+	if !ok {
+		t.Fatalf("persisted agent missing after loadGatewayState")
+	}
+	if gotAgent.Description != "Recovered from gateway_state.json" {
+		t.Fatalf("agent=%#v", gotAgent)
+	}
+
+	channelResp := performCompatRequest(t, handler, http.MethodGet, "/api/channels", nil, nil)
+	if channelResp.Code != http.StatusOK {
+		t.Fatalf("channels status=%d body=%s", channelResp.Code, channelResp.Body.String())
+	}
+	var channelPayload struct {
+		ServiceRunning bool                   `json:"service_running"`
+		Channels       map[string]channelInfo `json:"channels"`
+	}
+	if err := json.NewDecoder(channelResp.Body).Decode(&channelPayload); err != nil {
+		t.Fatalf("decode channels: %v", err)
+	}
+	if !channelPayload.ServiceRunning {
+		t.Fatalf("service_running=%v want true", channelPayload.ServiceRunning)
+	}
+	if !channelPayload.Channels["slack"].Enabled || !channelPayload.Channels["slack"].Running {
+		t.Fatalf("slack=%#v want enabled+running from persisted state", channelPayload.Channels["slack"])
+	}
+}
+
 func TestSkillsGetRefreshesExtensionsConfigCompatibilityFile(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "extensions_config.json")
 	t.Setenv("DEERFLOW_EXTENSIONS_CONFIG_PATH", configPath)

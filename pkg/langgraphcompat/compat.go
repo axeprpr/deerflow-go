@@ -54,6 +54,7 @@ type Server struct {
 	uiStateMu         sync.RWMutex
 	skills            map[string]gatewaySkill
 	mcpConfig         gatewayMCPConfig
+	channelConfig     gatewayChannelsConfig
 	agents            map[string]gatewayAgent
 	userProfile       string
 	memory            gatewayMemoryResponse
@@ -325,7 +326,7 @@ func NewServer(addr string, dbURL string, defaultModel string, opts ...ServerOpt
 		mcpToolNames:      map[string]struct{}{},
 		mcpConnector:      defaultGatewayMCPConnector,
 	}
-	s.channelService = newGatewayChannelService()
+	s.channelService = newGatewayChannelService(s)
 	s.channelService.start()
 	for _, opt := range opts {
 		if opt == nil {

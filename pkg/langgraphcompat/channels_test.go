@@ -201,7 +201,7 @@ channels:
 	}
 	t.Setenv("DEER_FLOW_CONFIG_PATH", configPath)
 
-	svc := newGatewayChannelService()
+	svc := newGatewayChannelService(nil)
 	svc.start()
 	if !svc.snapshot().Channels["telegram"].Running {
 		t.Fatalf("telegram before stop=%#v want running", svc.snapshot().Channels["telegram"])
@@ -352,7 +352,7 @@ channels:
 	}
 	t.Setenv("DEER_FLOW_CONFIG_PATH", configPath)
 
-	svc := newGatewayChannelService()
+	svc := newGatewayChannelService(nil)
 	svc.start()
 
 	if ok, msg := svc.restart("slack"); ok || !strings.Contains(msg, "not enabled") {
