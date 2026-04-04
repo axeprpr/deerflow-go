@@ -13,7 +13,8 @@ import (
 )
 
 func main() {
-	yolo := flag.Bool("yolo", false, "YOLO mode: use defaults for all settings (no config required)")
+	yolo := flag.Bool("yolo", false, "YOLO mode: no auth, defaults for all settings")
+	authToken := flag.String("auth-token", os.Getenv("DEERFLOW_AUTH_TOKEN"), "Bearer token for API auth (env: DEERFLOW_AUTH_TOKEN)")
 	addr := flag.String("addr", defaultAddr(), "Server address")
 	dbURL := flag.String("db", firstNonEmpty(os.Getenv("POSTGRES_URL")), "Postgres database URL")
 	model := flag.String("model", firstNonEmpty(os.Getenv("DEFAULT_LLM_MODEL"), "qwen/Qwen3.5-9B"), "Default LLM model")
@@ -22,20 +23,32 @@ func main() {
 	logger := log.Default()
 	logger.SetPrefix("[deerflow] ")
 
+	// YOLO mode: zero-config defaults
 	if *yolo {
+		os.Setenv("DEERFLOW_YOLO", "1")
 		os.Setenv("ADDR", ":8080")
 		os.Setenv("DEFAULT_LLM_MODEL", "qwen/Qwen3.5-9B")
 		os.Setenv("DEERFLOW_DATA_ROOT", "./data")
 		os.Setenv("LOG_LEVEL", "info")
-		*addr = ":8080"
-		*model = "qwen/Qwen3.5-9B"
+		if *addr == "" || *addr == ":8080" {
+			*addr = ":8080"
+		}
+		if *model == "" {
+			*model = "qwen/Qwen3.5-9B"
+		}
 	}
 
-	logger.Printf("Starting deerflow-go LangGraph-compatible server...")
+	// Propagate auth token to env for server to pick up
+	if *authToken != "" {
+		os.Setenv("DEERFLOW_AUTH_TOKEN", *authToken)
+	}
+
+	logger.Printf("Starting deerflow-go server...")
 	logger.Printf("  YOLO mode: %v", *yolo)
 	logger.Printf("  Address:   %s", *addr)
-	logger.Printf("  Database:  %s", describeDB(*dbURL))
-	logger.Printf("  Model:     %s", *model)
+	logger.Printf("  Database: %s", describeDB(*dbURL))
+	logger.Printf("  Model:    %s", *model)
+	logger.Printf("  Auth:     %s", describeAuth(*authToken, *yolo))
 
 	if level := strings.TrimSpace(os.Getenv("LOG_LEVEL")); level != "" {
 		logger.Printf("  Log Level: %s", level)
@@ -93,4 +106,14 @@ func describeDB(dbURL string) string {
 		return "(file storage: $DEERFLOW_DATA_ROOT or /tmp/deerflow-go-data)"
 	}
 	return dbURL
+}
+
+func describeAuth(token string, yolo bool) string {
+	if yolo {
+		return "disabled (YOLO mode)"
+	}
+	if token == "" {
+		return "disabled (no token set)"
+	}
+	return "enabled (Bearer token required)"
 }

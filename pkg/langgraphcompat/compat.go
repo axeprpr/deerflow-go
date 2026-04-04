@@ -328,7 +328,7 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 
 	s.httpServer = &http.Server{
 		Addr:    addr,
-		Handler: wrapTrailingSlashCompat(wrapCORSCompat(mux)),
+		Handler: wrapAuth(wrapTrailingSlashCompat(wrapCORSCompat(mux)), defaultAuthConfig()),
 	}
 
 	return s, nil
