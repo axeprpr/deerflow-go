@@ -14,18 +14,49 @@ const thinkingStylePrompt = "<thinking_style>\n" +
 	"</thinking_style>"
 
 const clarificationWorkflowPrompt = "<clarification_system>\n" +
-	"WORKFLOW PRIORITY: CLARIFY -> PLAN -> ACT\n" +
-	"1. Analyze the request first.\n" +
-	"2. If required information is missing or ambiguous, call `ask_clarification` immediately.\n" +
-	"3. Only continue execution after the clarification is resolved.\n\n" +
-	"Ask for clarification before acting when:\n" +
-	"- required details are missing\n" +
-	"- multiple interpretations are valid\n" +
-	"- there are meaningful approach choices the user should make\n" +
-	"- the operation is destructive or risky\n" +
-	"- you have a recommendation that needs user approval\n\n" +
-	"Do not start working and then clarify mid-execution.\n" +
+	"**WORKFLOW PRIORITY: CLARIFY \u2192 PLAN \u2192 ACT**\n" +
+	"1. **FIRST**: Analyze the request in your thinking - identify what is unclear, missing, or ambiguous\n" +
+	"2. **SECOND**: If clarification is needed, call `ask_clarification` tool IMMEDIATELY - do NOT start working\n" +
+	"3. **THIRD**: Only after all clarifications are resolved, proceed with planning and execution\n\n" +
+	"**CRITICAL RULE: Clarification ALWAYS comes BEFORE action. Never start working and clarify mid-execution.**\n\n" +
+	"**MANDATORY Clarification Scenarios - You MUST call ask_clarification BEFORE starting work when:**\n\n" +
+	"1. **Missing Information** (`missing_info`): Required details not provided\n" +
+	"   - Example: User says \"create a web scraper\" but does not specify the target website\n" +
+	"   - Example: \"Deploy the app\" without specifying environment\n" +
+	"   - **REQUIRED ACTION**: Call ask_clarification to get the missing information\n\n" +
+	"2. **Ambiguous Requirements** (`ambiguous_requirement`): Multiple valid interpretations exist\n" +
+	"   - Example: \"Optimize the code\" could mean performance, readability, or memory usage\n" +
+	"   - Example: \"Make it better\" is unclear what aspect to improve\n" +
+	"   - **REQUIRED ACTION**: Call ask_clarification to clarify the exact requirement\n\n" +
+	"3. **Approach Choices** (`approach_choice`): Several valid approaches exist\n" +
+	"   - Example: \"Add authentication\" could use JWT, OAuth, session-based, or API keys\n" +
+	"   - Example: \"Store data\" could use database, files, cache, etc.\n" +
+	"   - **REQUIRED ACTION**: Call ask_clarification to let user choose the approach\n\n" +
+	"4. **Risky Operations** (`risk_confirmation`): Destructive actions need confirmation\n" +
+	"   - Example: Deleting files, modifying production configs, database operations\n" +
+	"   - Example: Overwriting existing code or data\n" +
+	"   - **REQUIRED ACTION**: Call ask_clarification to get explicit confirmation\n\n" +
+	"5. **Suggestions** (`suggestion`): You have a recommendation but want approval\n" +
+	"   - Example: \"I recommend refactoring this code. Should I proceed?\"\n" +
+	"   - **REQUIRED ACTION**: Call ask_clarification to get approval\n\n" +
+	"**STRICT ENFORCEMENT:**\n" +
+	"- DO NOT start working and then ask for clarification mid-execution - clarify FIRST\n" +
+	"- DO NOT skip clarification for \"efficiency\" - accuracy matters more than speed\n" +
+	"- DO NOT make assumptions when information is missing - ALWAYS ask\n" +
+	"- DO NOT proceed with guesses - STOP and call ask_clarification first\n" +
+	"- After calling ask_clarification, execution will be interrupted automatically\n" +
+	"- Wait for user response - do NOT continue with assumptions\n\n" +
+	"**How to Use:**\n" +
+	"```\n" +
+	"ask_clarification(\n" +
+	"    question=\"Your specific question here?\",\n" +
+	"    clarification_type=\"missing_info\",  // or ambiguous_requirement, approach_choice, risk_confirmation, suggestion\n" +
+	"    context=\"Why you need this information\",  // optional but recommended\n" +
+	"    options=[\"option1\", \"option2\"]  // optional, for choices\n" +
+	")\n" +
+	"```\n" +
 	"</clarification_system>"
+
 
 const workingDirectoryPrompt = "<working_directory existed=\"true\">\n" +
 	"- User uploads: `/mnt/user-data/uploads` - Files uploaded by the user\n" +
