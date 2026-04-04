@@ -2950,13 +2950,7 @@ func defaultGatewaySkills() map[string]gatewaySkill {
 			License:     "MIT",
 			Enabled:     true,
 		},
-		skillStorageKey(skillCategoryPublic, "code-assist"): {
-			Name:        "code-assist",
-			Description: "Code reading, patching, and debugging workflows.",
-			Category:    skillCategoryPublic,
-			License:     "MIT",
-			Enabled:     true,
-		},
+
 	}
 }
 
