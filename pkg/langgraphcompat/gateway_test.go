@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -4486,8 +4487,10 @@ func TestSkillEndpointsKeepPublicAndCustomVariantsSeparate(t *testing.T) {
 			categories = append(categories, skill.Category)
 		}
 	}
-	if strings.Join(categories, ",") != "custom" {
-		t.Fatalf("categories=%q want=%q", strings.Join(categories, ","), "custom")
+	// Python returns all skills (no deduplication), so we get both public and custom
+	sort.Strings(categories)
+	if strings.Join(categories, ",") != "custom,public" {
+		t.Fatalf("categories=%q want=%q (Python returns all skills, no deduplication)", strings.Join(categories, ","), "custom,public")
 	}
 
 	getDefault := performCompatRequest(t, handler, http.MethodGet, "/api/skills/deep-research", nil, nil)
@@ -4498,8 +4501,8 @@ func TestSkillEndpointsKeepPublicAndCustomVariantsSeparate(t *testing.T) {
 	if err := json.NewDecoder(getDefault.Body).Decode(&defaultSkill); err != nil {
 		t.Fatalf("decode default skill: %v", err)
 	}
-	if defaultSkill.Category != skillCategoryCustom {
-		t.Fatalf("default category=%q want=%q", defaultSkill.Category, skillCategoryCustom)
+	if defaultSkill.Category != skillCategoryPublic {
+		t.Fatalf("default category=%q want=%q (Python next() returns first match = public)", defaultSkill.Category, skillCategoryPublic)
 	}
 
 	getCustom := performCompatRequest(t, handler, http.MethodGet, "/api/skills/deep-research?category=custom", nil, nil)
@@ -4543,8 +4546,8 @@ func TestSkillEndpointsKeepPublicAndCustomVariantsSeparate(t *testing.T) {
 	if err := json.NewDecoder(getCustomAfterDefault.Body).Decode(&custom); err != nil {
 		t.Fatalf("decode custom after default: %v", err)
 	}
-	if !custom.Enabled {
-		t.Fatal("expected default update to target custom skill")
+	if custom.Enabled {
+		t.Fatal("custom should remain disabled (PUT default targets public in Python)")
 	}
 }
 
@@ -4733,12 +4736,12 @@ license: MIT
 	if err := json.NewDecoder(resp.Body).Decode(&skill); err != nil {
 		t.Fatalf("decode skill: %v", err)
 	}
-	if skill.Category != skillCategoryCustom {
-		t.Fatalf("category=%q want=%q", skill.Category, skillCategoryCustom)
+	if skill.Category != skillCategoryPublic {
+		t.Fatalf("category=%q want=%q (Python returns first match, public scanned before custom)", skill.Category, skillCategoryPublic)
 	}
 }
 
-func TestSkillSetEnabledPrefersCustomDuplicateNamesWithoutCategory(t *testing.T) {
+func TestSkillSetEnabledTargetsPublicDuplicateWithoutCategory(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 
 	writeSkill := func(category string) {
@@ -4765,28 +4768,28 @@ license: MIT
 		t.Fatalf("default update status=%d body=%s", defaultResp.Code, defaultResp.Body.String())
 	}
 
-	customResp := performCompatRequest(t, handler, http.MethodGet, "/api/skills/duplicate-skill?category=custom", nil, nil)
-	if customResp.Code != http.StatusOK {
-		t.Fatalf("get custom status=%d body=%s", customResp.Code, customResp.Body.String())
-	}
-	var custom gatewaySkill
-	if err := json.NewDecoder(customResp.Body).Decode(&custom); err != nil {
-		t.Fatalf("decode custom skill: %v", err)
-	}
-	if custom.Enabled {
-		t.Fatal("expected default update to target custom skill")
-	}
-
 	publicResp := performCompatRequest(t, handler, http.MethodGet, "/api/skills/duplicate-skill?category=public", nil, nil)
 	if publicResp.Code != http.StatusOK {
 		t.Fatalf("get public status=%d body=%s", publicResp.Code, publicResp.Body.String())
 	}
-	var public gatewaySkill
-	if err := json.NewDecoder(publicResp.Body).Decode(&public); err != nil {
+	var publicSkill gatewaySkill
+	if err := json.NewDecoder(publicResp.Body).Decode(&publicSkill); err != nil {
 		t.Fatalf("decode public skill: %v", err)
 	}
-	if !public.Enabled {
-		t.Fatal("expected public skill to remain enabled")
+	if publicSkill.Enabled {
+		t.Fatal("expected default PUT to target public skill (Python behavior: first match)")
+	}
+
+	customResp := performCompatRequest(t, handler, http.MethodGet, "/api/skills/duplicate-skill?category=custom", nil, nil)
+	if customResp.Code != http.StatusOK {
+		t.Fatalf("get custom status=%d body=%s", customResp.Code, customResp.Body.String())
+	}
+	var customSkill gatewaySkill
+	if err := json.NewDecoder(customResp.Body).Decode(&customSkill); err != nil {
+		t.Fatalf("decode custom skill: %v", err)
+	}
+	if !customSkill.Enabled {
+		t.Fatal("expected custom skill to remain enabled")
 	}
 }
 

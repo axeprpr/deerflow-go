@@ -20,7 +20,7 @@
         "@modelcontextprotocol/server-github"
       ],
       "env": {
-        "GITHUB_TOKEN": "$GITHUB_TOKEN"
+        "GITHUB_TOKEN": ""
       },
       "description": "GitHub MCP server for repository operations"
     },
@@ -37,14 +37,14 @@
     }
   },
   "skills": {
-    "code-assist": {
-      "enabled": true
-    },
     "deep-research": {
       "enabled": true
     },
-    "my-skill": {
-      "enabled": true
+    "frontend-design": {
+      "enabled": false
+    },
+    "public:duplicate-skill": {
+      "enabled": false
     }
   }
 }

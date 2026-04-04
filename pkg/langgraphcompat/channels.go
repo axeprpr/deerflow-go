@@ -8,10 +8,17 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/axeprpr/deerflow-go/pkg/reflection"
 	"gopkg.in/yaml.v3"
 )
 
 var supportedGatewayChannels = []string{"feishu", "slack", "telegram"}
+
+var gatewayChannelClassPaths = map[string]string{
+	"feishu":   "app.channels.feishu:FeishuChannel",
+	"slack":    "app.channels.slack:SlackChannel",
+	"telegram": "app.channels.telegram:TelegramChannel",
+}
 
 type channelStatusSnapshot struct {
 	ServiceRunning bool                   `json:"service_running"`
@@ -281,11 +288,11 @@ func (s *gatewayChannelService) startChannelLocked(name string) error {
 		s.channels[name] = info
 		return fmt.Errorf("channel is not enabled in config.yaml")
 	}
-	starter := s.starters[name]
-	if starter == nil {
-		info.Running = s.running
+	starter, err := resolveGatewayChannelStarter(name, s.starters)
+	if err != nil {
+		info.Running = false
 		s.channels[name] = info
-		return nil
+		return err
 	}
 	cfg := s.config.Channels[name]
 	if err := starter(cfg); err != nil {
@@ -351,4 +358,37 @@ func stringConfigValue(cfg map[string]any, key string) string {
 	}
 	value, _ := cfg[key].(string)
 	return value
+}
+
+func resolveGatewayChannelStarter(name string, starters map[string]gatewayChannelStarter) (gatewayChannelStarter, error) {
+	classPath := strings.TrimSpace(gatewayChannelClassPaths[name])
+	if classPath == "" {
+		return nil, fmt.Errorf("Unknown channel type: %s", name)
+	}
+	return reflection.ResolveClass(classPath, func(modulePath, className string) reflection.SymbolLookupResult[gatewayChannelStarter] {
+		path := strings.TrimSpace(modulePath) + ":" + strings.TrimSpace(className)
+		for channelName, candidate := range gatewayChannelClassPaths {
+			if candidate != path {
+				continue
+			}
+			starter := starters[channelName]
+			if starter == nil {
+				return reflection.SymbolLookupResult[gatewayChannelStarter]{ModuleFound: true}
+			}
+			return reflection.SymbolLookupResult[gatewayChannelStarter]{
+				Value:       starter,
+				ModuleFound: true,
+				SymbolFound: true,
+			}
+		}
+		moduleFound := false
+		prefix := strings.TrimSpace(modulePath) + ":"
+		for _, candidate := range gatewayChannelClassPaths {
+			if strings.HasPrefix(candidate, prefix) {
+				moduleFound = true
+				break
+			}
+		}
+		return reflection.SymbolLookupResult[gatewayChannelStarter]{ModuleFound: moduleFound}
+	})
 }
