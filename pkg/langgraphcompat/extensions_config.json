@@ -20,7 +20,7 @@
         "@modelcontextprotocol/server-github"
       ],
       "env": {
-        "GITHUB_TOKEN": ""
+        "GITHUB_TOKEN": "$GITHUB_TOKEN"
       },
       "description": "GitHub MCP server for repository operations"
     },
@@ -36,15 +36,5 @@
       "description": "PostgreSQL database access"
     }
   },
-  "skills": {
-    "deep-research": {
-      "enabled": true
-    },
-    "frontend-design": {
-      "enabled": false
-    },
-    "public:duplicate-skill": {
-      "enabled": false
-    }
-  }
+  "skills": {}
 }
