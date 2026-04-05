@@ -1627,6 +1627,12 @@ func (s *Server) loadAgentsFromFiles() map[string]gatewayAgent {
 		data, err := os.ReadFile(configPath)
 		agent := gatewayAgent{Name: name}
 		if err == nil {
+			var wrapper map[string]json.RawMessage
+			if err := json.Unmarshal(data, &wrapper); err == nil {
+				if nested, ok := wrapper["agent"]; ok && len(nested) > 0 {
+					data = nested
+				}
+			}
 			if err := json.Unmarshal(data, &agent); err == nil {
 				var raw map[string]any
 				_ = json.Unmarshal(data, &raw)

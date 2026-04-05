@@ -1297,6 +1297,35 @@ func TestLoadAgentsFromFilesAcceptsModelNameAliases(t *testing.T) {
 	}
 }
 
+func TestLoadAgentsFromFilesAcceptsWrappedAgentObject(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{dataRoot: root}
+	dir := filepath.Join(s.agentsRoot(), "writer")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"agent":{
+			"name":"writer",
+			"description":"Writer",
+			"modelName":"qwen/Qwen3.5-9B",
+			"toolGroups":["web"]
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	loaded := s.loadAgentsFromFiles()
+	got, ok := loaded["writer"]
+	if !ok {
+		t.Fatalf("missing agent: %#v", loaded)
+	}
+	if got.Description != "Writer" || got.Model == nil || *got.Model != "qwen/Qwen3.5-9B" || len(got.ToolGroups) != 1 || got.ToolGroups[0] != "web" {
+		t.Fatalf("agent=%#v", got)
+	}
+}
+
 func TestLoadUserProfileFromFileAcceptsJSONContent(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}
