@@ -886,6 +886,84 @@ func TestThreadSearchAcceptsCamelCaseRunIDSort(t *testing.T) {
 	}
 }
 
+func TestThreadSearchAcceptsCamelCaseCheckpointIDSort(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	first := s.ensureSession("thread-search-checkpoint-b", map[string]any{"checkpoint_id": "cp-b"})
+	second := s.ensureSession("thread-search-checkpoint-a", map[string]any{"checkpoint_id": "cp-a"})
+	first.UpdatedAt = time.Now().UTC().Add(-time.Hour)
+	second.UpdatedAt = time.Now().UTC()
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"limit":10,"sortBy":"checkpointId","sortOrder":"asc","select":["threadId","checkpointId"]}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) < 2 {
+		t.Fatalf("threads=%#v", threads)
+	}
+	if threads[0]["thread_id"] != "thread-search-checkpoint-a" {
+		t.Fatalf("first thread=%v want thread-search-checkpoint-a", threads[0]["thread_id"])
+	}
+	if threads[0]["checkpoint_id"] != "cp-a" {
+		t.Fatalf("checkpoint_id=%v want cp-a", threads[0]["checkpoint_id"])
+	}
+	if _, ok := threads[0]["checkpointId"]; ok {
+		t.Fatalf("unexpected checkpointId alias in %#v", threads[0])
+	}
+}
+
+func TestThreadSearchAcceptsCamelCaseParentCheckpointIDSort(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	first := s.ensureSession("thread-search-parent-checkpoint-b", map[string]any{"parent_checkpoint_id": "cp-parent-b"})
+	second := s.ensureSession("thread-search-parent-checkpoint-a", map[string]any{"parent_checkpoint_id": "cp-parent-a"})
+	first.UpdatedAt = time.Now().UTC().Add(-time.Hour)
+	second.UpdatedAt = time.Now().UTC()
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"limit":10,"sortBy":"parentCheckpointId","sortOrder":"asc","select":["threadId","parentCheckpointId"]}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) < 2 {
+		t.Fatalf("threads=%#v", threads)
+	}
+	if threads[0]["thread_id"] != "thread-search-parent-checkpoint-a" {
+		t.Fatalf("first thread=%v want thread-search-parent-checkpoint-a", threads[0]["thread_id"])
+	}
+	if threads[0]["parent_checkpoint_id"] != "cp-parent-a" {
+		t.Fatalf("parent_checkpoint_id=%v want cp-parent-a", threads[0]["parent_checkpoint_id"])
+	}
+	if _, ok := threads[0]["parentCheckpointId"]; ok {
+		t.Fatalf("unexpected parentCheckpointId alias in %#v", threads[0])
+	}
+}
+
 func TestThreadSearchAcceptsCamelCaseCheckpointSelectFields(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.ensureSession("thread-search-checkpoint-select", map[string]any{

@@ -178,6 +178,10 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 			less = asString(left["metadata"].(map[string]any)["graph_id"]) < asString(right["metadata"].(map[string]any)["graph_id"])
 		case "run_id":
 			less = asString(left["metadata"].(map[string]any)["run_id"]) < asString(right["metadata"].(map[string]any)["run_id"])
+		case "checkpoint_id":
+			less = asString(left["checkpoint_id"]) < asString(right["checkpoint_id"])
+		case "parent_checkpoint_id":
+			less = asString(left["parent_checkpoint_id"]) < asString(right["parent_checkpoint_id"])
 		case "thread_id":
 			less = left["thread_id"].(string) < right["thread_id"].(string)
 		default:
