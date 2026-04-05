@@ -345,11 +345,15 @@ func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Limit int `json:"limit"`
+		Limit     int `json:"limit"`
+		PageSizeX int `json:"pageSize"`
 	}
 	if r.Body != nil {
 		defer r.Body.Close()
 		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	if req.Limit == 0 {
+		req.Limit = req.PageSizeX
 	}
 
 	state := s.getThreadState(threadID)

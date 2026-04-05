@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -999,6 +1000,40 @@ func TestThreadHistorySnapshots(t *testing.T) {
 	defer getResp.Body.Close()
 	if getResp.StatusCode != http.StatusOK {
 		t.Fatalf("get history status=%d", getResp.StatusCode)
+	}
+}
+
+func TestThreadHistoryAcceptsPageSizeAlias(t *testing.T) {
+	_, ts := newCompatTestServer(t)
+	resp, err := http.Post(ts.URL+"/threads", "application/json", strings.NewReader(`{"thread_id":"history-pagesize"}`))
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	resp.Body.Close()
+
+	for i := 1; i <= 3; i++ {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/history-pagesize/state", strings.NewReader(fmt.Sprintf(`{"values":{"title":"Version %d"}}`, i)))
+		req.Header.Set("Content-Type", "application/json")
+		stateResp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("update state: %v", err)
+		}
+		stateResp.Body.Close()
+	}
+
+	historyReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/history-pagesize/history", strings.NewReader(`{"pageSize":2}`))
+	historyReq.Header.Set("Content-Type", "application/json")
+	historyResp, err := http.DefaultClient.Do(historyReq)
+	if err != nil {
+		t.Fatalf("history request: %v", err)
+	}
+	defer historyResp.Body.Close()
+	var history []ThreadState
+	if err := json.NewDecoder(historyResp.Body).Decode(&history); err != nil {
+		t.Fatalf("decode history: %v", err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("history len=%d want 2", len(history))
 	}
 }
 
