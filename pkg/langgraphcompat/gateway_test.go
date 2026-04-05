@@ -1081,6 +1081,9 @@ func TestThreadSearchIncludesCheckpointFieldsByDefault(t *testing.T) {
 	if selected["mode"] != "flash" || selected["model_name"] != "" || selected["reasoning_effort"] != "minimal" {
 		t.Fatalf("selected=%#v", selected)
 	}
+	if selected["thinking_enabled"] != true || selected["is_plan_mode"] != false || selected["subagent_enabled"] != false {
+		t.Fatalf("selected=%#v", selected)
+	}
 	if value, ok := selected["temperature"]; !ok || value != nil {
 		t.Fatalf("temperature=%#v in %#v", selected["temperature"], selected)
 	}
@@ -5054,6 +5057,9 @@ func TestThreadGetIncludesCompatShape(t *testing.T) {
 		t.Fatalf("thread=%#v", thread)
 	}
 	if thread["mode"] != "thinking" || thread["model_name"] != "deepseek/deepseek-r1" || thread["reasoning_effort"] != "high" {
+		t.Fatalf("thread=%#v", thread)
+	}
+	if thread["thinking_enabled"] != false || thread["is_plan_mode"] != true || thread["subagent_enabled"] != true {
 		t.Fatalf("thread=%#v", thread)
 	}
 	if thread["temperature"] != 0.2 {
