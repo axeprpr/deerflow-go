@@ -9843,6 +9843,18 @@ func TestRecordedRunStreamReplaysToolCallEvents(t *testing.T) {
 			t.Fatalf("unexpected on_tool_end field %s: %s", forbidden, aliasBlock)
 		}
 	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	streamEndBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(streamEndBlock, `"run_id":"run-replay-tools"`) {
+		t.Fatalf("missing run_id in end payload: %s", streamEndBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(streamEndBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, streamEndBlock)
+		}
+	}
 }
 
 func TestRecordedRunStreamReplaysToolCallEvent(t *testing.T) {
@@ -9885,6 +9897,18 @@ func TestRecordedRunStreamReplaysToolCallEvent(t *testing.T) {
 	for _, forbidden := range []string{`"messages":`, `"usage_metadata":`, `"additional_kwargs":`, `"tool_calls":`, `"tool_call_id":`, `"thread_id":`, `"run_id":`, `"status":`, `"data":{`} {
 		if strings.Contains(callBlock, forbidden) {
 			t.Fatalf("unexpected tool_call field %s: %s", forbidden, callBlock)
+		}
+	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-replay-tool-call"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
 		}
 	}
 }
@@ -9935,6 +9959,18 @@ func TestRecordedRunStreamReplaysChunkEvent(t *testing.T) {
 	for _, forbidden := range []string{`"messages":`, `"usage_metadata":`, `"additional_kwargs":`, `"tool_calls":`, `"tool_call_id":`, `"status":`, `"data":{`, `"role":`, `"thread_id":`, `"run_id":`} {
 		if strings.Contains(chunkBlock, forbidden) {
 			t.Fatalf("unexpected replay chunk field %s: %s", forbidden, chunkBlock)
+		}
+	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-replay-chunk"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
 		}
 	}
 }
@@ -10548,6 +10584,18 @@ func TestThreadJoinStreamReplaysToolCallEvents(t *testing.T) {
 			t.Fatalf("unexpected on_tool_end field %s: %s", forbidden, aliasBlock)
 		}
 	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	streamEndBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(streamEndBlock, `"run_id":"run-join-tools"`) {
+		t.Fatalf("missing run_id in end payload: %s", streamEndBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(streamEndBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, streamEndBlock)
+		}
+	}
 }
 
 func TestThreadJoinStreamReplaysToolCallEvent(t *testing.T) {
@@ -10590,6 +10638,18 @@ func TestThreadJoinStreamReplaysToolCallEvent(t *testing.T) {
 	for _, forbidden := range []string{`"messages":`, `"usage_metadata":`, `"additional_kwargs":`, `"tool_calls":`, `"tool_call_id":`, `"thread_id":`, `"run_id":`, `"status":`, `"data":{`} {
 		if strings.Contains(callBlock, forbidden) {
 			t.Fatalf("unexpected tool_call field %s: %s", forbidden, callBlock)
+		}
+	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-join-tool-call"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
 		}
 	}
 }
@@ -10640,6 +10700,18 @@ func TestThreadJoinStreamReplaysChunkEvent(t *testing.T) {
 	for _, forbidden := range []string{`"messages":`, `"usage_metadata":`, `"additional_kwargs":`, `"tool_calls":`, `"tool_call_id":`, `"status":`, `"data":{`, `"role":`, `"thread_id":`, `"run_id":`} {
 		if strings.Contains(chunkBlock, forbidden) {
 			t.Fatalf("unexpected join chunk field %s: %s", forbidden, chunkBlock)
+		}
+	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-join-chunk"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
 		}
 	}
 }
