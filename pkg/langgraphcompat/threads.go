@@ -1281,27 +1281,19 @@ func (s *Server) loadPersistedThreads() {
 			}
 		}
 		if checkpoint := mapFromAny(raw["checkpoint"]); len(checkpoint) > 0 {
-			if _, exists := persisted.Metadata["checkpoint_ns"]; !exists {
-				if value, ok := checkpoint["checkpoint_ns"]; ok {
-					persisted.Metadata["checkpoint_ns"] = value
-				}
+			if value, ok := checkpoint["checkpoint_ns"]; ok {
+				persisted.Metadata["checkpoint_ns"] = value
 			}
-			if _, exists := persisted.Metadata["checkpoint_thread_id"]; !exists {
-				if value, ok := checkpoint["thread_id"]; ok {
-					persisted.Metadata["checkpoint_thread_id"] = value
-				}
+			if value, ok := checkpoint["thread_id"]; ok {
+				persisted.Metadata["checkpoint_thread_id"] = value
 			}
 		}
 		if checkpoint := mapFromAny(raw["parent_checkpoint"]); len(checkpoint) > 0 {
-			if _, exists := persisted.Metadata["parent_checkpoint_ns"]; !exists {
-				if value, ok := checkpoint["checkpoint_ns"]; ok {
-					persisted.Metadata["parent_checkpoint_ns"] = value
-				}
+			if value, ok := checkpoint["checkpoint_ns"]; ok {
+				persisted.Metadata["parent_checkpoint_ns"] = value
 			}
-			if _, exists := persisted.Metadata["parent_checkpoint_thread_id"]; !exists {
-				if value, ok := checkpoint["thread_id"]; ok {
-					persisted.Metadata["parent_checkpoint_thread_id"] = value
-				}
+			if value, ok := checkpoint["thread_id"]; ok {
+				persisted.Metadata["parent_checkpoint_thread_id"] = value
 			}
 		}
 		if persisted.ThreadID == "" {
