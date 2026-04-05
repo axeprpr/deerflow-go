@@ -8567,6 +8567,15 @@ func TestThreadRunStreamEmitsToolEndAliasAndUsageMetadata(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	if !strings.Contains(text, "event: tool_call_start") {
+		t.Fatalf("missing tool_call_start event: %s", text)
+	}
+	if !strings.Contains(text, "event: tool_call_end") {
+		t.Fatalf("missing tool_call_end event: %s", text)
+	}
+	if !strings.Contains(text, `"id":"call-1"`) {
+		t.Fatalf("missing tool call id in tool events: %s", text)
+	}
 	if !strings.Contains(text, "event: on_tool_end") {
 		t.Fatalf("missing on_tool_end event: %s", text)
 	}
