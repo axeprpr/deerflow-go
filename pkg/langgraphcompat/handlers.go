@@ -29,6 +29,11 @@ type runConfig struct {
 	MaxTokens       *int
 }
 
+type streamModeFilter struct {
+	allowAll bool
+	allowed  map[string]struct{}
+}
+
 func (s *Server) handleRunsStream(w http.ResponseWriter, r *http.Request) {
 	s.handleStreamRequest(w, r, "")
 }
@@ -197,7 +202,8 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.Header().Set("Content-Location", fmt.Sprintf("/threads/%s/runs/%s", threadID, runID))
 
-	s.recordAndSendEvent(w, flusher, run, "metadata", map[string]any{
+	filter := newStreamModeFilter(firstNonNil(req.StreamMode, req.StreamModeX))
+	s.recordAndSendEventFiltered(w, flusher, run, filter, "metadata", map[string]any{
 		"run_id":    runID,
 		"thread_id": threadID,
 	})
@@ -214,20 +220,20 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	})
 
 	ctx := subagent.WithEventSink(r.Context(), func(evt subagent.TaskEvent) {
-		s.forwardTaskEvent(w, flusher, run, evt)
+		s.forwardTaskEvent(w, flusher, run, filter, evt)
 	})
 	ctx = clarification.WithThreadID(ctx, threadID)
 	ctx = clarification.WithEventSink(ctx, func(item *clarification.Clarification) {
 		if item == nil {
 			return
 		}
-		s.recordAndSendEvent(w, flusher, run, "clarification_request", item)
+		s.recordAndSendEventFiltered(w, flusher, run, filter, "clarification_request", item)
 	})
 	eventsDone := make(chan struct{})
 	go func() {
 		defer close(eventsDone)
 		for evt := range runAgent.Events() {
-			s.forwardAgentEvent(w, flusher, run, evt)
+			s.forwardAgentEvent(w, flusher, run, filter, evt)
 		}
 	}()
 
@@ -244,17 +250,17 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 
 	s.saveSession(threadID, result.Messages)
 	state := s.getThreadState(threadID)
-	s.emitFinalMessagesTuple(w, flusher, run, existingMessages, result.Messages, result.Usage)
+	s.emitFinalMessagesTuple(w, flusher, run, filter, existingMessages, result.Messages, result.Usage)
 
-	s.recordAndSendEvent(w, flusher, run, "updates", map[string]any{
+	s.recordAndSendEventFiltered(w, flusher, run, filter, "updates", map[string]any{
 		"agent": map[string]any{
 			"messages":  state.Values["messages"],
 			"title":     state.Values["title"],
 			"artifacts": state.Values["artifacts"],
 		},
 	})
-	s.recordAndSendEvent(w, flusher, run, "values", state.Values)
-	s.recordAndSendEvent(w, flusher, run, "end", map[string]any{
+	s.recordAndSendEventFiltered(w, flusher, run, filter, "values", state.Values)
+	s.recordAndSendEventFiltered(w, flusher, run, filter, "end", map[string]any{
 		"run_id": runID,
 		"usage":  result.Usage,
 	})
@@ -294,16 +300,12 @@ func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	filter := newStreamModeFilter(streamModeFromQuery(r))
 	for _, event := range run.Events {
-		if event.ID != "" {
-			fmt.Fprintf(w, "id: %s\n", event.ID)
-		}
-		jsonData, err := json.Marshal(event.Data)
-		if err != nil {
+		if !filter.allows(event.Event) {
 			continue
 		}
-		fmt.Fprintf(w, "event: %s\n", event.Event)
-		fmt.Fprintf(w, "data: %s\n\n", jsonData)
+		s.sendSSEEvent(w, flusher, event)
 	}
 	flusher.Flush()
 }
@@ -331,7 +333,11 @@ func (s *Server) streamRecordedRun(w http.ResponseWriter, r *http.Request, threa
 		return
 	}
 
+	filter := newStreamModeFilter(streamModeFromQuery(r))
 	for _, event := range run.Events {
+		if !filter.allows(event.Event) {
+			continue
+		}
 		s.sendSSEEvent(w, flusher, event)
 	}
 }
@@ -529,6 +535,20 @@ func (s *Server) recordAndSendEvent(w http.ResponseWriter, flusher http.Flusher,
 	s.sendSSEEvent(w, flusher, event)
 }
 
+func (s *Server) recordAndSendEventFiltered(w http.ResponseWriter, flusher http.Flusher, run *Run, filter streamModeFilter, eventType string, data any) {
+	event := StreamEvent{
+		ID:       fmt.Sprintf("%s:%d", run.RunID, s.nextRunEventIndex(run.RunID)),
+		Event:    eventType,
+		Data:     data,
+		RunID:    run.RunID,
+		ThreadID: run.ThreadID,
+	}
+	s.appendRunEvent(run.RunID, event)
+	if filter.allows(eventType) {
+		s.sendSSEEvent(w, flusher, event)
+	}
+}
+
 func (s *Server) saveSession(threadID string, messages []models.Message) {
 	s.sessionsMu.Lock()
 	var session *Session
@@ -553,7 +573,7 @@ func (s *Server) saveSession(threadID string, messages []models.Message) {
 	_ = s.appendThreadHistorySnapshot(threadID)
 }
 
-func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, run *Run, evt agent.AgentEvent) {
+func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, run *Run, filter streamModeFilter, evt agent.AgentEvent) {
 	switch evt.Type {
 	case agent.AgentEventChunk:
 		chunkData := map[string]any{
@@ -564,8 +584,8 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 			"delta":     evt.Text,
 			"content":   evt.Text,
 		}
-		s.recordAndSendEvent(w, flusher, run, "chunk", chunkData)
-		s.recordAndSendEvent(w, flusher, run, "messages-tuple", Message{
+		s.recordAndSendEventFiltered(w, flusher, run, filter, "chunk", chunkData)
+		s.recordAndSendEventFiltered(w, flusher, run, filter, "messages-tuple", Message{
 			Type:    "ai",
 			Role:    "assistant",
 			Content: evt.Text,
@@ -574,23 +594,23 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 		if evt.ToolEvent == nil {
 			return
 		}
-		s.recordAndSendEvent(w, flusher, run, "tool_call", evt.ToolEvent)
+		s.recordAndSendEventFiltered(w, flusher, run, filter, "tool_call", evt.ToolEvent)
 	case agent.AgentEventToolCallStart:
 		if evt.ToolEvent == nil {
 			return
 		}
-		s.recordAndSendEvent(w, flusher, run, "tool_call_start", evt.ToolEvent)
+		s.recordAndSendEventFiltered(w, flusher, run, filter, "tool_call_start", evt.ToolEvent)
 	case agent.AgentEventToolCallEnd:
 		if evt.ToolEvent == nil {
 			return
 		}
-		s.recordAndSendEvent(w, flusher, run, "tool_call_end", evt.ToolEvent)
-		s.recordAndSendEvent(w, flusher, run, "on_tool_end", map[string]any{
+		s.recordAndSendEventFiltered(w, flusher, run, filter, "tool_call_end", evt.ToolEvent)
+		s.recordAndSendEventFiltered(w, flusher, run, filter, "on_tool_end", map[string]any{
 			"event": "on_tool_end",
 			"name":  evt.ToolEvent.Name,
 			"data":  evt.ToolEvent,
 		})
-		s.recordAndSendEvent(w, flusher, run, "messages-tuple", Message{
+		s.recordAndSendEventFiltered(w, flusher, run, filter, "messages-tuple", Message{
 			Type:       "tool",
 			ID:         toolMessageID(evt.ToolEvent.ID),
 			Role:       "tool",
@@ -615,11 +635,11 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 			errData["suggestion"] = evt.Error.Suggestion
 			errData["retryable"] = evt.Error.Retryable
 		}
-		s.recordAndSendEvent(w, flusher, run, "error", errData)
+		s.recordAndSendEventFiltered(w, flusher, run, filter, "error", errData)
 	}
 }
 
-func (s *Server) emitFinalMessagesTuple(w http.ResponseWriter, flusher http.Flusher, run *Run, existingMessages []models.Message, resultMessages []models.Message, usage *agent.Usage) {
+func (s *Server) emitFinalMessagesTuple(w http.ResponseWriter, flusher http.Flusher, run *Run, filter streamModeFilter, existingMessages []models.Message, resultMessages []models.Message, usage *agent.Usage) {
 	start := len(existingMessages)
 	if start > len(resultMessages) {
 		start = 0
@@ -629,11 +649,11 @@ func (s *Server) emitFinalMessagesTuple(w http.ResponseWriter, flusher http.Flus
 		if finalMessages[i].Type == "ai" && usage != nil {
 			finalMessages[i].UsageMetadata = usageMetadataMap(usage)
 		}
-		s.recordAndSendEvent(w, flusher, run, "messages-tuple", finalMessages[i])
+		s.recordAndSendEventFiltered(w, flusher, run, filter, "messages-tuple", finalMessages[i])
 	}
 }
 
-func (s *Server) forwardTaskEvent(w http.ResponseWriter, flusher http.Flusher, run *Run, evt subagent.TaskEvent) {
+func (s *Server) forwardTaskEvent(w http.ResponseWriter, flusher http.Flusher, run *Run, filter streamModeFilter, evt subagent.TaskEvent) {
 	data := map[string]any{
 		"type":        evt.Type,
 		"task_id":     evt.TaskID,
@@ -642,7 +662,118 @@ func (s *Server) forwardTaskEvent(w http.ResponseWriter, flusher http.Flusher, r
 		"result":      evt.Result,
 		"error":       evt.Error,
 	}
-	s.recordAndSendEvent(w, flusher, run, evt.Type, data)
+	s.recordAndSendEventFiltered(w, flusher, run, filter, evt.Type, data)
+}
+
+func newStreamModeFilter(raw any) streamModeFilter {
+	filter := streamModeFilter{allowAll: true}
+	values := streamModeValues(raw)
+	if len(values) == 0 {
+		return filter
+	}
+	filter.allowAll = false
+	filter.allowed = make(map[string]struct{}, len(values)+2)
+	for _, value := range values {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "", "events", "debug", "custom":
+			filter.allow("metadata")
+			filter.allow("clarification_request")
+			filter.allow("chunk")
+			filter.allow("tool_call")
+			filter.allow("tool_call_start")
+			filter.allow("tool_call_end")
+			filter.allow("on_tool_end")
+			filter.allow("error")
+			filter.allow("task_started")
+			filter.allow("task_running")
+			filter.allow("task_completed")
+			filter.allow("task_failed")
+		case "messages":
+			filter.allow("chunk")
+			filter.allow("messages-tuple")
+		case "messages-tuple":
+			filter.allow("messages-tuple")
+		case "tasks":
+			filter.allow("task_started")
+			filter.allow("task_running")
+			filter.allow("task_completed")
+			filter.allow("task_failed")
+		case "values":
+			filter.allow("values")
+		case "updates":
+			filter.allow("updates")
+		}
+	}
+	filter.allow("end")
+	filter.allow("error")
+	return filter
+}
+
+func streamModeValues(raw any) []string {
+	switch value := raw.(type) {
+	case string:
+		if value == "" {
+			return nil
+		}
+		return []string{value}
+	case []string:
+		return value
+	case []any:
+		values := make([]string, 0, len(value))
+		for _, item := range value {
+			if text := stringFromAny(item); text != "" {
+				values = append(values, text)
+			}
+		}
+		return values
+	default:
+		return nil
+	}
+}
+
+func streamModeFromQuery(r *http.Request) any {
+	if r == nil || r.URL == nil {
+		return nil
+	}
+	query := r.URL.Query()
+	values := make([]string, 0, len(query["stream_mode"])+len(query["streamMode"]))
+	values = append(values, splitStreamModeQueryValues(query["stream_mode"])...)
+	values = append(values, splitStreamModeQueryValues(query["streamMode"])...)
+	if len(values) == 0 {
+		return nil
+	}
+	return values
+}
+
+func splitStreamModeQueryValues(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	values := make([]string, 0, len(raw))
+	for _, item := range raw {
+		for _, part := range strings.Split(item, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				values = append(values, part)
+			}
+		}
+	}
+	return values
+}
+
+func (f *streamModeFilter) allow(eventType string) {
+	if f.allowed == nil {
+		f.allowed = make(map[string]struct{})
+	}
+	f.allowed[eventType] = struct{}{}
+}
+
+func (f streamModeFilter) allows(eventType string) bool {
+	if f.allowAll {
+		return true
+	}
+	_, ok := f.allowed[eventType]
+	return ok
 }
 
 func parseRunConfig(raw map[string]any) runConfig {

@@ -98,6 +98,8 @@ type RunCreateRequest struct {
 	Input       map[string]any `json:"input,omitempty"`
 	Config      map[string]any `json:"config,omitempty"`
 	Context     map[string]any `json:"context,omitempty"`
+	StreamMode  any            `json:"stream_mode,omitempty"`
+	StreamModeX any            `json:"streamMode,omitempty"`
 }
 
 // Message represents a LangGraph-compatible message

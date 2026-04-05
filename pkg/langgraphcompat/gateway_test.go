@@ -1314,6 +1314,200 @@ func TestThreadRunStreamEmitsToolEndAliasAndUsageMetadata(t *testing.T) {
 	}
 }
 
+func TestThreadRunStreamModeValuesFiltersMessageEvents(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+
+	reqBody := `{"assistant_id":"lead_agent","stream_mode":["values"],"input":{"messages":[{"role":"user","content":"hello"}]}}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/thread-stream-values/runs/stream", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: values") {
+		t.Fatalf("missing values event: %s", text)
+	}
+	if strings.Contains(text, "event: messages-tuple") {
+		t.Fatalf("unexpected messages-tuple event: %s", text)
+	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+}
+
+func TestThreadRunStreamModeMessagesTupleFiltersValues(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+
+	reqBody := `{"assistant_id":"lead_agent","stream_mode":["messages-tuple"],"input":{"messages":[{"role":"user","content":"hello"}]}}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/thread-stream-messages/runs/stream", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: messages-tuple") {
+		t.Fatalf("missing messages-tuple event: %s", text)
+	}
+	if strings.Contains(text, "event: values") {
+		t.Fatalf("unexpected values event: %s", text)
+	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+}
+
+func TestThreadRunCamelCaseStreamModeFiltersValues(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+
+	reqBody := `{"assistant_id":"lead_agent","streamMode":["messages-tuple"],"input":{"messages":[{"role":"user","content":"hello"}]}}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/thread-stream-camel/runs/stream", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: messages-tuple") {
+		t.Fatalf("missing messages-tuple event: %s", text)
+	}
+	if strings.Contains(text, "event: values") {
+		t.Fatalf("unexpected values event: %s", text)
+	}
+}
+
+func TestStreamModeFilterAliases(t *testing.T) {
+	filter := newStreamModeFilter([]any{"tasks", "messages"})
+	if !filter.allows("task_started") || !filter.allows("task_completed") {
+		t.Fatalf("tasks mode should allow task lifecycle events: %#v", filter)
+	}
+	if !filter.allows("chunk") || !filter.allows("messages-tuple") {
+		t.Fatalf("messages mode should allow chunk and messages-tuple")
+	}
+	if filter.allows("values") {
+		t.Fatal("values should not be allowed when not requested")
+	}
+	if !filter.allows("end") {
+		t.Fatal("end should always be allowed")
+	}
+}
+
+func TestRecordedRunStreamModeFiltersReplayEvents(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-replay-1",
+		ThreadID:    "thread-replay-1",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "metadata", Data: map[string]any{"run_id": "run-replay-1"}},
+			{ID: "2", Event: "messages-tuple", Data: map[string]any{"type": "ai", "content": "hello"}},
+			{ID: "3", Event: "values", Data: map[string]any{"title": "done"}},
+			{ID: "4", Event: "end", Data: map[string]any{"run_id": "run-replay-1"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-replay-1/runs/run-replay-1/stream?stream_mode=values")
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: values") {
+		t.Fatalf("missing values event: %s", text)
+	}
+	if strings.Contains(text, "event: messages-tuple") {
+		t.Fatalf("unexpected messages-tuple event: %s", text)
+	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+}
+
+func TestThreadJoinStreamModeFiltersReplayEvents(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-join-1",
+		ThreadID:    "thread-join-1",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "messages-tuple", Data: map[string]any{"type": "ai", "content": "hello"}},
+			{ID: "2", Event: "values", Data: map[string]any{"title": "done"}},
+			{ID: "3", Event: "end", Data: map[string]any{"run_id": "run-join-1"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-join-1/stream?streamMode=messages-tuple")
+	if err != nil {
+		t.Fatalf("join stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: messages-tuple") {
+		t.Fatalf("missing messages-tuple event: %s", text)
+	}
+	if strings.Contains(text, "event: values") {
+		t.Fatalf("unexpected values event: %s", text)
+	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+}
+
 func TestSkillInstallFromArchive(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-skill-1"
