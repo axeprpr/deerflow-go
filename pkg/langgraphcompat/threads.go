@@ -1516,7 +1516,7 @@ func (s *Server) loadPersistedThreads() {
 				persisted.Metadata[key] = value
 			}
 		}
-		if checkpoint := mapFromAny(raw["checkpoint"]); len(checkpoint) > 0 {
+		if checkpoint := normalizeCheckpointObject(mapFromAny(firstNonNil(raw["checkpoint"], raw["checkpointObject"]))); len(checkpoint) > 0 {
 			if value, ok := checkpoint["checkpoint_id"]; ok {
 				persisted.Metadata["checkpoint_id"] = value
 			}
@@ -1527,7 +1527,7 @@ func (s *Server) loadPersistedThreads() {
 				persisted.Metadata["checkpoint_thread_id"] = value
 			}
 		}
-		if checkpoint := mapFromAny(raw["parent_checkpoint"]); len(checkpoint) > 0 {
+		if checkpoint := normalizeCheckpointObject(mapFromAny(firstNonNil(raw["parent_checkpoint"], raw["parentCheckpoint"]))); len(checkpoint) > 0 {
 			if value, ok := checkpoint["checkpoint_id"]; ok {
 				persisted.Metadata["parent_checkpoint_id"] = value
 			}
@@ -1889,13 +1889,13 @@ func normalizeLoadedThreadHistory(history []ThreadState, rawItems []map[string]a
 		if len(history[i].ParentCheckpoint) == 0 {
 			history[i].ParentCheckpoint = checkpointObjectFromMetadata(history[i].Metadata, "parent_")
 		}
-		if checkpoint := mapFromAny(rawItems[i]["checkpoint"]); len(checkpoint) > 0 {
+		if checkpoint := mapFromAny(firstNonNil(rawItems[i]["checkpoint"], rawItems[i]["checkpointObject"])); len(checkpoint) > 0 {
 			history[i].Checkpoint = normalizeCheckpointObject(checkpoint)
 			if history[i].CheckpointID == "" {
 				history[i].CheckpointID = stringValue(history[i].Checkpoint["checkpoint_id"])
 			}
 		}
-		if checkpoint := mapFromAny(rawItems[i]["parent_checkpoint"]); len(checkpoint) > 0 {
+		if checkpoint := mapFromAny(firstNonNil(rawItems[i]["parent_checkpoint"], rawItems[i]["parentCheckpoint"])); len(checkpoint) > 0 {
 			history[i].ParentCheckpoint = normalizeCheckpointObject(checkpoint)
 			if history[i].ParentCheckpointID == "" {
 				history[i].ParentCheckpointID = stringValue(history[i].ParentCheckpoint["checkpoint_id"])

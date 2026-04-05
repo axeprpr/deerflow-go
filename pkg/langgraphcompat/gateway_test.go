@@ -2358,6 +2358,34 @@ func TestLoadPersistedThreadsPrefersTopLevelCheckpointObjects(t *testing.T) {
 	}
 }
 
+func TestLoadPersistedThreadsAcceptsCamelCaseParentCheckpointObject(t *testing.T) {
+	root := t.TempDir()
+	threadDir := filepath.Join(root, "threads", "thread-parent-checkpoint-camel", "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"values":{"messages":[{"id":"m1","type":"human","content":"hello"}]},
+		"metadata":{"thread_id":"thread-parent-checkpoint-camel"},
+		"parentCheckpoint":{"checkpointId":"cp-parent-current","threadId":"thread-parent","checkpointNs":"ns-parent"},
+		"created_at":"2026-01-01T00:00:00Z"
+	}`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write thread file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, sessions: map[string]*Session{}}
+	s.loadPersistedThreads()
+
+	state := s.getThreadState("thread-parent-checkpoint-camel")
+	if state == nil {
+		t.Fatalf("state=nil")
+	}
+	if state.ParentCheckpoint == nil || state.ParentCheckpoint["checkpoint_id"] != "cp-parent-current" || state.ParentCheckpoint["thread_id"] != "thread-parent" || state.ParentCheckpoint["checkpoint_ns"] != "ns-parent" {
+		t.Fatalf("parent_checkpoint=%#v", state.ParentCheckpoint)
+	}
+}
+
 func TestLoadPersistedThreadsUsesCheckpointObjectsAsIDFallback(t *testing.T) {
 	root := t.TempDir()
 	threadDir := filepath.Join(root, "threads", "thread-checkpoint-object-fallback", "user-data")
@@ -2907,6 +2935,35 @@ func TestLoadThreadHistoryNormalizesCheckpointObjects(t *testing.T) {
 	}
 	if history[0].Checkpoint == nil || history[0].Checkpoint["checkpoint_id"] != "cp-1" || history[0].Checkpoint["checkpoint_ns"] != "ns-1" || history[0].Checkpoint["thread_id"] != "thread-1" {
 		t.Fatalf("checkpoint=%#v", history[0].Checkpoint)
+	}
+	if history[0].ParentCheckpoint == nil || history[0].ParentCheckpoint["checkpoint_id"] != "cp-parent-1" || history[0].ParentCheckpoint["checkpoint_ns"] != "ns-parent-1" || history[0].ParentCheckpoint["thread_id"] != "thread-parent-1" {
+		t.Fatalf("parent_checkpoint=%#v", history[0].ParentCheckpoint)
+	}
+	if history[0].ParentCheckpointID != "cp-parent-1" {
+		t.Fatalf("parent_checkpoint_id=%q", history[0].ParentCheckpointID)
+	}
+}
+
+func TestLoadThreadHistoryAcceptsCamelCaseParentCheckpointObject(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{dataRoot: root}
+	threadID := "thread-history-parent-checkpoint-camel"
+	if err := os.MkdirAll(s.threadRoot(threadID), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `[
+		{
+			"parentCheckpoint":{"checkpointId":"cp-parent-1","checkpointNs":"ns-parent-1","threadId":"thread-parent-1"},
+			"createdAt":"2026-01-01T00:00:00Z"
+		}
+	]`
+	if err := os.WriteFile(s.threadHistoryPath(threadID), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write history file: %v", err)
+	}
+
+	history := s.loadThreadHistory(threadID)
+	if len(history) != 1 {
+		t.Fatalf("history=%#v", history)
 	}
 	if history[0].ParentCheckpoint == nil || history[0].ParentCheckpoint["checkpoint_id"] != "cp-parent-1" || history[0].ParentCheckpoint["checkpoint_ns"] != "ns-parent-1" || history[0].ParentCheckpoint["thread_id"] != "thread-parent-1" {
 		t.Fatalf("parent_checkpoint=%#v", history[0].ParentCheckpoint)
