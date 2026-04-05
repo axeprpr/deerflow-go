@@ -1308,6 +1308,37 @@ func TestThreadStatePatchAcceptsValuesPayload(t *testing.T) {
 	}
 }
 
+func TestThreadStatePatchAcceptsCamelCaseViewedImages(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-patch-viewed-images"
+	s.ensureSession(threadID, nil)
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID+"/state",
+		strings.NewReader(`{"values":{"viewedImages":{"/tmp/chart.png":{"base64":"xyz","mime_type":"image/png"}}}}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("patch request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("state missing")
+	}
+	viewedImages, ok := state.Values["viewed_images"].(map[string]any)
+	if !ok || len(viewedImages) != 1 {
+		t.Fatalf("viewed_images=%#v", state.Values["viewed_images"])
+	}
+}
+
 func TestThreadRunPersistsConfigMetadata(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.llmProvider = fakeLLMProvider{}

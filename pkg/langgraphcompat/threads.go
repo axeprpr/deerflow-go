@@ -273,7 +273,7 @@ func (s *Server) handleThreadStatePost(w http.ResponseWriter, r *http.Request) {
 	if sandboxState, ok := normalizeStringMap(req.Values["sandbox"]); ok {
 		session.Metadata["sandbox"] = sandboxState
 	}
-	if viewedImages, ok := normalizeViewedImages(req.Values["viewed_images"]); ok {
+	if viewedImages, ok := normalizeViewedImages(firstNonNil(req.Values["viewed_images"], req.Values["viewedImages"])); ok {
 		session.Metadata["viewed_images"] = viewedImages
 	}
 	session.UpdatedAt = time.Now().UTC()
@@ -320,7 +320,7 @@ func (s *Server) handleThreadStatePatch(w http.ResponseWriter, r *http.Request) 
 	if sandboxState, ok := normalizeStringMap(req.Values["sandbox"]); ok {
 		session.Metadata["sandbox"] = sandboxState
 	}
-	if viewedImages, ok := normalizeViewedImages(req.Values["viewed_images"]); ok {
+	if viewedImages, ok := normalizeViewedImages(firstNonNil(req.Values["viewed_images"], req.Values["viewedImages"])); ok {
 		session.Metadata["viewed_images"] = viewedImages
 	}
 	for k, v := range req.Metadata {
