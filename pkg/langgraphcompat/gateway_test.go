@@ -9130,6 +9130,90 @@ func TestThreadJoinStreamReplaysValuesPayload(t *testing.T) {
 	}
 }
 
+func TestRecordedRunStreamModeSupportsUpdates(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-replay-updates",
+		ThreadID:    "thread-replay-updates",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "updates", Data: map[string]any{"agent": map[string]any{"title": "done"}}},
+			{ID: "2", Event: "messages-tuple", Data: map[string]any{"type": "ai", "content": "hello"}},
+			{ID: "3", Event: "end", Data: map[string]any{"run_id": "run-replay-updates"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-replay-updates/runs/run-replay-updates/stream?streamMode=updates")
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: updates") {
+		t.Fatalf("missing updates event: %s", text)
+	}
+	if !strings.Contains(text, `"title":"done"`) {
+		t.Fatalf("missing updates payload: %s", text)
+	}
+	if strings.Contains(text, "event: messages-tuple") {
+		t.Fatalf("unexpected messages-tuple event: %s", text)
+	}
+}
+
+func TestThreadJoinStreamModeSupportsUpdates(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-join-updates",
+		ThreadID:    "thread-join-updates",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "updates", Data: map[string]any{"agent": map[string]any{"title": "done"}}},
+			{ID: "2", Event: "messages-tuple", Data: map[string]any{"type": "ai", "content": "hello"}},
+			{ID: "3", Event: "end", Data: map[string]any{"run_id": "run-join-updates"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-join-updates/stream?stream_mode=updates")
+	if err != nil {
+		t.Fatalf("join stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: updates") {
+		t.Fatalf("missing updates event: %s", text)
+	}
+	if !strings.Contains(text, `"title":"done"`) {
+		t.Fatalf("missing updates payload: %s", text)
+	}
+	if strings.Contains(text, "event: messages-tuple") {
+		t.Fatalf("unexpected messages-tuple event: %s", text)
+	}
+}
+
 func TestRecordedRunStreamModeSupportsCommaSeparatedAliases(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	run := &Run{
