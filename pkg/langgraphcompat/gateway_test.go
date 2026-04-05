@@ -1543,6 +1543,56 @@ func TestLoadPersistedRunsAcceptsCamelCaseFields(t *testing.T) {
 	}
 }
 
+func TestLoadPersistedRunsNormalizesCamelCaseEventFields(t *testing.T) {
+	root := t.TempDir()
+	runDir := filepath.Join(root, "runs")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"runId":"run-events-camel",
+		"threadId":"thread-camel",
+		"assistantId":"lead_agent",
+		"status":"success",
+		"createdAt":"2026-01-01T00:00:00Z",
+		"updatedAt":"2026-01-02T00:00:00Z",
+		"events":[
+			{
+				"id":"evt-1",
+				"event":"messages-tuple",
+				"data":{"type":"ai","role":"assistant","content":"done"},
+				"runId":"run-events-camel",
+				"threadId":"thread-camel"
+			}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(runDir, "run-events-camel.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write run file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, runs: map[string]*Run{}}
+	s.loadPersistedRuns()
+
+	run, ok := s.runs["run-events-camel"]
+	if !ok {
+		t.Fatalf("missing run: %#v", s.runs)
+	}
+	if len(run.Events) != 1 {
+		t.Fatalf("events=%#v", run.Events)
+	}
+	event := run.Events[0]
+	if event.ID != "evt-1" || event.Event != "messages-tuple" {
+		t.Fatalf("event=%#v", event)
+	}
+	data, ok := event.Data.(map[string]any)
+	if !ok || data["content"] != "done" {
+		t.Fatalf("data=%#v", event.Data)
+	}
+	if event.RunID != "run-events-camel" || event.ThreadID != "thread-camel" {
+		t.Fatalf("event=%#v", event)
+	}
+}
+
 func TestLoadThreadHistoryAcceptsCamelCaseFields(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}

@@ -1279,6 +1279,34 @@ func normalizePersistedThreadMetadata(metadata map[string]any) map[string]any {
 	return metadata
 }
 
+func normalizePersistedRunEvents(events []StreamEvent, rawItems []any) []StreamEvent {
+	if len(events) == 0 || len(events) != len(rawItems) {
+		return events
+	}
+	for i, rawItem := range rawItems {
+		raw := mapFromAny(rawItem)
+		if raw == nil {
+			continue
+		}
+		if events[i].ID == "" {
+			events[i].ID = stringValue(firstNonNil(raw["id"], raw["ID"]))
+		}
+		if events[i].Event == "" {
+			events[i].Event = stringValue(firstNonNil(raw["event"], raw["Event"]))
+		}
+		if events[i].Data == nil {
+			events[i].Data = firstNonNil(raw["data"], raw["Data"])
+		}
+		if events[i].RunID == "" {
+			events[i].RunID = stringValue(firstNonNil(raw["runId"], raw["run_id"], raw["RunID"]))
+		}
+		if events[i].ThreadID == "" {
+			events[i].ThreadID = stringValue(firstNonNil(raw["threadId"], raw["thread_id"], raw["ThreadID"]))
+		}
+	}
+	return events
+}
+
 func (s *Server) loadPersistedRuns() {
 	root := filepath.Join(s.dataRoot, "runs")
 	entries, err := os.ReadDir(root)
@@ -1315,6 +1343,9 @@ func (s *Server) loadPersistedRuns() {
 		}
 		if persisted.UpdatedAt.IsZero() {
 			persisted.UpdatedAt = timeValue(firstNonNil(raw["updatedAt"], raw["updated_at"]))
+		}
+		if rawEvents, ok := raw["events"].([]any); ok {
+			persisted.Events = normalizePersistedRunEvents(persisted.Events, rawEvents)
 		}
 		if persisted.RunID == "" {
 			continue
