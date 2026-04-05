@@ -1580,6 +1580,10 @@ func TestLoadPersistedThreadsNormalizesCamelCaseMetadata(t *testing.T) {
 		"messages":[],
 		"metadata":{
 			"viewedImages":{"/tmp/chart.png":{"base64":"xyz","mime_type":"image/png"}},
+			"threadId":"thread-meta-camel",
+			"assistantId":"assistant-1",
+			"graphId":"graph-1",
+			"runId":"run-1",
 			"agentType":"deep_research",
 			"modelName":"deepseek/deepseek-r1",
 			"reasoningEffort":"high",
@@ -1609,6 +1613,9 @@ func TestLoadPersistedThreadsNormalizesCamelCaseMetadata(t *testing.T) {
 		t.Fatalf("metadata=%#v", session.Metadata)
 	}
 	if session.Metadata["agent_type"] != "deep_research" {
+		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+	if session.Metadata["thread_id"] != "thread-meta-camel" || session.Metadata["assistant_id"] != "assistant-1" || session.Metadata["graph_id"] != "graph-1" || session.Metadata["run_id"] != "run-1" {
 		t.Fatalf("metadata=%#v", session.Metadata)
 	}
 	if session.Metadata["reasoning_effort"] != "high" || session.Metadata["agent_name"] != "writer" {

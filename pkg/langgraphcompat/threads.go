@@ -1246,6 +1246,26 @@ func normalizePersistedThreadMetadata(metadata map[string]any) map[string]any {
 			metadata["model_name"] = value
 		}
 	}
+	if _, ok := metadata["thread_id"]; !ok {
+		if value, ok := metadata["threadId"]; ok {
+			metadata["thread_id"] = value
+		}
+	}
+	if _, ok := metadata["assistant_id"]; !ok {
+		if value, ok := metadata["assistantId"]; ok {
+			metadata["assistant_id"] = value
+		}
+	}
+	if _, ok := metadata["graph_id"]; !ok {
+		if value, ok := metadata["graphId"]; ok {
+			metadata["graph_id"] = value
+		}
+	}
+	if _, ok := metadata["run_id"]; !ok {
+		if value, ok := metadata["runId"]; ok {
+			metadata["run_id"] = value
+		}
+	}
 	if _, ok := metadata["agent_type"]; !ok {
 		if value, ok := metadata["agentType"]; ok {
 			metadata["agent_type"] = value
