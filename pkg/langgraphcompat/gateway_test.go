@@ -1314,6 +1314,23 @@ func TestLoadUserProfileFromFileAcceptsJSONContent(t *testing.T) {
 	}
 }
 
+func TestLoadUserProfileFromFileAcceptsJSONNullContent(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{dataRoot: root}
+	raw := `{"content":null}`
+	if err := os.WriteFile(s.userProfilePath(), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write user profile: %v", err)
+	}
+
+	content, ok := s.loadUserProfileFromFile()
+	if !ok {
+		t.Fatal("expected user profile to load")
+	}
+	if content != "" {
+		t.Fatalf("content=%q", content)
+	}
+}
+
 func TestLoadMemoryFromFileAcceptsSnakeCaseFields(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}

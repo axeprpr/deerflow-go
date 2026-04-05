@@ -1681,8 +1681,14 @@ func (s *Server) loadUserProfileFromFile() (string, bool) {
 	}
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err == nil {
-		if content := stringFromAny(firstNonNil(raw["content"], raw["user_profile"], raw["userProfile"])); content != "" {
-			return content, true
+		if value, ok := raw["content"]; ok {
+			return stringFromAny(value), true
+		}
+		if value, ok := raw["user_profile"]; ok {
+			return stringFromAny(value), true
+		}
+		if value, ok := raw["userProfile"]; ok {
+			return stringFromAny(value), true
 		}
 	}
 	return string(data), true
