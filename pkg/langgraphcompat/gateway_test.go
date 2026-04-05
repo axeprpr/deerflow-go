@@ -2166,7 +2166,7 @@ func TestLoadPersistedThreadsAcceptsValuesStateObject(t *testing.T) {
 	if session.Metadata["title"] != "Values Thread" || session.Metadata["assistant_id"] != "assistant-1" || session.Metadata["model_name"] != "qwen/Qwen3.5-9B" {
 		t.Fatalf("metadata=%#v", session.Metadata)
 	}
-	if session.Metadata["checkpoint_id"] != "cp-top-level" || session.Metadata["parent_checkpoint_id"] != "cp-parent-top-level" {
+	if session.Metadata["checkpoint_id"] != "cp-checkpoint-object" || session.Metadata["parent_checkpoint_id"] != "cp-parent-object" {
 		t.Fatalf("metadata=%#v", session.Metadata)
 	}
 	if session.Metadata["checkpoint_ns"] != "ns-current" || session.Metadata["parent_checkpoint_ns"] != "ns-parent" {
@@ -2287,6 +2287,39 @@ func TestLoadPersistedThreadsUsesCheckpointObjectsAsIDFallback(t *testing.T) {
 	s.loadPersistedThreads()
 
 	session := s.sessions["thread-checkpoint-object-fallback"]
+	if session == nil {
+		t.Fatalf("sessions=%#v", s.sessions)
+	}
+	if session.Metadata["checkpoint_id"] != "cp-current" || session.Metadata["parent_checkpoint_id"] != "cp-parent-current" {
+		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+}
+
+func TestLoadPersistedThreadsPrefersCheckpointObjectsOverStaleMetadata(t *testing.T) {
+	root := t.TempDir()
+	threadDir := filepath.Join(root, "threads", "thread-checkpoint-object-override", "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"values":{"messages":[{"id":"m1","type":"human","content":"hello"}]},
+		"metadata":{
+			"thread_id":"thread-checkpoint-object-override",
+			"checkpoint_id":"cp-stale",
+			"parent_checkpoint_id":"cp-parent-stale"
+		},
+		"checkpoint":{"checkpoint_id":"cp-current","thread_id":"thread-current","checkpoint_ns":"ns-current"},
+		"parent_checkpoint":{"checkpoint_id":"cp-parent-current","thread_id":"thread-parent","checkpoint_ns":"ns-parent"},
+		"created_at":"2026-01-01T00:00:00Z"
+	}`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write thread file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, sessions: map[string]*Session{}}
+	s.loadPersistedThreads()
+
+	session := s.sessions["thread-checkpoint-object-override"]
 	if session == nil {
 		t.Fatalf("sessions=%#v", s.sessions)
 	}

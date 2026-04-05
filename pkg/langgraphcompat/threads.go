@@ -1281,10 +1281,8 @@ func (s *Server) loadPersistedThreads() {
 			}
 		}
 		if checkpoint := mapFromAny(raw["checkpoint"]); len(checkpoint) > 0 {
-			if _, exists := persisted.Metadata["checkpoint_id"]; !exists {
-				if value, ok := checkpoint["checkpoint_id"]; ok {
-					persisted.Metadata["checkpoint_id"] = value
-				}
+			if value, ok := checkpoint["checkpoint_id"]; ok {
+				persisted.Metadata["checkpoint_id"] = value
 			}
 			if value, ok := checkpoint["checkpoint_ns"]; ok {
 				persisted.Metadata["checkpoint_ns"] = value
@@ -1294,10 +1292,8 @@ func (s *Server) loadPersistedThreads() {
 			}
 		}
 		if checkpoint := mapFromAny(raw["parent_checkpoint"]); len(checkpoint) > 0 {
-			if _, exists := persisted.Metadata["parent_checkpoint_id"]; !exists {
-				if value, ok := checkpoint["checkpoint_id"]; ok {
-					persisted.Metadata["parent_checkpoint_id"] = value
-				}
+			if value, ok := checkpoint["checkpoint_id"]; ok {
+				persisted.Metadata["parent_checkpoint_id"] = value
 			}
 			if value, ok := checkpoint["checkpoint_ns"]; ok {
 				persisted.Metadata["parent_checkpoint_ns"] = value
