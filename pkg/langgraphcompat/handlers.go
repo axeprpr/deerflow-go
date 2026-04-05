@@ -213,8 +213,9 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 
 	filter := newStreamModeFilter(firstNonNil(req.StreamMode, req.StreamModeX))
 	s.recordAndSendEventFiltered(w, flusher, run, filter, "metadata", map[string]any{
-		"run_id":    runID,
-		"thread_id": threadID,
+		"run_id":       runID,
+		"thread_id":    threadID,
+		"assistant_id": assistantID,
 	})
 
 	runCfg := parseRunConfig(mergeRunConfig(req.Config, req.Context))

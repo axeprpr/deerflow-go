@@ -8716,6 +8716,9 @@ func TestThreadRunStreamAcceptsTopLevelMessages(t *testing.T) {
 	if !strings.Contains(text, `"thread_id":"thread-stream-top-level"`) {
 		t.Fatalf("missing thread_id in metadata: %s", text)
 	}
+	if !strings.Contains(text, `"assistant_id":"lead_agent"`) {
+		t.Fatalf("missing assistant_id in metadata: %s", text)
+	}
 	if !strings.Contains(text, `"run_id":"`) {
 		t.Fatalf("missing run_id in metadata: %s", text)
 	}
