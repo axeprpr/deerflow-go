@@ -226,6 +226,9 @@ func TestCreateThreadAcceptsTopLevelValues(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&thread); err != nil {
 		t.Fatalf("decode thread: %v", err)
 	}
+	if thread["title"] != "Created Top" {
+		t.Fatalf("thread=%#v", thread)
+	}
 	values, _ := thread["values"].(map[string]any)
 	if got := values["title"]; got != "Created Top" {
 		t.Fatalf("title=%v want Created Top", got)
@@ -233,6 +236,10 @@ func TestCreateThreadAcceptsTopLevelValues(t *testing.T) {
 	viewedImages, ok := values["viewed_images"].(map[string]any)
 	if !ok || len(viewedImages) != 1 {
 		t.Fatalf("viewed_images=%#v", values["viewed_images"])
+	}
+	viewedImagesSummary, ok := thread["viewed_images"].(map[string]any)
+	if !ok || len(viewedImagesSummary) != 1 {
+		t.Fatalf("thread=%#v", thread)
 	}
 	config, _ := thread["config"].(map[string]any)
 	configurable, _ := config["configurable"].(map[string]any)
@@ -6131,6 +6138,13 @@ func TestThreadUpdateAcceptsValuesPayload(t *testing.T) {
 	var thread map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&thread); err != nil {
 		t.Fatalf("decode thread: %v", err)
+	}
+	if thread["title"] != "After" {
+		t.Fatalf("thread=%#v", thread)
+	}
+	todosSummary, _ := thread["todos"].([]any)
+	if len(todosSummary) != 1 {
+		t.Fatalf("thread=%#v", thread)
 	}
 	values, _ := thread["values"].(map[string]any)
 	if got := values["title"]; got != "After" {
