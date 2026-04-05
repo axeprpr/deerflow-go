@@ -2226,6 +2226,13 @@ func TestLoadPersistedThreadsPrefersTopLevelCheckpointIDs(t *testing.T) {
 	if session.Metadata["checkpoint_id"] != "cp-current" || session.Metadata["parent_checkpoint_id"] != "cp-parent-current" {
 		t.Fatalf("metadata=%#v", session.Metadata)
 	}
+	state := s.getThreadState("thread-top-level-checkpoint")
+	if state == nil {
+		t.Fatalf("state=nil")
+	}
+	if state.CheckpointID != "cp-current" {
+		t.Fatalf("checkpoint_id=%q", state.CheckpointID)
+	}
 }
 
 func TestLoadPersistedThreadsPrefersTopLevelCheckpointObjects(t *testing.T) {
