@@ -9401,6 +9401,41 @@ func TestRecordedRunStreamReplaysAIUsageTuple(t *testing.T) {
 	}
 }
 
+func TestRecordedRunStreamReplaysAIAdditionalKwargsTuple(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-replay-ai-kwargs",
+		ThreadID:    "thread-replay-ai-kwargs",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "messages-tuple", Data: map[string]any{"type": "ai", "id": "ai-1", "content": "done", "additional_kwargs": map[string]any{"reasoning_content": "Need to inspect report", "stop_reason": "end_turn"}}},
+			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-replay-ai-kwargs"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-replay-ai-kwargs/runs/run-replay-ai-kwargs/stream?streamMode=messages-tuple")
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"additional_kwargs":{"reasoning_content":"Need to inspect report","stop_reason":"end_turn"}`) {
+		t.Fatalf("missing ai additional_kwargs tuple payload: %s", text)
+	}
+}
+
 func TestRecordedRunStreamReplaysToolCallEvents(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	run := &Run{
@@ -9811,6 +9846,41 @@ func TestThreadJoinStreamReplaysAIUsageTuple(t *testing.T) {
 	}
 	if !strings.Contains(text, `"usage_metadata":{"input_tokens":10,"output_tokens":5,"total_tokens":15}`) {
 		t.Fatalf("missing ai usage tuple payload: %s", text)
+	}
+}
+
+func TestThreadJoinStreamReplaysAIAdditionalKwargsTuple(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-join-ai-kwargs",
+		ThreadID:    "thread-join-ai-kwargs",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "messages-tuple", Data: map[string]any{"type": "ai", "id": "ai-1", "content": "done", "additional_kwargs": map[string]any{"reasoning_content": "Need to inspect report", "stop_reason": "end_turn"}}},
+			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-join-ai-kwargs"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-join-ai-kwargs/stream?streamMode=messages-tuple")
+	if err != nil {
+		t.Fatalf("join stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"additional_kwargs":{"reasoning_content":"Need to inspect report","stop_reason":"end_turn"}`) {
+		t.Fatalf("missing ai additional_kwargs tuple payload: %s", text)
 	}
 }
 
