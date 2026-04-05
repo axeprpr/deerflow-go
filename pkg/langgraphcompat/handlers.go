@@ -57,6 +57,7 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
+	assistantID := firstNonEmpty(req.AssistantID, req.AssistantIDX)
 
 	session := s.ensureSession(threadID, nil)
 	if session.PresentFiles != nil {
@@ -80,14 +81,14 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 	run := &Run{
 		RunID:       runID,
 		ThreadID:    threadID,
-		AssistantID: req.AssistantID,
+		AssistantID: assistantID,
 		Status:      "running",
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 	}
 	s.saveRun(run)
-	s.setThreadMetadata(threadID, "assistant_id", req.AssistantID)
-	s.setThreadMetadata(threadID, "graph_id", firstNonEmpty(req.AssistantID, "lead_agent"))
+	s.setThreadMetadata(threadID, "assistant_id", assistantID)
+	s.setThreadMetadata(threadID, "graph_id", firstNonEmpty(assistantID, "lead_agent"))
 	s.setThreadMetadata(threadID, "run_id", runID)
 
 	runCfg := parseRunConfig(mergeRunConfig(req.Config, req.Context))
@@ -152,11 +153,12 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 
 	threadID := routeThreadID
 	if threadID == "" {
-		threadID = req.ThreadID
+		threadID = firstNonEmpty(req.ThreadID, req.ThreadIDX)
 	}
 	if threadID == "" {
 		threadID = uuid.New().String()
 	}
+	assistantID := firstNonEmpty(req.AssistantID, req.AssistantIDX)
 
 	session := s.ensureSession(threadID, nil)
 	if session.PresentFiles != nil {
@@ -186,14 +188,14 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	run := &Run{
 		RunID:       runID,
 		ThreadID:    threadID,
-		AssistantID: req.AssistantID,
+		AssistantID: assistantID,
 		Status:      "running",
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 	}
 	s.saveRun(run)
-	s.setThreadMetadata(threadID, "assistant_id", req.AssistantID)
-	s.setThreadMetadata(threadID, "graph_id", firstNonEmpty(req.AssistantID, "lead_agent"))
+	s.setThreadMetadata(threadID, "assistant_id", assistantID)
+	s.setThreadMetadata(threadID, "graph_id", firstNonEmpty(assistantID, "lead_agent"))
 	s.setThreadMetadata(threadID, "run_id", runID)
 
 	w.Header().Set("Content-Type", "text/event-stream")

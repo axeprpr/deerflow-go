@@ -1562,6 +1562,59 @@ func TestThreadRunCamelCaseStreamModeFiltersValues(t *testing.T) {
 	}
 }
 
+func TestRunsStreamAcceptsCamelCaseIDs(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+
+	reqBody := `{"assistantId":"lead_agent","threadId":"thread-camel-ids","streamMode":["values"],"input":{"messages":[{"role":"user","content":"hello"}]}}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/runs/stream", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: values") {
+		t.Fatalf("missing values event: %s", text)
+	}
+
+	threadResp, err := http.Get(ts.URL + "/threads/thread-camel-ids")
+	if err != nil {
+		t.Fatalf("get thread: %v", err)
+	}
+	defer threadResp.Body.Close()
+	if threadResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(threadResp.Body)
+		t.Fatalf("thread status=%d body=%s", threadResp.StatusCode, string(b))
+	}
+	var thread map[string]any
+	if err := json.NewDecoder(threadResp.Body).Decode(&thread); err != nil {
+		t.Fatalf("decode thread: %v", err)
+	}
+	metadata, ok := thread["metadata"].(map[string]any)
+	if !ok || metadata["assistant_id"] != "lead_agent" {
+		t.Fatalf("metadata=%#v", thread["metadata"])
+	}
+	config, ok := thread["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("config=%#v", thread["config"])
+	}
+	configurable, ok := config["configurable"].(map[string]any)
+	if !ok || configurable["thread_id"] != "thread-camel-ids" {
+		t.Fatalf("configurable=%#v", config["configurable"])
+	}
+}
+
 func TestStreamModeFilterAliases(t *testing.T) {
 	filter := newStreamModeFilter([]any{"tasks", "messages"})
 	if !filter.allows("task_started") || !filter.allows("task_completed") {

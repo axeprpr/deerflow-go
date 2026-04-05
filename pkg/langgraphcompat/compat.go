@@ -93,13 +93,15 @@ type Run struct {
 
 // LangGraph API types
 type RunCreateRequest struct {
-	AssistantID string         `json:"assistant_id"`
-	ThreadID    string         `json:"thread_id,omitempty"`
-	Input       map[string]any `json:"input,omitempty"`
-	Config      map[string]any `json:"config,omitempty"`
-	Context     map[string]any `json:"context,omitempty"`
-	StreamMode  any            `json:"stream_mode,omitempty"`
-	StreamModeX any            `json:"streamMode,omitempty"`
+	AssistantID  string         `json:"assistant_id"`
+	AssistantIDX string         `json:"assistantId,omitempty"`
+	ThreadID     string         `json:"thread_id,omitempty"`
+	ThreadIDX    string         `json:"threadId,omitempty"`
+	Input        map[string]any `json:"input,omitempty"`
+	Config       map[string]any `json:"config,omitempty"`
+	Context      map[string]any `json:"context,omitempty"`
+	StreamMode   any            `json:"stream_mode,omitempty"`
+	StreamModeX  any            `json:"streamMode,omitempty"`
 }
 
 // Message represents a LangGraph-compatible message
