@@ -247,6 +247,8 @@ func normalizeThreadFieldName(field string) string {
 		return "assistant_id"
 	case "graphId":
 		return "graph_id"
+	case "runId":
+		return "run_id"
 	case "checkpointId":
 		return "checkpoint_id"
 	case "parentCheckpointId":
