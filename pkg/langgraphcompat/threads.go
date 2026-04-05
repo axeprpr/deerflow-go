@@ -130,6 +130,7 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	req.SortBy = firstNonEmpty(req.SortBy, req.SortByX)
 	req.SortOrder = firstNonEmpty(req.SortOrder, req.SortOrderX)
+	req.SortBy = normalizeThreadFieldName(req.SortBy)
 	if req.SortBy == "" {
 		req.SortBy = "updated_at"
 	}
@@ -184,7 +185,7 @@ func selectThreadFields(thread map[string]any, selectFields []string) map[string
 	}
 	selected := make(map[string]any, len(selectFields))
 	for _, field := range selectFields {
-		field = strings.TrimSpace(field)
+		field = normalizeThreadFieldName(field)
 		if field == "" {
 			continue
 		}
@@ -198,6 +199,23 @@ func selectThreadFields(thread map[string]any, selectFields []string) map[string
 		}
 	}
 	return selected
+}
+
+func normalizeThreadFieldName(field string) string {
+	switch strings.TrimSpace(field) {
+	case "threadId":
+		return "thread_id"
+	case "createdAt":
+		return "created_at"
+	case "updatedAt":
+		return "updated_at"
+	case "assistantId":
+		return "assistant_id"
+	case "graphId":
+		return "graph_id"
+	default:
+		return strings.TrimSpace(field)
+	}
 }
 
 func (s *Server) handleThreadFiles(w http.ResponseWriter, r *http.Request) {
