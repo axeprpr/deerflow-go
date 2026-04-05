@@ -206,6 +206,35 @@ func TestCreateThreadAcceptsValuesPayload(t *testing.T) {
 	}
 }
 
+func TestCreateThreadAcceptsTopLevelValues(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	resp, err := http.Post(
+		ts.URL+"/threads",
+		"application/json",
+		strings.NewReader(`{"threadId":"thread-create-top-level","title":"Created Top","viewedImages":{"/tmp/chart.png":{"base64":"xyz","mime_type":"image/png"}}}`),
+	)
+	if err != nil {
+		t.Fatalf("post thread: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(body))
+	}
+
+	state := s.getThreadState("thread-create-top-level")
+	if state == nil {
+		t.Fatal("state missing")
+	}
+	if got := state.Values["title"]; got != "Created Top" {
+		t.Fatalf("title=%v want Created Top", got)
+	}
+	viewedImages, ok := state.Values["viewed_images"].(map[string]any)
+	if !ok || len(viewedImages) != 1 {
+		t.Fatalf("viewed_images=%#v", state.Values["viewed_images"])
+	}
+}
+
 func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-gateway-1"
@@ -1582,6 +1611,36 @@ func TestThreadStatePatchAcceptsValuesPayload(t *testing.T) {
 	}
 	if got := state.Values["title"]; got != "After" {
 		t.Fatalf("title=%v want After", got)
+	}
+}
+
+func TestThreadStatePatchAcceptsTopLevelValues(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-patch-top-level"
+	s.ensureSession(threadID, map[string]any{"title": "Before"})
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID+"/state",
+		strings.NewReader(`{"title":"After Top"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("patch request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("state missing")
+	}
+	if got := state.Values["title"]; got != "After Top" {
+		t.Fatalf("title=%v want After Top", got)
 	}
 }
 

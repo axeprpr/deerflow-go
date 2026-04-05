@@ -51,9 +51,7 @@ func (s *Server) handleThreadCreate(w http.ResponseWriter, r *http.Request) {
 	metadata, _ := req["metadata"].(map[string]any)
 
 	session := s.ensureSession(threadID, metadata)
-	if values, ok := req["values"].(map[string]any); ok {
-		applyThreadValues(session, values)
-	}
+	applyThreadValues(session, extractThreadValues(req))
 	_ = s.persistSessionFile(session)
 	_ = s.appendThreadHistorySnapshot(threadID)
 	writeJSON(w, http.StatusCreated, s.threadResponse(session))
@@ -86,9 +84,7 @@ func (s *Server) handleThreadUpdate(w http.ResponseWriter, r *http.Request) {
 			session.Metadata[k] = v
 		}
 	}
-	if values, ok := req["values"].(map[string]any); ok {
-		applyThreadValues(session, values)
-	}
+	applyThreadValues(session, extractThreadValues(req))
 	session.UpdatedAt = time.Now().UTC()
 	s.sessionsMu.Unlock()
 	if err := s.persistSessionFile(session); err != nil {
@@ -246,6 +242,27 @@ func applyThreadValues(session *Session, values map[string]any) {
 	}
 }
 
+func extractThreadValues(raw map[string]any) map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+	values := map[string]any{}
+	for _, key := range []string{"title", "todos", "sandbox", "viewed_images", "viewedImages"} {
+		if value, ok := raw[key]; ok {
+			values[key] = value
+		}
+	}
+	if nested, ok := raw["values"].(map[string]any); ok {
+		for key, value := range nested {
+			values[key] = value
+		}
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	return values
+}
+
 func (s *Server) handleThreadFiles(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
@@ -294,9 +311,7 @@ func (s *Server) handleThreadStatePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Values map[string]any `json:"values"`
-	}
+	var req map[string]any
 	defer r.Body.Close()
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -311,7 +326,7 @@ func (s *Server) handleThreadStatePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	applyThreadValues(session, req.Values)
+	applyThreadValues(session, extractThreadValues(req))
 	session.UpdatedAt = time.Now().UTC()
 	s.sessionsMu.Unlock()
 	if err := s.persistSessionFile(session); err != nil {
@@ -330,10 +345,7 @@ func (s *Server) handleThreadStatePatch(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var req struct {
-		Metadata map[string]any `json:"metadata"`
-		Values   map[string]any `json:"values"`
-	}
+	var req map[string]any
 	defer r.Body.Close()
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -347,8 +359,9 @@ func (s *Server) handleThreadStatePatch(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "thread not found", http.StatusNotFound)
 		return
 	}
-	applyThreadValues(session, req.Values)
-	for k, v := range req.Metadata {
+	applyThreadValues(session, extractThreadValues(req))
+	metadata, _ := req["metadata"].(map[string]any)
+	for k, v := range metadata {
 		session.Metadata[k] = v
 	}
 	session.UpdatedAt = time.Now().UTC()
