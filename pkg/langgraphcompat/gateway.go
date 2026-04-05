@@ -308,11 +308,12 @@ func (s *Server) handleMCPConfigGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMCPConfigPut(w http.ResponseWriter, r *http.Request) {
-	var req gatewayMCPConfig
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var raw map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid request body"})
 		return
 	}
+	req := gatewayMCPConfigFromMap(raw)
 	if req.MCPServers == nil {
 		req.MCPServers = map[string]gatewayMCPServerConfig{}
 	}
@@ -1682,6 +1683,131 @@ func normalizeGatewayMCPServer(server gatewayMCPServerConfig) gatewayMCPServerCo
 		}
 	}
 	return server
+}
+
+func gatewayMCPConfigFromMap(raw map[string]any) gatewayMCPConfig {
+	req := gatewayMCPConfig{MCPServers: map[string]gatewayMCPServerConfig{}}
+	serversRaw := firstNonNil(raw["mcp_servers"], raw["mcpServers"])
+	serversMap, _ := serversRaw.(map[string]any)
+	for name, value := range serversMap {
+		serverMap, _ := value.(map[string]any)
+		req.MCPServers[name] = normalizeGatewayMCPServer(gatewayMCPServerFromMap(serverMap))
+	}
+	return req
+}
+
+func gatewayMCPServerFromMap(raw map[string]any) gatewayMCPServerConfig {
+	if raw == nil {
+		return gatewayMCPServerConfig{}
+	}
+	server := gatewayMCPServerConfig{
+		Enabled:     boolValue(raw["enabled"]),
+		Type:        firstNonEmpty(stringFromAny(raw["type"]), "stdio"),
+		Command:     stringFromAny(raw["command"]),
+		Args:        stringSliceFromAny(raw["args"]),
+		Env:         stringMapFromAny(raw["env"]),
+		URL:         stringFromAny(raw["url"]),
+		Headers:     stringMapFromAny(raw["headers"]),
+		Description: stringFromAny(raw["description"]),
+	}
+	if oauthRaw := firstNonNil(raw["oauth"], raw["oAuth"]); oauthRaw != nil {
+		if oauthMap, _ := oauthRaw.(map[string]any); oauthMap != nil {
+			server.OAuth = gatewayMCPOAuthFromMap(oauthMap)
+		}
+	}
+	return server
+}
+
+func gatewayMCPOAuthFromMap(raw map[string]any) *gatewayMCPOAuthConfig {
+	if raw == nil {
+		return nil
+	}
+	return &gatewayMCPOAuthConfig{
+		Enabled:           boolValue(raw["enabled"]),
+		TokenURL:          firstNonEmpty(stringFromAny(raw["token_url"]), stringFromAny(raw["tokenUrl"])),
+		GrantType:         firstNonEmpty(stringFromAny(raw["grant_type"]), stringFromAny(raw["grantType"])),
+		ClientID:          firstNonEmpty(stringFromAny(raw["client_id"]), stringFromAny(raw["clientId"])),
+		ClientSecret:      firstNonEmpty(stringFromAny(raw["client_secret"]), stringFromAny(raw["clientSecret"])),
+		RefreshToken:      firstNonEmpty(stringFromAny(raw["refresh_token"]), stringFromAny(raw["refreshToken"])),
+		Scope:             stringFromAny(raw["scope"]),
+		Audience:          stringFromAny(raw["audience"]),
+		TokenField:        firstNonEmpty(stringFromAny(raw["token_field"]), stringFromAny(raw["tokenField"])),
+		TokenTypeField:    firstNonEmpty(stringFromAny(raw["token_type_field"]), stringFromAny(raw["tokenTypeField"])),
+		ExpiresInField:    firstNonEmpty(stringFromAny(raw["expires_in_field"]), stringFromAny(raw["expiresInField"])),
+		DefaultTokenType:  firstNonEmpty(stringFromAny(raw["default_token_type"]), stringFromAny(raw["defaultTokenType"])),
+		RefreshSkewSecond: intValue(firstNonNil(raw["refresh_skew_seconds"], raw["refreshSkewSeconds"])),
+		ExtraTokenParams:  stringMapFromAny(firstNonNil(raw["extra_token_params"], raw["extraTokenParams"])),
+	}
+}
+
+func stringSliceFromAny(value any) []string {
+	items, _ := value.([]any)
+	if len(items) == 0 {
+		if direct, ok := value.([]string); ok {
+			return append([]string(nil), direct...)
+		}
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if text := stringFromAny(item); text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
+}
+
+func stringMapFromAny(value any) map[string]string {
+	switch typed := value.(type) {
+	case map[string]string:
+		return mapsClone(typed)
+	case map[string]any:
+		out := make(map[string]string, len(typed))
+		for key, raw := range typed {
+			out[key] = stringFromAny(raw)
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func mapsClone(src map[string]string) map[string]string {
+	if src == nil {
+		return nil
+	}
+	out := make(map[string]string, len(src))
+	for key, value := range src {
+		out[key] = value
+	}
+	return out
+}
+
+func boolValue(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	default:
+		return false
+	}
+}
+
+func intValue(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case json.Number:
+		n, _ := typed.Int64()
+		return int(n)
+	default:
+		return 0
+	}
 }
 
 func firstNonEmptySlice[T any](primary []T, fallback []T) []T {

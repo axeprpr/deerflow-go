@@ -627,6 +627,67 @@ func TestGatewayMCPConfigFromEnv(t *testing.T) {
 	}
 }
 
+func TestMCPConfigPutAcceptsCamelCaseFields(t *testing.T) {
+	_, ts := newCompatTestServer(t)
+
+	body := `{
+		"mcpServers": {
+			"github": {
+				"enabled": true,
+				"type": "http",
+				"url": "https://example.com/mcp",
+				"headers": {"Authorization":"Bearer token"},
+				"oauth": {
+					"enabled": true,
+					"tokenUrl": "https://example.com/token",
+					"grantType": "client_credentials",
+					"clientId": "client-id",
+					"clientSecret": "client-secret",
+					"refreshSkewSeconds": 42,
+					"extraTokenParams": {"aud":"demo"}
+				}
+			}
+		}
+	}`
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/mcp/config", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("mcp put request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var cfg map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	servers, ok := cfg["mcp_servers"].(map[string]any)
+	if !ok {
+		t.Fatalf("mcp_servers=%#v", cfg["mcp_servers"])
+	}
+	githubServer, ok := servers["github"].(map[string]any)
+	if !ok {
+		t.Fatalf("github server=%#v", servers["github"])
+	}
+	oauth, ok := githubServer["oauth"].(map[string]any)
+	if !ok {
+		t.Fatalf("oauth=%#v", githubServer["oauth"])
+	}
+	if oauth["token_url"] != "https://example.com/token" {
+		t.Fatalf("token_url=%v", oauth["token_url"])
+	}
+	if oauth["client_id"] != "client-id" || oauth["client_secret"] != "client-secret" {
+		t.Fatalf("oauth=%#v", oauth)
+	}
+	if oauth["refresh_skew_seconds"] != float64(42) {
+		t.Fatalf("refresh_skew_seconds=%v", oauth["refresh_skew_seconds"])
+	}
+}
+
 func TestAgentFilesPersistAndLoad(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}
