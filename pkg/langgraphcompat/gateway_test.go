@@ -8790,6 +8790,7 @@ func TestThreadRunStreamModeValuesFiltersMessageEvents(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	valuesBlock := sseEventBlock(t, text, "values")
 	if !strings.Contains(text, "event: values") {
 		t.Fatalf("missing values event: %s", text)
 	}
@@ -8798,6 +8799,11 @@ func TestThreadRunStreamModeValuesFiltersMessageEvents(t *testing.T) {
 	}
 	if !strings.Contains(text, `"content":"hello from fake llm"`) {
 		t.Fatalf("missing final message in values payload: %s", text)
+	}
+	for _, forbidden := range []string{`"metadata":`, `"config":`, `"next":`, `"tasks":`, `"interrupts":`, `"checkpoint":`, `"parent_checkpoint":`} {
+		if strings.Contains(valuesBlock, forbidden) {
+			t.Fatalf("unexpected extra values payload field %s: %s", forbidden, valuesBlock)
+		}
 	}
 	if strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("unexpected messages-tuple event: %s", text)
@@ -9271,6 +9277,7 @@ func TestRecordedRunStreamModeFiltersReplayEvents(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	valuesBlock := sseEventBlock(t, text, "values")
 	if strings.Contains(text, "event: metadata") {
 		t.Fatalf("unexpected metadata event: %s", text)
 	}
@@ -9300,6 +9307,11 @@ func TestRecordedRunStreamModeFiltersReplayEvents(t *testing.T) {
 	}
 	if !strings.Contains(text, `"viewed_images":{"/tmp/chart.png":{"mime_type":"image/png"}}`) {
 		t.Fatalf("missing values viewed_images payload: %s", text)
+	}
+	for _, forbidden := range []string{`"metadata":`, `"config":`, `"next":`, `"tasks":`, `"interrupts":`, `"checkpoint":`, `"parent_checkpoint":`} {
+		if strings.Contains(valuesBlock, forbidden) {
+			t.Fatalf("unexpected extra values payload field %s: %s", forbidden, valuesBlock)
+		}
 	}
 	if strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("unexpected messages-tuple event: %s", text)
@@ -10088,6 +10100,7 @@ func TestThreadJoinStreamReplaysValuesPayload(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	valuesBlock := sseEventBlock(t, text, "values")
 	if !strings.Contains(text, "event: values") {
 		t.Fatalf("missing values event: %s", text)
 	}
@@ -10114,6 +10127,11 @@ func TestThreadJoinStreamReplaysValuesPayload(t *testing.T) {
 	}
 	if !strings.Contains(text, `"viewed_images":{"/tmp/chart.png":{"mime_type":"image/png"}}`) {
 		t.Fatalf("missing values viewed_images payload: %s", text)
+	}
+	for _, forbidden := range []string{`"metadata":`, `"config":`, `"next":`, `"tasks":`, `"interrupts":`, `"checkpoint":`, `"parent_checkpoint":`} {
+		if strings.Contains(valuesBlock, forbidden) {
+			t.Fatalf("unexpected extra values payload field %s: %s", forbidden, valuesBlock)
+		}
 	}
 }
 
