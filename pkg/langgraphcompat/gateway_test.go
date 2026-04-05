@@ -4058,6 +4058,12 @@ func TestConvertToMessagesPreservesToolShape(t *testing.T) {
 				"reasoning_content": "Need to present files",
 				"stop_reason":       "tool_calls",
 			},
+			"response_metadata": map[string]any{
+				"model_name":         "deepseek-v3-2-251201",
+				"model_provider":     "deepseek",
+				"finish_reason":      "tool_calls",
+				"system_fingerprint": "fpv0_abc",
+			},
 			"tool_calls": []any{
 				map[string]any{
 					"id":   "call-1",
@@ -4087,6 +4093,9 @@ func TestConvertToMessagesPreservesToolShape(t *testing.T) {
 		t.Fatalf("tool_calls=%#v", messages[0].ToolCalls)
 	}
 	if messages[0].Metadata["reasoning_content"] != "Need to present files" || messages[0].Metadata["stop_reason"] != "tool_calls" {
+		t.Fatalf("metadata=%#v", messages[0].Metadata)
+	}
+	if messages[0].Metadata["model_name"] != "deepseek-v3-2-251201" || messages[0].Metadata["model_provider"] != "deepseek" || messages[0].Metadata["system_fingerprint"] != "fpv0_abc" {
 		t.Fatalf("metadata=%#v", messages[0].Metadata)
 	}
 	if messages[1].ToolResult == nil {

@@ -389,6 +389,17 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 		if metadata := parseLangGraphMessageMetadata(msgMap["additional_kwargs"]); len(metadata) > 0 {
 			msg.Metadata = metadata
 		}
+		if metadata := parseLangGraphMessageMetadata(msgMap["response_metadata"]); len(metadata) > 0 {
+			if msg.Metadata == nil {
+				msg.Metadata = metadata
+			} else {
+				for key, value := range metadata {
+					if _, exists := msg.Metadata[key]; !exists {
+						msg.Metadata[key] = value
+					}
+				}
+			}
+		}
 		if len(toolCalls) > 0 {
 			msg.ToolCalls = toolCalls
 		}
