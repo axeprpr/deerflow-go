@@ -10,3 +10,5 @@ pkg/langgraphcompat/threads/
 dist/
 internal/webui/dist/*
 !internal/webui/dist/placeholder.txt
+
+pkg/langgraphcompat/threads/
