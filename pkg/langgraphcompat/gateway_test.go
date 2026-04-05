@@ -4842,7 +4842,7 @@ func TestThreadRunPersistsAgentNameFromContext(t *testing.T) {
 func TestThreadRunAcceptsCamelCaseConfigFields(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.llmProvider = fakeLLMProvider{}
-	body := `{"assistant_id":"lead_agent","input":{"messages":[{"role":"user","content":"hi"}]},"config":{"configurable":{"modelName":"deepseek/deepseek-r1","thinkingEnabled":false,"isPlanMode":true,"subagentEnabled":true,"reasoningEffort":"high","agentType":"deep_research","maxTokens":321}}}`
+	body := `{"assistant_id":"lead_agent","input":{"messages":[{"role":"user","content":"hi"}]},"config":{"configurable":{"modelName":"deepseek/deepseek-r1","thinkingEnabled":false,"isPlanMode":true,"subagentEnabled":true,"reasoningEffort":"high","agentType":"deep_research","temperature":0.2,"maxTokens":321}}}`
 	resp, err := http.Post(ts.URL+"/threads/thread-camel-config/runs", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("create run: %v", err)
@@ -4875,6 +4875,12 @@ func TestThreadRunAcceptsCamelCaseConfigFields(t *testing.T) {
 	if metadata["thinking_enabled"] != false || metadata["is_plan_mode"] != true || metadata["subagent_enabled"] != true {
 		t.Fatalf("metadata=%#v", metadata)
 	}
+	if metadata["temperature"] != 0.2 {
+		t.Fatalf("metadata=%#v", metadata)
+	}
+	if metadata["max_tokens"] != float64(321) && metadata["max_tokens"] != 321 {
+		t.Fatalf("metadata=%#v", metadata)
+	}
 
 	stateResp, err := http.Get(ts.URL + "/threads/thread-camel-config/state")
 	if err != nil {
@@ -4890,6 +4896,12 @@ func TestThreadRunAcceptsCamelCaseConfigFields(t *testing.T) {
 		t.Fatalf("config=%#v", config)
 	}
 	if config["thinking_enabled"] != false || config["is_plan_mode"] != true || config["subagent_enabled"] != true {
+		t.Fatalf("config=%#v", config)
+	}
+	if config["temperature"] != 0.2 {
+		t.Fatalf("config=%#v", config)
+	}
+	if config["max_tokens"] != float64(321) && config["max_tokens"] != 321 && config["max_tokens"] != int64(321) {
 		t.Fatalf("config=%#v", config)
 	}
 }
