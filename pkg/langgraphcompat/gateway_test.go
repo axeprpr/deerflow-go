@@ -5752,6 +5752,12 @@ func TestThreadGetIncludesCompatShape(t *testing.T) {
 		"tasks":                       []any{map[string]any{"id": "task-1", "name": "lead_agent"}},
 		"interrupts":                  []any{map[string]any{"value": "Need input"}},
 	})
+	session.Messages = []models.Message{{
+		ID:        "m1",
+		SessionID: threadID,
+		Role:      models.RoleHuman,
+		Content:   "hello",
+	}}
 	session.Status = "busy"
 	uploadDir := s.uploadsDir(threadID)
 	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
@@ -5829,6 +5835,14 @@ func TestThreadGetIncludesCompatShape(t *testing.T) {
 	values, _ := thread["values"].(map[string]any)
 	if values["title"] != "Compat Thread" {
 		t.Fatalf("values=%#v", values)
+	}
+	messages, _ := values["messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("values=%#v", values)
+	}
+	firstMessage, _ := messages[0].(map[string]any)
+	if firstMessage["content"] != "hello" {
+		t.Fatalf("message=%#v", firstMessage)
 	}
 	config, _ := thread["config"].(map[string]any)
 	configurable, _ := config["configurable"].(map[string]any)
