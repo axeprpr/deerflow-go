@@ -1141,6 +1141,12 @@ func TestThreadSearchIncludesCheckpointFieldsByDefault(t *testing.T) {
 	if selected["checkpoint_id"] != "cp-1" || selected["parent_checkpoint_id"] != "cp-parent-1" {
 		t.Fatalf("selected=%#v", selected)
 	}
+	if selected["checkpoint_ns"] != "ns-1" || selected["parent_checkpoint_ns"] != "ns-parent-1" {
+		t.Fatalf("selected=%#v", selected)
+	}
+	if selected["checkpoint_thread_id"] != "checkpoint-thread-1" || selected["parent_checkpoint_thread_id"] != "checkpoint-thread-parent-1" {
+		t.Fatalf("selected=%#v", selected)
+	}
 	if selected["assistant_id"] != "assistant-1" || selected["graph_id"] != "graph-1" || selected["run_id"] != "run-1" {
 		t.Fatalf("selected=%#v", selected)
 	}
@@ -5319,6 +5325,12 @@ func TestThreadGetIncludesCompatShape(t *testing.T) {
 		t.Fatalf("metadata=%#v", metadata)
 	}
 	if thread["checkpoint_id"] != "cp-1" || thread["parent_checkpoint_id"] != "cp-parent-1" {
+		t.Fatalf("thread=%#v", thread)
+	}
+	if thread["checkpoint_ns"] != "ns-1" || thread["parent_checkpoint_ns"] != "ns-parent-1" {
+		t.Fatalf("thread=%#v", thread)
+	}
+	if thread["checkpoint_thread_id"] != "checkpoint-thread-1" || thread["parent_checkpoint_thread_id"] != "checkpoint-thread-parent-1" {
 		t.Fatalf("thread=%#v", thread)
 	}
 	checkpoint, _ := thread["checkpoint"].(map[string]any)
