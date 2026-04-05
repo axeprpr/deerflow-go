@@ -52,7 +52,7 @@ func (s *Server) handleThreadCreate(w http.ResponseWriter, r *http.Request) {
 	metadata, _ := req["metadata"].(map[string]any)
 
 	session := s.ensureSession(threadID, metadata)
-	applyThreadValues(session, extractThreadValues(req))
+	s.applyThreadValues(session, extractThreadValues(req))
 	_ = s.persistSessionFile(session)
 	_ = s.appendThreadHistorySnapshot(threadID)
 	writeJSON(w, http.StatusCreated, s.threadResponse(session))
@@ -83,7 +83,7 @@ func (s *Server) handleThreadUpdate(w http.ResponseWriter, r *http.Request) {
 	if metadata, ok := req["metadata"].(map[string]any); ok {
 		applyThreadMetadata(session, metadata)
 	}
-	applyThreadValues(session, extractThreadValues(req))
+	s.applyThreadValues(session, extractThreadValues(req))
 	session.UpdatedAt = time.Now().UTC()
 	s.sessionsMu.Unlock()
 	if err := s.persistSessionFile(session); err != nil {
@@ -348,9 +348,16 @@ func numberFromAny(v any) float64 {
 	return value
 }
 
-func applyThreadValues(session *Session, values map[string]any) {
+func (s *Server) applyThreadValues(session *Session, values map[string]any) {
 	if session == nil || len(values) == 0 {
 		return
+	}
+	if hasAnyKey(values, "messages") {
+		if rawMessages, ok := values["messages"].([]any); ok {
+			session.Messages = s.convertToMessages(session.ThreadID, rawMessages)
+		} else {
+			session.Messages = nil
+		}
 	}
 	if hasAnyKey(values, "title") {
 		if title, ok := values["title"].(string); ok {
@@ -439,6 +446,7 @@ func extractThreadValues(raw map[string]any) map[string]any {
 	}
 	values := map[string]any{}
 	for canonicalKey, aliases := range map[string][]string{
+		"messages":       {"messages"},
 		"title":          {"title"},
 		"todos":          {"todos"},
 		"sandbox":        {"sandbox"},
@@ -528,7 +536,7 @@ func (s *Server) handleThreadStatePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	applyThreadValues(session, extractThreadValues(req))
+	s.applyThreadValues(session, extractThreadValues(req))
 	metadata, _ := req["metadata"].(map[string]any)
 	applyThreadMetadata(session, metadata)
 	session.UpdatedAt = time.Now().UTC()
@@ -563,7 +571,7 @@ func (s *Server) handleThreadStatePatch(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "thread not found", http.StatusNotFound)
 		return
 	}
-	applyThreadValues(session, extractThreadValues(req))
+	s.applyThreadValues(session, extractThreadValues(req))
 	metadata, _ := req["metadata"].(map[string]any)
 	applyThreadMetadata(session, metadata)
 	session.UpdatedAt = time.Now().UTC()
