@@ -1385,6 +1385,61 @@ func TestThreadRunAcceptsTopLevelContext(t *testing.T) {
 	}
 }
 
+func TestThreadRunAcceptsCamelCaseConfigFields(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+	body := `{"assistant_id":"lead_agent","input":{"messages":[{"role":"user","content":"hi"}]},"config":{"configurable":{"modelName":"deepseek/deepseek-r1","thinkingEnabled":false,"isPlanMode":true,"subagentEnabled":true,"reasoningEffort":"high","agentType":"deep_research","maxTokens":321}}}`
+	resp, err := http.Post(ts.URL+"/threads/thread-camel-config/runs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	threadResp, err := http.Get(ts.URL + "/threads/thread-camel-config")
+	if err != nil {
+		t.Fatalf("get thread: %v", err)
+	}
+	defer threadResp.Body.Close()
+	if threadResp.StatusCode != http.StatusOK {
+		t.Fatalf("thread status=%d", threadResp.StatusCode)
+	}
+	var thread map[string]any
+	if err := json.NewDecoder(threadResp.Body).Decode(&thread); err != nil {
+		t.Fatalf("decode thread: %v", err)
+	}
+	metadata, ok := thread["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("metadata=%#v", thread["metadata"])
+	}
+	if metadata["model_name"] != "deepseek/deepseek-r1" || metadata["reasoning_effort"] != "high" {
+		t.Fatalf("metadata=%#v", metadata)
+	}
+	if metadata["thinking_enabled"] != false || metadata["is_plan_mode"] != true || metadata["subagent_enabled"] != true {
+		t.Fatalf("metadata=%#v", metadata)
+	}
+
+	stateResp, err := http.Get(ts.URL + "/threads/thread-camel-config/state")
+	if err != nil {
+		t.Fatalf("get state: %v", err)
+	}
+	defer stateResp.Body.Close()
+	var state ThreadState
+	if err := json.NewDecoder(stateResp.Body).Decode(&state); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	config, _ := state.Config["configurable"].(map[string]any)
+	if config["model_name"] != "deepseek/deepseek-r1" || config["reasoning_effort"] != "high" {
+		t.Fatalf("config=%#v", config)
+	}
+	if config["thinking_enabled"] != false || config["is_plan_mode"] != true || config["subagent_enabled"] != true {
+		t.Fatalf("config=%#v", config)
+	}
+}
+
 func TestThreadRunPersistsCoreMetadataFields(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.llmProvider = fakeLLMProvider{}

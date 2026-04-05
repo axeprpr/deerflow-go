@@ -785,14 +785,51 @@ func parseRunConfig(raw map[string]any) runConfig {
 
 	configurable, _ := raw["configurable"].(map[string]any)
 	cfg := runConfig{
-		ModelName:       firstNonEmpty(stringFromAny(raw["model_name"]), stringFromAny(raw["model"]), stringFromAny(configurable["model_name"]), stringFromAny(configurable["model"])),
-		ReasoningEffort: firstNonEmpty(stringFromAny(raw["reasoning_effort"]), stringFromAny(configurable["reasoning_effort"])),
-		AgentType:       agent.AgentType(firstNonEmpty(stringFromAny(raw["agent_type"]), stringFromAny(configurable["agent_type"]))),
-		ThinkingEnabled: boolPointerFromAny(firstNonNil(raw["thinking_enabled"], configurable["thinking_enabled"])),
-		IsPlanMode:      boolPointerFromAny(firstNonNil(raw["is_plan_mode"], configurable["is_plan_mode"])),
-		SubagentEnabled: boolPointerFromAny(firstNonNil(raw["subagent_enabled"], configurable["subagent_enabled"])),
-		Temperature:     floatPointerFromAny(firstNonNil(raw["temperature"], configurable["temperature"])),
-		MaxTokens:       intPointerFromAny(firstNonNil(raw["max_tokens"], configurable["max_tokens"])),
+		ModelName: firstNonEmpty(
+			stringFromAny(raw["model_name"]),
+			stringFromAny(raw["modelName"]),
+			stringFromAny(raw["model"]),
+			stringFromAny(configurable["model_name"]),
+			stringFromAny(configurable["modelName"]),
+			stringFromAny(configurable["model"]),
+		),
+		ReasoningEffort: firstNonEmpty(
+			stringFromAny(raw["reasoning_effort"]),
+			stringFromAny(raw["reasoningEffort"]),
+			stringFromAny(configurable["reasoning_effort"]),
+			stringFromAny(configurable["reasoningEffort"]),
+		),
+		AgentType: agent.AgentType(firstNonEmpty(
+			stringFromAny(raw["agent_type"]),
+			stringFromAny(raw["agentType"]),
+			stringFromAny(configurable["agent_type"]),
+			stringFromAny(configurable["agentType"]),
+		)),
+		ThinkingEnabled: boolPointerFromAny(firstNonNil(
+			raw["thinking_enabled"],
+			raw["thinkingEnabled"],
+			configurable["thinking_enabled"],
+			configurable["thinkingEnabled"],
+		)),
+		IsPlanMode: boolPointerFromAny(firstNonNil(
+			raw["is_plan_mode"],
+			raw["isPlanMode"],
+			configurable["is_plan_mode"],
+			configurable["isPlanMode"],
+		)),
+		SubagentEnabled: boolPointerFromAny(firstNonNil(
+			raw["subagent_enabled"],
+			raw["subagentEnabled"],
+			configurable["subagent_enabled"],
+			configurable["subagentEnabled"],
+		)),
+		Temperature: floatPointerFromAny(firstNonNil(raw["temperature"], configurable["temperature"])),
+		MaxTokens: intPointerFromAny(firstNonNil(
+			raw["max_tokens"],
+			raw["maxTokens"],
+			configurable["max_tokens"],
+			configurable["maxTokens"],
+		)),
 	}
 	return cfg
 }
