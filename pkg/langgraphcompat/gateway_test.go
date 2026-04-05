@@ -8687,6 +8687,7 @@ func TestThreadRunStreamEmitsToolEndAliasAndUsageMetadata(t *testing.T) {
 	endBlock := sseEventBlock(t, text, "tool_call_end")
 	aliasBlock := sseEventBlock(t, text, "on_tool_end")
 	updatesBlock := sseEventBlock(t, text, "updates")
+	streamEndBlock := sseEventBlock(t, text, "end")
 	if !strings.Contains(text, "event: tool_call_start") {
 		t.Fatalf("missing tool_call_start event: %s", text)
 	}
@@ -8743,6 +8744,17 @@ func TestThreadRunStreamEmitsToolEndAliasAndUsageMetadata(t *testing.T) {
 	}
 	if !strings.Contains(text, "\"type\":\"tool\",\"id\":\"tool:call-1\"") {
 		t.Fatalf("missing stable tool message id: %s", text)
+	}
+	if !strings.Contains(streamEndBlock, `"run_id":"`) {
+		t.Fatalf("missing run_id in live end payload: %s", streamEndBlock)
+	}
+	if !strings.Contains(streamEndBlock, `"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}`) {
+		t.Fatalf("missing usage in live end payload: %s", streamEndBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(streamEndBlock, forbidden) {
+			t.Fatalf("unexpected live end field %s: %s", forbidden, streamEndBlock)
+		}
 	}
 }
 
