@@ -2143,8 +2143,8 @@ func TestLoadPersistedThreadsAcceptsValuesStateObject(t *testing.T) {
 			"assistant_id":"assistant-1",
 			"model_name":"qwen/Qwen3.5-9B"
 		},
-		"checkpoint":{"checkpoint_id":"cp-checkpoint-object","checkpoint_ns":"ns-current"},
-		"parent_checkpoint":{"checkpoint_id":"cp-parent-object","checkpoint_ns":"ns-parent"},
+		"checkpoint":{"checkpoint_id":"cp-checkpoint-object","thread_id":"thread-values-state","checkpoint_ns":"ns-current"},
+		"parent_checkpoint":{"checkpoint_id":"cp-parent-object","thread_id":"thread-values-state","checkpoint_ns":"ns-parent"},
 		"checkpoint_id":"cp-top-level",
 		"parent_checkpoint_id":"cp-parent-top-level",
 		"created_at":"2026-01-01T00:00:00Z"
@@ -2170,6 +2170,9 @@ func TestLoadPersistedThreadsAcceptsValuesStateObject(t *testing.T) {
 		t.Fatalf("metadata=%#v", session.Metadata)
 	}
 	if session.Metadata["checkpoint_ns"] != "ns-current" || session.Metadata["parent_checkpoint_ns"] != "ns-parent" {
+		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+	if session.Metadata["checkpoint_thread_id"] != "thread-values-state" || session.Metadata["parent_checkpoint_thread_id"] != "thread-values-state" {
 		t.Fatalf("metadata=%#v", session.Metadata)
 	}
 	if artifacts := anyStringSlice(session.Metadata["artifacts"]); len(artifacts) != 1 || artifacts[0] != "/tmp/report.html" {
