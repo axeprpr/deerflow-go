@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -354,6 +355,12 @@ func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Limit == 0 {
 		req.Limit = req.PageSizeX
+	}
+	if req.Limit == 0 {
+		query := r.URL.Query()
+		if rawLimit := firstNonEmpty(query.Get("limit"), query.Get("pageSize")); rawLimit != "" {
+			req.Limit, _ = strconv.Atoi(rawLimit)
+		}
 	}
 
 	state := s.getThreadState(threadID)

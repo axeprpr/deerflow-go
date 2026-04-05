@@ -1037,6 +1037,42 @@ func TestThreadHistoryAcceptsPageSizeAlias(t *testing.T) {
 	}
 }
 
+func TestThreadHistoryGetAcceptsLimitQuery(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.ensureSession("history-query", nil)
+
+	for i := 1; i <= 3; i++ {
+		body := strings.NewReader(fmt.Sprintf(`{"values":{"title":"Version %d"}}`, i))
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/history-query/state", body)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("post thread state: %v", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("state status=%d", resp.StatusCode)
+		}
+	}
+
+	resp, err := http.Get(ts.URL + "/threads/history-query/history?limit=2")
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("history status=%d", resp.StatusCode)
+	}
+
+	var history []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&history); err != nil {
+		t.Fatalf("decode history: %v", err)
+	}
+	if len(history) != 2 {
+		t.Fatalf("history len=%d", len(history))
+	}
+}
+
 func TestThreadDeleteRemovesRunFiles(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-cleanup"
