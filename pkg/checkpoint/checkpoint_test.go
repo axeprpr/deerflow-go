@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -227,6 +228,51 @@ func TestMessageCRUD(t *testing.T) {
 	}
 	if len(messages) != 0 {
 		t.Fatalf("LoadSession() len = %d, want 0", len(messages))
+	}
+}
+
+func TestSQLiteStoreRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store, err := OpenStore(ctx, filepath.Join(t.TempDir(), "checkpoint.db"))
+	if err != nil {
+		t.Fatalf("OpenStore() error = %v", err)
+	}
+	defer store.Close()
+
+	now := time.Date(2026, 4, 5, 10, 0, 0, 0, time.UTC)
+	session := Session{
+		ID:        "sqlite-session",
+		UserID:    "local",
+		State:     SessionStateActive,
+		Metadata:  map[string]string{"backend": "sqlite"},
+		CreatedAt: now,
+		UpdatedAt: now,
+		Messages: []Message{
+			{
+				ID:        "sqlite-msg-1",
+				SessionID: "sqlite-session",
+				Role:      RoleHuman,
+				Content:   "hello sqlite",
+				CreatedAt: now,
+			},
+		},
+	}
+
+	if err := store.SaveSession(ctx, session); err != nil {
+		t.Fatalf("SaveSession() error = %v", err)
+	}
+
+	got, err := store.GetSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("GetSession() error = %v", err)
+	}
+	if got.Metadata["backend"] != "sqlite" {
+		t.Fatalf("metadata = %#v", got.Metadata)
+	}
+	if len(got.Messages) != 1 || got.Messages[0].Content != "hello sqlite" {
+		t.Fatalf("messages = %#v", got.Messages)
 	}
 }
 

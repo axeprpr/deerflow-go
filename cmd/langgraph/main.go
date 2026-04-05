@@ -17,11 +17,17 @@ import (
 //go:embed frontend/*
 var frontendFS embed.FS
 
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildTime = "unknown"
+)
+
 func main() {
 	yolo := flag.Bool("yolo", false, "YOLO mode: no auth, defaults for all settings")
 	authToken := flag.String("auth-token", os.Getenv("DEERFLOW_AUTH_TOKEN"), "Bearer token for API auth (env: DEERFLOW_AUTH_TOKEN)")
 	addr := flag.String("addr", defaultAddr(), "Server address")
-	dbURL := flag.String("db", firstNonEmpty(os.Getenv("POSTGRES_URL")), "Postgres database URL")
+	dbURL := flag.String("db", firstNonEmpty(os.Getenv("DATABASE_URL"), os.Getenv("POSTGRES_URL")), "Database URL (postgres or sqlite)")
 	model := flag.String("model", firstNonEmpty(os.Getenv("DEFAULT_LLM_MODEL"), "qwen/Qwen3.5-9B"), "Default LLM model")
 	flag.Parse()
 
@@ -43,7 +49,6 @@ func main() {
 		}
 	}
 
-	// Propagate auth token to env for server to pick up
 	if *authToken != "" {
 		os.Setenv("DEERFLOW_AUTH_TOKEN", *authToken)
 	}
@@ -54,7 +59,7 @@ func main() {
 	logger.Printf("  Database: %s", describeDB(*dbURL))
 	logger.Printf("  Model:    %s", *model)
 	logger.Printf("  Auth:     %s", describeAuth(*authToken, *yolo))
-
+	logger.Printf("  Version: %s (%s, %s)", version, commit, buildTime)
 	if level := strings.TrimSpace(os.Getenv("LOG_LEVEL")); level != "" {
 		logger.Printf("  Log Level: %s", level)
 	}

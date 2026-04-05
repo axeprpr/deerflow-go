@@ -2,7 +2,7 @@
 
 ## Overview
 
-`deerflow-go` is a Go reimplementation of DeerFlow focused on a lightweight, self-hosted agent runtime. It exposes a LangGraph-compatible HTTP API, streams execution over Server-Sent Events (SSE), supports built-in tools for shell and file operations, and can persist thread checkpoints in PostgreSQL.
+`deerflow-go` is a Go reimplementation of DeerFlow focused on a lightweight, self-hosted agent runtime. It exposes a LangGraph-compatible HTTP API, streams execution over Server-Sent Events (SSE), supports built-in tools for shell and file operations, and can persist thread checkpoints in SQLite or PostgreSQL.
 
 Core characteristics:
 
@@ -10,7 +10,7 @@ Core characteristics:
 - Streaming execution via SSE
 - Built-in tools for shell, files, clarification, artifacts, and subagents
 - Multiple agent profiles optimized for general, research, coding, and analysis workflows
-- Optional PostgreSQL persistence for checkpoints
+- Optional SQLite or PostgreSQL persistence for checkpoints
 - Compatible with `deerflow-ui` via `NEXT_PUBLIC_LANGGRAPH_BASE_URL`
 
 ## Quick Start
@@ -21,7 +21,7 @@ This path gets a local server running in about five minutes.
 
 - Go 1.23+
 - A SiliconFlow API key
-- Optional: PostgreSQL 16+ for checkpoint persistence
+- Optional: SQLite for single-file local persistence or PostgreSQL 16+ for external persistence
 
 ### 2. Configure environment
 
@@ -42,7 +42,9 @@ export PORT=8080
 Optional persistence:
 
 ```bash
-export POSTGRES_URL=postgres://postgres:password@localhost:5432/deerflow?sslmode=disable
+export DATABASE_URL=sqlite:///tmp/deerflow-go/deerflow.db
+# or
+export DATABASE_URL=postgres://postgres:password@localhost:5432/deerflow?sslmode=disable
 ```
 
 ### 3. Build and run
@@ -50,6 +52,19 @@ export POSTGRES_URL=postgres://postgres:password@localhost:5432/deerflow?sslmode
 ```bash
 make build
 make run
+```
+
+For a single self-contained binary with the frontend embedded:
+
+```bash
+# Recommended: add deerflow-ui as a git submodule under third_party/deerflow-ui
+make build-release
+```
+
+You can also point at an existing checkout:
+
+```bash
+make build-release UI_DIR=/abs/path/to/deerflow-ui/frontend
 ```
 
 Or run directly:
@@ -97,12 +112,13 @@ curl -N \
 
 ## Configuration
 
-The server can be configured through environment variables. `cmd/langgraph` reads `PORT`, `POSTGRES_URL`, and `DEFAULT_LLM_MODEL` directly; the LLM provider reads its own API credentials from the environment.
+The server can be configured through environment variables. `cmd/langgraph` reads `PORT`, `DATABASE_URL`, `POSTGRES_URL`, and `DEFAULT_LLM_MODEL` directly; the LLM provider reads its own API credentials from the environment.
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
 | `SILICONFLOW_API_KEY` | Yes for SiliconFlow | none | API key used by the default `siliconflow` provider. |
-| `POSTGRES_URL` | No | empty | PostgreSQL connection string for checkpoint persistence. When unset, state is in-memory only. |
+| `DATABASE_URL` | No | empty | Database URL for persistence. Supports `sqlite:///...` for single-file deployment and `postgres://...` for external PostgreSQL. When unset, state is in-memory only. |
+| `POSTGRES_URL` | No | empty | Legacy PostgreSQL fallback read only when `DATABASE_URL` is unset. |
 | `DEFAULT_LLM_MODEL` | No | `qwen/Qwen3.5-9B` for `cmd/langgraph` | Default model passed to runs when the request does not override `config.configurable.model_name`. |
 | `DEERFLOW_TITLE_ENABLED` | No | `true` | Enable or disable automatic thread title generation after the first exchange. |
 | `DEERFLOW_TITLE_MAX_WORDS` | No | `6` | Maximum words allowed in generated thread titles. Valid range: `1-20`. |
@@ -122,11 +138,24 @@ Example:
 
 ```bash
 export SILICONFLOW_API_KEY=sk-xxx
-export POSTGRES_URL=postgres://postgres:password@localhost:5432/deerflow?sslmode=disable
+export DATABASE_URL=sqlite:///tmp/deerflow-go/deerflow.db
 export DEFAULT_LLM_MODEL=qwen/Qwen3.5-9B
 export PORT=8080
 export LOG_LEVEL=info
 ```
+
+## Embedded Frontend
+
+`cmd/langgraph` can serve a statically exported `deerflow-ui` bundle from the same Go binary.
+
+- Preferred source location: `third_party/deerflow-ui/frontend`
+- Build assets only: `make build-ui`
+- Build API + UI binary: `make build-release`
+- Runtime URL layout:
+  - UI: `/`
+  - API: `/api/langgraph`
+
+If the embedded asset bundle is absent, `cmd/langgraph` continues to run as API-only.
 
 ## API Reference
 

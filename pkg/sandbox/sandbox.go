@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -136,7 +135,7 @@ func (s *Sandbox) Exec(ctx context.Context, cmd string, timeout time.Duration) (
 
 	command := exec.CommandContext(runCtx, exePath)
 	command.Dir = s.sessionDir
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	command.SysProcAttr = newSysProcAttr()
 	command.Env = append(os.Environ(),
 		helperEnvEnabled+"=1",
 		helperEnvBackend+"="+string(s.backend),
@@ -341,16 +340,6 @@ func exitCode(state *os.ProcessState, waitErr error) int {
 	return -1
 }
 
-func forceKillProcess(proc *os.Process) {
-	if proc == nil {
-		return
-	}
-	if proc.Pid > 0 {
-		_ = syscall.Kill(-proc.Pid, syscall.SIGKILL)
-	}
-	_ = proc.Kill()
-}
-
 func normalizeConfig(cfg Config) Config {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = defaultTimeout
@@ -382,38 +371,14 @@ func runHelper() int {
 	case backendLandlock:
 		if err := applyLandlock(dir); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "landlock setup failed: %v\n", err)
-			if hasBubblewrap() {
-				return execBubblewrap(dir, cmd, env)
-			}
-			return execShell(cmd, env)
+			return runHelperCommand(backendBwrap, dir, cmd, env)
 		}
-		return execShell(cmd, env)
+		return runHelperCommand(backendDirect, dir, cmd, env)
 	case backendBwrap:
-		return execBubblewrap(dir, cmd, env)
+		return runHelperCommand(backendBwrap, dir, cmd, env)
 	default:
-		return execShell(cmd, env)
+		return runHelperCommand(backendDirect, dir, cmd, env)
 	}
-}
-
-func execShell(command string, env []string) int {
-	return execProgram("/bin/sh", []string{"/bin/sh", "-lc", command}, env)
-}
-
-func execBubblewrap(dir string, command string, env []string) int {
-	args, err := bubblewrapArgs(dir, command)
-	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "bubblewrap args: %v\n", err)
-		return execShell(command, env)
-	}
-	return execProgram(bwrapPath, args, env)
-}
-
-func execProgram(path string, args []string, env []string) int {
-	if err := syscall.Exec(path, args, env); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "exec %s: %v\n", path, err)
-		return 127
-	}
-	return 0
 }
 
 func helperEnv(base []string, dir string) []string {
@@ -439,8 +404,7 @@ func ExecDirect(ctx context.Context, cmd string, timeout time.Duration) (*Result
 // ExecDirectInDir runs a command without sandbox restrictions from the provided directory.
 func ExecDirectInDir(ctx context.Context, cmd string, dir string, timeout time.Duration) (*Result, error) {
 	start := time.Now()
-	execCmd := exec.Command("sh", "-c", cmd)
-	execCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	execCmd := shellCommand(cmd)
 	if strings.TrimSpace(dir) != "" {
 		execCmd.Dir = dir
 	}

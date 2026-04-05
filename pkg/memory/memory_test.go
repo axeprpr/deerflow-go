@@ -608,6 +608,45 @@ func TestFileStoreSaveLoadRoundTrip(t *testing.T) {
 		t.Fatalf("longTermBackground = %q want %q", got.History.LongTermBackground, doc.History.LongTermBackground)
 	}
 	if len(got.Facts) != 1 || got.Facts[0].Content != "Prefers concrete bug reports" {
+
+		t.Fatalf("facts = %#v", got.Facts)
+	}
+}
+
+func TestSQLiteStoreSaveLoad(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store, err := OpenStore(ctx, filepath.Join(t.TempDir(), "memory.db"))
+	if err != nil {
+		t.Fatalf("OpenStore() error = %v", err)
+	}
+	defer store.Close()
+
+	now := time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)
+	doc := Document{
+		SessionID: "sqlite-memory",
+		User: UserMemory{
+			TopOfMind: "Ship single-file deploy",
+		},
+		Facts: []Fact{
+			{ID: "deploy", Content: "Uses sqlite for lightweight persistence", Category: "project", Confidence: 0.9, CreatedAt: now, UpdatedAt: now},
+		},
+		UpdatedAt: now,
+	}
+
+	if err := store.Save(ctx, doc); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	got, err := store.Load(ctx, doc.SessionID)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.User.TopOfMind != doc.User.TopOfMind {
+		t.Fatalf("top_of_mind = %q", got.User.TopOfMind)
+	}
+	if len(got.Facts) != 1 || got.Facts[0].ID != "deploy" {
 		t.Fatalf("facts = %#v", got.Facts)
 	}
 }

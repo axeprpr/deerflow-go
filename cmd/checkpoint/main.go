@@ -38,7 +38,7 @@ func newMigrateCommand(cfg config) *cobra.Command {
 		Use:   "migrate",
 		Short: "Run checkpoint schema migrations",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			store, err := checkpoint.NewPostgresStore(cmd.Context(), cfg.DatabaseURL)
+			store, err := checkpoint.OpenStore(cmd.Context(), cfg.DatabaseURL)
 			if err != nil {
 				return err
 			}
@@ -60,7 +60,7 @@ func newTestCommand(cfg config) *cobra.Command {
 		Short: "Create and read back a test session with messages",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
-			store, err := checkpoint.NewPostgresStore(ctx, cfg.DatabaseURL)
+			store, err := checkpoint.OpenStore(ctx, cfg.DatabaseURL)
 			if err != nil {
 				return err
 			}

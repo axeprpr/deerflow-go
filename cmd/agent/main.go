@@ -24,7 +24,6 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 	"github.com/axeprpr/deerflow-go/pkg/tools/builtin"
 	"github.com/caarlos0/env/v11"
-	"github.com/jackc/pgx/v5"
 	"github.com/spf13/cobra"
 )
 
@@ -204,12 +203,12 @@ func newApp(ctx context.Context, cfg config) (*app, func(), error) {
 
 	store := sessionStore(newMemoryStore())
 	if strings.TrimSpace(cfg.DatabaseURL) != "" {
-		pgStore, err := checkpoint.NewPostgresStore(ctx, cfg.DatabaseURL)
+		dbStore, err := checkpoint.OpenStore(ctx, cfg.DatabaseURL)
 		if err != nil {
 			return nil, nil, err
 		}
-		store = &postgresSessionStore{store: pgStore}
-		cleanupFns = append(cleanupFns, pgStore.Close)
+		store = &durableSessionStore{store: dbStore}
+		cleanupFns = append(cleanupFns, dbStore.Close)
 	}
 
 	cleanup := func() {
@@ -472,14 +471,14 @@ func (s *memoryStore) Save(_ context.Context, session models.Session) error {
 	return nil
 }
 
-type postgresSessionStore struct {
-	store *checkpoint.PostgresStore
+type durableSessionStore struct {
+	store checkpoint.Store
 }
 
-func (s *postgresSessionStore) Load(ctx context.Context, sessionID string) ([]models.Message, error) {
+func (s *durableSessionStore) Load(ctx context.Context, sessionID string) ([]models.Message, error) {
 	session, err := s.store.GetSession(ctx, sessionID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, checkpoint.ErrNotFound) {
 			return nil, nil
 		}
 		return nil, err
@@ -487,7 +486,7 @@ func (s *postgresSessionStore) Load(ctx context.Context, sessionID string) ([]mo
 	return session.Messages, nil
 }
 
-func (s *postgresSessionStore) Save(ctx context.Context, session models.Session) error {
+func (s *durableSessionStore) Save(ctx context.Context, session models.Session) error {
 	return s.store.SaveSession(ctx, session)
 }
 

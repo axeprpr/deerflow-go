@@ -42,7 +42,7 @@ func newMigrateCommand(cfg config) *cobra.Command {
 		Use:   "migrate",
 		Short: "Run memory schema migrations",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			store, err := memory.NewPostgresStore(cmd.Context(), cfg.DatabaseURL)
+			store, err := memory.OpenStore(cmd.Context(), cfg.DatabaseURL)
 			if err != nil {
 				return err
 			}
@@ -59,7 +59,7 @@ func newGetCommand(cfg config) *cobra.Command {
 		Use:   "get --session-id <id>",
 		Short: "Load the durable memory snapshot for a session",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			store, err := memory.NewPostgresStore(cmd.Context(), cfg.DatabaseURL)
+			store, err := memory.OpenStore(cmd.Context(), cfg.DatabaseURL)
 			if err != nil {
 				return err
 			}
@@ -93,7 +93,7 @@ func newUpdateCommand(cfg config) *cobra.Command {
 		Use:   "update --session-id <id> --message <text>",
 		Short: "Run a single memory extraction/update round",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			store, err := memory.NewPostgresStore(cmd.Context(), cfg.DatabaseURL)
+			store, err := memory.OpenStore(cmd.Context(), cfg.DatabaseURL)
 			if err != nil {
 				return err
 			}

@@ -41,7 +41,7 @@ type Server struct {
 	clarifyAPI        *clarification.API
 	defaultModel      string
 	maxTurns          int
-	store             *checkpoint.PostgresStore
+	store             checkpoint.Store
 	startedAt         time.Time
 	sessions          map[string]*Session
 	sessionsMu        sync.RWMutex
@@ -231,12 +231,12 @@ func NewServer(addr string, dbURL string, defaultModel string, opts ...ServerOpt
 	registry.Register(tools.TaskTool(subagentPool))
 
 	// Create checkpoint store
-	var store *checkpoint.PostgresStore
+	var store checkpoint.Store
 	if dbURL != "" {
 		var err error
-		store, err = checkpoint.NewPostgresStore(ctx, dbURL)
+		store, err = checkpoint.OpenStore(ctx, dbURL)
 		if err != nil {
-			logger.Printf("Warning: failed to create Postgres store: %v", err)
+			logger.Printf("Warning: failed to create database store: %v", err)
 		}
 	}
 
@@ -520,6 +520,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /health", s.handleHealth)
 	if s.frontend != nil {
 		mux.Handle("/", s.frontend)
+	} else {
+		mux.HandleFunc("/", s.handleEmbeddedUI)
 	}
 }
 
