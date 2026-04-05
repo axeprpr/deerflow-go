@@ -1296,6 +1296,36 @@ func TestLoadMemoryFromFileAcceptsSnakeCaseFields(t *testing.T) {
 	}
 }
 
+func TestLoadMemoryFromFileAcceptsFlatLegacySections(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{dataRoot: root}
+	raw := `{
+		"version":"1.0",
+		"lastUpdated":"2026-01-01T00:00:00Z",
+		"workContext":{"summary":"Work","updatedAt":"2026-01-01T00:00:00Z"},
+		"personal_context":{"summary":"Personal","updated_at":"2026-01-01T00:00:00Z"},
+		"topOfMind":{"summary":"Mind","updatedAt":"2026-01-01T00:00:00Z"},
+		"recent_months":{"summary":"Recent","updated_at":"2026-01-01T00:00:00Z"},
+		"earlierContext":{"summary":"Earlier","updatedAt":"2026-01-01T00:00:00Z"},
+		"long_term_background":{"summary":"Long","updated_at":"2026-01-01T00:00:00Z"},
+		"facts":[]
+	}`
+	if err := os.WriteFile(s.memoryPath(), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write memory file: %v", err)
+	}
+
+	mem, ok := s.loadMemoryFromFile()
+	if !ok {
+		t.Fatal("expected memory file to load")
+	}
+	if mem.User.WorkContext.Summary != "Work" || mem.User.PersonalContext.Summary != "Personal" || mem.User.TopOfMind.Summary != "Mind" {
+		t.Fatalf("unexpected user memory=%#v", mem.User)
+	}
+	if mem.History.RecentMonths.Summary != "Recent" || mem.History.EarlierContext.Summary != "Earlier" || mem.History.LongTermBackground.Summary != "Long" {
+		t.Fatalf("unexpected history memory=%#v", mem.History)
+	}
+}
+
 func TestLoadGatewayStateAcceptsLegacyFieldNames(t *testing.T) {
 	root := t.TempDir()
 	raw := `{

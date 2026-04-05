@@ -1666,18 +1666,50 @@ func gatewayMemoryResponseFromMap(raw map[string]any) gatewayMemoryResponse {
 	if raw == nil {
 		return gatewayMemoryResponse{}
 	}
+	userRaw := mapFromAny(raw["user"])
+	historyRaw := mapFromAny(raw["history"])
 	mem := gatewayMemoryResponse{
 		Version:     firstNonEmpty(stringFromAny(raw["version"])),
 		LastUpdated: firstNonEmpty(stringFromAny(raw["lastUpdated"]), stringFromAny(raw["last_updated"])),
 		User: memoryUser{
-			WorkContext:     memorySectionFromMap(mapFromAny(firstNonNil(raw["workContext"], mapFromAny(raw["user"])["workContext"], mapFromAny(raw["user"])["work_context"]))),
-			PersonalContext: memorySectionFromMap(mapFromAny(firstNonNil(mapFromAny(raw["user"])["personalContext"], mapFromAny(raw["user"])["personal_context"]))),
-			TopOfMind:       memorySectionFromMap(mapFromAny(firstNonNil(mapFromAny(raw["user"])["topOfMind"], mapFromAny(raw["user"])["top_of_mind"]))),
+			WorkContext: memorySectionFromMap(mapFromAny(firstNonNil(
+				raw["workContext"],
+				raw["work_context"],
+				userRaw["workContext"],
+				userRaw["work_context"],
+			))),
+			PersonalContext: memorySectionFromMap(mapFromAny(firstNonNil(
+				raw["personalContext"],
+				raw["personal_context"],
+				userRaw["personalContext"],
+				userRaw["personal_context"],
+			))),
+			TopOfMind: memorySectionFromMap(mapFromAny(firstNonNil(
+				raw["topOfMind"],
+				raw["top_of_mind"],
+				userRaw["topOfMind"],
+				userRaw["top_of_mind"],
+			))),
 		},
 		History: memoryHistory{
-			RecentMonths:       memorySectionFromMap(mapFromAny(firstNonNil(mapFromAny(raw["history"])["recentMonths"], mapFromAny(raw["history"])["recent_months"]))),
-			EarlierContext:     memorySectionFromMap(mapFromAny(firstNonNil(mapFromAny(raw["history"])["earlierContext"], mapFromAny(raw["history"])["earlier_context"]))),
-			LongTermBackground: memorySectionFromMap(mapFromAny(firstNonNil(mapFromAny(raw["history"])["longTermBackground"], mapFromAny(raw["history"])["long_term_background"]))),
+			RecentMonths: memorySectionFromMap(mapFromAny(firstNonNil(
+				raw["recentMonths"],
+				raw["recent_months"],
+				historyRaw["recentMonths"],
+				historyRaw["recent_months"],
+			))),
+			EarlierContext: memorySectionFromMap(mapFromAny(firstNonNil(
+				raw["earlierContext"],
+				raw["earlier_context"],
+				historyRaw["earlierContext"],
+				historyRaw["earlier_context"],
+			))),
+			LongTermBackground: memorySectionFromMap(mapFromAny(firstNonNil(
+				raw["longTermBackground"],
+				raw["long_term_background"],
+				historyRaw["longTermBackground"],
+				historyRaw["long_term_background"],
+			))),
 		},
 		Facts: memoryFactsFromAny(raw["facts"]),
 	}
