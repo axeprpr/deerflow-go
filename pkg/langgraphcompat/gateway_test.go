@@ -2910,6 +2910,32 @@ func TestLoadThreadHistoryNormalizesCheckpointObjects(t *testing.T) {
 	}
 }
 
+func TestLoadThreadHistoryUsesCheckpointObjectAsIDFallback(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{dataRoot: root}
+	threadID := "thread-history-checkpoint-fallback"
+	if err := os.MkdirAll(s.threadRoot(threadID), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `[
+		{
+			"checkpoint":{"checkpointId":"cp-1","checkpointNs":"ns-1","threadId":"thread-1"},
+			"createdAt":"2026-01-01T00:00:00Z"
+		}
+	]`
+	if err := os.WriteFile(s.threadHistoryPath(threadID), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write history file: %v", err)
+	}
+
+	history := s.loadThreadHistory(threadID)
+	if len(history) != 1 {
+		t.Fatalf("history=%#v", history)
+	}
+	if history[0].CheckpointID != "cp-1" {
+		t.Fatalf("checkpoint_id=%q checkpoint=%#v", history[0].CheckpointID, history[0].Checkpoint)
+	}
+}
+
 func TestLoadThreadHistoryAcceptsScalarStateItems(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}

@@ -1887,6 +1887,9 @@ func normalizeLoadedThreadHistory(history []ThreadState, rawItems []map[string]a
 		}
 		if checkpoint := mapFromAny(rawItems[i]["checkpoint"]); len(checkpoint) > 0 {
 			history[i].Checkpoint = normalizeCheckpointObject(checkpoint)
+			if history[i].CheckpointID == "" {
+				history[i].CheckpointID = stringValue(history[i].Checkpoint["checkpoint_id"])
+			}
 		}
 		if checkpoint := mapFromAny(rawItems[i]["parent_checkpoint"]); len(checkpoint) > 0 {
 			history[i].ParentCheckpoint = normalizeCheckpointObject(checkpoint)
