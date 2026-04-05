@@ -4529,7 +4529,28 @@ func TestThreadStateIncludesCompatFields(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-state-fields"
 	s.ensureSession(threadID, map[string]any{
-		"title": "Compat Thread",
+		"title":                       "Compat Thread",
+		"mode":                        "thinking",
+		"model_name":                  "deepseek/deepseek-r1",
+		"reasoning_effort":            "high",
+		"thinking_enabled":            false,
+		"is_plan_mode":                true,
+		"subagent_enabled":            true,
+		"temperature":                 0.2,
+		"max_tokens":                  321,
+		"checkpoint_id":               "cp-1",
+		"parent_checkpoint_id":        "cp-parent-1",
+		"checkpoint_ns":               "ns-1",
+		"parent_checkpoint_ns":        "ns-parent-1",
+		"checkpoint_thread_id":        "checkpoint-thread-1",
+		"parent_checkpoint_thread_id": "checkpoint-thread-parent-1",
+		"next":                        []any{"lead_agent"},
+		"tasks": []any{
+			map[string]any{"id": "task-1", "name": "lead_agent"},
+		},
+		"interrupts": []any{
+			map[string]any{"value": "Need input"},
+		},
 		"todos": []any{
 			map[string]any{"content": "first", "status": "pending"},
 		},
@@ -4586,6 +4607,34 @@ func TestThreadStateIncludesCompatFields(t *testing.T) {
 	sandboxState, ok := state.Values["sandbox"].(map[string]any)
 	if !ok || sandboxState["sandbox_id"] != "sb-1" {
 		t.Fatalf("sandbox=%#v", state.Values["sandbox"])
+	}
+	configurable, _ := state.Config["configurable"].(map[string]any)
+	if configurable["mode"] != "thinking" || configurable["model_name"] != "deepseek/deepseek-r1" || configurable["reasoning_effort"] != "high" {
+		t.Fatalf("config=%#v", state.Config)
+	}
+	if configurable["thinking_enabled"] != false || configurable["is_plan_mode"] != true || configurable["subagent_enabled"] != true {
+		t.Fatalf("config=%#v", state.Config)
+	}
+	if configurable["temperature"] != 0.2 {
+		t.Fatalf("config=%#v", state.Config)
+	}
+	if configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != int64(321) && configurable["max_tokens"] != 321 {
+		t.Fatalf("config=%#v", state.Config)
+	}
+	if state.Checkpoint == nil || state.Checkpoint["checkpoint_id"] != "cp-1" || state.Checkpoint["checkpoint_ns"] != "ns-1" || state.Checkpoint["thread_id"] != "checkpoint-thread-1" {
+		t.Fatalf("checkpoint=%#v", state.Checkpoint)
+	}
+	if state.ParentCheckpoint == nil || state.ParentCheckpoint["checkpoint_id"] != "cp-parent-1" || state.ParentCheckpoint["checkpoint_ns"] != "ns-parent-1" || state.ParentCheckpoint["thread_id"] != "checkpoint-thread-parent-1" {
+		t.Fatalf("parent_checkpoint=%#v", state.ParentCheckpoint)
+	}
+	if len(state.Next) != 1 || state.Next[0] != "lead_agent" {
+		t.Fatalf("next=%#v", state.Next)
+	}
+	if len(state.Tasks) != 1 {
+		t.Fatalf("tasks=%#v", state.Tasks)
+	}
+	if len(state.Interrupts) != 1 {
+		t.Fatalf("interrupts=%#v", state.Interrupts)
 	}
 }
 
