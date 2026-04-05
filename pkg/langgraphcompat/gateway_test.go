@@ -2274,6 +2274,49 @@ func TestThreadArtifactsRecoveredFromMessageHistory(t *testing.T) {
 	}
 }
 
+func TestArtifactGetAllowsRecoveredMessageHistoryPaths(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-artifact-history-read"
+	session := s.ensureSession(threadID, map[string]any{"title": "Artifacts"})
+	session.PresentFiles.Clear()
+	target := filepath.Join(s.dataRoot, "report.md")
+	if err := os.WriteFile(target, []byte("artifact from history"), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+	session.Messages = []models.Message{
+		{
+			ID:        "ai-1",
+			SessionID: threadID,
+			Role:      models.RoleAI,
+			ToolCalls: []models.ToolCall{
+				{
+					ID:        "call-1",
+					Name:      "present_file",
+					Arguments: map[string]any{"path": target},
+					Status:    models.CallStatusCompleted,
+				},
+			},
+		},
+	}
+
+	resp, err := http.Get(ts.URL + "/api/threads/" + threadID + "/artifacts" + target)
+	if err != nil {
+		t.Fatalf("get artifact: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if string(body) != "artifact from history" {
+		t.Fatalf("body=%q", string(body))
+	}
+}
+
 func TestThreadRunStreamEmitsToolEndAliasAndUsageMetadata(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.llmProvider = &fakeToolLLMProvider{}

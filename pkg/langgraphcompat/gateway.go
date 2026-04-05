@@ -889,6 +889,11 @@ func (s *Server) artifactAllowed(threadID, absPath string) bool {
 			return true
 		}
 	}
+	for _, path := range sessionArtifactPaths(session) {
+		if filepath.Clean(path) == absPath {
+			return true
+		}
+	}
 	return false
 }
 
