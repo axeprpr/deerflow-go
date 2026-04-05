@@ -6123,6 +6123,53 @@ func TestThreadUpdateClearsMessagesWithNull(t *testing.T) {
 	}
 }
 
+func TestThreadHistoryReflectsWrittenMessages(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-history-written-messages"
+	s.ensureSession(threadID, nil)
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID+"/state",
+		strings.NewReader(`{"values":{"messages":[{"id":"m1","type":"human","content":"hello"}]}}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("patch state: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	historyResp, err := http.Get(ts.URL + "/threads/" + threadID + "/history?limit=1")
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+	defer historyResp.Body.Close()
+	if historyResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(historyResp.Body)
+		t.Fatalf("status=%d body=%s", historyResp.StatusCode, string(b))
+	}
+
+	var history []ThreadState
+	if err := json.NewDecoder(historyResp.Body).Decode(&history); err != nil {
+		t.Fatalf("decode history: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len=%d", len(history))
+	}
+	messages, _ := history[0].Values["messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("values=%#v", history[0].Values)
+	}
+	message, _ := messages[0].(map[string]any)
+	if message["id"] != "m1" || message["content"] != "hello" {
+		t.Fatalf("message=%#v", message)
+	}
+}
+
 func TestThreadGetIncludesCompatShape(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-get-shape"
