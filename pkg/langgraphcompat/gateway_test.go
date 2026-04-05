@@ -2193,6 +2193,13 @@ func TestLoadPersistedThreadsAcceptsValuesStateObject(t *testing.T) {
 	if session.Status != "idle" {
 		t.Fatalf("status=%q", session.Status)
 	}
+	state := s.getThreadState("thread-values-state")
+	if state == nil {
+		t.Fatalf("state=nil")
+	}
+	if state.CreatedAt != "2026-01-01T00:00:00Z" {
+		t.Fatalf("created_at=%q", state.CreatedAt)
+	}
 }
 
 func TestLoadPersistedThreadsPrefersTopLevelCheckpointIDs(t *testing.T) {

@@ -781,7 +781,7 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 		Tasks:      append([]any(nil), tasks...),
 		Interrupts: append([]any(nil), interrupts...),
 		Metadata:   threadMetadata(session),
-		CreatedAt:  session.UpdatedAt.Format(time.RFC3339Nano),
+		CreatedAt:  firstNonZeroTime(session.CreatedAt, session.UpdatedAt).Format(time.RFC3339Nano),
 	}
 }
 
@@ -902,6 +902,15 @@ func checkpointObjectFromMetadata(metadata map[string]any, prefix string) map[st
 		return nil
 	}
 	return out
+}
+
+func firstNonZeroTime(times ...time.Time) time.Time {
+	for _, ts := range times {
+		if !ts.IsZero() {
+			return ts
+		}
+	}
+	return time.Time{}
 }
 
 func (s *Server) workspaceDir(threadID string) string {
@@ -1692,6 +1701,12 @@ func (s *Server) appendThreadHistorySnapshot(threadID string) error {
 	state := s.getThreadState(threadID)
 	if state == nil {
 		return nil
+	}
+	s.sessionsMu.RLock()
+	session := s.sessions[threadID]
+	s.sessionsMu.RUnlock()
+	if session != nil {
+		state.CreatedAt = firstNonZeroTime(session.UpdatedAt, session.CreatedAt).Format(time.RFC3339Nano)
 	}
 	history := s.loadThreadHistory(threadID)
 	if len(history) > 0 && history[0].CreatedAt == state.CreatedAt {
