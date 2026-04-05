@@ -572,6 +572,59 @@ func TestThreadSearchSelectProjectsFields(t *testing.T) {
 	}
 }
 
+func TestThreadSearchSelectProjectsMessages(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	session := s.ensureSession("thread-search-messages-select", map[string]any{"title": "Projected"})
+	session.Messages = []models.Message{{
+		ID:        "m1",
+		SessionID: "thread-search-messages-select",
+		Role:      models.RoleHuman,
+		Content:   "hello",
+	}}
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"limit":10,"select":["threadId","values"]}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) == 0 {
+		t.Fatal("expected threads")
+	}
+
+	var selected map[string]any
+	for _, thread := range threads {
+		if thread["thread_id"] == "thread-search-messages-select" {
+			selected = thread
+			break
+		}
+	}
+	if selected == nil {
+		t.Fatalf("missing projected thread in %#v", threads)
+	}
+	values, _ := selected["values"].(map[string]any)
+	messages, _ := values["messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("values=%#v", values)
+	}
+	first, _ := messages[0].(map[string]any)
+	if first["content"] != "hello" {
+		t.Fatalf("message=%#v", first)
+	}
+}
+
 func TestThreadSearchDefaultsToFiftyResults(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	for i := 0; i < 12; i++ {

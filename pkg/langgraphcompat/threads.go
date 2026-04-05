@@ -996,6 +996,7 @@ func (s *Server) threadValues(session *Session) map[string]any {
 	values := map[string]any{
 		"title":          stringValue(session.Metadata["title"]),
 		"artifacts":      sessionArtifactPaths(session),
+		"messages":       s.messagesToLangChain(session.Messages),
 		"todos":          todosFromMetadata(session.Metadata["todos"]),
 		"sandbox":        mapFromMetadata(session.Metadata["sandbox"]),
 		"thread_data":    s.restoredThreadDataState(session),
