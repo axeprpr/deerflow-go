@@ -1954,6 +1954,35 @@ func TestSkillInstallFromArchive(t *testing.T) {
 	}
 }
 
+func TestSkillInstallAcceptsCamelCaseThreadID(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-skill-camel"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir upload dir: %v", err)
+	}
+	archivePath := filepath.Join(uploadDir, "camel.skill")
+	if err := writeSkillArchive(archivePath, "camel-skill"); err != nil {
+		t.Fatalf("write skill archive: %v", err)
+	}
+
+	body := `{"threadId":"` + threadID + `","path":"/mnt/user-data/uploads/camel.skill"}`
+	resp, err := http.Post(ts.URL+"/api/skills/install", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("install request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	target := filepath.Join(s.dataRoot, "skills", "custom", "camel-skill", "SKILL.md")
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("expected installed skill file: %v", err)
+	}
+}
+
 func TestAgentsAndMemoryEndpoints(t *testing.T) {
 	_, ts := newCompatTestServer(t)
 

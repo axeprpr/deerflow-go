@@ -262,14 +262,16 @@ func (s *Server) handleSkillSetEnabled(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSkillInstall(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ThreadID string `json:"thread_id"`
-		Path     string `json:"path"`
+		ThreadID  string `json:"thread_id"`
+		ThreadIDX string `json:"threadId"`
+		Path      string `json:"path"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid request body"})
 		return
 	}
-	archivePath, err := s.resolveSkillArchivePath(req.ThreadID, req.Path)
+	threadID := firstNonEmpty(req.ThreadID, req.ThreadIDX)
+	archivePath, err := s.resolveSkillArchivePath(threadID, req.Path)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": err.Error()})
 		return
