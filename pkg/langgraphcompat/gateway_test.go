@@ -5678,6 +5678,41 @@ func TestThreadRunsCreateAcceptsTopLevelMessages(t *testing.T) {
 	}
 }
 
+func TestThreadRunsCreatePersistsMessagesAcrossReload(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+	body := `{"assistant_id":"lead_agent","input":{"messages":[{"id":"user-1","role":"user","content":"hi"}]}}`
+	resp, err := http.Post(ts.URL+"/threads/thread-run-persist/runs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	loaded := &Server{
+		dataRoot: s.dataRoot,
+		sessions: map[string]*Session{},
+	}
+	loaded.loadPersistedThreads()
+
+	session := loaded.sessions["thread-run-persist"]
+	if session == nil {
+		t.Fatal("expected thread restored")
+	}
+	if len(session.Messages) < 2 {
+		t.Fatalf("messages=%#v", session.Messages)
+	}
+	if session.Messages[0].ID != "user-1" || session.Messages[0].Content != "hi" {
+		t.Fatalf("message=%#v", session.Messages[0])
+	}
+	if session.Messages[len(session.Messages)-1].Content != "hello from fake llm" {
+		t.Fatalf("last message=%#v", session.Messages[len(session.Messages)-1])
+	}
+}
+
 func TestThreadClarificationsList(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.ensureSession("thread-clarify", nil)
