@@ -81,9 +81,7 @@ func (s *Server) handleThreadUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if metadata, ok := req["metadata"].(map[string]any); ok {
-		for k, v := range metadata {
-			session.Metadata[k] = v
-		}
+		applyThreadMetadata(session, metadata)
 	}
 	applyThreadValues(session, extractThreadValues(req))
 	session.UpdatedAt = time.Now().UTC()
@@ -1189,9 +1187,7 @@ func (s *Server) ensureSession(threadID string, metadata map[string]any) *Sessio
 
 	if session, exists := s.sessions[threadID]; exists {
 		if metadata != nil {
-			for k, v := range metadata {
-				session.Metadata[k] = v
-			}
+			applyThreadMetadata(session, metadata)
 		}
 		return session
 	}
@@ -1199,6 +1195,7 @@ func (s *Server) ensureSession(threadID string, metadata map[string]any) *Sessio
 	if metadata == nil {
 		metadata = make(map[string]any)
 	}
+	metadata = normalizePersistedThreadMetadata(metadata)
 	if _, exists := metadata["thread_id"]; !exists {
 		metadata["thread_id"] = threadID
 	}

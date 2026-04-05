@@ -5021,7 +5021,7 @@ func TestThreadUpdateAcceptsValuesPayload(t *testing.T) {
 	req, _ := http.NewRequest(
 		http.MethodPatch,
 		ts.URL+"/threads/"+threadID,
-		strings.NewReader(`{"metadata":{"mode":"thinking","model_name":"deepseek/deepseek-r1","reasoning_effort":"high","thinking_enabled":false,"is_plan_mode":true,"subagent_enabled":true,"temperature":0.2,"max_tokens":321,"checkpoint_id":"cp-1","parent_checkpoint_id":"cp-parent-1"},"values":{"title":"After","todos":[{"content":"ship sqlite","status":"completed"}]}}`),
+		strings.NewReader(`{"metadata":{"mode":"thinking","modelName":"deepseek/deepseek-r1","reasoningEffort":"high","agentName":"planner","agentType":"research","thinkingEnabled":false,"isPlanMode":true,"subagentEnabled":true,"Temperature":0.2,"maxTokens":321,"checkpointId":"cp-1","parentCheckpointId":"cp-parent-1","checkpointNs":"ns-1","parentCheckpointNs":"ns-parent-1","checkpointThreadId":"checkpoint-thread-1","parentCheckpointThreadId":"checkpoint-thread-parent-1"},"values":{"title":"After","todos":[{"content":"ship sqlite","status":"completed"}]}}`),
 	)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
@@ -5046,6 +5046,9 @@ func TestThreadUpdateAcceptsValuesPayload(t *testing.T) {
 	if configurable["mode"] != "thinking" || configurable["model_name"] != "deepseek/deepseek-r1" || configurable["reasoning_effort"] != "high" {
 		t.Fatalf("config=%#v", config)
 	}
+	if configurable["agent_name"] != "planner" || configurable["agent_type"] != "research" {
+		t.Fatalf("config=%#v", config)
+	}
 	if configurable["thinking_enabled"] != false || configurable["is_plan_mode"] != true || configurable["subagent_enabled"] != true {
 		t.Fatalf("config=%#v", config)
 	}
@@ -5057,6 +5060,15 @@ func TestThreadUpdateAcceptsValuesPayload(t *testing.T) {
 	}
 	metadata, _ := thread["metadata"].(map[string]any)
 	if metadata["checkpoint_id"] != "cp-1" || metadata["parent_checkpoint_id"] != "cp-parent-1" {
+		t.Fatalf("metadata=%#v", metadata)
+	}
+	if metadata["checkpoint_ns"] != "ns-1" || metadata["parent_checkpoint_ns"] != "ns-parent-1" {
+		t.Fatalf("metadata=%#v", metadata)
+	}
+	if metadata["checkpoint_thread_id"] != "checkpoint-thread-1" || metadata["parent_checkpoint_thread_id"] != "checkpoint-thread-parent-1" {
+		t.Fatalf("metadata=%#v", metadata)
+	}
+	if metadata["agent_name"] != "planner" || metadata["agent_type"] != "research" {
 		t.Fatalf("metadata=%#v", metadata)
 	}
 
