@@ -2229,6 +2229,83 @@ func TestLoadPersistedThreadsAcceptsValuesStateObject(t *testing.T) {
 	}
 }
 
+func TestLoadPersistedThreadsAcceptsCamelCaseValueAliases(t *testing.T) {
+	root := t.TempDir()
+	threadDir := filepath.Join(root, "threads", "thread-values-camel", "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"values":{
+			"messages":[{"id":"m1","type":"human","content":"hello from state"}],
+			"threadData":{
+				"workspace_path":"/external/thread/workspace",
+				"uploads_path":"/external/thread/uploads",
+				"outputs_path":"/external/thread/outputs"
+			},
+			"uploadedFiles":[{"filename":"notes.txt","size":42,"path":"/external/thread/uploads/notes.txt","status":"uploaded"}]
+		},
+		"metadata":{"thread_id":"thread-values-camel"},
+		"created_at":"2026-01-01T00:00:00Z"
+	}`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write thread file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, sessions: map[string]*Session{}}
+	s.loadPersistedThreads()
+
+	session := s.sessions["thread-values-camel"]
+	if session == nil {
+		t.Fatalf("sessions=%#v", s.sessions)
+	}
+	threadData, _ := session.Metadata["thread_data"].(map[string]any)
+	if threadData["workspace_path"] != "/external/thread/workspace" || threadData["uploads_path"] != "/external/thread/uploads" || threadData["outputs_path"] != "/external/thread/outputs" {
+		t.Fatalf("thread_data=%#v metadata=%#v", threadData, session.Metadata)
+	}
+	switch uploadedFiles := session.Metadata["uploaded_files"].(type) {
+	case []map[string]any:
+		if len(uploadedFiles) != 1 || uploadedFiles[0]["filename"] != "notes.txt" || uploadedFiles[0]["path"] != "/external/thread/uploads/notes.txt" {
+			t.Fatalf("uploaded_files=%#v metadata=%#v", uploadedFiles, session.Metadata)
+		}
+	case []any:
+		if len(uploadedFiles) != 1 {
+			t.Fatalf("uploaded_files=%#v metadata=%#v", uploadedFiles, session.Metadata)
+		}
+		file, _ := uploadedFiles[0].(map[string]any)
+		if file["filename"] != "notes.txt" || file["path"] != "/external/thread/uploads/notes.txt" {
+			t.Fatalf("uploaded_files=%#v", uploadedFiles)
+		}
+	default:
+		t.Fatalf("uploaded_files=%#v metadata=%#v", session.Metadata["uploaded_files"], session.Metadata)
+	}
+
+	state := s.getThreadState("thread-values-camel")
+	if state == nil {
+		t.Fatalf("state=nil")
+	}
+	restoredThreadData, _ := state.Values["thread_data"].(map[string]any)
+	if restoredThreadData["workspace_path"] != "/external/thread/workspace" || restoredThreadData["uploads_path"] != "/external/thread/uploads" || restoredThreadData["outputs_path"] != "/external/thread/outputs" {
+		t.Fatalf("thread_data=%#v", state.Values["thread_data"])
+	}
+	switch rawFiles := state.Values["uploaded_files"].(type) {
+	case []map[string]any:
+		if len(rawFiles) != 1 || rawFiles[0]["filename"] != "notes.txt" || rawFiles[0]["path"] != "/external/thread/uploads/notes.txt" {
+			t.Fatalf("uploaded_files=%#v", state.Values["uploaded_files"])
+		}
+	case []any:
+		if len(rawFiles) != 1 {
+			t.Fatalf("uploaded_files=%#v", state.Values["uploaded_files"])
+		}
+		restoredFile, _ := rawFiles[0].(map[string]any)
+		if restoredFile["filename"] != "notes.txt" || restoredFile["path"] != "/external/thread/uploads/notes.txt" {
+			t.Fatalf("uploaded_files=%#v", state.Values["uploaded_files"])
+		}
+	default:
+		t.Fatalf("uploaded_files=%#v", state.Values["uploaded_files"])
+	}
+}
+
 func TestLoadPersistedThreadsAcceptsLegacyModelAlias(t *testing.T) {
 	root := t.TempDir()
 	threadDir := filepath.Join(root, "threads", "thread-model-alias", "user-data")

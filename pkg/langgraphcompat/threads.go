@@ -1494,9 +1494,20 @@ func (s *Server) loadPersistedThreads() {
 			if persisted.Metadata == nil {
 				persisted.Metadata = map[string]any{}
 			}
-			for _, key := range []string{"title", "todos", "sandbox", "viewed_images", "viewedImages", "artifacts", "uploaded_files", "thread_data"} {
-				if value, ok := values[key]; ok {
-					persisted.Metadata[key] = value
+			for metadataKey, valueKeys := range map[string][]string{
+				"title":          {"title"},
+				"todos":          {"todos"},
+				"sandbox":        {"sandbox"},
+				"viewed_images":  {"viewed_images", "viewedImages"},
+				"artifacts":      {"artifacts"},
+				"uploaded_files": {"uploaded_files", "uploadedFiles"},
+				"thread_data":    {"thread_data", "threadData"},
+			} {
+				for _, valueKey := range valueKeys {
+					if value, ok := values[valueKey]; ok {
+						persisted.Metadata[metadataKey] = value
+						break
+					}
 				}
 			}
 		}
