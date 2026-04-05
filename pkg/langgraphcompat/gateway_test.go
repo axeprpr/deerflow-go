@@ -964,6 +964,72 @@ func TestThreadSearchAcceptsCamelCaseParentCheckpointIDSort(t *testing.T) {
 	}
 }
 
+func TestThreadSearchAcceptsCamelCaseRuntimeSortFields(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	first := s.ensureSession("thread-search-runtime-b", map[string]any{
+		"model_name":       "qwen/Qwen3.5-9B",
+		"reasoning_effort": "medium",
+		"thinking_enabled": true,
+		"is_plan_mode":     true,
+		"subagent_enabled": true,
+		"temperature":      0.8,
+		"max_tokens":       512,
+	})
+	second := s.ensureSession("thread-search-runtime-a", map[string]any{
+		"model_name":       "deepseek/deepseek-r1",
+		"reasoning_effort": "high",
+		"thinking_enabled": false,
+		"is_plan_mode":     false,
+		"subagent_enabled": false,
+		"temperature":      0.2,
+		"max_tokens":       128,
+	})
+	first.UpdatedAt = time.Now().UTC().Add(-time.Hour)
+	second.UpdatedAt = time.Now().UTC()
+
+	tests := []struct {
+		name   string
+		sortBy string
+	}{
+		{name: "model", sortBy: "modelName"},
+		{name: "reasoning", sortBy: "reasoningEffort"},
+		{name: "thinking", sortBy: "thinkingEnabled"},
+		{name: "plan", sortBy: "isPlanMode"},
+		{name: "subagent", sortBy: "subagentEnabled"},
+		{name: "temperature", sortBy: "temperature"},
+		{name: "max_tokens", sortBy: "maxTokens"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := http.Post(
+				ts.URL+"/threads/search",
+				"application/json",
+				strings.NewReader(`{"limit":10,"sortBy":"`+tc.sortBy+`","sortOrder":"asc","select":["threadId","modelName","reasoningEffort","thinkingEnabled","isPlanMode","subagentEnabled","temperature","maxTokens"]}`),
+			)
+			if err != nil {
+				t.Fatalf("search request: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				b, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+			}
+
+			var threads []map[string]any
+			if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if len(threads) < 2 {
+				t.Fatalf("threads=%#v", threads)
+			}
+			if threads[0]["thread_id"] != "thread-search-runtime-a" {
+				t.Fatalf("first thread=%v want thread-search-runtime-a", threads[0]["thread_id"])
+			}
+		})
+	}
+}
+
 func TestThreadSearchAcceptsCamelCaseCheckpointSelectFields(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.ensureSession("thread-search-checkpoint-select", map[string]any{

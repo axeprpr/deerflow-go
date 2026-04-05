@@ -178,6 +178,22 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 			less = asString(left["metadata"].(map[string]any)["graph_id"]) < asString(right["metadata"].(map[string]any)["graph_id"])
 		case "run_id":
 			less = asString(left["metadata"].(map[string]any)["run_id"]) < asString(right["metadata"].(map[string]any)["run_id"])
+		case "model_name":
+			less = asString(left["model_name"]) < asString(right["model_name"])
+		case "mode":
+			less = asString(left["mode"]) < asString(right["mode"])
+		case "reasoning_effort":
+			less = asString(left["reasoning_effort"]) < asString(right["reasoning_effort"])
+		case "thinking_enabled":
+			less = boolRank(left["thinking_enabled"]) < boolRank(right["thinking_enabled"])
+		case "is_plan_mode":
+			less = boolRank(left["is_plan_mode"]) < boolRank(right["is_plan_mode"])
+		case "subagent_enabled":
+			less = boolRank(left["subagent_enabled"]) < boolRank(right["subagent_enabled"])
+		case "temperature":
+			less = numberFromAny(left["temperature"]) < numberFromAny(right["temperature"])
+		case "max_tokens":
+			less = numberFromAny(left["max_tokens"]) < numberFromAny(right["max_tokens"])
 		case "checkpoint_id":
 			less = asString(left["checkpoint_id"]) < asString(right["checkpoint_id"])
 		case "parent_checkpoint_id":
@@ -276,6 +292,19 @@ func normalizeThreadFieldName(field string) string {
 	default:
 		return strings.TrimSpace(field)
 	}
+}
+
+func boolRank(v any) int {
+	value, _ := v.(bool)
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func numberFromAny(v any) float64 {
+	value, _ := float64FromAny(v)
+	return value
 }
 
 func applyThreadValues(session *Session, values map[string]any) {
