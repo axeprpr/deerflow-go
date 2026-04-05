@@ -9283,6 +9283,9 @@ func TestRecordedRunStreamReplaysMetadataPayload(t *testing.T) {
 	if !strings.Contains(text, `"assistant_id":"lead_agent"`) {
 		t.Fatalf("missing assistant_id in metadata: %s", text)
 	}
+	if strings.Contains(text, `"status":`) {
+		t.Fatalf("unexpected status in metadata payload: %s", text)
+	}
 }
 
 func TestRecordedRunStreamReplaysEndUsagePayload(t *testing.T) {
@@ -9777,6 +9780,9 @@ func TestThreadJoinStreamReplaysMetadataPayload(t *testing.T) {
 	}
 	if !strings.Contains(text, `"assistant_id":"lead_agent"`) {
 		t.Fatalf("missing assistant_id in metadata: %s", text)
+	}
+	if strings.Contains(text, `"status":`) {
+		t.Fatalf("unexpected status in metadata payload: %s", text)
 	}
 }
 
