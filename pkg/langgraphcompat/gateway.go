@@ -2227,6 +2227,9 @@ func stringSliceFromAny(value any) []string {
 		if direct, ok := value.([]string); ok {
 			return append([]string(nil), direct...)
 		}
+		if text := strings.TrimSpace(stringFromAny(value)); text != "" {
+			return []string{text}
+		}
 		return nil
 	}
 	out := make([]string, 0, len(items))
