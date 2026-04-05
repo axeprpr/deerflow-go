@@ -1428,6 +1428,52 @@ func TestLoadPersistedThreadsAcceptsCamelCaseFields(t *testing.T) {
 	}
 }
 
+func TestLoadPersistedThreadsNormalizesCamelCaseMetadata(t *testing.T) {
+	root := t.TempDir()
+	threadDir := filepath.Join(root, "threads", "thread-meta-camel", "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"threadId":"thread-meta-camel",
+		"messages":[],
+		"metadata":{
+			"viewedImages":{"/tmp/chart.png":{"base64":"xyz","mime_type":"image/png"}},
+			"modelName":"deepseek/deepseek-r1",
+			"reasoningEffort":"high",
+			"agentName":"writer",
+			"thinkingEnabled":false,
+			"isPlanMode":true,
+			"subagentEnabled":true
+		},
+		"status":"idle",
+		"createdAt":"2026-01-01T00:00:00Z",
+		"updatedAt":"2026-01-02T00:00:00Z"
+	}`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write thread file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, sessions: map[string]*Session{}}
+	s.loadPersistedThreads()
+	session := s.sessions["thread-meta-camel"]
+	if session == nil {
+		t.Fatalf("missing session: %#v", s.sessions)
+	}
+	if _, ok := session.Metadata["viewed_images"]; !ok {
+		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+	if session.Metadata["model_name"] != "deepseek/deepseek-r1" {
+		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+	if session.Metadata["reasoning_effort"] != "high" || session.Metadata["agent_name"] != "writer" {
+		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+	if session.Metadata["thinking_enabled"] != false || session.Metadata["is_plan_mode"] != true || session.Metadata["subagent_enabled"] != true {
+		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+}
+
 func TestLoadPersistedRunsAcceptsCamelCaseFields(t *testing.T) {
 	root := t.TempDir()
 	runDir := filepath.Join(root, "runs")

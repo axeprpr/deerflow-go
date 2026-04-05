@@ -1219,6 +1219,7 @@ func (s *Server) loadPersistedThreads() {
 		if persisted.ThreadID == "" {
 			persisted.ThreadID = entry.Name()
 		}
+		persisted.Metadata = normalizePersistedThreadMetadata(persisted.Metadata)
 		s.sessions[persisted.ThreadID] = &Session{
 			ThreadID:     persisted.ThreadID,
 			Messages:     persisted.Messages,
@@ -1229,6 +1230,48 @@ func (s *Server) loadPersistedThreads() {
 			UpdatedAt:    persisted.UpdatedAt,
 		}
 	}
+}
+
+func normalizePersistedThreadMetadata(metadata map[string]any) map[string]any {
+	if len(metadata) == 0 {
+		return metadata
+	}
+	if _, ok := metadata["viewed_images"]; !ok {
+		if value, ok := metadata["viewedImages"]; ok {
+			metadata["viewed_images"] = value
+		}
+	}
+	if _, ok := metadata["model_name"]; !ok {
+		if value, ok := metadata["modelName"]; ok {
+			metadata["model_name"] = value
+		}
+	}
+	if _, ok := metadata["reasoning_effort"]; !ok {
+		if value, ok := metadata["reasoningEffort"]; ok {
+			metadata["reasoning_effort"] = value
+		}
+	}
+	if _, ok := metadata["agent_name"]; !ok {
+		if value, ok := metadata["agentName"]; ok {
+			metadata["agent_name"] = value
+		}
+	}
+	if _, ok := metadata["thinking_enabled"]; !ok {
+		if value, ok := metadata["thinkingEnabled"]; ok {
+			metadata["thinking_enabled"] = value
+		}
+	}
+	if _, ok := metadata["is_plan_mode"]; !ok {
+		if value, ok := metadata["isPlanMode"]; ok {
+			metadata["is_plan_mode"] = value
+		}
+	}
+	if _, ok := metadata["subagent_enabled"]; !ok {
+		if value, ok := metadata["subagentEnabled"]; ok {
+			metadata["subagent_enabled"] = value
+		}
+	}
+	return metadata
 }
 
 func (s *Server) loadPersistedRuns() {
