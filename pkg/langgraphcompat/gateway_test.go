@@ -10001,6 +10001,47 @@ func TestRecordedRunStreamReplaysTaskCompletedEvent(t *testing.T) {
 	}
 }
 
+func TestRecordedRunStreamReplaysTaskFailedEvent(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-replay-task-failed",
+		ThreadID:    "thread-replay-task-failed",
+		AssistantID: "lead_agent",
+		Status:      "error",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "task_failed", Data: map[string]any{"task_id": "t1", "error": "boom"}},
+			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-replay-task-failed"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-replay-task-failed/runs/run-replay-task-failed/stream?streamMode=tasks")
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: task_failed") {
+		t.Fatalf("missing task_failed event: %s", text)
+	}
+	if !strings.Contains(text, `"task_id":"t1"`) || !strings.Contains(text, `"error":"boom"`) {
+		t.Fatalf("missing task_failed payload: %s", text)
+	}
+	if strings.Contains(text, "event: values") {
+		t.Fatalf("unexpected values event: %s", text)
+	}
+}
+
 func TestThreadJoinStreamModeSupportsCommaSeparatedAliases(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	run := &Run{
@@ -10088,6 +10129,47 @@ func TestThreadJoinStreamReplaysTaskCompletedEvent(t *testing.T) {
 	}
 	if !strings.Contains(text, `"task_id":"t1"`) || !strings.Contains(text, `"result":"done"`) {
 		t.Fatalf("missing task_completed payload: %s", text)
+	}
+	if strings.Contains(text, "event: values") {
+		t.Fatalf("unexpected values event: %s", text)
+	}
+}
+
+func TestThreadJoinStreamReplaysTaskFailedEvent(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-join-task-failed",
+		ThreadID:    "thread-join-task-failed",
+		AssistantID: "lead_agent",
+		Status:      "error",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "task_failed", Data: map[string]any{"task_id": "t1", "error": "boom"}},
+			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-join-task-failed"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-join-task-failed/stream?streamMode=tasks")
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: task_failed") {
+		t.Fatalf("missing task_failed event: %s", text)
+	}
+	if !strings.Contains(text, `"task_id":"t1"`) || !strings.Contains(text, `"error":"boom"`) {
+		t.Fatalf("missing task_failed payload: %s", text)
 	}
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
