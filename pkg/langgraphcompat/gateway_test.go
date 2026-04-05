@@ -8703,6 +8703,98 @@ func TestThreadRunStreamAcceptsTopLevelMessages(t *testing.T) {
 	}
 }
 
+func TestThreadRunStreamPersistsMessagesAcrossReload(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+
+	reqBody := `{"assistant_id":"lead_agent","messages":[{"id":"user-top","role":"user","content":"hello from top level"}]}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/thread-stream-reload/runs/stream", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	if _, err := io.ReadAll(resp.Body); err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+
+	loaded := &Server{
+		dataRoot: s.dataRoot,
+		sessions: map[string]*Session{},
+	}
+	loaded.loadPersistedThreads()
+
+	session := loaded.sessions["thread-stream-reload"]
+	if session == nil {
+		t.Fatal("expected thread restored")
+	}
+	if len(session.Messages) < 2 {
+		t.Fatalf("messages=%#v", session.Messages)
+	}
+	if session.Messages[0].ID != "user-top" || session.Messages[0].Content != "hello from top level" {
+		t.Fatalf("message=%#v", session.Messages[0])
+	}
+	if session.Messages[len(session.Messages)-1].Content != "hello from fake llm" {
+		t.Fatalf("last message=%#v", session.Messages[len(session.Messages)-1])
+	}
+}
+
+func TestThreadRunStreamUpdatesHistoryMessages(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+
+	reqBody := `{"assistant_id":"lead_agent","messages":[{"id":"user-top","role":"user","content":"hello from top level"}]}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/thread-stream-history/runs/stream", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	if _, err := io.ReadAll(resp.Body); err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+
+	historyResp, err := http.Get(ts.URL + "/threads/thread-stream-history/history?limit=1")
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+	defer historyResp.Body.Close()
+	if historyResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(historyResp.Body)
+		t.Fatalf("status=%d body=%s", historyResp.StatusCode, string(b))
+	}
+
+	var history []ThreadState
+	if err := json.NewDecoder(historyResp.Body).Decode(&history); err != nil {
+		t.Fatalf("decode history: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len=%d", len(history))
+	}
+	messages, _ := history[0].Values["messages"].([]any)
+	if len(messages) < 2 {
+		t.Fatalf("values=%#v", history[0].Values)
+	}
+	first, _ := messages[0].(map[string]any)
+	last, _ := messages[len(messages)-1].(map[string]any)
+	if first["id"] != "user-top" || first["content"] != "hello from top level" {
+		t.Fatalf("first message=%#v", first)
+	}
+	if last["content"] != "hello from fake llm" {
+		t.Fatalf("last message=%#v", last)
+	}
+}
+
 func TestRunsStreamAcceptsCamelCaseIDs(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.llmProvider = fakeLLMProvider{}
