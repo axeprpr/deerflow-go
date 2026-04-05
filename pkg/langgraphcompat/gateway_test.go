@@ -1063,6 +1063,53 @@ func TestAgentUpdateAcceptsCamelCaseToolGroups(t *testing.T) {
 	}
 }
 
+func TestAgentUpdateAcceptsNullClearsFields(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+
+	createBody := `{"name":"null-updater","description":"a","model":"qwen/Qwen3.5-9B","tool_groups":["file"],"soul":"hello"}`
+	createResp, err := http.Post(ts.URL+"/api/agents", "application/json", strings.NewReader(createBody))
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	createResp.Body.Close()
+
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/agents/null-updater", strings.NewReader(`{"description":null,"model":null,"tool_groups":null,"soul":null}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("update agent: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var agent map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&agent); err != nil {
+		t.Fatalf("decode agent: %v", err)
+	}
+	if agent["description"] != "" {
+		t.Fatalf("description=%#v", agent["description"])
+	}
+	if value, ok := agent["model"]; ok && value != nil {
+		t.Fatalf("model=%#v", value)
+	}
+	if value, ok := agent["tool_groups"]; ok && value != nil {
+		t.Fatalf("tool_groups=%#v", value)
+	}
+	if _, ok := agent["soul"]; ok {
+		t.Fatalf("expected soul omitted after clear, got %#v", agent["soul"])
+	}
+
+	s.uiStateMu.RLock()
+	persisted := s.getAgentsLocked()["null-updater"]
+	s.uiStateMu.RUnlock()
+	if persisted.Description != "" || persisted.Model != nil || persisted.ToolGroups != nil || persisted.Soul != "" {
+		t.Fatalf("persisted agent=%#v", persisted)
+	}
+}
+
 func TestDefaultGatewayMemoryConfigFromEnv(t *testing.T) {
 	t.Setenv("DEERFLOW_MEMORY_CONFIG", `{"enabled":true,"debounce_seconds":10,"max_facts":55,"fact_confidence_threshold":0.9,"injection_enabled":false,"max_injection_tokens":999}`)
 	cfg := defaultGatewayMemoryConfig("/tmp/deerflow-test")

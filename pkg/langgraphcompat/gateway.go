@@ -428,13 +428,7 @@ func (s *Server) handleAgentUpdate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": "Invalid agent name"})
 		return
 	}
-	var req struct {
-		Description *string   `json:"description"`
-		Model       **string  `json:"model"`
-		ToolGroups  *[]string `json:"tool_groups"`
-		ToolGroupsX *[]string `json:"toolGroups"`
-		Soul        *string   `json:"soul"`
-	}
+	var req map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid request body"})
 		return
@@ -448,19 +442,32 @@ func (s *Server) handleAgentUpdate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Agent '%s' not found", name)})
 		return
 	}
-	if req.Description != nil {
-		agent.Description = *req.Description
+	if rawDescription, exists := req["description"]; exists {
+		agent.Description = stringFromAny(rawDescription)
 	}
-	if req.Model != nil {
-		agent.Model = *req.Model
+	if rawModel, exists := req["model"]; exists {
+		if rawModel == nil {
+			agent.Model = nil
+		} else {
+			model := stringFromAny(rawModel)
+			agent.Model = &model
+		}
 	}
-	if req.ToolGroups != nil {
-		agent.ToolGroups = *req.ToolGroups
-	} else if req.ToolGroupsX != nil {
-		agent.ToolGroups = *req.ToolGroupsX
+	if rawToolGroups, exists := req["tool_groups"]; exists {
+		if rawToolGroups == nil {
+			agent.ToolGroups = nil
+		} else {
+			agent.ToolGroups = stringsFromAny(rawToolGroups)
+		}
+	} else if rawToolGroups, exists := req["toolGroups"]; exists {
+		if rawToolGroups == nil {
+			agent.ToolGroups = nil
+		} else {
+			agent.ToolGroups = stringsFromAny(rawToolGroups)
+		}
 	}
-	if req.Soul != nil {
-		agent.Soul = *req.Soul
+	if rawSoul, exists := req["soul"]; exists {
+		agent.Soul = stringFromAny(rawSoul)
 	}
 	agents[name] = agent
 	s.uiStateMu.Unlock()
@@ -1826,6 +1833,23 @@ func firstNonEmptySlice[T any](primary []T, fallback []T) []T {
 		return fallback
 	}
 	return primary
+}
+
+func stringsFromAny(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := strings.TrimSpace(stringFromAny(item)); text != "" {
+				out = append(out, text)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func normalizeGatewayModels(models []gatewayModel) []gatewayModel {
