@@ -799,11 +799,13 @@ func (s *Server) threadValues(session *Session) map[string]any {
 }
 
 func (s *Server) threadConfigurable(session *Session) map[string]any {
+	mode := deriveThreadMode(session.Metadata)
 	configurable := map[string]any{
 		"thread_id":        session.ThreadID,
 		"agent_type":       stringValue(session.Metadata["agent_type"]),
 		"agent_name":       stringValue(session.Metadata["agent_name"]),
 		"model_name":       stringValue(session.Metadata["model_name"]),
+		"mode":             mode,
 		"is_plan_mode":     false,
 		"thinking_enabled": true,
 		"subagent_enabled": false,
@@ -911,6 +913,25 @@ func firstNonZeroTime(times ...time.Time) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+func deriveThreadMode(metadata map[string]any) string {
+	if mode := strings.TrimSpace(stringValue(metadata["mode"])); mode != "" {
+		return mode
+	}
+	subagentEnabled, _ := metadata["subagent_enabled"].(bool)
+	isPlanMode, _ := metadata["is_plan_mode"].(bool)
+	thinkingEnabled, thinkingSet := metadata["thinking_enabled"].(bool)
+	if subagentEnabled {
+		return "ultra"
+	}
+	if isPlanMode {
+		return "pro"
+	}
+	if thinkingSet && thinkingEnabled {
+		return "thinking"
+	}
+	return "flash"
 }
 
 func (s *Server) workspaceDir(threadID string) string {
