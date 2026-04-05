@@ -9631,6 +9631,9 @@ func TestRecordedRunStreamReplaysToolCallEvents(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	startBlock := sseEventBlock(t, text, "tool_call_start")
+	endBlock := sseEventBlock(t, text, "tool_call_end")
+	aliasBlock := sseEventBlock(t, text, "on_tool_end")
 	if !strings.Contains(text, "event: tool_call_start") {
 		t.Fatalf("missing tool_call_start event: %s", text)
 	}
@@ -9642,6 +9645,19 @@ func TestRecordedRunStreamReplaysToolCallEvents(t *testing.T) {
 	}
 	if !strings.Contains(text, `"id":"call-1"`) {
 		t.Fatalf("missing tool call id: %s", text)
+	}
+	for _, forbidden := range []string{`"messages":`, `"usage_metadata":`, `"additional_kwargs":`, `"tool_calls":`, `"tool_call_id":`, `"thread_id":`, `"run_id":`} {
+		if strings.Contains(startBlock, forbidden) {
+			t.Fatalf("unexpected tool_call_start field %s: %s", forbidden, startBlock)
+		}
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected tool_call_end field %s: %s", forbidden, endBlock)
+		}
+	}
+	for _, forbidden := range []string{`"messages":`, `"usage_metadata":`, `"additional_kwargs":`, `"tool_calls":`, `"tool_call_id":`, `"thread_id":`, `"run_id":`, `"status":`} {
+		if strings.Contains(aliasBlock, forbidden) {
+			t.Fatalf("unexpected on_tool_end field %s: %s", forbidden, aliasBlock)
+		}
 	}
 }
 
@@ -9675,11 +9691,17 @@ func TestRecordedRunStreamReplaysToolCallEvent(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	callBlock := sseEventBlock(t, text, "tool_call")
 	if !strings.Contains(text, "event: tool_call") {
 		t.Fatalf("missing tool_call event: %s", text)
 	}
 	if !strings.Contains(text, `"id":"call-1"`) || !strings.Contains(text, `"name":"read_file"`) {
 		t.Fatalf("missing tool_call payload: %s", text)
+	}
+	for _, forbidden := range []string{`"messages":`, `"usage_metadata":`, `"additional_kwargs":`, `"tool_calls":`, `"tool_call_id":`, `"thread_id":`, `"run_id":`, `"status":`, `"data":{`} {
+		if strings.Contains(callBlock, forbidden) {
+			t.Fatalf("unexpected tool_call field %s: %s", forbidden, callBlock)
+		}
 	}
 }
 
@@ -10233,6 +10255,9 @@ func TestThreadJoinStreamReplaysToolCallEvents(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	startBlock := sseEventBlock(t, text, "tool_call_start")
+	endBlock := sseEventBlock(t, text, "tool_call_end")
+	aliasBlock := sseEventBlock(t, text, "on_tool_end")
 	if !strings.Contains(text, "event: tool_call_start") {
 		t.Fatalf("missing tool_call_start event: %s", text)
 	}
@@ -10244,6 +10269,19 @@ func TestThreadJoinStreamReplaysToolCallEvents(t *testing.T) {
 	}
 	if !strings.Contains(text, `"id":"call-1"`) {
 		t.Fatalf("missing tool call id: %s", text)
+	}
+	for _, forbidden := range []string{`"messages":`, `"usage_metadata":`, `"additional_kwargs":`, `"tool_calls":`, `"tool_call_id":`, `"thread_id":`, `"run_id":`} {
+		if strings.Contains(startBlock, forbidden) {
+			t.Fatalf("unexpected tool_call_start field %s: %s", forbidden, startBlock)
+		}
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected tool_call_end field %s: %s", forbidden, endBlock)
+		}
+	}
+	for _, forbidden := range []string{`"messages":`, `"usage_metadata":`, `"additional_kwargs":`, `"tool_calls":`, `"tool_call_id":`, `"thread_id":`, `"run_id":`, `"status":`} {
+		if strings.Contains(aliasBlock, forbidden) {
+			t.Fatalf("unexpected on_tool_end field %s: %s", forbidden, aliasBlock)
+		}
 	}
 }
 
@@ -10277,11 +10315,17 @@ func TestThreadJoinStreamReplaysToolCallEvent(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	callBlock := sseEventBlock(t, text, "tool_call")
 	if !strings.Contains(text, "event: tool_call") {
 		t.Fatalf("missing tool_call event: %s", text)
 	}
 	if !strings.Contains(text, `"id":"call-1"`) || !strings.Contains(text, `"name":"read_file"`) {
 		t.Fatalf("missing tool_call payload: %s", text)
+	}
+	for _, forbidden := range []string{`"messages":`, `"usage_metadata":`, `"additional_kwargs":`, `"tool_calls":`, `"tool_call_id":`, `"thread_id":`, `"run_id":`, `"status":`, `"data":{`} {
+		if strings.Contains(callBlock, forbidden) {
+			t.Fatalf("unexpected tool_call field %s: %s", forbidden, callBlock)
+		}
 	}
 }
 
