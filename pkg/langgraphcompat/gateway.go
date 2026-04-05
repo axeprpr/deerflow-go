@@ -1633,6 +1633,8 @@ func (s *Server) loadAgentsFromFiles() map[string]gatewayAgent {
 			if err := json.Unmarshal(data, &wrapper); err == nil {
 				if nested, ok := wrapper["agent"]; ok && len(nested) > 0 {
 					data = nested
+				} else if nested, ok := wrapper["config"]; ok && len(nested) > 0 {
+					data = nested
 				}
 			}
 			if err := json.Unmarshal(data, &agent); err == nil {
