@@ -9043,6 +9043,18 @@ func TestThreadRunCamelCaseStreamModeFiltersValues(t *testing.T) {
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
 	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
+	}
 }
 
 func TestThreadRunStreamAcceptsTopLevelMessages(t *testing.T) {
