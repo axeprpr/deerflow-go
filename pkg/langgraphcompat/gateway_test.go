@@ -2173,6 +2173,39 @@ func TestLoadThreadHistoryAcceptsWrappedHistoryObject(t *testing.T) {
 	}
 }
 
+func TestLoadThreadHistoryAcceptsWrappedItemsObject(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{dataRoot: root}
+	threadID := "thread-history-items"
+	if err := os.MkdirAll(s.threadRoot(threadID), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"items":[
+			{
+				"checkpointId":"cp-1",
+				"values":{"title":"History"},
+				"metadata":{"threadId":"thread-history-items"},
+				"createdAt":"2026-01-01T00:00:00Z"
+			}
+		]
+	}`
+	if err := os.WriteFile(s.threadHistoryPath(threadID), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write history file: %v", err)
+	}
+
+	history := s.loadThreadHistory(threadID)
+	if len(history) != 1 {
+		t.Fatalf("history=%#v", history)
+	}
+	if history[0].CheckpointID != "cp-1" || history[0].CreatedAt != "2026-01-01T00:00:00Z" {
+		t.Fatalf("history=%#v", history[0])
+	}
+	if history[0].Metadata["thread_id"] != "thread-history-items" {
+		t.Fatalf("metadata=%#v", history[0].Metadata)
+	}
+}
+
 func TestUserProfileFileLoad(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}

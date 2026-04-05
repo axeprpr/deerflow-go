@@ -1437,6 +1437,8 @@ func (s *Server) loadThreadHistory(threadID string) []ThreadState {
 	if err := json.Unmarshal(data, &wrapper); err == nil {
 		if nested, ok := wrapper["history"]; ok && len(nested) > 0 {
 			data = nested
+		} else if nested, ok := wrapper["items"]; ok && len(nested) > 0 {
+			data = nested
 		}
 	}
 	var history []ThreadState
