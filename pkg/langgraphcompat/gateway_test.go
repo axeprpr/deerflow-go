@@ -2305,6 +2305,9 @@ func TestLoadPersistedThreadsPrefersTopLevelCheckpointIDs(t *testing.T) {
 	if state.CheckpointID != "cp-current" {
 		t.Fatalf("checkpoint_id=%q", state.CheckpointID)
 	}
+	if state.ParentCheckpointID != "cp-parent-current" {
+		t.Fatalf("parent_checkpoint_id=%q", state.ParentCheckpointID)
+	}
 }
 
 func TestLoadPersistedThreadsPrefersTopLevelCheckpointObjects(t *testing.T) {
@@ -2908,6 +2911,9 @@ func TestLoadThreadHistoryNormalizesCheckpointObjects(t *testing.T) {
 	if history[0].ParentCheckpoint == nil || history[0].ParentCheckpoint["checkpoint_id"] != "cp-parent-1" || history[0].ParentCheckpoint["checkpoint_ns"] != "ns-parent-1" || history[0].ParentCheckpoint["thread_id"] != "thread-parent-1" {
 		t.Fatalf("parent_checkpoint=%#v", history[0].ParentCheckpoint)
 	}
+	if history[0].ParentCheckpointID != "cp-parent-1" {
+		t.Fatalf("parent_checkpoint_id=%q", history[0].ParentCheckpointID)
+	}
 }
 
 func TestLoadThreadHistoryUsesCheckpointObjectAsIDFallback(t *testing.T) {
@@ -2933,6 +2939,9 @@ func TestLoadThreadHistoryUsesCheckpointObjectAsIDFallback(t *testing.T) {
 	}
 	if history[0].CheckpointID != "cp-1" {
 		t.Fatalf("checkpoint_id=%q checkpoint=%#v", history[0].CheckpointID, history[0].Checkpoint)
+	}
+	if history[0].ParentCheckpointID != "" {
+		t.Fatalf("parent_checkpoint_id=%q", history[0].ParentCheckpointID)
 	}
 }
 

@@ -770,10 +770,11 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 	parentCheckpoint := checkpointObjectFromMetadata(session.Metadata, "parent_")
 
 	return &ThreadState{
-		CheckpointID:     firstNonEmpty(stringValue(session.Metadata["checkpoint_id"]), uuid.New().String()),
-		Checkpoint:       checkpoint,
-		ParentCheckpoint: parentCheckpoint,
-		Values:           values,
+		CheckpointID:       firstNonEmpty(stringValue(session.Metadata["checkpoint_id"]), uuid.New().String()),
+		ParentCheckpointID: stringValue(session.Metadata["parent_checkpoint_id"]),
+		Checkpoint:         checkpoint,
+		ParentCheckpoint:   parentCheckpoint,
+		Values:             values,
 		Config: map[string]any{
 			"configurable": s.threadConfigurable(session),
 		},
@@ -1857,6 +1858,9 @@ func normalizeLoadedThreadHistory(history []ThreadState, rawItems []map[string]a
 		if history[i].CheckpointID == "" {
 			history[i].CheckpointID = firstNonEmpty(stringValue(rawItems[i]["checkpointId"]), stringValue(rawItems[i]["checkpoint_id"]))
 		}
+		if history[i].ParentCheckpointID == "" {
+			history[i].ParentCheckpointID = firstNonEmpty(stringValue(rawItems[i]["parentCheckpointId"]), stringValue(rawItems[i]["parent_checkpoint_id"]))
+		}
 		if history[i].CreatedAt == "" {
 			history[i].CreatedAt = firstNonEmpty(stringValue(rawItems[i]["createdAt"]), stringValue(rawItems[i]["created_at"]))
 		}
@@ -1893,6 +1897,9 @@ func normalizeLoadedThreadHistory(history []ThreadState, rawItems []map[string]a
 		}
 		if checkpoint := mapFromAny(rawItems[i]["parent_checkpoint"]); len(checkpoint) > 0 {
 			history[i].ParentCheckpoint = normalizeCheckpointObject(checkpoint)
+			if history[i].ParentCheckpointID == "" {
+				history[i].ParentCheckpointID = stringValue(history[i].ParentCheckpoint["checkpoint_id"])
+			}
 		}
 	}
 	return history
