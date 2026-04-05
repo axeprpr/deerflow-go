@@ -108,6 +108,21 @@ func (p *fakeToolLLMProvider) Stream(_ context.Context, _ llm.ChatRequest) (<-ch
 	return ch, nil
 }
 
+type fakeErrorLLMProvider struct{}
+
+func (fakeErrorLLMProvider) Chat(_ context.Context, _ llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, nil
+}
+
+func (fakeErrorLLMProvider) Stream(_ context.Context, _ llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	ch := make(chan llm.StreamChunk, 1)
+	go func() {
+		defer close(ch)
+		ch <- llm.StreamChunk{Err: fmt.Errorf("boom")}
+	}()
+	return ch, nil
+}
+
 func writeGatewaySkill(t *testing.T, root, category, name, frontmatter string) {
 	t.Helper()
 	skillDir := filepath.Join(root, "skills", category, name)
@@ -8795,6 +8810,41 @@ func TestThreadRunStreamAcceptsTopLevelMessages(t *testing.T) {
 	}
 	if !strings.Contains(text, `"run_id":"`) {
 		t.Fatalf("missing run_id in end payload: %s", text)
+	}
+}
+
+func TestThreadRunStreamEmitsErrorEvent(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeErrorLLMProvider{}
+
+	reqBody := `{"assistant_id":"lead_agent","stream_mode":["events"],"input":{"messages":[{"role":"user","content":"hello"}]}}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/thread-stream-error/runs/stream", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: error") {
+		t.Fatalf("missing error event: %s", text)
+	}
+	if !strings.Contains(text, `"message":"boom"`) {
+		t.Fatalf("missing error message: %s", text)
+	}
+	if !strings.Contains(text, `"suggestion":"Retry the run or inspect the previous tool and model events."`) {
+		t.Fatalf("missing error suggestion: %s", text)
+	}
+	if !strings.Contains(text, `"retryable":true`) {
+		t.Fatalf("missing retryable flag: %s", text)
 	}
 }
 
