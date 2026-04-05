@@ -8676,6 +8676,9 @@ func TestThreadRunStreamEmitsToolEndAliasAndUsageMetadata(t *testing.T) {
 	if !strings.Contains(text, `"title":""`) {
 		t.Fatalf("missing agent title in updates payload: %s", text)
 	}
+	if strings.Contains(text, `"values":`) {
+		t.Fatalf("unexpected nested values payload in updates event: %s", text)
+	}
 	if !strings.Contains(text, "\"usage_metadata\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}") {
 		t.Fatalf("missing usage_metadata in messages-tuple: %s", text)
 	}
