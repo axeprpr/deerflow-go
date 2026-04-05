@@ -1230,6 +1230,8 @@ func TestThreadSearchAcceptsCamelCaseCoreIDSelectFields(t *testing.T) {
 func TestThreadSearchAcceptsCamelCaseRuntimeSelectFields(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.ensureSession("thread-search-runtime-select", map[string]any{
+		"agent_name":       "writer",
+		"agent_type":       "deep_research",
 		"model_name":       "deepseek/deepseek-r1",
 		"reasoning_effort": "high",
 		"thinking_enabled": false,
@@ -1242,7 +1244,7 @@ func TestThreadSearchAcceptsCamelCaseRuntimeSelectFields(t *testing.T) {
 	resp, err := http.Post(
 		ts.URL+"/threads/search",
 		"application/json",
-		strings.NewReader(`{"limit":10,"select":["threadId","modelName","reasoningEffort","thinkingEnabled","isPlanMode","subagentEnabled","temperature","maxTokens"]}`),
+		strings.NewReader(`{"limit":10,"select":["threadId","agentName","agentType","modelName","reasoningEffort","thinkingEnabled","isPlanMode","subagentEnabled","temperature","maxTokens"]}`),
 	)
 	if err != nil {
 		t.Fatalf("search request: %v", err)
@@ -1274,6 +1276,9 @@ func TestThreadSearchAcceptsCamelCaseRuntimeSelectFields(t *testing.T) {
 	if selected["model_name"] != "deepseek/deepseek-r1" || selected["reasoning_effort"] != "high" {
 		t.Fatalf("selected=%#v", selected)
 	}
+	if selected["agent_name"] != "writer" || selected["agent_type"] != "deep_research" {
+		t.Fatalf("selected=%#v", selected)
+	}
 	if selected["thinking_enabled"] != false || selected["is_plan_mode"] != true || selected["subagent_enabled"] != true {
 		t.Fatalf("selected=%#v", selected)
 	}
@@ -1283,10 +1288,55 @@ func TestThreadSearchAcceptsCamelCaseRuntimeSelectFields(t *testing.T) {
 	if selected["max_tokens"] != float64(321) && selected["max_tokens"] != int64(321) && selected["max_tokens"] != 321 {
 		t.Fatalf("selected=%#v", selected)
 	}
-	for _, alias := range []string{"modelName", "reasoningEffort", "thinkingEnabled", "isPlanMode", "subagentEnabled", "maxTokens"} {
+	for _, alias := range []string{"agentName", "agentType", "modelName", "reasoningEffort", "thinkingEnabled", "isPlanMode", "subagentEnabled", "maxTokens"} {
 		if _, ok := selected[alias]; ok {
 			t.Fatalf("unexpected %s alias in %#v", alias, selected)
 		}
+	}
+}
+
+func TestThreadSearchAcceptsCamelCaseAgentSortFields(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	first := s.ensureSession("thread-search-agent-b", map[string]any{"agent_name": "writer", "agent_type": "research"})
+	second := s.ensureSession("thread-search-agent-a", map[string]any{"agent_name": "planner", "agent_type": "analysis"})
+	first.UpdatedAt = time.Now().UTC().Add(-time.Hour)
+	second.UpdatedAt = time.Now().UTC()
+
+	tests := []struct {
+		name   string
+		sortBy string
+	}{
+		{name: "agent_name", sortBy: "agentName"},
+		{name: "agent_type", sortBy: "agentType"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := http.Post(
+				ts.URL+"/threads/search",
+				"application/json",
+				strings.NewReader(`{"limit":10,"sortBy":"`+tc.sortBy+`","sortOrder":"asc","select":["threadId","agentName","agentType"]}`),
+			)
+			if err != nil {
+				t.Fatalf("search request: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				b, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+			}
+
+			var threads []map[string]any
+			if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if len(threads) < 2 {
+				t.Fatalf("threads=%#v", threads)
+			}
+			if threads[0]["thread_id"] != "thread-search-agent-a" {
+				t.Fatalf("first thread=%v want thread-search-agent-a", threads[0]["thread_id"])
+			}
+		})
 	}
 }
 

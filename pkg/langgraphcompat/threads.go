@@ -178,6 +178,10 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 			less = asString(left["metadata"].(map[string]any)["graph_id"]) < asString(right["metadata"].(map[string]any)["graph_id"])
 		case "run_id":
 			less = asString(left["metadata"].(map[string]any)["run_id"]) < asString(right["metadata"].(map[string]any)["run_id"])
+		case "agent_name":
+			less = asString(left["agent_name"]) < asString(right["agent_name"])
+		case "agent_type":
+			less = asString(left["agent_type"]) < asString(right["agent_type"])
 		case "model_name":
 			less = asString(left["model_name"]) < asString(right["model_name"])
 		case "mode":
@@ -271,6 +275,10 @@ func normalizeThreadFieldName(field string) string {
 		return "graph_id"
 	case "runId":
 		return "run_id"
+	case "agentName":
+		return "agent_name"
+	case "agentType":
+		return "agent_type"
 	case "modelName":
 		return "model_name"
 	case "reasoningEffort":
