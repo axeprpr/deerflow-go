@@ -247,6 +247,12 @@ func normalizeThreadFieldName(field string) string {
 		return "assistant_id"
 	case "graphId":
 		return "graph_id"
+	case "checkpointId":
+		return "checkpoint_id"
+	case "parentCheckpointId":
+		return "parent_checkpoint_id"
+	case "parentCheckpoint":
+		return "parent_checkpoint"
 	default:
 		return strings.TrimSpace(field)
 	}
