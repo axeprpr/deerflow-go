@@ -494,6 +494,39 @@ func TestThreadSearchAcceptsCamelCaseSortFields(t *testing.T) {
 	}
 }
 
+func TestThreadSearchAcceptsPageSizeAlias(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	first := s.ensureSession("thread-search-pagesize-1", map[string]any{"title": "One"})
+	second := s.ensureSession("thread-search-pagesize-2", map[string]any{"title": "Two"})
+	first.UpdatedAt = time.Now().UTC().Add(-time.Hour)
+	second.UpdatedAt = time.Now().UTC()
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"pageSize":1,"sortBy":"updated_at","sortOrder":"desc","select":["thread_id"]}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) != 1 {
+		t.Fatalf("threads=%#v", threads)
+	}
+	if threads[0]["thread_id"] != "thread-search-pagesize-2" {
+		t.Fatalf("first thread=%v want thread-search-pagesize-2", threads[0]["thread_id"])
+	}
+}
+
 func TestThreadSearchAcceptsCamelCaseSortValuesAndSelectFields(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	oldSession := s.ensureSession("thread-search-camel-value-old", map[string]any{"title": "Old"})

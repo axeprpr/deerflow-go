@@ -115,6 +115,7 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Limit      int      `json:"limit"`
+		PageSizeX  int      `json:"pageSize"`
 		Offset     int      `json:"offset"`
 		SortBy     string   `json:"sort_by"`
 		SortByX    string   `json:"sortBy"`
@@ -127,6 +128,9 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 
+	if req.Limit <= 0 {
+		req.Limit = req.PageSizeX
+	}
 	if req.Limit <= 0 {
 		req.Limit = 10
 	}
