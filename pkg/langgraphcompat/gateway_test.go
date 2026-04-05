@@ -540,6 +540,39 @@ func TestThreadSearchSortsByCamelCaseAssistantID(t *testing.T) {
 	}
 }
 
+func TestThreadSearchSortsByCamelCaseGraphID(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	first := s.ensureSession("thread-search-graph-b", map[string]any{"graph_id": "beta"})
+	second := s.ensureSession("thread-search-graph-a", map[string]any{"graph_id": "alpha"})
+	first.UpdatedAt = time.Now().UTC().Add(-time.Hour)
+	second.UpdatedAt = time.Now().UTC()
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"limit":10,"sortBy":"graphId","sortOrder":"asc","select":["threadId"]}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) < 2 {
+		t.Fatalf("threads=%#v", threads)
+	}
+	if threads[0]["thread_id"] != "thread-search-graph-a" {
+		t.Fatalf("first thread=%v want thread-search-graph-a", threads[0]["thread_id"])
+	}
+}
+
 func TestModelsSkillsMCPConfigEndpoints(t *testing.T) {
 	_, ts := newCompatTestServer(t)
 
