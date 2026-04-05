@@ -9022,6 +9022,7 @@ func TestThreadRunStreamEmitsErrorEvent(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	errorBlock := sseEventBlock(t, text, "error")
 	if !strings.Contains(text, "event: error") {
 		t.Fatalf("missing error event: %s", text)
 	}
@@ -9033,6 +9034,11 @@ func TestThreadRunStreamEmitsErrorEvent(t *testing.T) {
 	}
 	if !strings.Contains(text, `"retryable":true`) {
 		t.Fatalf("missing retryable flag: %s", text)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"run_id":`, `"assistant_id":`, `"messages":`, `"usage_metadata":`, `"tool_calls":`, `"tool_call_id":`} {
+		if strings.Contains(errorBlock, forbidden) {
+			t.Fatalf("unexpected error field %s: %s", forbidden, errorBlock)
+		}
 	}
 }
 
@@ -9061,6 +9067,7 @@ func TestThreadRunStreamEmitsClarificationRequest(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	clarifyBlock := sseEventBlock(t, text, "clarification_request")
 	if !strings.Contains(text, "event: clarification_request") {
 		t.Fatalf("missing clarification_request event: %s", text)
 	}
@@ -9072,6 +9079,11 @@ func TestThreadRunStreamEmitsClarificationRequest(t *testing.T) {
 	}
 	if !strings.Contains(text, `"type":"text"`) {
 		t.Fatalf("missing clarification type: %s", text)
+	}
+	for _, forbidden := range []string{`"run_id":`, `"assistant_id":`, `"messages":`, `"usage_metadata":`, `"tool_calls":`, `"tool_call_id":`, `"retryable":`} {
+		if strings.Contains(clarifyBlock, forbidden) {
+			t.Fatalf("unexpected clarification field %s: %s", forbidden, clarifyBlock)
+		}
 	}
 }
 
