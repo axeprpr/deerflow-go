@@ -5625,7 +5625,7 @@ func TestThreadRunResponsesIncludeError(t *testing.T) {
 func TestThreadRunsCreateReturnsFinalState(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.llmProvider = fakeLLMProvider{}
-	body := `{"assistant_id":"lead_agent","input":{"messages":[{"role":"user","content":"hi"}]}}`
+	body := `{"assistant_id":"lead_agent","input":{"messages":[{"id":"user-1","role":"user","content":"hi"}]}}`
 	resp, err := http.Post(ts.URL+"/threads/thread-sync-run/runs", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("create run: %v", err)
@@ -5646,15 +5646,23 @@ func TestThreadRunsCreateReturnsFinalState(t *testing.T) {
 		t.Fatalf("run_id missing: %#v", payload)
 	}
 	messages, ok := payload["messages"].([]any)
-	if !ok || len(messages) == 0 {
+	if !ok || len(messages) < 2 {
 		t.Fatalf("messages missing: %#v", payload)
+	}
+	first, _ := messages[0].(map[string]any)
+	last, _ := messages[len(messages)-1].(map[string]any)
+	if first["id"] != "user-1" || first["content"] != "hi" {
+		t.Fatalf("first message=%#v", first)
+	}
+	if last["content"] != "hello from fake llm" {
+		t.Fatalf("last message=%#v", last)
 	}
 }
 
 func TestThreadRunsCreateAcceptsTopLevelMessages(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.llmProvider = fakeLLMProvider{}
-	body := `{"assistant_id":"lead_agent","messages":[{"role":"user","content":"hi from top level"}]}`
+	body := `{"assistant_id":"lead_agent","messages":[{"id":"user-top","role":"user","content":"hi from top level"}]}`
 	resp, err := http.Post(ts.URL+"/threads/thread-top-level-run/runs", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("create run: %v", err)
@@ -5673,8 +5681,12 @@ func TestThreadRunsCreateAcceptsTopLevelMessages(t *testing.T) {
 		t.Fatalf("thread_id=%v", payload["thread_id"])
 	}
 	messages, ok := payload["messages"].([]any)
-	if !ok || len(messages) == 0 {
+	if !ok || len(messages) < 2 {
 		t.Fatalf("messages missing: %#v", payload)
+	}
+	first, _ := messages[0].(map[string]any)
+	if first["id"] != "user-top" || first["content"] != "hi from top level" {
+		t.Fatalf("first message=%#v", first)
 	}
 }
 
