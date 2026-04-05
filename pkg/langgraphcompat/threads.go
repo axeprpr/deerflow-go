@@ -830,6 +830,9 @@ func (s *Server) threadConfigurable(session *Session) map[string]any {
 		"thinking_enabled": true,
 		"subagent_enabled": false,
 	}
+	if value := toInt64(session.Metadata["max_tokens"]); value > 0 {
+		configurable["max_tokens"] = value
+	}
 	if value, ok := session.Metadata["thinking_enabled"].(bool); ok {
 		configurable["thinking_enabled"] = value
 	}

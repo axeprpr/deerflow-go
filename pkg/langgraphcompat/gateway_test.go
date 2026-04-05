@@ -2479,7 +2479,8 @@ func TestLoadPersistedThreadsAcceptsTopLevelConfigurable(t *testing.T) {
 			"reasoningEffort":"high",
 			"thinkingEnabled":false,
 			"isPlanMode":true,
-			"subagentEnabled":true
+			"subagentEnabled":true,
+			"maxTokens":321
 		},
 		"created_at":"2026-01-01T00:00:00Z"
 	}`
@@ -2505,6 +2506,9 @@ func TestLoadPersistedThreadsAcceptsTopLevelConfigurable(t *testing.T) {
 	if configurable["thinking_enabled"] != false || configurable["is_plan_mode"] != true || configurable["subagent_enabled"] != true {
 		t.Fatalf("configurable=%#v", configurable)
 	}
+	if configurable["max_tokens"] != int64(321) && configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != 321 {
+		t.Fatalf("configurable=%#v", configurable)
+	}
 }
 
 func TestLoadPersistedThreadsAcceptsFlatTopLevelConfig(t *testing.T) {
@@ -2523,6 +2527,7 @@ func TestLoadPersistedThreadsAcceptsFlatTopLevelConfig(t *testing.T) {
 		"thinkingEnabled":false,
 		"isPlanMode":true,
 		"subagentEnabled":true,
+		"maxTokens":321,
 		"created_at":"2026-01-01T00:00:00Z"
 	}`
 	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
@@ -2545,6 +2550,9 @@ func TestLoadPersistedThreadsAcceptsFlatTopLevelConfig(t *testing.T) {
 		t.Fatalf("configurable=%#v", configurable)
 	}
 	if configurable["thinking_enabled"] != false || configurable["is_plan_mode"] != true || configurable["subagent_enabled"] != true {
+		t.Fatalf("configurable=%#v", configurable)
+	}
+	if configurable["max_tokens"] != int64(321) && configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != 321 {
 		t.Fatalf("configurable=%#v", configurable)
 	}
 }
