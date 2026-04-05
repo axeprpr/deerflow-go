@@ -8570,6 +8570,18 @@ func TestThreadRunStreamEmitsToolEndAliasAndUsageMetadata(t *testing.T) {
 	if !strings.Contains(text, "event: on_tool_end") {
 		t.Fatalf("missing on_tool_end event: %s", text)
 	}
+	if !strings.Contains(text, "event: updates") {
+		t.Fatalf("missing updates event: %s", text)
+	}
+	if !strings.Contains(text, `"agent":{"artifacts":[`) {
+		t.Fatalf("missing agent artifacts in updates payload: %s", text)
+	}
+	if !strings.Contains(text, `"messages":[`) {
+		t.Fatalf("missing agent messages in updates payload: %s", text)
+	}
+	if !strings.Contains(text, `"title":""`) {
+		t.Fatalf("missing agent title in updates payload: %s", text)
+	}
 	if !strings.Contains(text, "\"usage_metadata\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}") {
 		t.Fatalf("missing usage_metadata in messages-tuple: %s", text)
 	}
