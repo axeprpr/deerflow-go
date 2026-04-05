@@ -903,6 +903,62 @@ func TestThreadSearchAcceptsCamelCaseCheckpointSelectFields(t *testing.T) {
 	}
 }
 
+func TestThreadSearchIncludesCheckpointFieldsByDefault(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.ensureSession("thread-search-checkpoint-default", map[string]any{
+		"checkpoint_id":               "cp-1",
+		"parent_checkpoint_id":        "cp-parent-1",
+		"checkpoint_ns":               "ns-1",
+		"parent_checkpoint_ns":        "ns-parent-1",
+		"checkpoint_thread_id":        "checkpoint-thread-1",
+		"parent_checkpoint_thread_id": "checkpoint-thread-parent-1",
+	})
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"limit":10}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) == 0 {
+		t.Fatal("expected threads")
+	}
+
+	var selected map[string]any
+	for _, thread := range threads {
+		if thread["thread_id"] == "thread-search-checkpoint-default" {
+			selected = thread
+			break
+		}
+	}
+	if selected == nil {
+		t.Fatalf("missing projected thread in %#v", threads)
+	}
+	if selected["checkpoint_id"] != "cp-1" || selected["parent_checkpoint_id"] != "cp-parent-1" {
+		t.Fatalf("selected=%#v", selected)
+	}
+	checkpoint, _ := selected["checkpoint"].(map[string]any)
+	if checkpoint["checkpoint_id"] != "cp-1" || checkpoint["checkpoint_ns"] != "ns-1" || checkpoint["thread_id"] != "checkpoint-thread-1" {
+		t.Fatalf("checkpoint=%#v", selected["checkpoint"])
+	}
+	parentCheckpoint, _ := selected["parent_checkpoint"].(map[string]any)
+	if parentCheckpoint["checkpoint_id"] != "cp-parent-1" || parentCheckpoint["checkpoint_ns"] != "ns-parent-1" || parentCheckpoint["thread_id"] != "checkpoint-thread-parent-1" {
+		t.Fatalf("parent_checkpoint=%#v", selected["parent_checkpoint"])
+	}
+}
+
 func TestThreadSearchSortsByCamelCaseAssistantID(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	first := s.ensureSession("thread-search-assistant-b", map[string]any{"assistant_id": "beta"})
