@@ -2133,6 +2133,7 @@ func TestLoadPersistedThreadsAcceptsValuesStateObject(t *testing.T) {
 			"messages":[
 				{"id":"m1","type":"human","content":"hello from state"}
 			],
+			"artifacts":["/tmp/report.html"],
 			"title":"Values Thread",
 			"todos":[{"content":"task","status":"pending"}],
 			"viewed_images":{"/tmp/chart.png":{"base64":"xyz","mime_type":"image/png"}}
@@ -2166,8 +2167,14 @@ func TestLoadPersistedThreadsAcceptsValuesStateObject(t *testing.T) {
 	if session.Metadata["checkpoint_id"] != "cp-top-level" || session.Metadata["parent_checkpoint_id"] != "cp-parent-top-level" {
 		t.Fatalf("metadata=%#v", session.Metadata)
 	}
+	if artifacts := anyStringSlice(session.Metadata["artifacts"]); len(artifacts) != 1 || artifacts[0] != "/tmp/report.html" {
+		t.Fatalf("artifacts=%#v metadata=%#v", artifacts, session.Metadata)
+	}
 	if _, ok := session.Metadata["viewed_images"]; !ok {
 		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+	if artifacts := sessionArtifactPaths(session); len(artifacts) != 1 || artifacts[0] != "/tmp/report.html" {
+		t.Fatalf("session artifacts=%#v", artifacts)
 	}
 	if session.CreatedAt.IsZero() {
 		t.Fatalf("created_at not loaded: %#v", session)

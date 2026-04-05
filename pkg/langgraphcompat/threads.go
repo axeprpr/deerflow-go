@@ -1041,6 +1041,9 @@ func sessionArtifactPaths(session *Session) []string {
 			addArtifactPath(&paths, seen, path)
 		}
 	}
+	for _, path := range anyStringSlice(session.Metadata["artifacts"]) {
+		addArtifactPath(&paths, seen, path)
+	}
 	return paths
 }
 
@@ -1226,7 +1229,7 @@ func (s *Server) loadPersistedThreads() {
 			if persisted.Metadata == nil {
 				persisted.Metadata = map[string]any{}
 			}
-			for _, key := range []string{"title", "todos", "sandbox", "viewed_images", "viewedImages"} {
+			for _, key := range []string{"title", "todos", "sandbox", "viewed_images", "viewedImages", "artifacts"} {
 				if _, exists := persisted.Metadata[key]; exists {
 					continue
 				}
