@@ -2402,6 +2402,13 @@ func TestLoadPersistedThreadsDerivesBusyStatusFromNextTasks(t *testing.T) {
 	if session.Status != "busy" {
 		t.Fatalf("status=%q", session.Status)
 	}
+	state := s.getThreadState("thread-busy-state")
+	if state == nil {
+		t.Fatalf("state=nil")
+	}
+	if len(state.Next) != 1 || state.Next[0] != "lead_agent" {
+		t.Fatalf("next=%#v", state.Next)
+	}
 }
 
 func TestLoadPersistedThreadsDerivesInterruptedStatus(t *testing.T) {
@@ -2414,6 +2421,7 @@ func TestLoadPersistedThreadsDerivesInterruptedStatus(t *testing.T) {
 		"values":{"messages":[{"id":"m1","type":"human","content":"hello"}]},
 		"metadata":{"thread_id":"thread-interrupted-state"},
 		"interrupts":[{"value":"Need input"}],
+		"tasks":[{"id":"task-1","name":"lead_agent"}],
 		"created_at":"2026-01-01T00:00:00Z"
 	}`
 	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
@@ -2429,6 +2437,17 @@ func TestLoadPersistedThreadsDerivesInterruptedStatus(t *testing.T) {
 	}
 	if session.Status != "interrupted" {
 		t.Fatalf("status=%q", session.Status)
+	}
+	state := s.getThreadState("thread-interrupted-state")
+	if state == nil {
+		t.Fatalf("state=nil")
+	}
+	if len(state.Tasks) != 1 {
+		t.Fatalf("tasks=%#v", state.Tasks)
+	}
+	metadataInterrupts, _ := state.Metadata["interrupts"].([]any)
+	if len(metadataInterrupts) != 1 {
+		t.Fatalf("interrupts=%#v", state.Metadata["interrupts"])
 	}
 }
 

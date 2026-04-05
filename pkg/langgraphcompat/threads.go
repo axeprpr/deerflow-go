@@ -763,14 +763,17 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 	values := s.threadValues(session)
 	values["messages"] = s.messagesToLangChain(session.Messages)
 
+	next := stringSliceFromAny(session.Metadata["next"])
+	tasks := anySlice(session.Metadata["tasks"])
+
 	return &ThreadState{
 		CheckpointID: uuid.New().String(),
 		Values:       values,
 		Config: map[string]any{
 			"configurable": s.threadConfigurable(session),
 		},
-		Next:      []string{},
-		Tasks:     []any{},
+		Next:      append([]string(nil), next...),
+		Tasks:     append([]any(nil), tasks...),
 		Metadata:  threadMetadata(session),
 		CreatedAt: session.UpdatedAt.Format(time.RFC3339Nano),
 	}
@@ -1339,6 +1342,11 @@ func (s *Server) loadPersistedThreads() {
 					persisted.Metadata[key] = value
 					break
 				}
+			}
+		}
+		for _, key := range []string{"interrupts", "tasks", "next"} {
+			if value, ok := raw[key]; ok {
+				persisted.Metadata[key] = value
 			}
 		}
 		if checkpoint := mapFromAny(raw["checkpoint"]); len(checkpoint) > 0 {
