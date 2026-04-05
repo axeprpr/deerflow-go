@@ -172,6 +172,8 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 		switch req.SortBy {
 		case "created_at":
 			less = left["created_at"].(string) < right["created_at"].(string)
+		case "step":
+			less = numberFromAny(left["step"]) < numberFromAny(right["step"])
 		case "status":
 			less = asString(left["status"]) < asString(right["status"])
 		case "assistant_id":
@@ -867,6 +869,7 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 		"parent_checkpoint_ns":        stringValue(session.Metadata["parent_checkpoint_ns"]),
 		"checkpoint_thread_id":        stringValue(session.Metadata["checkpoint_thread_id"]),
 		"parent_checkpoint_thread_id": stringValue(session.Metadata["parent_checkpoint_thread_id"]),
+		"step":                        session.Metadata["step"],
 		"checkpoint":                  checkpoint,
 		"parent_checkpoint":           parentCheckpoint,
 		"metadata":                    threadMetadata(session),

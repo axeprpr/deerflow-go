@@ -1160,6 +1160,7 @@ func TestThreadSearchIncludesCheckpointFieldsByDefault(t *testing.T) {
 		"assistant_id":                "assistant-1",
 		"graph_id":                    "graph-1",
 		"run_id":                      "run-1",
+		"step":                        3,
 		"checkpoint_id":               "cp-1",
 		"parent_checkpoint_id":        "cp-parent-1",
 		"checkpoint_ns":               "ns-1",
@@ -1207,6 +1208,9 @@ func TestThreadSearchIncludesCheckpointFieldsByDefault(t *testing.T) {
 		t.Fatalf("selected=%#v", selected)
 	}
 	if selected["checkpoint_thread_id"] != "checkpoint-thread-1" || selected["parent_checkpoint_thread_id"] != "checkpoint-thread-parent-1" {
+		t.Fatalf("selected=%#v", selected)
+	}
+	if selected["step"] != float64(3) && selected["step"] != 3 {
 		t.Fatalf("selected=%#v", selected)
 	}
 	if selected["assistant_id"] != "assistant-1" || selected["graph_id"] != "graph-1" || selected["run_id"] != "run-1" {
@@ -5299,6 +5303,7 @@ func TestThreadGetIncludesCompatShape(t *testing.T) {
 		"assistant_id":                "assistant-1",
 		"graph_id":                    "graph-1",
 		"run_id":                      "run-1",
+		"step":                        7,
 		"title":                       "Compat Thread",
 		"mode":                        "thinking",
 		"model_name":                  "deepseek/deepseek-r1",
@@ -5395,6 +5400,9 @@ func TestThreadGetIncludesCompatShape(t *testing.T) {
 	if thread["checkpoint_thread_id"] != "checkpoint-thread-1" || thread["parent_checkpoint_thread_id"] != "checkpoint-thread-parent-1" {
 		t.Fatalf("thread=%#v", thread)
 	}
+	if thread["step"] != float64(7) && thread["step"] != 7 {
+		t.Fatalf("thread=%#v", thread)
+	}
 	checkpoint, _ := thread["checkpoint"].(map[string]any)
 	if checkpoint["checkpoint_id"] != "cp-1" || checkpoint["checkpoint_ns"] != "ns-1" || checkpoint["thread_id"] != "checkpoint-thread-1" {
 		t.Fatalf("checkpoint=%#v", thread["checkpoint"])
@@ -5402,6 +5410,42 @@ func TestThreadGetIncludesCompatShape(t *testing.T) {
 	parentCheckpoint, _ := thread["parent_checkpoint"].(map[string]any)
 	if parentCheckpoint["checkpoint_id"] != "cp-parent-1" || parentCheckpoint["checkpoint_ns"] != "ns-parent-1" || parentCheckpoint["thread_id"] != "checkpoint-thread-parent-1" {
 		t.Fatalf("parent_checkpoint=%#v", thread["parent_checkpoint"])
+	}
+}
+
+func TestThreadSearchSupportsStepSort(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	first := s.ensureSession("thread-search-step-b", map[string]any{"step": 7})
+	second := s.ensureSession("thread-search-step-a", map[string]any{"step": 3})
+	first.UpdatedAt = time.Now().UTC().Add(-time.Hour)
+	second.UpdatedAt = time.Now().UTC()
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"limit":10,"sortBy":"step","sortOrder":"asc","select":["threadId","step"]}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) < 2 {
+		t.Fatalf("threads=%#v", threads)
+	}
+	if threads[0]["thread_id"] != "thread-search-step-a" {
+		t.Fatalf("first thread=%v want thread-search-step-a", threads[0]["thread_id"])
+	}
+	if threads[0]["step"] != float64(3) && threads[0]["step"] != 3 {
+		t.Fatalf("step=%#v", threads[0]["step"])
 	}
 }
 
