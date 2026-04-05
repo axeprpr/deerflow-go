@@ -8928,6 +8928,9 @@ func TestThreadRunStreamAcceptsTopLevelMessages(t *testing.T) {
 	if !strings.Contains(text, `"run_id":"`) {
 		t.Fatalf("missing run_id in metadata: %s", text)
 	}
+	if strings.Contains(text, `"status":`) {
+		t.Fatalf("unexpected status in metadata payload: %s", text)
+	}
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
 	}
