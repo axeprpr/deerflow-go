@@ -5914,7 +5914,7 @@ func TestThreadStatePostPersistsCompatFields(t *testing.T) {
 	threadID := "thread-state-post"
 	s.ensureSession(threadID, nil)
 
-	body := `{"metadata":{"mode":"thinking","model_name":"deepseek/deepseek-r1","reasoning_effort":"high","thinking_enabled":false,"is_plan_mode":true,"subagent_enabled":true,"temperature":0.2,"max_tokens":321,"checkpoint_id":"cp-1","parent_checkpoint_id":"cp-parent-1","checkpoint_ns":"ns-1","parent_checkpoint_ns":"ns-parent-1","checkpoint_thread_id":"checkpoint-thread-1","parent_checkpoint_thread_id":"checkpoint-thread-parent-1","next":["lead_agent"],"tasks":[{"id":"task-1","name":"lead_agent"}],"interrupts":[{"value":"Need input"}]},"values":{"title":"Updated","todos":[{"content":"ship sqlite","status":"in_progress"}],"sandbox":{"sandbox_id":"sb-2"},"viewed_images":{"/tmp/chart.png":{"base64":"xyz","mime_type":"image/png"}}}}`
+	body := `{"metadata":{"mode":"thinking","model_name":"deepseek/deepseek-r1","reasoning_effort":"high","thinking_enabled":false,"is_plan_mode":true,"subagent_enabled":true,"temperature":0.2,"max_tokens":321,"checkpoint_id":"cp-1","parent_checkpoint_id":"cp-parent-1","checkpoint_ns":"ns-1","parent_checkpoint_ns":"ns-parent-1","checkpoint_thread_id":"checkpoint-thread-1","parent_checkpoint_thread_id":"checkpoint-thread-parent-1","next":["lead_agent"],"tasks":[{"id":"task-1","name":"lead_agent"}],"interrupts":[{"value":"Need input"}]},"values":{"title":"Updated","todos":[{"content":"ship sqlite","status":"in_progress"}],"sandbox":{"sandbox_id":"sb-2"},"artifacts":["/tmp/report.html"],"viewed_images":{"/tmp/chart.png":{"base64":"xyz","mime_type":"image/png"}}}}`
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/"+threadID+"/state", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
@@ -5958,6 +5958,10 @@ func TestThreadStatePostPersistsCompatFields(t *testing.T) {
 	if len(state.Interrupts) != 1 {
 		t.Fatalf("interrupts=%#v", state.Interrupts)
 	}
+	artifacts := anyStringSlice(state.Values["artifacts"])
+	if len(artifacts) != 1 || artifacts[0] != "/tmp/report.html" {
+		t.Fatalf("artifacts=%#v", state.Values["artifacts"])
+	}
 
 	s.sessionsMu.RLock()
 	session := s.sessions[threadID]
@@ -5982,6 +5986,9 @@ func TestThreadStatePostPersistsCompatFields(t *testing.T) {
 	viewedImages, ok := session.Metadata["viewed_images"].(map[string]any)
 	if !ok || len(viewedImages) != 1 {
 		t.Fatalf("viewed_images=%#v", session.Metadata["viewed_images"])
+	}
+	if artifacts := anyStringSlice(session.Metadata["artifacts"]); len(artifacts) != 1 || artifacts[0] != "/tmp/report.html" {
+		t.Fatalf("artifacts=%#v", session.Metadata["artifacts"])
 	}
 }
 
@@ -6140,7 +6147,7 @@ func TestThreadStatePatchAcceptsValuesPayload(t *testing.T) {
 	req, _ := http.NewRequest(
 		http.MethodPatch,
 		ts.URL+"/threads/"+threadID+"/state",
-		strings.NewReader(`{"metadata":{"mode":"thinking","modelName":"deepseek/deepseek-r1","reasoningEffort":"high","thinkingEnabled":false,"isPlanMode":true,"subagentEnabled":true,"Temperature":0.2,"maxTokens":321,"checkpointId":"cp-1","parentCheckpointId":"cp-parent-1","checkpointNs":"ns-1","parentCheckpointNs":"ns-parent-1","checkpointThreadId":"checkpoint-thread-1","parentCheckpointThreadId":"checkpoint-thread-parent-1","next":["lead_agent"],"tasks":[{"id":"task-1","name":"lead_agent"}],"interrupts":[{"value":"Need input"}]},"values":{"title":"After"}}`),
+		strings.NewReader(`{"metadata":{"mode":"thinking","modelName":"deepseek/deepseek-r1","reasoningEffort":"high","thinkingEnabled":false,"isPlanMode":true,"subagentEnabled":true,"Temperature":0.2,"maxTokens":321,"checkpointId":"cp-1","parentCheckpointId":"cp-parent-1","checkpointNs":"ns-1","parentCheckpointNs":"ns-parent-1","checkpointThreadId":"checkpoint-thread-1","parentCheckpointThreadId":"checkpoint-thread-parent-1","next":["lead_agent"],"tasks":[{"id":"task-1","name":"lead_agent"}],"interrupts":[{"value":"Need input"}]},"values":{"title":"After","artifacts":["/tmp/report.html"]}}`),
 	)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
@@ -6184,6 +6191,10 @@ func TestThreadStatePatchAcceptsValuesPayload(t *testing.T) {
 	if len(stateResp.Interrupts) != 1 {
 		t.Fatalf("interrupts=%#v", stateResp.Interrupts)
 	}
+	artifacts := anyStringSlice(stateResp.Values["artifacts"])
+	if len(artifacts) != 1 || artifacts[0] != "/tmp/report.html" {
+		t.Fatalf("artifacts=%#v", stateResp.Values["artifacts"])
+	}
 
 	state := s.getThreadState(threadID)
 	if state == nil {
@@ -6191,6 +6202,9 @@ func TestThreadStatePatchAcceptsValuesPayload(t *testing.T) {
 	}
 	if got := state.Values["title"]; got != "After" {
 		t.Fatalf("title=%v want After", got)
+	}
+	if artifacts := anyStringSlice(state.Values["artifacts"]); len(artifacts) != 1 || artifacts[0] != "/tmp/report.html" {
+		t.Fatalf("artifacts=%#v", state.Values["artifacts"])
 	}
 }
 
