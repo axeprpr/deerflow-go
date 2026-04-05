@@ -2463,6 +2463,50 @@ func TestLoadPersistedThreadsAcceptsCamelCaseParentCheckpointObject(t *testing.T
 	}
 }
 
+func TestLoadPersistedThreadsAcceptsTopLevelConfigurable(t *testing.T) {
+	root := t.TempDir()
+	threadDir := filepath.Join(root, "threads", "thread-configurable-top-level", "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"values":{"messages":[{"id":"m1","type":"human","content":"hello from state"}]},
+		"configurable":{
+			"threadId":"thread-configurable-top-level",
+			"agentType":"deep_research",
+			"agentName":"writer",
+			"modelName":"deepseek/deepseek-r1",
+			"reasoningEffort":"high",
+			"thinkingEnabled":false,
+			"isPlanMode":true,
+			"subagentEnabled":true
+		},
+		"created_at":"2026-01-01T00:00:00Z"
+	}`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write thread file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, sessions: map[string]*Session{}}
+	s.loadPersistedThreads()
+
+	state := s.getThreadState("thread-configurable-top-level")
+	if state == nil {
+		t.Fatalf("state=nil")
+	}
+	configurable, _ := state.Config["configurable"].(map[string]any)
+	if configurable["thread_id"] != "thread-configurable-top-level" ||
+		configurable["agent_type"] != "deep_research" ||
+		configurable["agent_name"] != "writer" ||
+		configurable["model_name"] != "deepseek/deepseek-r1" ||
+		configurable["reasoning_effort"] != "high" {
+		t.Fatalf("configurable=%#v", configurable)
+	}
+	if configurable["thinking_enabled"] != false || configurable["is_plan_mode"] != true || configurable["subagent_enabled"] != true {
+		t.Fatalf("configurable=%#v", configurable)
+	}
+}
+
 func TestLoadPersistedThreadsUsesCheckpointObjectsAsIDFallback(t *testing.T) {
 	root := t.TempDir()
 	threadDir := filepath.Join(root, "threads", "thread-checkpoint-object-fallback", "user-data")

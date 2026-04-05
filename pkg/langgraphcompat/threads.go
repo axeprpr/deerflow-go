@@ -1529,6 +1529,22 @@ func (s *Server) loadPersistedThreads() {
 				}
 			}
 		}
+		config := normalizeThreadConfig(mapFromAny(raw["config"]))
+		if len(config) == 0 {
+			if configurable := mapFromAny(raw["configurable"]); len(configurable) > 0 {
+				config = normalizeThreadConfig(map[string]any{"configurable": configurable})
+			}
+		}
+		if configurable := mapFromAny(config["configurable"]); len(configurable) > 0 {
+			if persisted.Metadata == nil {
+				persisted.Metadata = map[string]any{}
+			}
+			for _, key := range []string{"thread_id", "agent_type", "agent_name", "model_name", "mode", "reasoning_effort", "thinking_enabled", "is_plan_mode", "subagent_enabled", "max_tokens"} {
+				if value, ok := configurable[key]; ok {
+					persisted.Metadata[key] = value
+				}
+			}
+		}
 		for key, aliases := range map[string][]string{
 			"checkpoint_id":        {"checkpoint_id", "checkpointId"},
 			"parent_checkpoint_id": {"parent_checkpoint_id", "parentCheckpointId"},
