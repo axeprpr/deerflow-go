@@ -4199,6 +4199,82 @@ func TestThreadHistoryReturnsLatestSnapshotFirst(t *testing.T) {
 	}
 }
 
+func TestThreadHistoryIncludesRecoveredStateShape(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "history-shape"
+	session := s.ensureSession(threadID, map[string]any{
+		"title":                       "Snapshot",
+		"mode":                        "thinking",
+		"model_name":                  "deepseek/deepseek-r1",
+		"reasoning_effort":            "high",
+		"thinking_enabled":            false,
+		"is_plan_mode":                true,
+		"subagent_enabled":            true,
+		"temperature":                 0.2,
+		"max_tokens":                  321,
+		"checkpoint_id":               "cp-1",
+		"parent_checkpoint_id":        "cp-parent-1",
+		"checkpoint_ns":               "ns-1",
+		"parent_checkpoint_ns":        "ns-parent-1",
+		"checkpoint_thread_id":        "checkpoint-thread-1",
+		"parent_checkpoint_thread_id": "checkpoint-thread-parent-1",
+		"next":                        []any{"lead_agent"},
+		"tasks":                       []any{map[string]any{"id": "task-1", "name": "lead_agent"}},
+		"interrupts":                  []any{map[string]any{"value": "Need input"}},
+	})
+	if err := s.persistSessionFile(session); err != nil {
+		t.Fatalf("persist session: %v", err)
+	}
+	if err := s.appendThreadHistorySnapshot(threadID); err != nil {
+		t.Fatalf("append history: %v", err)
+	}
+
+	resp, err := http.Get(ts.URL + "/threads/" + threadID + "/history?limit=1")
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("history status=%d", resp.StatusCode)
+	}
+
+	var history []ThreadState
+	if err := json.NewDecoder(resp.Body).Decode(&history); err != nil {
+		t.Fatalf("decode history: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len=%d", len(history))
+	}
+	configurable, _ := history[0].Config["configurable"].(map[string]any)
+	if configurable["mode"] != "thinking" || configurable["model_name"] != "deepseek/deepseek-r1" || configurable["reasoning_effort"] != "high" {
+		t.Fatalf("config=%#v", history[0].Config)
+	}
+	if configurable["thinking_enabled"] != false || configurable["is_plan_mode"] != true || configurable["subagent_enabled"] != true {
+		t.Fatalf("config=%#v", history[0].Config)
+	}
+	if configurable["temperature"] != 0.2 {
+		t.Fatalf("config=%#v", history[0].Config)
+	}
+	if configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != 321 && configurable["max_tokens"] != int64(321) {
+		t.Fatalf("config=%#v", history[0].Config)
+	}
+	if history[0].Checkpoint == nil || history[0].Checkpoint["checkpoint_id"] != "cp-1" || history[0].Checkpoint["checkpoint_ns"] != "ns-1" || history[0].Checkpoint["thread_id"] != "checkpoint-thread-1" {
+		t.Fatalf("checkpoint=%#v", history[0].Checkpoint)
+	}
+	if history[0].ParentCheckpoint == nil || history[0].ParentCheckpoint["checkpoint_id"] != "cp-parent-1" || history[0].ParentCheckpoint["checkpoint_ns"] != "ns-parent-1" || history[0].ParentCheckpoint["thread_id"] != "checkpoint-thread-parent-1" {
+		t.Fatalf("parent_checkpoint=%#v", history[0].ParentCheckpoint)
+	}
+	if len(history[0].Next) != 1 || history[0].Next[0] != "lead_agent" {
+		t.Fatalf("next=%#v", history[0].Next)
+	}
+	if len(history[0].Tasks) != 1 {
+		t.Fatalf("tasks=%#v", history[0].Tasks)
+	}
+	if len(history[0].Interrupts) != 1 {
+		t.Fatalf("interrupts=%#v", history[0].Interrupts)
+	}
+}
+
 func TestThreadDeleteRemovesRunFiles(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-cleanup"
