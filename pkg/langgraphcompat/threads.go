@@ -1558,6 +1558,8 @@ func normalizePersistedThreadMetadata(metadata map[string]any) map[string]any {
 	if _, ok := metadata["model_name"]; !ok {
 		if value, ok := metadata["modelName"]; ok {
 			metadata["model_name"] = value
+		} else if value, ok := metadata["model"]; ok {
+			metadata["model_name"] = value
 		}
 	}
 	if _, ok := metadata["thread_id"]; !ok {

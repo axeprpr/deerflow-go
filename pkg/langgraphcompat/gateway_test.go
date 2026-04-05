@@ -2207,6 +2207,41 @@ func TestLoadPersistedThreadsAcceptsValuesStateObject(t *testing.T) {
 	}
 }
 
+func TestLoadPersistedThreadsAcceptsLegacyModelAlias(t *testing.T) {
+	root := t.TempDir()
+	threadDir := filepath.Join(root, "threads", "thread-model-alias", "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"values":{"messages":[{"id":"m1","type":"human","content":"hello"}]},
+		"metadata":{"thread_id":"thread-model-alias","model":"doubao-seed-1.8"},
+		"created_at":"2026-01-01T00:00:00Z"
+	}`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write thread file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, sessions: map[string]*Session{}}
+	s.loadPersistedThreads()
+
+	session := s.sessions["thread-model-alias"]
+	if session == nil {
+		t.Fatalf("sessions=%#v", s.sessions)
+	}
+	if session.Metadata["model_name"] != "doubao-seed-1.8" {
+		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+	state := s.getThreadState("thread-model-alias")
+	if state == nil {
+		t.Fatalf("state=nil")
+	}
+	configurable, _ := state.Config["configurable"].(map[string]any)
+	if configurable["model_name"] != "doubao-seed-1.8" {
+		t.Fatalf("configurable=%#v", configurable)
+	}
+}
+
 func TestLoadPersistedThreadsPrefersTopLevelCheckpointIDs(t *testing.T) {
 	root := t.TempDir()
 	threadDir := filepath.Join(root, "threads", "thread-top-level-checkpoint", "user-data")
