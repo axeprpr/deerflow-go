@@ -9285,6 +9285,46 @@ func TestRecordedRunStreamReplaysMetadataPayload(t *testing.T) {
 	}
 }
 
+func TestRecordedRunStreamReplaysEndUsagePayload(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-replay-end-usage",
+		ThreadID:    "thread-replay-end-usage",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "end", Data: map[string]any{"run_id": "run-replay-end-usage", "usage": map[string]any{"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-replay-end-usage/runs/run-replay-end-usage/stream")
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	if !strings.Contains(text, `"run_id":"run-replay-end-usage"`) {
+		t.Fatalf("missing run_id in end payload: %s", text)
+	}
+	if !strings.Contains(text, `"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}`) {
+		t.Fatalf("missing usage in end payload: %s", text)
+	}
+}
+
 func TestRecordedRunStreamReplaysToolCallEvents(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	run := &Run{
@@ -9579,6 +9619,46 @@ func TestThreadJoinStreamReplaysMetadataPayload(t *testing.T) {
 	}
 	if !strings.Contains(text, `"assistant_id":"lead_agent"`) {
 		t.Fatalf("missing assistant_id in metadata: %s", text)
+	}
+}
+
+func TestThreadJoinStreamReplaysEndUsagePayload(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-join-end-usage",
+		ThreadID:    "thread-join-end-usage",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "end", Data: map[string]any{"run_id": "run-join-end-usage", "usage": map[string]any{"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-join-end-usage/stream")
+	if err != nil {
+		t.Fatalf("join stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	if !strings.Contains(text, `"run_id":"run-join-end-usage"`) {
+		t.Fatalf("missing run_id in end payload: %s", text)
+	}
+	if !strings.Contains(text, `"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}`) {
+		t.Fatalf("missing usage in end payload: %s", text)
 	}
 }
 
