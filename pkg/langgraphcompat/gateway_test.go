@@ -360,6 +360,39 @@ func TestThreadSearchSelectStillSortsByUnselectedField(t *testing.T) {
 	}
 }
 
+func TestThreadSearchAcceptsCamelCaseSortFields(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	oldSession := s.ensureSession("thread-search-camel-old", map[string]any{"title": "Old"})
+	newSession := s.ensureSession("thread-search-camel-new", map[string]any{"title": "New"})
+	oldSession.UpdatedAt = time.Now().UTC().Add(-time.Hour)
+	newSession.UpdatedAt = time.Now().UTC()
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"limit":10,"sortBy":"updated_at","sortOrder":"asc","select":["thread_id"]}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) < 2 {
+		t.Fatalf("threads=%#v", threads)
+	}
+	if threads[0]["thread_id"] != "thread-search-camel-old" {
+		t.Fatalf("first thread=%v want thread-search-camel-old", threads[0]["thread_id"])
+	}
+}
+
 func TestModelsSkillsMCPConfigEndpoints(t *testing.T) {
 	_, ts := newCompatTestServer(t)
 

@@ -108,11 +108,13 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Limit     int      `json:"limit"`
-		Offset    int      `json:"offset"`
-		SortBy    string   `json:"sort_by"`
-		SortOrder string   `json:"sort_order"`
-		Select    []string `json:"select"`
+		Limit      int      `json:"limit"`
+		Offset     int      `json:"offset"`
+		SortBy     string   `json:"sort_by"`
+		SortByX    string   `json:"sortBy"`
+		SortOrder  string   `json:"sort_order"`
+		SortOrderX string   `json:"sortOrder"`
+		Select     []string `json:"select"`
 	}
 	if r.Body != nil {
 		defer r.Body.Close()
@@ -122,6 +124,8 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 	if req.Limit <= 0 {
 		req.Limit = 10
 	}
+	req.SortBy = firstNonEmpty(req.SortBy, req.SortByX)
+	req.SortOrder = firstNonEmpty(req.SortOrder, req.SortOrderX)
 	if req.SortBy == "" {
 		req.SortBy = "updated_at"
 	}
