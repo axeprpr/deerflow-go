@@ -8994,9 +8994,10 @@ func TestThreadJoinStreamModeFiltersReplayEvents(t *testing.T) {
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 		Events: []StreamEvent{
-			{ID: "1", Event: "messages-tuple", Data: map[string]any{"type": "ai", "content": "hello"}},
-			{ID: "2", Event: "values", Data: map[string]any{"title": "done"}},
-			{ID: "3", Event: "end", Data: map[string]any{"run_id": "run-join-1"}},
+			{ID: "1", Event: "metadata", Data: map[string]any{"run_id": "run-join-1", "thread_id": "thread-join-1", "assistant_id": "lead_agent"}},
+			{ID: "2", Event: "messages-tuple", Data: map[string]any{"type": "ai", "content": "hello"}},
+			{ID: "3", Event: "values", Data: map[string]any{"title": "done"}},
+			{ID: "4", Event: "end", Data: map[string]any{"run_id": "run-join-1"}},
 		},
 	}
 	s.saveRun(run)
@@ -9015,6 +9016,9 @@ func TestThreadJoinStreamModeFiltersReplayEvents(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	if strings.Contains(text, "event: metadata") {
+		t.Fatalf("unexpected metadata event: %s", text)
+	}
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
 	}
@@ -9029,6 +9033,47 @@ func TestThreadJoinStreamModeFiltersReplayEvents(t *testing.T) {
 	}
 	if !strings.Contains(text, `"run_id":"run-join-1"`) {
 		t.Fatalf("missing run_id in end payload: %s", text)
+	}
+}
+
+func TestThreadJoinStreamReplaysMetadataPayload(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-join-meta",
+		ThreadID:    "thread-join-meta",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "metadata", Data: map[string]any{"run_id": "run-join-meta", "thread_id": "thread-join-meta", "assistant_id": "lead_agent"}},
+			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-join-meta"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-join-meta/stream")
+	if err != nil {
+		t.Fatalf("join stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: metadata") {
+		t.Fatalf("missing metadata event: %s", text)
+	}
+	if !strings.Contains(text, `"run_id":"run-join-meta"`) || !strings.Contains(text, `"thread_id":"thread-join-meta"`) {
+		t.Fatalf("missing metadata IDs: %s", text)
+	}
+	if !strings.Contains(text, `"assistant_id":"lead_agent"`) {
+		t.Fatalf("missing assistant_id in metadata: %s", text)
 	}
 }
 
