@@ -20,6 +20,7 @@ import (
 
 type runConfig struct {
 	ModelName       string
+	Mode            string
 	ReasoningEffort string
 	AgentType       agent.AgentType
 	AgentName       string
@@ -938,6 +939,10 @@ func parseRunConfig(raw map[string]any) runConfig {
 			stringFromAny(configurable["modelName"]),
 			stringFromAny(configurable["model"]),
 		),
+		Mode: firstNonEmpty(
+			stringFromAny(raw["mode"]),
+			stringFromAny(configurable["mode"]),
+		),
 		ReasoningEffort: firstNonEmpty(
 			stringFromAny(raw["reasoning_effort"]),
 			stringFromAny(raw["reasoningEffort"]),
@@ -1016,6 +1021,9 @@ func (s *Server) applyRunConfigMetadata(threadID string, cfg runConfig) {
 	}
 	if cfg.ModelName != "" {
 		s.setThreadMetadata(threadID, "model_name", cfg.ModelName)
+	}
+	if cfg.Mode != "" {
+		s.setThreadMetadata(threadID, "mode", cfg.Mode)
 	}
 	if cfg.ReasoningEffort != "" {
 		s.setThreadMetadata(threadID, "reasoning_effort", cfg.ReasoningEffort)

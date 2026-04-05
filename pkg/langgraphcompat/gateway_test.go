@@ -8290,6 +8290,76 @@ func TestThreadRunAcceptsTopLevelContext(t *testing.T) {
 	}
 }
 
+func TestThreadRunPersistsModeFromConfig(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+	body := `{"assistant_id":"lead_agent","input":{"messages":[{"role":"user","content":"hi"}]},"config":{"configurable":{"mode":"pro","model_name":"deepseek/deepseek-r1"}}}`
+	resp, err := http.Post(ts.URL+"/threads/thread-mode-config/runs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	stateResp, err := http.Get(ts.URL + "/threads/thread-mode-config/state")
+	if err != nil {
+		t.Fatalf("get state: %v", err)
+	}
+	defer stateResp.Body.Close()
+	var state ThreadState
+	if err := json.NewDecoder(stateResp.Body).Decode(&state); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	config, ok := state.Config["configurable"].(map[string]any)
+	if !ok {
+		t.Fatalf("config=%#v", state.Config)
+	}
+	if config["mode"] != "pro" {
+		t.Fatalf("config=%#v", config)
+	}
+	if config["thinking_enabled"] != true || config["is_plan_mode"] != true || config["subagent_enabled"] != false {
+		t.Fatalf("config=%#v", config)
+	}
+}
+
+func TestThreadRunPersistsModeFromTopLevelContext(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+	body := `{"assistant_id":"lead_agent","input":{"messages":[{"role":"user","content":"hi"}]},"context":{"mode":"ultra"}}`
+	resp, err := http.Post(ts.URL+"/threads/thread-mode-context/runs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	stateResp, err := http.Get(ts.URL + "/threads/thread-mode-context/state")
+	if err != nil {
+		t.Fatalf("get state: %v", err)
+	}
+	defer stateResp.Body.Close()
+	var state ThreadState
+	if err := json.NewDecoder(stateResp.Body).Decode(&state); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	config, ok := state.Config["configurable"].(map[string]any)
+	if !ok {
+		t.Fatalf("config=%#v", state.Config)
+	}
+	if config["mode"] != "ultra" {
+		t.Fatalf("config=%#v", config)
+	}
+	if config["thinking_enabled"] != true || config["is_plan_mode"] != true || config["subagent_enabled"] != true {
+		t.Fatalf("config=%#v", config)
+	}
+}
+
 func TestThreadRunPersistsAgentNameFromContext(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.llmProvider = fakeLLMProvider{}

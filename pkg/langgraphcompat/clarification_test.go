@@ -22,6 +22,17 @@ func TestParseRunConfigAgentType(t *testing.T) {
 	}
 }
 
+func TestParseRunConfigMode(t *testing.T) {
+	cfg := parseRunConfig(map[string]any{
+		"configurable": map[string]any{
+			"mode": "pro",
+		},
+	})
+	if cfg.Mode != "pro" {
+		t.Fatalf("Mode = %q, want %q", cfg.Mode, "pro")
+	}
+}
+
 func TestThreadClarificationHandlers(t *testing.T) {
 	manager := clarification.NewManager(4)
 	root := t.TempDir()
