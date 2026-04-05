@@ -51,6 +51,9 @@ func (s *Server) handleThreadCreate(w http.ResponseWriter, r *http.Request) {
 	metadata, _ := req["metadata"].(map[string]any)
 
 	session := s.ensureSession(threadID, metadata)
+	if values, ok := req["values"].(map[string]any); ok {
+		applyThreadValues(session, values)
+	}
 	_ = s.persistSessionFile(session)
 	_ = s.appendThreadHistorySnapshot(threadID)
 	writeJSON(w, http.StatusCreated, s.threadResponse(session))

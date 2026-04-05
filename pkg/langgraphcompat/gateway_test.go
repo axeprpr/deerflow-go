@@ -177,6 +177,35 @@ func TestCreateThreadAcceptsCamelCaseThreadID(t *testing.T) {
 	}
 }
 
+func TestCreateThreadAcceptsValuesPayload(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	resp, err := http.Post(
+		ts.URL+"/threads",
+		"application/json",
+		strings.NewReader(`{"thread_id":"thread-create-values","values":{"title":"Created","todos":[{"content":"ship sqlite","status":"pending"}]}}`),
+	)
+	if err != nil {
+		t.Fatalf("post thread: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(body))
+	}
+
+	state := s.getThreadState("thread-create-values")
+	if state == nil {
+		t.Fatal("state missing")
+	}
+	if got := state.Values["title"]; got != "Created" {
+		t.Fatalf("title=%v want Created", got)
+	}
+	todos, ok := state.Values["todos"].([]map[string]any)
+	if !ok || len(todos) != 1 {
+		t.Fatalf("todos=%#v", state.Values["todos"])
+	}
+}
+
 func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-gateway-1"
