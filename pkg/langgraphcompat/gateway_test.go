@@ -4933,6 +4933,42 @@ func TestThreadStatePostAcceptsMetadata(t *testing.T) {
 	}
 }
 
+func TestThreadStatePostAcceptsCheckpointObjects(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-state-post-checkpoint-objects"
+	s.ensureSession(threadID, nil)
+
+	body := `{"metadata":{"checkpoint":{"checkpointId":"cp-1","checkpointNs":"ns-1","threadId":"checkpoint-thread-1"},"parentCheckpoint":{"checkpointId":"cp-parent-1","checkpointNs":"ns-parent-1","threadId":"checkpoint-thread-parent-1"}}}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/"+threadID+"/state", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post state: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("state missing")
+	}
+	if state.Metadata["checkpoint_id"] != "cp-1" || state.Metadata["checkpoint_ns"] != "ns-1" || state.Metadata["checkpoint_thread_id"] != "checkpoint-thread-1" {
+		t.Fatalf("metadata=%#v", state.Metadata)
+	}
+	if state.Metadata["parent_checkpoint_id"] != "cp-parent-1" || state.Metadata["parent_checkpoint_ns"] != "ns-parent-1" || state.Metadata["parent_checkpoint_thread_id"] != "checkpoint-thread-parent-1" {
+		t.Fatalf("metadata=%#v", state.Metadata)
+	}
+	if state.Checkpoint == nil || state.Checkpoint["checkpoint_id"] != "cp-1" || state.Checkpoint["checkpoint_ns"] != "ns-1" || state.Checkpoint["thread_id"] != "checkpoint-thread-1" {
+		t.Fatalf("checkpoint=%#v", state.Checkpoint)
+	}
+	if state.ParentCheckpoint == nil || state.ParentCheckpoint["checkpoint_id"] != "cp-parent-1" || state.ParentCheckpoint["checkpoint_ns"] != "ns-parent-1" || state.ParentCheckpoint["thread_id"] != "checkpoint-thread-parent-1" {
+		t.Fatalf("parent_checkpoint=%#v", state.ParentCheckpoint)
+	}
+}
+
 func TestThreadStatePatchAcceptsValuesPayload(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-patch-values"

@@ -1782,6 +1782,28 @@ func normalizePersistedThreadMetadata(metadata map[string]any) map[string]any {
 			metadata["max_tokens"] = value
 		}
 	}
+	if checkpoint := normalizeCheckpointObject(mapFromAny(firstNonNil(metadata["checkpoint"], metadata["checkpointObject"]))); len(checkpoint) > 0 {
+		if value, ok := checkpoint["checkpoint_id"]; ok {
+			metadata["checkpoint_id"] = value
+		}
+		if value, ok := checkpoint["checkpoint_ns"]; ok {
+			metadata["checkpoint_ns"] = value
+		}
+		if value, ok := checkpoint["thread_id"]; ok {
+			metadata["checkpoint_thread_id"] = value
+		}
+	}
+	if checkpoint := normalizeCheckpointObject(mapFromAny(firstNonNil(metadata["parent_checkpoint"], metadata["parentCheckpoint"]))); len(checkpoint) > 0 {
+		if value, ok := checkpoint["checkpoint_id"]; ok {
+			metadata["parent_checkpoint_id"] = value
+		}
+		if value, ok := checkpoint["checkpoint_ns"]; ok {
+			metadata["parent_checkpoint_ns"] = value
+		}
+		if value, ok := checkpoint["thread_id"]; ok {
+			metadata["parent_checkpoint_thread_id"] = value
+		}
+	}
 	return metadata
 }
 
