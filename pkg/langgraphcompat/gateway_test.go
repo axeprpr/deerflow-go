@@ -10260,7 +10260,7 @@ func TestRecordedRunStreamModeSupportsUpdates(t *testing.T) {
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 		Events: []StreamEvent{
-			{ID: "1", Event: "updates", Data: map[string]any{"agent": map[string]any{"title": "done"}}},
+			{ID: "1", Event: "updates", Data: map[string]any{"agent": map[string]any{"title": "done", "messages": []any{map[string]any{"type": "ai", "content": "hello"}}, "artifacts": []any{"/tmp/report.md"}}}},
 			{ID: "2", Event: "messages-tuple", Data: map[string]any{"type": "ai", "content": "hello"}},
 			{ID: "3", Event: "end", Data: map[string]any{"run_id": "run-replay-updates"}},
 		},
@@ -10287,6 +10287,12 @@ func TestRecordedRunStreamModeSupportsUpdates(t *testing.T) {
 	if !strings.Contains(text, `"title":"done"`) {
 		t.Fatalf("missing updates payload: %s", text)
 	}
+	if !strings.Contains(text, `"messages":[{`) || !strings.Contains(text, `"artifacts":["/tmp/report.md"]`) {
+		t.Fatalf("missing updates shape payload: %s", text)
+	}
+	if strings.Contains(text, `"values":`) {
+		t.Fatalf("unexpected nested values payload: %s", text)
+	}
 	if strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("unexpected messages-tuple event: %s", text)
 	}
@@ -10302,7 +10308,7 @@ func TestThreadJoinStreamModeSupportsUpdates(t *testing.T) {
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 		Events: []StreamEvent{
-			{ID: "1", Event: "updates", Data: map[string]any{"agent": map[string]any{"title": "done"}}},
+			{ID: "1", Event: "updates", Data: map[string]any{"agent": map[string]any{"title": "done", "messages": []any{map[string]any{"type": "ai", "content": "hello"}}, "artifacts": []any{"/tmp/report.md"}}}},
 			{ID: "2", Event: "messages-tuple", Data: map[string]any{"type": "ai", "content": "hello"}},
 			{ID: "3", Event: "end", Data: map[string]any{"run_id": "run-join-updates"}},
 		},
@@ -10328,6 +10334,12 @@ func TestThreadJoinStreamModeSupportsUpdates(t *testing.T) {
 	}
 	if !strings.Contains(text, `"title":"done"`) {
 		t.Fatalf("missing updates payload: %s", text)
+	}
+	if !strings.Contains(text, `"messages":[{`) || !strings.Contains(text, `"artifacts":["/tmp/report.md"]`) {
+		t.Fatalf("missing updates shape payload: %s", text)
+	}
+	if strings.Contains(text, `"values":`) {
+		t.Fatalf("unexpected nested values payload: %s", text)
 	}
 	if strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("unexpected messages-tuple event: %s", text)
