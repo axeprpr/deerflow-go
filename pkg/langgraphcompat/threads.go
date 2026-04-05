@@ -42,6 +42,9 @@ func (s *Server) handleThreadCreate(w http.ResponseWriter, r *http.Request) {
 
 	threadID, _ := req["thread_id"].(string)
 	if threadID == "" {
+		threadID, _ = req["threadId"].(string)
+	}
+	if threadID == "" {
 		threadID = uuid.New().String()
 	}
 	metadata, _ := req["metadata"].(map[string]any)

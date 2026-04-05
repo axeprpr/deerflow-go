@@ -156,6 +156,26 @@ func TestAPILangGraphPrefixCreateThread(t *testing.T) {
 	}
 }
 
+func TestCreateThreadAcceptsCamelCaseThreadID(t *testing.T) {
+	_, ts := newCompatTestServer(t)
+	resp, err := http.Post(ts.URL+"/threads", "application/json", strings.NewReader(`{"threadId":"thread-camel-create"}`))
+	if err != nil {
+		t.Fatalf("post thread: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(body))
+	}
+	var thread map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&thread); err != nil {
+		t.Fatalf("decode thread: %v", err)
+	}
+	if thread["thread_id"] != "thread-camel-create" {
+		t.Fatalf("thread_id=%v", thread["thread_id"])
+	}
+}
+
 func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-gateway-1"
