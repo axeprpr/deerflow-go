@@ -25,11 +25,13 @@ func TestParseRunConfigAgentType(t *testing.T) {
 
 func TestThreadClarificationHandlers(t *testing.T) {
 	manager := clarification.NewManager(4)
+	root := t.TempDir()
 	server := &Server{
 		clarify:    manager,
 		clarifyAPI: clarification.NewAPI(manager),
 		sessions:   make(map[string]*Session),
 		runs:       make(map[string]*Run),
+		dataRoot:   root,
 	}
 	server.ensureSession("thread-1", nil)
 
