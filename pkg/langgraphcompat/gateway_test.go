@@ -6034,6 +6034,95 @@ func TestThreadStatePatchAcceptsMessages(t *testing.T) {
 	}
 }
 
+func TestThreadStatePatchClearsMessages(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-state-clear-messages"
+	session := s.ensureSession(threadID, nil)
+	session.Messages = []models.Message{{
+		ID:        "m1",
+		SessionID: threadID,
+		Role:      models.RoleHuman,
+		Content:   "hello",
+	}}
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID+"/state",
+		strings.NewReader(`{"values":{"messages":[]}}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("patch state: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var state ThreadState
+	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	messages, _ := state.Values["messages"].([]any)
+	if len(messages) != 0 {
+		t.Fatalf("values=%#v", state.Values)
+	}
+
+	s.sessionsMu.RLock()
+	session = s.sessions[threadID]
+	s.sessionsMu.RUnlock()
+	if session == nil || len(session.Messages) != 0 {
+		t.Fatalf("session=%#v", session)
+	}
+}
+
+func TestThreadUpdateClearsMessagesWithNull(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-update-clear-messages"
+	session := s.ensureSession(threadID, nil)
+	session.Messages = []models.Message{{
+		ID:        "m1",
+		SessionID: threadID,
+		Role:      models.RoleHuman,
+		Content:   "hello",
+	}}
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID,
+		strings.NewReader(`{"messages":null}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("update thread: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var thread map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&thread); err != nil {
+		t.Fatalf("decode thread: %v", err)
+	}
+	values, _ := thread["values"].(map[string]any)
+	messages, _ := values["messages"].([]any)
+	if len(messages) != 0 {
+		t.Fatalf("values=%#v", values)
+	}
+
+	s.sessionsMu.RLock()
+	session = s.sessions[threadID]
+	s.sessionsMu.RUnlock()
+	if session == nil || len(session.Messages) != 0 {
+		t.Fatalf("session=%#v", session)
+	}
+}
+
 func TestThreadGetIncludesCompatShape(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-get-shape"
