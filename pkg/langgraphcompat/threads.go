@@ -411,14 +411,7 @@ func (s *Server) handleRunGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"run_id":       run.RunID,
-		"thread_id":    run.ThreadID,
-		"assistant_id": run.AssistantID,
-		"status":       run.Status,
-		"created_at":   run.CreatedAt.Format(time.RFC3339Nano),
-		"updated_at":   run.UpdatedAt.Format(time.RFC3339Nano),
-	})
+	writeJSON(w, http.StatusOK, runResponse(run))
 }
 
 func (s *Server) handleThreadScopedRunGet(w http.ResponseWriter, r *http.Request) {
@@ -429,14 +422,7 @@ func (s *Server) handleThreadScopedRunGet(w http.ResponseWriter, r *http.Request
 		http.Error(w, "run not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"run_id":       run.RunID,
-		"thread_id":    run.ThreadID,
-		"assistant_id": run.AssistantID,
-		"status":       run.Status,
-		"created_at":   run.CreatedAt.Format(time.RFC3339Nano),
-		"updated_at":   run.UpdatedAt.Format(time.RFC3339Nano),
-	})
+	writeJSON(w, http.StatusOK, runResponse(run))
 }
 
 func (s *Server) handleThreadRunsList(w http.ResponseWriter, r *http.Request) {
@@ -447,20 +433,31 @@ func (s *Server) handleThreadRunsList(w http.ResponseWriter, r *http.Request) {
 		if run.ThreadID != threadID {
 			continue
 		}
-		runs = append(runs, map[string]any{
-			"run_id":       run.RunID,
-			"thread_id":    run.ThreadID,
-			"assistant_id": run.AssistantID,
-			"status":       run.Status,
-			"created_at":   run.CreatedAt.Format(time.RFC3339Nano),
-			"updated_at":   run.UpdatedAt.Format(time.RFC3339Nano),
-		})
+		runs = append(runs, runResponse(run))
 	}
 	s.runsMu.RUnlock()
 	sort.Slice(runs, func(i, j int) bool {
 		return runs[i]["created_at"].(string) > runs[j]["created_at"].(string)
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
+}
+
+func runResponse(run *Run) map[string]any {
+	if run == nil {
+		return nil
+	}
+	out := map[string]any{
+		"run_id":       run.RunID,
+		"thread_id":    run.ThreadID,
+		"assistant_id": run.AssistantID,
+		"status":       run.Status,
+		"created_at":   run.CreatedAt.Format(time.RFC3339Nano),
+		"updated_at":   run.UpdatedAt.Format(time.RFC3339Nano),
+	}
+	if strings.TrimSpace(run.Error) != "" {
+		out["error"] = run.Error
+	}
+	return out
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

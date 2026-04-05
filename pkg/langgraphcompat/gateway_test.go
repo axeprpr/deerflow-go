@@ -1275,6 +1275,48 @@ func TestThreadRunsListAndScopedGet(t *testing.T) {
 	}
 }
 
+func TestThreadRunResponsesIncludeError(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-error-1",
+		ThreadID:    "thread-error-1",
+		AssistantID: "lead_agent",
+		Status:      "error",
+		Error:       "boom",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.saveRun(run)
+
+	listResp, err := http.Get(ts.URL + "/threads/thread-error-1/runs")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	defer listResp.Body.Close()
+	var listData struct {
+		Runs []map[string]any `json:"runs"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&listData); err != nil {
+		t.Fatalf("decode runs: %v", err)
+	}
+	if len(listData.Runs) != 1 || listData.Runs[0]["error"] != "boom" {
+		t.Fatalf("unexpected runs payload: %#v", listData.Runs)
+	}
+
+	getResp, err := http.Get(ts.URL + "/threads/thread-error-1/runs/run-error-1")
+	if err != nil {
+		t.Fatalf("get scoped run: %v", err)
+	}
+	defer getResp.Body.Close()
+	var getData map[string]any
+	if err := json.NewDecoder(getResp.Body).Decode(&getData); err != nil {
+		t.Fatalf("decode scoped run: %v", err)
+	}
+	if getData["error"] != "boom" {
+		t.Fatalf("unexpected run payload: %#v", getData)
+	}
+}
+
 func TestThreadRunsCreateReturnsFinalState(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.llmProvider = fakeLLMProvider{}
