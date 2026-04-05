@@ -1679,6 +1679,12 @@ func (s *Server) loadUserProfileFromFile() (string, bool) {
 	if err != nil {
 		return "", false
 	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err == nil {
+		if content := stringFromAny(firstNonNil(raw["content"], raw["user_profile"], raw["userProfile"])); content != "" {
+			return content, true
+		}
+	}
 	return string(data), true
 }
 

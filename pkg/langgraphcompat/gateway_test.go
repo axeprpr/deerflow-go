@@ -1297,6 +1297,23 @@ func TestLoadAgentsFromFilesAcceptsModelNameAliases(t *testing.T) {
 	}
 }
 
+func TestLoadUserProfileFromFileAcceptsJSONContent(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{dataRoot: root}
+	raw := `{"content":"Legacy profile from JSON"}`
+	if err := os.WriteFile(s.userProfilePath(), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write user profile: %v", err)
+	}
+
+	content, ok := s.loadUserProfileFromFile()
+	if !ok {
+		t.Fatal("expected user profile to load")
+	}
+	if content != "Legacy profile from JSON" {
+		t.Fatalf("content=%q", content)
+	}
+}
+
 func TestLoadMemoryFromFileAcceptsSnakeCaseFields(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}
