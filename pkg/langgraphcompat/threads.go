@@ -1976,6 +1976,11 @@ func normalizeLoadedThreadHistory(history []ThreadState, rawItems []map[string]a
 		if len(history[i].Config) == 0 {
 			history[i].Config = mapFromAny(rawItems[i]["config"])
 		}
+		if len(history[i].Config) == 0 {
+			if configurable := mapFromAny(rawItems[i]["configurable"]); len(configurable) > 0 {
+				history[i].Config = map[string]any{"configurable": configurable}
+			}
+		}
 		history[i].Config = normalizeThreadConfig(history[i].Config)
 		if len(history[i].Metadata) == 0 {
 			history[i].Metadata = mapFromAny(rawItems[i]["metadata"])

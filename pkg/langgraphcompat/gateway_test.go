@@ -3086,6 +3086,38 @@ func TestLoadThreadHistoryNormalizesCamelCaseConfig(t *testing.T) {
 	}
 }
 
+func TestLoadThreadHistoryAcceptsTopLevelConfigurable(t *testing.T) {
+	root := t.TempDir()
+	threadID := "thread-history-configurable-top-level"
+	threadDir := filepath.Join(root, "threads", threadID, "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `[
+		{
+			"checkpointId":"cp-1",
+			"createdAt":"2026-01-01T00:00:00Z",
+			"configurable":{
+				"threadId":"thread-history-configurable-top-level",
+				"modelName":"deepseek/deepseek-r1"
+			}
+		}
+	]`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread_history.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write history: %v", err)
+	}
+
+	s := &Server{dataRoot: root}
+	history := s.loadThreadHistory(threadID)
+	if len(history) != 1 {
+		t.Fatalf("history=%d", len(history))
+	}
+	configurable, _ := history[0].Config["configurable"].(map[string]any)
+	if configurable["thread_id"] != "thread-history-configurable-top-level" || configurable["model_name"] != "deepseek/deepseek-r1" {
+		t.Fatalf("config=%#v", history[0].Config)
+	}
+}
+
 func TestLoadThreadHistoryNormalizesCheckpointObjects(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}
