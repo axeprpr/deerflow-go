@@ -9338,6 +9338,9 @@ func TestRecordedRunStreamReplaysEndUsagePayload(t *testing.T) {
 	if !strings.Contains(text, `"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}`) {
 		t.Fatalf("missing usage in end payload: %s", text)
 	}
+	if strings.Contains(text, `"thread_id":"thread-replay-end-usage"`) || strings.Contains(text, `"assistant_id":"lead_agent"`) {
+		t.Fatalf("unexpected extra fields in end payload: %s", text)
+	}
 }
 
 func TestRecordedRunStreamReplaysToolMessageTuple(t *testing.T) {
@@ -9835,6 +9838,9 @@ func TestThreadJoinStreamReplaysEndUsagePayload(t *testing.T) {
 	}
 	if !strings.Contains(text, `"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}`) {
 		t.Fatalf("missing usage in end payload: %s", text)
+	}
+	if strings.Contains(text, `"thread_id":"thread-join-end-usage"`) || strings.Contains(text, `"assistant_id":"lead_agent"`) {
+		t.Fatalf("unexpected extra fields in end payload: %s", text)
 	}
 }
 
