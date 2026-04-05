@@ -906,6 +906,9 @@ func TestThreadSearchAcceptsCamelCaseCheckpointSelectFields(t *testing.T) {
 func TestThreadSearchIncludesCheckpointFieldsByDefault(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.ensureSession("thread-search-checkpoint-default", map[string]any{
+		"assistant_id":                "assistant-1",
+		"graph_id":                    "graph-1",
+		"run_id":                      "run-1",
 		"checkpoint_id":               "cp-1",
 		"parent_checkpoint_id":        "cp-parent-1",
 		"checkpoint_ns":               "ns-1",
@@ -948,6 +951,10 @@ func TestThreadSearchIncludesCheckpointFieldsByDefault(t *testing.T) {
 	}
 	if selected["checkpoint_id"] != "cp-1" || selected["parent_checkpoint_id"] != "cp-parent-1" {
 		t.Fatalf("selected=%#v", selected)
+	}
+	metadata, _ := selected["metadata"].(map[string]any)
+	if metadata["assistant_id"] != "assistant-1" || metadata["graph_id"] != "graph-1" || metadata["run_id"] != "run-1" {
+		t.Fatalf("metadata=%#v", selected["metadata"])
 	}
 	checkpoint, _ := selected["checkpoint"].(map[string]any)
 	if checkpoint["checkpoint_id"] != "cp-1" || checkpoint["checkpoint_ns"] != "ns-1" || checkpoint["thread_id"] != "checkpoint-thread-1" {
