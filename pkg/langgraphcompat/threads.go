@@ -1822,11 +1822,43 @@ func (s *Server) loadThreadHistory(threadID string) []ThreadState {
 					history[i].CreatedAt = firstNonEmpty(stringValue(rawItems[i]["createdAt"]), stringValue(rawItems[i]["created_at"]))
 				}
 				history[i].Metadata = normalizePersistedThreadMetadata(history[i].Metadata)
+				if len(history[i].Checkpoint) == 0 {
+					history[i].Checkpoint = checkpointObjectFromMetadata(history[i].Metadata, "")
+				}
+				if len(history[i].ParentCheckpoint) == 0 {
+					history[i].ParentCheckpoint = checkpointObjectFromMetadata(history[i].Metadata, "parent_")
+				}
+				if checkpoint := mapFromAny(rawItems[i]["checkpoint"]); len(checkpoint) > 0 {
+					history[i].Checkpoint = normalizeCheckpointObject(checkpoint)
+				}
+				if checkpoint := mapFromAny(rawItems[i]["parent_checkpoint"]); len(checkpoint) > 0 {
+					history[i].ParentCheckpoint = normalizeCheckpointObject(checkpoint)
+				}
 			}
 		}
 		return history
 	}
 	return nil
+}
+
+func normalizeCheckpointObject(raw map[string]any) map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	if value := firstNonEmpty(stringValue(raw["checkpoint_id"]), stringValue(raw["checkpointId"])); value != "" {
+		out["checkpoint_id"] = value
+	}
+	if value := firstNonEmpty(stringValue(raw["checkpoint_ns"]), stringValue(raw["checkpointNs"])); value != "" {
+		out["checkpoint_ns"] = value
+	}
+	if value := firstNonEmpty(stringValue(raw["thread_id"]), stringValue(raw["threadId"])); value != "" {
+		out["thread_id"] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (s *Server) deleteRunsForThread(threadID string) {
