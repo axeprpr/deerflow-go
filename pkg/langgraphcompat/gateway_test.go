@@ -1268,6 +1268,63 @@ func TestLoadMemoryFromFileAcceptsSnakeCaseFields(t *testing.T) {
 	}
 }
 
+func TestLoadGatewayStateAcceptsLegacyFieldNames(t *testing.T) {
+	root := t.TempDir()
+	raw := `{
+		"models":{
+			"flash":{"name":"flash","model":"qwen/Qwen3.5-9B","displayName":"Flash","supportsThinking":true}
+		},
+		"mcp_config":{
+			"mcpServers":{
+				"github":{
+					"enabled":true,
+					"oauth":{"enabled":true,"tokenUrl":"https://example.com/token","refreshSkewSeconds":0}
+				}
+			}
+		},
+		"agents":{
+			"writer":{"name":"writer","description":"Writer","toolGroups":["web"]}
+		},
+		"user_profile":"Legacy profile",
+		"memory":{
+			"version":"1.0",
+			"last_updated":"2026-01-01T00:00:00Z",
+			"user":{"work_context":{"summary":"Work","updated_at":"2026-01-01T00:00:00Z"}},
+			"history":{},
+			"facts":[]
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(root, "gateway_state.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write gateway_state.json: %v", err)
+	}
+
+	loaded := &Server{
+		dataRoot: root,
+		models:   map[string]gatewayModel{},
+		agents:   map[string]gatewayAgent{},
+	}
+	if err := loaded.loadGatewayState(); err != nil {
+		t.Fatalf("loadGatewayState: %v", err)
+	}
+
+	model, ok := loaded.findModelLocked("flash")
+	if !ok || model.DisplayName != "Flash" || !model.SupportsThinking {
+		t.Fatalf("model=%#v ok=%v", model, ok)
+	}
+	if loaded.mcpConfig.MCPServers["github"].OAuth == nil || loaded.mcpConfig.MCPServers["github"].OAuth.RefreshSkewSecond != 0 {
+		t.Fatalf("mcp=%#v", loaded.mcpConfig)
+	}
+	if loaded.getAgentsLocked()["writer"].ToolGroups == nil || len(loaded.getAgentsLocked()["writer"].ToolGroups) != 1 {
+		t.Fatalf("agents=%#v", loaded.getAgentsLocked())
+	}
+	if loaded.getUserProfileLocked() != "Legacy profile" {
+		t.Fatalf("userProfile=%q", loaded.getUserProfileLocked())
+	}
+	if loaded.getMemoryLocked().LastUpdated != "2026-01-01T00:00:00Z" {
+		t.Fatalf("memory=%#v", loaded.getMemoryLocked())
+	}
+}
+
 func TestLoadPersistedThreadsAcceptsCamelCaseFields(t *testing.T) {
 	root := t.TempDir()
 	threadDir := filepath.Join(root, "threads", "thread-camel", "user-data")

@@ -1231,6 +1231,75 @@ func (s *Server) loadGatewayState() error {
 	if err := json.Unmarshal(data, &state); err != nil {
 		return err
 	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if modelsRaw := mapFromAny(raw["models"]); modelsRaw != nil {
+		models := make(map[string]gatewayModel, len(modelsRaw))
+		for name, value := range modelsRaw {
+			models[name] = gatewayModelFromMap(mapFromAny(value))
+		}
+		if len(models) > 0 {
+			state.Models = models
+		}
+	}
+	if mcpRaw := mapFromAny(firstNonNil(raw["mcp_config"], raw["mcpConfig"])); mcpRaw != nil {
+		state.MCPConfig = gatewayMCPConfigFromMap(mcpRaw)
+	}
+	if agentsRaw := mapFromAny(raw["agents"]); agentsRaw != nil {
+		agents := make(map[string]gatewayAgent, len(agentsRaw))
+		for name, value := range agentsRaw {
+			agentMap := mapFromAny(value)
+			if agentMap == nil {
+				continue
+			}
+			agent := gatewayAgent{
+				Name:        firstNonEmpty(stringFromAny(agentMap["name"]), name),
+				Description: stringFromAny(agentMap["description"]),
+				Soul:        stringFromAny(agentMap["soul"]),
+			}
+			if rawModel, exists := agentMap["model"]; exists {
+				if rawModel == nil {
+					agent.Model = nil
+				} else {
+					model := stringFromAny(rawModel)
+					agent.Model = &model
+				}
+			}
+			if rawToolGroups, exists := agentMap["tool_groups"]; exists {
+				agent.ToolGroups = stringsFromAny(rawToolGroups)
+			} else if rawToolGroups, exists := agentMap["toolGroups"]; exists {
+				agent.ToolGroups = stringsFromAny(rawToolGroups)
+			}
+			agents[name] = agent
+		}
+		if len(agents) > 0 {
+			state.Agents = agents
+		}
+	}
+	if state.UserProfile == "" {
+		state.UserProfile = firstNonEmpty(stringFromAny(raw["user_profile"]), stringFromAny(raw["userProfile"]))
+	}
+	if memRaw := mapFromAny(raw["memory"]); memRaw != nil {
+		compatMem := gatewayMemoryResponseFromMap(memRaw)
+		if state.Memory.Version == "" {
+			state.Memory = compatMem
+		} else {
+			if state.Memory.LastUpdated == "" {
+				state.Memory.LastUpdated = compatMem.LastUpdated
+			}
+			if state.Memory.User == (memoryUser{}) {
+				state.Memory.User = compatMem.User
+			}
+			if state.Memory.History == (memoryHistory{}) {
+				state.Memory.History = compatMem.History
+			}
+			if len(state.Memory.Facts) == 0 && len(compatMem.Facts) > 0 {
+				state.Memory.Facts = compatMem.Facts
+			}
+		}
+	}
 	s.uiStateMu.Lock()
 	defer s.uiStateMu.Unlock()
 	if state.Models != nil {
