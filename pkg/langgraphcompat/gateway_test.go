@@ -1720,6 +1720,36 @@ func TestThreadStatePostPersistsCompatFields(t *testing.T) {
 	}
 }
 
+func TestThreadStatePostAcceptsMetadata(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-state-post-metadata"
+	s.ensureSession(threadID, nil)
+
+	body := `{"metadata":{"assistant_id":"lead_agent","graph_id":"lead_agent"},"values":{"title":"Updated"}}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/"+threadID+"/state", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post state: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("state missing")
+	}
+	if state.Metadata["assistant_id"] != "lead_agent" || state.Metadata["graph_id"] != "lead_agent" {
+		t.Fatalf("metadata=%#v", state.Metadata)
+	}
+	if state.Values["title"] != "Updated" {
+		t.Fatalf("title=%v", state.Values["title"])
+	}
+}
+
 func TestThreadStatePatchAcceptsValuesPayload(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-patch-values"

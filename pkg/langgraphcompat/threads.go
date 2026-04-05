@@ -246,6 +246,15 @@ func applyThreadValues(session *Session, values map[string]any) {
 	}
 }
 
+func applyThreadMetadata(session *Session, metadata map[string]any) {
+	if session == nil || len(metadata) == 0 {
+		return
+	}
+	for k, v := range metadata {
+		session.Metadata[k] = v
+	}
+}
+
 func extractThreadValues(raw map[string]any) map[string]any {
 	if len(raw) == 0 {
 		return nil
@@ -331,6 +340,8 @@ func (s *Server) handleThreadStatePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	applyThreadValues(session, extractThreadValues(req))
+	metadata, _ := req["metadata"].(map[string]any)
+	applyThreadMetadata(session, metadata)
 	session.UpdatedAt = time.Now().UTC()
 	s.sessionsMu.Unlock()
 	if err := s.persistSessionFile(session); err != nil {
@@ -365,9 +376,7 @@ func (s *Server) handleThreadStatePatch(w http.ResponseWriter, r *http.Request) 
 	}
 	applyThreadValues(session, extractThreadValues(req))
 	metadata, _ := req["metadata"].(map[string]any)
-	for k, v := range metadata {
-		session.Metadata[k] = v
-	}
+	applyThreadMetadata(session, metadata)
 	session.UpdatedAt = time.Now().UTC()
 	s.sessionsMu.Unlock()
 	if err := s.persistSessionFile(session); err != nil {
