@@ -952,6 +952,9 @@ func TestThreadSearchIncludesCheckpointFieldsByDefault(t *testing.T) {
 	if selected["checkpoint_id"] != "cp-1" || selected["parent_checkpoint_id"] != "cp-parent-1" {
 		t.Fatalf("selected=%#v", selected)
 	}
+	if selected["assistant_id"] != "assistant-1" || selected["graph_id"] != "graph-1" || selected["run_id"] != "run-1" {
+		t.Fatalf("selected=%#v", selected)
+	}
 	metadata, _ := selected["metadata"].(map[string]any)
 	if metadata["assistant_id"] != "assistant-1" || metadata["graph_id"] != "graph-1" || metadata["run_id"] != "run-1" {
 		t.Fatalf("metadata=%#v", selected["metadata"])
@@ -4814,6 +4817,9 @@ func TestThreadGetIncludesCompatShape(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-get-shape"
 	session := s.ensureSession(threadID, map[string]any{
+		"assistant_id":                "assistant-1",
+		"graph_id":                    "graph-1",
+		"run_id":                      "run-1",
 		"title":                       "Compat Thread",
 		"mode":                        "thinking",
 		"model_name":                  "deepseek/deepseek-r1",
@@ -4858,6 +4864,9 @@ func TestThreadGetIncludesCompatShape(t *testing.T) {
 	if thread["thread_id"] != threadID || thread["status"] != "busy" {
 		t.Fatalf("thread=%#v", thread)
 	}
+	if thread["assistant_id"] != "assistant-1" || thread["graph_id"] != "graph-1" || thread["run_id"] != "run-1" {
+		t.Fatalf("thread=%#v", thread)
+	}
 	values, _ := thread["values"].(map[string]any)
 	if values["title"] != "Compat Thread" {
 		t.Fatalf("values=%#v", values)
@@ -4878,6 +4887,9 @@ func TestThreadGetIncludesCompatShape(t *testing.T) {
 	}
 	metadata, _ := thread["metadata"].(map[string]any)
 	if metadata["checkpoint_id"] != "cp-1" || metadata["parent_checkpoint_id"] != "cp-parent-1" {
+		t.Fatalf("metadata=%#v", metadata)
+	}
+	if metadata["assistant_id"] != "assistant-1" || metadata["graph_id"] != "graph-1" || metadata["run_id"] != "run-1" {
 		t.Fatalf("metadata=%#v", metadata)
 	}
 	if thread["checkpoint_id"] != "cp-1" || thread["parent_checkpoint_id"] != "cp-parent-1" {
