@@ -9987,6 +9987,18 @@ func TestRecordedRunStreamReplaysErrorEvent(t *testing.T) {
 			t.Fatalf("unexpected error field %s: %s", forbidden, errorBlock)
 		}
 	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-replay-error"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
+	}
 }
 
 func TestRecordedRunStreamReplaysClarificationRequest(t *testing.T) {
@@ -10035,6 +10047,18 @@ func TestRecordedRunStreamReplaysClarificationRequest(t *testing.T) {
 	for _, forbidden := range []string{`"run_id":`, `"assistant_id":`, `"messages":`, `"usage_metadata":`, `"tool_calls":`, `"tool_call_id":`, `"retryable":`} {
 		if strings.Contains(clarifyBlock, forbidden) {
 			t.Fatalf("unexpected clarification field %s: %s", forbidden, clarifyBlock)
+		}
+	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-replay-clarify"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
 		}
 	}
 }
@@ -10668,6 +10692,18 @@ func TestThreadJoinStreamReplaysErrorEvent(t *testing.T) {
 			t.Fatalf("unexpected error field %s: %s", forbidden, errorBlock)
 		}
 	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-join-error"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
+	}
 }
 
 func TestThreadJoinStreamReplaysClarificationRequest(t *testing.T) {
@@ -10716,6 +10752,18 @@ func TestThreadJoinStreamReplaysClarificationRequest(t *testing.T) {
 	for _, forbidden := range []string{`"run_id":`, `"assistant_id":`, `"messages":`, `"usage_metadata":`, `"tool_calls":`, `"tool_call_id":`, `"retryable":`} {
 		if strings.Contains(clarifyBlock, forbidden) {
 			t.Fatalf("unexpected clarification field %s: %s", forbidden, clarifyBlock)
+		}
+	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-join-clarify"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
 		}
 	}
 }
