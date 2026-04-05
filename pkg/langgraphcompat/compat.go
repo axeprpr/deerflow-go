@@ -71,14 +71,16 @@ type Session struct {
 }
 
 type ThreadState struct {
-	CheckpointID string         `json:"checkpoint_id,omitempty"`
-	Values       map[string]any `json:"values"`
-	Config       map[string]any `json:"config,omitempty"`
-	Next         []string       `json:"next"`
-	Tasks        []any          `json:"tasks"`
-	Interrupts   []any          `json:"interrupts,omitempty"`
-	Metadata     map[string]any `json:"metadata"`
-	CreatedAt    string         `json:"created_at,omitempty"`
+	CheckpointID     string         `json:"checkpoint_id,omitempty"`
+	Checkpoint       map[string]any `json:"checkpoint,omitempty"`
+	ParentCheckpoint map[string]any `json:"parent_checkpoint,omitempty"`
+	Values           map[string]any `json:"values"`
+	Config           map[string]any `json:"config,omitempty"`
+	Next             []string       `json:"next"`
+	Tasks            []any          `json:"tasks"`
+	Interrupts       []any          `json:"interrupts,omitempty"`
+	Metadata         map[string]any `json:"metadata"`
+	CreatedAt        string         `json:"created_at,omitempty"`
 }
 
 type Run struct {

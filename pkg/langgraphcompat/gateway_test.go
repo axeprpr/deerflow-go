@@ -2271,6 +2271,16 @@ func TestLoadPersistedThreadsPrefersTopLevelCheckpointObjects(t *testing.T) {
 	if session.Metadata["parent_checkpoint_ns"] != "ns-parent" || session.Metadata["parent_checkpoint_thread_id"] != "thread-parent" {
 		t.Fatalf("metadata=%#v", session.Metadata)
 	}
+	state := s.getThreadState("thread-top-level-checkpoint-objects")
+	if state == nil {
+		t.Fatalf("state=nil")
+	}
+	if state.Checkpoint == nil || state.Checkpoint["checkpoint_id"] != "cp-current" || state.Checkpoint["thread_id"] != "thread-current" || state.Checkpoint["checkpoint_ns"] != "ns-current" {
+		t.Fatalf("checkpoint=%#v", state.Checkpoint)
+	}
+	if state.ParentCheckpoint == nil || state.ParentCheckpoint["checkpoint_id"] != "cp-parent-current" || state.ParentCheckpoint["thread_id"] != "thread-parent" || state.ParentCheckpoint["checkpoint_ns"] != "ns-parent" {
+		t.Fatalf("parent_checkpoint=%#v", state.ParentCheckpoint)
+	}
 }
 
 func TestLoadPersistedThreadsUsesCheckpointObjectsAsIDFallback(t *testing.T) {

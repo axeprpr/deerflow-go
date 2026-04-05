@@ -766,10 +766,14 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 	next := stringSliceFromAny(session.Metadata["next"])
 	tasks := anySlice(session.Metadata["tasks"])
 	interrupts := anySlice(session.Metadata["interrupts"])
+	checkpoint := checkpointObjectFromMetadata(session.Metadata, "")
+	parentCheckpoint := checkpointObjectFromMetadata(session.Metadata, "parent_")
 
 	return &ThreadState{
-		CheckpointID: firstNonEmpty(stringValue(session.Metadata["checkpoint_id"]), uuid.New().String()),
-		Values:       values,
+		CheckpointID:     firstNonEmpty(stringValue(session.Metadata["checkpoint_id"]), uuid.New().String()),
+		Checkpoint:       checkpoint,
+		ParentCheckpoint: parentCheckpoint,
+		Values:           values,
 		Config: map[string]any{
 			"configurable": s.threadConfigurable(session),
 		},
@@ -878,6 +882,26 @@ func threadDataExists(data map[string]any) bool {
 		}
 	}
 	return false
+}
+
+func checkpointObjectFromMetadata(metadata map[string]any, prefix string) map[string]any {
+	if len(metadata) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	if value := strings.TrimSpace(stringValue(metadata[prefix+"checkpoint_id"])); value != "" {
+		out["checkpoint_id"] = value
+	}
+	if value := strings.TrimSpace(stringValue(metadata[prefix+"checkpoint_ns"])); value != "" {
+		out["checkpoint_ns"] = value
+	}
+	if value := strings.TrimSpace(stringValue(metadata[prefix+"checkpoint_thread_id"])); value != "" {
+		out["thread_id"] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (s *Server) workspaceDir(threadID string) string {
