@@ -10580,11 +10580,17 @@ func TestRecordedRunStreamReplaysTaskCompletedEvent(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	taskBlock := sseEventBlock(t, text, "task_completed")
 	if !strings.Contains(text, "event: task_completed") {
 		t.Fatalf("missing task_completed event: %s", text)
 	}
 	if !strings.Contains(text, `"task_id":"t1"`) || !strings.Contains(text, `"result":"done"`) {
 		t.Fatalf("missing task_completed payload: %s", text)
+	}
+	for _, forbidden := range []string{`"message":`, `"error":`, `"description":`} {
+		if strings.Contains(taskBlock, forbidden) {
+			t.Fatalf("unexpected task_completed field %s: %s", forbidden, taskBlock)
+		}
 	}
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
@@ -10621,11 +10627,17 @@ func TestRecordedRunStreamReplaysTaskFailedEvent(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	taskBlock := sseEventBlock(t, text, "task_failed")
 	if !strings.Contains(text, "event: task_failed") {
 		t.Fatalf("missing task_failed event: %s", text)
 	}
 	if !strings.Contains(text, `"task_id":"t1"`) || !strings.Contains(text, `"error":"boom"`) {
 		t.Fatalf("missing task_failed payload: %s", text)
+	}
+	for _, forbidden := range []string{`"message":`, `"result":`, `"description":`} {
+		if strings.Contains(taskBlock, forbidden) {
+			t.Fatalf("unexpected task_failed field %s: %s", forbidden, taskBlock)
+		}
 	}
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
@@ -10662,11 +10674,17 @@ func TestRecordedRunStreamReplaysTaskRunningEvent(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	taskBlock := sseEventBlock(t, text, "task_running")
 	if !strings.Contains(text, "event: task_running") {
 		t.Fatalf("missing task_running event: %s", text)
 	}
 	if !strings.Contains(text, `"task_id":"t1"`) || !strings.Contains(text, `"message":"working"`) {
 		t.Fatalf("missing task_running payload: %s", text)
+	}
+	for _, forbidden := range []string{`"error":`, `"result":`, `"description":`} {
+		if strings.Contains(taskBlock, forbidden) {
+			t.Fatalf("unexpected task_running field %s: %s", forbidden, taskBlock)
+		}
 	}
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
@@ -10755,11 +10773,17 @@ func TestThreadJoinStreamReplaysTaskCompletedEvent(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	taskBlock := sseEventBlock(t, text, "task_completed")
 	if !strings.Contains(text, "event: task_completed") {
 		t.Fatalf("missing task_completed event: %s", text)
 	}
 	if !strings.Contains(text, `"task_id":"t1"`) || !strings.Contains(text, `"result":"done"`) {
 		t.Fatalf("missing task_completed payload: %s", text)
+	}
+	for _, forbidden := range []string{`"message":`, `"error":`, `"description":`} {
+		if strings.Contains(taskBlock, forbidden) {
+			t.Fatalf("unexpected task_completed field %s: %s", forbidden, taskBlock)
+		}
 	}
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
@@ -10796,11 +10820,17 @@ func TestThreadJoinStreamReplaysTaskFailedEvent(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	taskBlock := sseEventBlock(t, text, "task_failed")
 	if !strings.Contains(text, "event: task_failed") {
 		t.Fatalf("missing task_failed event: %s", text)
 	}
 	if !strings.Contains(text, `"task_id":"t1"`) || !strings.Contains(text, `"error":"boom"`) {
 		t.Fatalf("missing task_failed payload: %s", text)
+	}
+	for _, forbidden := range []string{`"message":`, `"result":`, `"description":`} {
+		if strings.Contains(taskBlock, forbidden) {
+			t.Fatalf("unexpected task_failed field %s: %s", forbidden, taskBlock)
+		}
 	}
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
@@ -10837,11 +10867,17 @@ func TestThreadJoinStreamReplaysTaskRunningEvent(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	taskBlock := sseEventBlock(t, text, "task_running")
 	if !strings.Contains(text, "event: task_running") {
 		t.Fatalf("missing task_running event: %s", text)
 	}
 	if !strings.Contains(text, `"task_id":"t1"`) || !strings.Contains(text, `"message":"working"`) {
 		t.Fatalf("missing task_running payload: %s", text)
+	}
+	for _, forbidden := range []string{`"error":`, `"result":`, `"description":`} {
+		if strings.Contains(taskBlock, forbidden) {
+			t.Fatalf("unexpected task_running field %s: %s", forbidden, taskBlock)
+		}
 	}
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
