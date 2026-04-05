@@ -1327,6 +1327,9 @@ func (s *Server) loadThreadHistory(threadID string) []ThreadState {
 		var rawItems []map[string]any
 		if err := json.Unmarshal(data, &rawItems); err == nil && len(rawItems) == len(history) {
 			for i := range history {
+				if history[i].CheckpointID == "" {
+					history[i].CheckpointID = firstNonEmpty(stringValue(rawItems[i]["checkpointId"]), stringValue(rawItems[i]["checkpoint_id"]))
+				}
 				if history[i].CreatedAt == "" {
 					history[i].CreatedAt = firstNonEmpty(stringValue(rawItems[i]["createdAt"]), stringValue(rawItems[i]["created_at"]))
 				}

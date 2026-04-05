@@ -1494,6 +1494,32 @@ func TestLoadThreadHistoryAcceptsCamelCaseFields(t *testing.T) {
 	}
 }
 
+func TestLoadThreadHistoryAcceptsCamelCaseCheckpointID(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{dataRoot: root}
+	threadID := "thread-history-checkpoint-camel"
+	if err := os.MkdirAll(s.threadRoot(threadID), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `[
+		{
+			"checkpointId":"cp-camel",
+			"values":{"title":"History"}
+		}
+	]`
+	if err := os.WriteFile(s.threadHistoryPath(threadID), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write history file: %v", err)
+	}
+
+	history := s.loadThreadHistory(threadID)
+	if len(history) != 1 {
+		t.Fatalf("len=%d want 1", len(history))
+	}
+	if history[0].CheckpointID != "cp-camel" {
+		t.Fatalf("checkpoint_id=%q", history[0].CheckpointID)
+	}
+}
+
 func TestUserProfileFileLoad(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}
