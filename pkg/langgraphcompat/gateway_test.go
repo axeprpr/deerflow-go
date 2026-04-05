@@ -8733,7 +8733,7 @@ func TestThreadRunStreamEmitsToolEndAliasAndUsageMetadata(t *testing.T) {
 	if strings.Contains(text, `"values":`) {
 		t.Fatalf("unexpected nested values payload in updates event: %s", text)
 	}
-	for _, forbidden := range []string{`"todos":`, `"sandbox":`, `"thread_data":`, `"uploaded_files":`, `"viewed_images":`} {
+	for _, forbidden := range []string{`"todos":`, `"sandbox":`, `"thread_data":`, `"uploaded_files":`, `"viewed_images":`, `"run_id":`, `"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
 		if strings.Contains(updatesBlock, forbidden) {
 			t.Fatalf("unexpected extra updates payload field %s: %s", forbidden, updatesBlock)
 		}
@@ -8910,7 +8910,7 @@ func TestThreadRunStreamModeUpdatesFiltersOtherEvents(t *testing.T) {
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
 	}
-	for _, forbidden := range []string{`"todos":`, `"sandbox":`, `"thread_data":`, `"uploaded_files":`, `"viewed_images":`} {
+	for _, forbidden := range []string{`"todos":`, `"sandbox":`, `"thread_data":`, `"uploaded_files":`, `"viewed_images":`, `"run_id":`, `"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
 		if strings.Contains(updatesBlock, forbidden) {
 			t.Fatalf("unexpected extra updates payload field %s: %s", forbidden, updatesBlock)
 		}
@@ -10632,7 +10632,7 @@ func TestRecordedRunStreamModeSupportsUpdates(t *testing.T) {
 	if strings.Contains(text, `"values":`) {
 		t.Fatalf("unexpected nested values payload: %s", text)
 	}
-	for _, forbidden := range []string{`"todos":`, `"sandbox":`, `"thread_data":`, `"uploaded_files":`, `"viewed_images":`} {
+	for _, forbidden := range []string{`"todos":`, `"sandbox":`, `"thread_data":`, `"uploaded_files":`, `"viewed_images":`, `"run_id":`, `"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
 		if strings.Contains(updatesBlock, forbidden) {
 			t.Fatalf("unexpected extra updates payload field %s: %s", forbidden, updatesBlock)
 		}
