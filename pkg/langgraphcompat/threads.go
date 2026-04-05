@@ -174,6 +174,8 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 			less = left["created_at"].(string) < right["created_at"].(string)
 		case "step":
 			less = numberFromAny(left["step"]) < numberFromAny(right["step"])
+		case "title":
+			less = asString(left["title"]) < asString(right["title"])
 		case "status":
 			less = asString(left["status"]) < asString(right["status"])
 		case "assistant_id":
@@ -858,6 +860,7 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 		"run_id":                      stringValue(session.Metadata["run_id"]),
 		"agent_name":                  stringValue(configurable["agent_name"]),
 		"agent_type":                  stringValue(configurable["agent_type"]),
+		"title":                       stringValue(values["title"]),
 		"model_name":                  stringValue(configurable["model_name"]),
 		"mode":                        stringValue(configurable["mode"]),
 		"reasoning_effort":            stringValue(configurable["reasoning_effort"]),

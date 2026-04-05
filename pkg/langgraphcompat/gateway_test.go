@@ -1234,6 +1234,9 @@ func TestThreadSearchIncludesCheckpointFieldsByDefault(t *testing.T) {
 	if selected["agent_name"] != "" || selected["agent_type"] != "" {
 		t.Fatalf("selected=%#v", selected)
 	}
+	if selected["title"] != "" {
+		t.Fatalf("selected=%#v", selected)
+	}
 	if selected["mode"] != "flash" || selected["model_name"] != "" || selected["reasoning_effort"] != "minimal" {
 		t.Fatalf("selected=%#v", selected)
 	}
@@ -1581,6 +1584,42 @@ func TestThreadSearchSupportsStatusSort(t *testing.T) {
 	}
 	if threads[0]["status"] != "busy" {
 		t.Fatalf("status=%v want busy", threads[0]["status"])
+	}
+}
+
+func TestThreadSearchSupportsTitleSort(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	first := s.ensureSession("thread-search-title-z", map[string]any{"title": "Zeta"})
+	second := s.ensureSession("thread-search-title-a", map[string]any{"title": "Alpha"})
+	first.UpdatedAt = time.Now().UTC().Add(-time.Hour)
+	second.UpdatedAt = time.Now().UTC()
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"limit":10,"sortBy":"title","sortOrder":"asc","select":["threadId","title"]}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) < 2 {
+		t.Fatalf("threads=%#v", threads)
+	}
+	if threads[0]["thread_id"] != "thread-search-title-a" {
+		t.Fatalf("first thread=%v want thread-search-title-a", threads[0]["thread_id"])
+	}
+	if threads[0]["title"] != "Alpha" {
+		t.Fatalf("title=%#v want Alpha", threads[0]["title"])
 	}
 }
 
@@ -5486,6 +5525,9 @@ func TestThreadGetIncludesCompatShape(t *testing.T) {
 		t.Fatalf("thread=%#v", thread)
 	}
 	if thread["agent_name"] != "writer" || thread["agent_type"] != "deep_research" {
+		t.Fatalf("thread=%#v", thread)
+	}
+	if thread["title"] != "Compat Thread" {
 		t.Fatalf("thread=%#v", thread)
 	}
 	if thread["mode"] != "thinking" || thread["model_name"] != "deepseek/deepseek-r1" || thread["reasoning_effort"] != "high" {
