@@ -8667,8 +8667,8 @@ func TestThreadRunStreamEmitsToolEndAliasAndUsageMetadata(t *testing.T) {
 	if !strings.Contains(text, "event: updates") {
 		t.Fatalf("missing updates event: %s", text)
 	}
-	if !strings.Contains(text, `"agent":{"artifacts":[`) {
-		t.Fatalf("missing agent artifacts in updates payload: %s", text)
+	if !strings.Contains(text, `"artifacts":[]`) {
+		t.Fatalf("missing agent artifacts payload in updates event: %s", text)
 	}
 	if !strings.Contains(text, `"messages":[`) {
 		t.Fatalf("missing agent messages in updates payload: %s", text)
