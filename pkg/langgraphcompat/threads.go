@@ -1323,10 +1323,18 @@ func (s *Server) loadThreadHistory(threadID string) []ThreadState {
 		return nil
 	}
 	var history []ThreadState
-	if err := json.Unmarshal(data, &history); err != nil {
-		return nil
+	if err := json.Unmarshal(data, &history); err == nil {
+		var rawItems []map[string]any
+		if err := json.Unmarshal(data, &rawItems); err == nil && len(rawItems) == len(history) {
+			for i := range history {
+				if history[i].CreatedAt == "" {
+					history[i].CreatedAt = firstNonEmpty(stringValue(rawItems[i]["createdAt"]), stringValue(rawItems[i]["created_at"]))
+				}
+			}
+		}
+		return history
 	}
-	return history
+	return nil
 }
 
 func (s *Server) deleteRunsForThread(threadID string) {
