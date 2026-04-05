@@ -2022,6 +2022,12 @@ func TestLoadPersistedThreadsNormalizesCamelCaseMetadata(t *testing.T) {
 			"assistantId":"assistant-1",
 			"graphId":"graph-1",
 			"runId":"run-1",
+			"checkpointId":"cp-1",
+			"parentCheckpointId":"cp-parent-1",
+			"checkpointNs":"ns-1",
+			"parentCheckpointNs":"ns-parent-1",
+			"checkpointThreadId":"checkpoint-thread-1",
+			"parentCheckpointThreadId":"checkpoint-thread-parent-1",
 			"agentType":"deep_research",
 			"modelName":"deepseek/deepseek-r1",
 			"reasoningEffort":"high",
@@ -2054,6 +2060,15 @@ func TestLoadPersistedThreadsNormalizesCamelCaseMetadata(t *testing.T) {
 		t.Fatalf("metadata=%#v", session.Metadata)
 	}
 	if session.Metadata["thread_id"] != "thread-meta-camel" || session.Metadata["assistant_id"] != "assistant-1" || session.Metadata["graph_id"] != "graph-1" || session.Metadata["run_id"] != "run-1" {
+		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+	if session.Metadata["checkpoint_id"] != "cp-1" || session.Metadata["parent_checkpoint_id"] != "cp-parent-1" {
+		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+	if session.Metadata["checkpoint_ns"] != "ns-1" || session.Metadata["parent_checkpoint_ns"] != "ns-parent-1" {
+		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+	if session.Metadata["checkpoint_thread_id"] != "checkpoint-thread-1" || session.Metadata["parent_checkpoint_thread_id"] != "checkpoint-thread-parent-1" {
 		t.Fatalf("metadata=%#v", session.Metadata)
 	}
 	if session.Metadata["reasoning_effort"] != "high" || session.Metadata["agent_name"] != "writer" {

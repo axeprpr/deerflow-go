@@ -1601,6 +1601,36 @@ func normalizePersistedThreadMetadata(metadata map[string]any) map[string]any {
 			metadata["run_id"] = value
 		}
 	}
+	if _, ok := metadata["checkpoint_id"]; !ok {
+		if value, ok := metadata["checkpointId"]; ok {
+			metadata["checkpoint_id"] = value
+		}
+	}
+	if _, ok := metadata["parent_checkpoint_id"]; !ok {
+		if value, ok := metadata["parentCheckpointId"]; ok {
+			metadata["parent_checkpoint_id"] = value
+		}
+	}
+	if _, ok := metadata["checkpoint_ns"]; !ok {
+		if value, ok := metadata["checkpointNs"]; ok {
+			metadata["checkpoint_ns"] = value
+		}
+	}
+	if _, ok := metadata["parent_checkpoint_ns"]; !ok {
+		if value, ok := metadata["parentCheckpointNs"]; ok {
+			metadata["parent_checkpoint_ns"] = value
+		}
+	}
+	if _, ok := metadata["checkpoint_thread_id"]; !ok {
+		if value, ok := metadata["checkpointThreadId"]; ok {
+			metadata["checkpoint_thread_id"] = value
+		}
+	}
+	if _, ok := metadata["parent_checkpoint_thread_id"]; !ok {
+		if value, ok := metadata["parentCheckpointThreadId"]; ok {
+			metadata["parent_checkpoint_thread_id"] = value
+		}
+	}
 	if _, ok := metadata["agent_type"]; !ok {
 		if value, ok := metadata["agentType"]; ok {
 			metadata["agent_type"] = value
