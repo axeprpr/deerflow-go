@@ -70,6 +70,9 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 		input = make(map[string]any)
 	}
 	messages, _ := input["messages"].([]any)
+	if len(messages) == 0 {
+		messages = req.Messages
+	}
 	newMessages := s.convertToMessages(threadID, messages)
 
 	s.sessionsMu.RLock()
@@ -171,6 +174,9 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		input = make(map[string]any)
 	}
 	messages, _ := input["messages"].([]any)
+	if len(messages) == 0 {
+		messages = req.Messages
+	}
 	newMessages := s.convertToMessages(threadID, messages)
 
 	s.sessionsMu.RLock()

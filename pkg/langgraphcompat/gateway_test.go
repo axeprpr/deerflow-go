@@ -1209,6 +1209,33 @@ func TestThreadRunsCreateReturnsFinalState(t *testing.T) {
 	}
 }
 
+func TestThreadRunsCreateAcceptsTopLevelMessages(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+	body := `{"assistant_id":"lead_agent","messages":[{"role":"user","content":"hi from top level"}]}`
+	resp, err := http.Post(ts.URL+"/threads/thread-top-level-run/runs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload["thread_id"] != "thread-top-level-run" {
+		t.Fatalf("thread_id=%v", payload["thread_id"])
+	}
+	messages, ok := payload["messages"].([]any)
+	if !ok || len(messages) == 0 {
+		t.Fatalf("messages missing: %#v", payload)
+	}
+}
+
 func TestThreadClarificationsList(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.ensureSession("thread-clarify", nil)

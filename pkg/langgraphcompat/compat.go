@@ -97,6 +97,7 @@ type RunCreateRequest struct {
 	AssistantIDX string         `json:"assistantId,omitempty"`
 	ThreadID     string         `json:"thread_id,omitempty"`
 	ThreadIDX    string         `json:"threadId,omitempty"`
+	Messages     []any          `json:"messages,omitempty"`
 	Input        map[string]any `json:"input,omitempty"`
 	Config       map[string]any `json:"config,omitempty"`
 	Context      map[string]any `json:"context,omitempty"`
