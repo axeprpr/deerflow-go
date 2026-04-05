@@ -176,6 +176,8 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 			less = asString(left["metadata"].(map[string]any)["assistant_id"]) < asString(right["metadata"].(map[string]any)["assistant_id"])
 		case "graph_id":
 			less = asString(left["metadata"].(map[string]any)["graph_id"]) < asString(right["metadata"].(map[string]any)["graph_id"])
+		case "run_id":
+			less = asString(left["metadata"].(map[string]any)["run_id"]) < asString(right["metadata"].(map[string]any)["run_id"])
 		case "thread_id":
 			less = left["thread_id"].(string) < right["thread_id"].(string)
 		default:

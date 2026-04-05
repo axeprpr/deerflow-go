@@ -847,6 +847,45 @@ func TestThreadSearchAcceptsCamelCaseSortValuesAndSelectFields(t *testing.T) {
 	}
 }
 
+func TestThreadSearchAcceptsCamelCaseRunIDSort(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	first := s.ensureSession("thread-search-run-b", map[string]any{"run_id": "run-b"})
+	second := s.ensureSession("thread-search-run-a", map[string]any{"run_id": "run-a"})
+	first.UpdatedAt = time.Now().UTC().Add(-time.Hour)
+	second.UpdatedAt = time.Now().UTC()
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"limit":10,"sortBy":"runId","sortOrder":"asc","select":["threadId","runId"]}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) < 2 {
+		t.Fatalf("threads=%#v", threads)
+	}
+	if threads[0]["thread_id"] != "thread-search-run-a" {
+		t.Fatalf("first thread=%v want thread-search-run-a", threads[0]["thread_id"])
+	}
+	if threads[0]["run_id"] != "run-a" {
+		t.Fatalf("run_id=%v want run-a", threads[0]["run_id"])
+	}
+	if _, ok := threads[0]["runId"]; ok {
+		t.Fatalf("unexpected runId alias in %#v", threads[0])
+	}
+}
+
 func TestThreadSearchAcceptsCamelCaseCheckpointSelectFields(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.ensureSession("thread-search-checkpoint-select", map[string]any{
