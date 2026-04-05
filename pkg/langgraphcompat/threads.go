@@ -1246,6 +1246,11 @@ func normalizePersistedThreadMetadata(metadata map[string]any) map[string]any {
 			metadata["model_name"] = value
 		}
 	}
+	if _, ok := metadata["agent_type"]; !ok {
+		if value, ok := metadata["agentType"]; ok {
+			metadata["agent_type"] = value
+		}
+	}
 	if _, ok := metadata["reasoning_effort"]; !ok {
 		if value, ok := metadata["reasoningEffort"]; ok {
 			metadata["reasoning_effort"] = value
