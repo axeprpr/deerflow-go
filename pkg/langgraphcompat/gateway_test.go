@@ -6245,6 +6245,46 @@ func TestThreadStatePostClearsValueSummaries(t *testing.T) {
 	}
 }
 
+func TestThreadStatePatchClearsValueSummariesWithNulls(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-patch-clear-values-null"
+	s.ensureSession(threadID, map[string]any{
+		"title":          "Before",
+		"todos":          []any{map[string]any{"content": "ship sqlite", "status": "pending"}},
+		"sandbox":        map[string]any{"sandbox_id": "sb-1"},
+		"artifacts":      []any{"/tmp/report.html"},
+		"viewed_images":  map[string]any{"/tmp/chart.png": map[string]any{"base64": "xyz", "mime_type": "image/png"}},
+		"thread_data":    map[string]any{"workspace_path": "/tmp/workspace"},
+		"uploaded_files": []any{map[string]any{"filename": "notes.txt", "path": "/tmp/uploads/notes.txt"}},
+	})
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID+"/state",
+		strings.NewReader(`{"title":null,"todos":null,"sandbox":null,"artifacts":null,"viewedImages":null,"threadData":null,"uploadedFiles":null}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("patch request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("state missing")
+	}
+	for _, key := range []string{"title", "todos", "sandbox", "artifacts", "viewed_images", "thread_data", "uploaded_files"} {
+		if _, ok := state.Metadata[key]; ok {
+			t.Fatalf("metadata=%#v", state.Metadata)
+		}
+	}
+}
+
 func TestThreadStatePatchAcceptsValuesPayload(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-patch-values"
@@ -6642,6 +6682,46 @@ func TestThreadUpdateClearsValueSummaries(t *testing.T) {
 	}
 	if uploadedFiles := anySlice(thread["uploaded_files"]); len(uploadedFiles) != 0 {
 		t.Fatalf("thread=%#v", thread)
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("state missing")
+	}
+	for _, key := range []string{"title", "todos", "sandbox", "artifacts", "viewed_images", "thread_data", "uploaded_files"} {
+		if _, ok := state.Metadata[key]; ok {
+			t.Fatalf("metadata=%#v", state.Metadata)
+		}
+	}
+}
+
+func TestThreadUpdateClearsValueSummariesWithNulls(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-update-clear-values-null"
+	s.ensureSession(threadID, map[string]any{
+		"title":          "Before",
+		"todos":          []any{map[string]any{"content": "ship sqlite", "status": "pending"}},
+		"sandbox":        map[string]any{"sandbox_id": "sb-1"},
+		"artifacts":      []any{"/tmp/report.html"},
+		"viewed_images":  map[string]any{"/tmp/chart.png": map[string]any{"base64": "xyz", "mime_type": "image/png"}},
+		"thread_data":    map[string]any{"workspace_path": "/tmp/workspace"},
+		"uploaded_files": []any{map[string]any{"filename": "notes.txt", "path": "/tmp/uploads/notes.txt"}},
+	})
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID,
+		strings.NewReader(`{"title":null,"todos":null,"sandbox":null,"artifacts":null,"viewedImages":null,"threadData":null,"uploadedFiles":null}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("update request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
 	}
 
 	state := s.getThreadState(threadID)
