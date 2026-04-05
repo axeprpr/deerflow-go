@@ -8907,7 +8907,7 @@ func TestRecordedRunStreamModeFiltersReplayEvents(t *testing.T) {
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 		Events: []StreamEvent{
-			{ID: "1", Event: "metadata", Data: map[string]any{"run_id": "run-replay-1"}},
+			{ID: "1", Event: "metadata", Data: map[string]any{"run_id": "run-replay-1", "thread_id": "thread-replay-1", "assistant_id": "lead_agent"}},
 			{ID: "2", Event: "messages-tuple", Data: map[string]any{"type": "ai", "content": "hello"}},
 			{ID: "3", Event: "values", Data: map[string]any{"title": "done"}},
 			{ID: "4", Event: "end", Data: map[string]any{"run_id": "run-replay-1"}},
@@ -8929,6 +8929,9 @@ func TestRecordedRunStreamModeFiltersReplayEvents(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	if strings.Contains(text, "event: metadata") {
+		t.Fatalf("unexpected metadata event: %s", text)
+	}
 	if !strings.Contains(text, "event: values") {
 		t.Fatalf("missing values event: %s", text)
 	}
@@ -8937,6 +8940,47 @@ func TestRecordedRunStreamModeFiltersReplayEvents(t *testing.T) {
 	}
 	if !strings.Contains(text, "event: end") {
 		t.Fatalf("missing end event: %s", text)
+	}
+}
+
+func TestRecordedRunStreamReplaysMetadataPayload(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-replay-meta",
+		ThreadID:    "thread-replay-meta",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "metadata", Data: map[string]any{"run_id": "run-replay-meta", "thread_id": "thread-replay-meta", "assistant_id": "lead_agent"}},
+			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-replay-meta"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-replay-meta/runs/run-replay-meta/stream")
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: metadata") {
+		t.Fatalf("missing metadata event: %s", text)
+	}
+	if !strings.Contains(text, `"run_id":"run-replay-meta"`) || !strings.Contains(text, `"thread_id":"thread-replay-meta"`) {
+		t.Fatalf("missing metadata IDs: %s", text)
+	}
+	if !strings.Contains(text, `"assistant_id":"lead_agent"`) {
+		t.Fatalf("missing assistant_id in metadata: %s", text)
 	}
 }
 
