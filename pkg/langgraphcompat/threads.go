@@ -610,7 +610,7 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 		"thread_id":  session.ThreadID,
 		"created_at": session.CreatedAt.Format(time.RFC3339Nano),
 		"updated_at": session.UpdatedAt.Format(time.RFC3339Nano),
-		"metadata":   session.Metadata,
+		"metadata":   threadMetadata(session),
 		"status":     session.Status,
 		"config": map[string]any{
 			"configurable": s.threadConfigurable(session),

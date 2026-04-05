@@ -1581,6 +1581,15 @@ func TestThreadRunPersistsConfigMetadata(t *testing.T) {
 	if metadata["is_plan_mode"] != true || metadata["subagent_enabled"] != true {
 		t.Fatalf("metadata=%#v", metadata)
 	}
+	if metadata["thread_id"] != "thread-config-run" {
+		t.Fatalf("thread_id=%v", metadata["thread_id"])
+	}
+	if metadata["assistant_id"] != "lead_agent" || metadata["graph_id"] != "lead_agent" {
+		t.Fatalf("assistant/graph metadata=%#v", metadata)
+	}
+	if metadata["run_id"] == "" {
+		t.Fatalf("run_id missing in metadata=%#v", metadata)
+	}
 
 	stateResp, err := http.Get(ts.URL + "/threads/thread-config-run/state")
 	if err != nil {
