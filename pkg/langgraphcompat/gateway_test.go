@@ -8684,6 +8684,37 @@ func TestThreadRunStreamEmitsToolEndAliasAndUsageMetadata(t *testing.T) {
 	}
 }
 
+func TestThreadRunStreamEmitsToolCallEvent(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = &fakeToolLLMProvider{}
+	if err := os.WriteFile("/tmp/demo.txt", []byte("demo"), 0o644); err != nil {
+		t.Fatalf("write tool fixture: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/thread-stream-tool-call/runs/stream", strings.NewReader(`{"assistant_id":"lead_agent","stream_mode":["events"],"input":{"messages":[{"role":"user","content":"inspect file"}]}}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: tool_call") {
+		t.Fatalf("missing tool_call event: %s", text)
+	}
+	if !strings.Contains(text, `"id":"call-1"`) || !strings.Contains(text, `"name":"read_file"`) {
+		t.Fatalf("missing tool_call payload: %s", text)
+	}
+}
+
 func TestThreadRunStreamModeValuesFiltersMessageEvents(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.llmProvider = fakeLLMProvider{}
@@ -9254,6 +9285,44 @@ func TestRecordedRunStreamReplaysToolCallEvents(t *testing.T) {
 	}
 }
 
+func TestRecordedRunStreamReplaysToolCallEvent(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-replay-tool-call",
+		ThreadID:    "thread-replay-tool-call",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "tool_call", Data: map[string]any{"id": "call-1", "name": "read_file"}},
+			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-replay-tool-call"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-replay-tool-call/runs/run-replay-tool-call/stream?streamMode=events")
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: tool_call") {
+		t.Fatalf("missing tool_call event: %s", text)
+	}
+	if !strings.Contains(text, `"id":"call-1"`) || !strings.Contains(text, `"name":"read_file"`) {
+		t.Fatalf("missing tool_call payload: %s", text)
+	}
+}
+
 func TestRecordedRunStreamReplaysErrorEvent(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	run := &Run{
@@ -9510,6 +9579,44 @@ func TestThreadJoinStreamReplaysToolCallEvents(t *testing.T) {
 	}
 	if !strings.Contains(text, `"id":"call-1"`) {
 		t.Fatalf("missing tool call id: %s", text)
+	}
+}
+
+func TestThreadJoinStreamReplaysToolCallEvent(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-join-tool-call",
+		ThreadID:    "thread-join-tool-call",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "tool_call", Data: map[string]any{"id": "call-1", "name": "read_file"}},
+			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-join-tool-call"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-join-tool-call/stream?streamMode=events")
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: tool_call") {
+		t.Fatalf("missing tool_call event: %s", text)
+	}
+	if !strings.Contains(text, `"id":"call-1"`) || !strings.Contains(text, `"name":"read_file"`) {
+		t.Fatalf("missing tool_call payload: %s", text)
 	}
 }
 
