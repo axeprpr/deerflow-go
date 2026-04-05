@@ -846,6 +846,9 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 	checkpoint := checkpointObjectFromMetadata(session.Metadata, "")
 	parentCheckpoint := checkpointObjectFromMetadata(session.Metadata, "parent_")
 	configurable := s.threadConfigurable(session)
+	next := stringSliceFromAny(session.Metadata["next"])
+	tasks := anySlice(session.Metadata["tasks"])
+	interrupts := anySlice(session.Metadata["interrupts"])
 	return map[string]any{
 		"thread_id":                   session.ThreadID,
 		"created_at":                  session.CreatedAt.Format(time.RFC3339Nano),
@@ -870,6 +873,9 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 		"checkpoint_thread_id":        stringValue(session.Metadata["checkpoint_thread_id"]),
 		"parent_checkpoint_thread_id": stringValue(session.Metadata["parent_checkpoint_thread_id"]),
 		"step":                        session.Metadata["step"],
+		"next":                        append([]string(nil), next...),
+		"tasks":                       append([]any(nil), tasks...),
+		"interrupts":                  append([]any(nil), interrupts...),
 		"checkpoint":                  checkpoint,
 		"parent_checkpoint":           parentCheckpoint,
 		"metadata":                    threadMetadata(session),

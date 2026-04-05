@@ -1161,6 +1161,9 @@ func TestThreadSearchIncludesCheckpointFieldsByDefault(t *testing.T) {
 		"graph_id":                    "graph-1",
 		"run_id":                      "run-1",
 		"step":                        3,
+		"next":                        []any{"lead_agent"},
+		"tasks":                       []any{map[string]any{"id": "task-1", "name": "lead_agent"}},
+		"interrupts":                  []any{map[string]any{"value": "Need input"}},
 		"checkpoint_id":               "cp-1",
 		"parent_checkpoint_id":        "cp-parent-1",
 		"checkpoint_ns":               "ns-1",
@@ -1211,6 +1214,18 @@ func TestThreadSearchIncludesCheckpointFieldsByDefault(t *testing.T) {
 		t.Fatalf("selected=%#v", selected)
 	}
 	if selected["step"] != float64(3) && selected["step"] != 3 {
+		t.Fatalf("selected=%#v", selected)
+	}
+	next, _ := selected["next"].([]any)
+	if len(next) != 1 || next[0] != "lead_agent" {
+		t.Fatalf("selected=%#v", selected)
+	}
+	tasks, _ := selected["tasks"].([]any)
+	if len(tasks) != 1 {
+		t.Fatalf("selected=%#v", selected)
+	}
+	interrupts, _ := selected["interrupts"].([]any)
+	if len(interrupts) != 1 {
 		t.Fatalf("selected=%#v", selected)
 	}
 	if selected["assistant_id"] != "assistant-1" || selected["graph_id"] != "graph-1" || selected["run_id"] != "run-1" {
@@ -5401,6 +5416,18 @@ func TestThreadGetIncludesCompatShape(t *testing.T) {
 		t.Fatalf("thread=%#v", thread)
 	}
 	if thread["step"] != float64(7) && thread["step"] != 7 {
+		t.Fatalf("thread=%#v", thread)
+	}
+	next, _ := thread["next"].([]any)
+	if len(next) != 1 || next[0] != "lead_agent" {
+		t.Fatalf("thread=%#v", thread)
+	}
+	tasks, _ := thread["tasks"].([]any)
+	if len(tasks) != 1 {
+		t.Fatalf("thread=%#v", thread)
+	}
+	interrupts, _ := thread["interrupts"].([]any)
+	if len(interrupts) != 1 {
 		t.Fatalf("thread=%#v", thread)
 	}
 	checkpoint, _ := thread["checkpoint"].(map[string]any)
