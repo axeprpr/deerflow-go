@@ -776,6 +776,7 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 	values := s.threadValues(session)
 	checkpoint := checkpointObjectFromMetadata(session.Metadata, "")
 	parentCheckpoint := checkpointObjectFromMetadata(session.Metadata, "parent_")
+	configurable := s.threadConfigurable(session)
 	return map[string]any{
 		"thread_id":            session.ThreadID,
 		"created_at":           session.CreatedAt.Format(time.RFC3339Nano),
@@ -783,6 +784,9 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 		"assistant_id":         stringValue(session.Metadata["assistant_id"]),
 		"graph_id":             stringValue(session.Metadata["graph_id"]),
 		"run_id":               stringValue(session.Metadata["run_id"]),
+		"model_name":           stringValue(configurable["model_name"]),
+		"mode":                 stringValue(configurable["mode"]),
+		"reasoning_effort":     stringValue(configurable["reasoning_effort"]),
 		"checkpoint_id":        stringValue(session.Metadata["checkpoint_id"]),
 		"parent_checkpoint_id": stringValue(session.Metadata["parent_checkpoint_id"]),
 		"checkpoint":           checkpoint,
@@ -790,7 +794,7 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 		"metadata":             threadMetadata(session),
 		"status":               session.Status,
 		"config": map[string]any{
-			"configurable": s.threadConfigurable(session),
+			"configurable": configurable,
 		},
 		"values": values,
 	}
