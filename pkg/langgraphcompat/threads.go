@@ -172,6 +172,8 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 		switch req.SortBy {
 		case "created_at":
 			less = left["created_at"].(string) < right["created_at"].(string)
+		case "status":
+			less = asString(left["status"]) < asString(right["status"])
 		case "assistant_id":
 			less = asString(left["metadata"].(map[string]any)["assistant_id"]) < asString(right["metadata"].(map[string]any)["assistant_id"])
 		case "graph_id":

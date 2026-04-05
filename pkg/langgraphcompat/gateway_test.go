@@ -1340,6 +1340,44 @@ func TestThreadSearchAcceptsCamelCaseAgentSortFields(t *testing.T) {
 	}
 }
 
+func TestThreadSearchSupportsStatusSort(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	first := s.ensureSession("thread-search-status-busy", nil)
+	second := s.ensureSession("thread-search-status-idle", nil)
+	first.Status = "busy"
+	second.Status = "idle"
+	first.UpdatedAt = time.Now().UTC().Add(-time.Hour)
+	second.UpdatedAt = time.Now().UTC()
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"limit":10,"sortBy":"status","sortOrder":"asc","select":["threadId","status"]}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) < 2 {
+		t.Fatalf("threads=%#v", threads)
+	}
+	if threads[0]["thread_id"] != "thread-search-status-busy" {
+		t.Fatalf("first thread=%v want thread-search-status-busy", threads[0]["thread_id"])
+	}
+	if threads[0]["status"] != "busy" {
+		t.Fatalf("status=%v want busy", threads[0]["status"])
+	}
+}
+
 func TestThreadSearchSortsByCamelCaseAssistantID(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	first := s.ensureSession("thread-search-assistant-b", map[string]any{"assistant_id": "beta"})
