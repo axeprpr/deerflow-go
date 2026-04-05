@@ -575,12 +575,46 @@ func TestThreadSearchSelectProjectsFields(t *testing.T) {
 func TestThreadSearchSelectProjectsMessages(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	session := s.ensureSession("thread-search-messages-select", map[string]any{"title": "Projected"})
-	session.Messages = []models.Message{{
-		ID:        "m1",
-		SessionID: "thread-search-messages-select",
-		Role:      models.RoleHuman,
-		Content:   "hello",
-	}}
+	session.Messages = []models.Message{
+		{
+			ID:        "ai-1",
+			SessionID: "thread-search-messages-select",
+			Role:      models.RoleAI,
+			Content:   "",
+			ToolCalls: []models.ToolCall{
+				{
+					ID:        "call-1",
+					Name:      "present_files",
+					Arguments: map[string]any{"filepaths": []string{"/tmp/report.md"}},
+					Status:    models.CallStatusCompleted,
+				},
+			},
+			Metadata: map[string]string{
+				"reasoning_content":   "Need to inspect report",
+				"usage_input_tokens":  "10",
+				"usage_output_tokens": "5",
+				"usage_total_tokens":  "15",
+			},
+		},
+		{
+			ID:        "tool-1",
+			SessionID: "thread-search-messages-select",
+			Role:      models.RoleTool,
+			ToolResult: &models.ToolResult{
+				CallID:   "call-1",
+				ToolName: "present_files",
+				Status:   models.CallStatusCompleted,
+				Content:  "presented",
+				Duration: 1500 * time.Millisecond,
+				Data: map[string]any{
+					"files": []string{"/tmp/report.md"},
+				},
+			},
+			Metadata: map[string]string{
+				"message_status": "success",
+			},
+		},
+	}
 
 	resp, err := http.Post(
 		ts.URL+"/threads/search",
@@ -616,12 +650,28 @@ func TestThreadSearchSelectProjectsMessages(t *testing.T) {
 	}
 	values, _ := selected["values"].(map[string]any)
 	messages, _ := values["messages"].([]any)
-	if len(messages) != 1 {
+	if len(messages) != 2 {
 		t.Fatalf("values=%#v", values)
 	}
 	first, _ := messages[0].(map[string]any)
-	if first["content"] != "hello" {
+	if first["id"] != "ai-1" {
 		t.Fatalf("message=%#v", first)
+	}
+	toolCalls, _ := first["tool_calls"].([]any)
+	if len(toolCalls) != 1 {
+		t.Fatalf("message=%#v", first)
+	}
+	additionalKwargs, _ := first["additional_kwargs"].(map[string]any)
+	if additionalKwargs["reasoning_content"] != "Need to inspect report" {
+		t.Fatalf("additional_kwargs=%#v", additionalKwargs)
+	}
+	usage, _ := first["usage_metadata"].(map[string]any)
+	if usage["input_tokens"] != float64(10) || usage["output_tokens"] != float64(5) || usage["total_tokens"] != float64(15) {
+		t.Fatalf("usage_metadata=%#v", usage)
+	}
+	second, _ := messages[1].(map[string]any)
+	if second["id"] != "tool-1" || second["tool_call_id"] != "call-1" || second["status"] != "success" {
+		t.Fatalf("message=%#v", second)
 	}
 }
 
