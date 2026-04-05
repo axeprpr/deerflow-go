@@ -6305,6 +6305,79 @@ func TestThreadStatePatchClearsValueSummaries(t *testing.T) {
 	}
 }
 
+func TestThreadHistoryReflectsClearedValueSummaries(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-history-clear-values"
+	s.ensureSession(threadID, map[string]any{
+		"title":          "Before",
+		"todos":          []any{map[string]any{"content": "ship sqlite", "status": "pending"}},
+		"sandbox":        map[string]any{"sandbox_id": "sb-1"},
+		"artifacts":      []any{"/tmp/report.html"},
+		"viewed_images":  map[string]any{"/tmp/chart.png": map[string]any{"base64": "xyz", "mime_type": "image/png"}},
+		"thread_data":    map[string]any{"workspace_path": "/tmp/workspace"},
+		"uploaded_files": []any{map[string]any{"filename": "notes.txt", "path": "/tmp/uploads/notes.txt"}},
+	})
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID+"/state",
+		strings.NewReader(`{"title":"","todos":[],"sandbox":{},"artifacts":[],"viewedImages":{},"threadData":{},"uploadedFiles":[]}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("patch request: %v", err)
+	}
+	resp.Body.Close()
+
+	historyResp, err := http.Get(ts.URL + "/threads/" + threadID + "/history?limit=1")
+	if err != nil {
+		t.Fatalf("history request: %v", err)
+	}
+	defer historyResp.Body.Close()
+	if historyResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(historyResp.Body)
+		t.Fatalf("status=%d body=%s", historyResp.StatusCode, string(b))
+	}
+
+	var history []map[string]any
+	if err := json.NewDecoder(historyResp.Body).Decode(&history); err != nil {
+		t.Fatalf("decode history: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history=%#v", history)
+	}
+	values, _ := history[0]["values"].(map[string]any)
+	if values["title"] != "" {
+		t.Fatalf("values=%#v", values)
+	}
+	if len(anyStringSlice(values["artifacts"])) != 0 {
+		t.Fatalf("values=%#v", values)
+	}
+	if todos := anySlice(values["todos"]); len(todos) != 0 {
+		t.Fatalf("values=%#v", values)
+	}
+	if sandbox, _ := values["sandbox"].(map[string]any); len(sandbox) != 0 {
+		t.Fatalf("values=%#v", values)
+	}
+	if viewedImages, _ := values["viewed_images"].(map[string]any); len(viewedImages) != 0 {
+		t.Fatalf("values=%#v", values)
+	}
+	threadData, _ := values["thread_data"].(map[string]any)
+	if threadData["uploads_path"] != s.uploadsDir(threadID) {
+		t.Fatalf("values=%#v", values)
+	}
+	if uploadedFiles := anySlice(values["uploaded_files"]); len(uploadedFiles) != 0 {
+		t.Fatalf("values=%#v", values)
+	}
+	metadata, _ := history[0]["metadata"].(map[string]any)
+	for _, key := range []string{"title", "todos", "sandbox", "artifacts", "viewed_images", "thread_data", "uploaded_files"} {
+		if _, ok := metadata[key]; ok {
+			t.Fatalf("metadata=%#v", metadata)
+		}
+	}
+}
+
 func TestThreadUpdateAcceptsValuesPayload(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-update-values"
