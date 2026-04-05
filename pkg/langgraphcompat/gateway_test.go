@@ -1650,6 +1650,55 @@ func TestThreadRunAcceptsTopLevelContext(t *testing.T) {
 	}
 }
 
+func TestThreadRunPersistsAgentNameFromContext(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+	body := `{"assistant_id":"lead_agent","input":{"messages":[{"role":"user","content":"hi"}]},"context":{"agent_name":"writer"}}`
+	resp, err := http.Post(ts.URL+"/threads/thread-agent-name/runs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	threadResp, err := http.Get(ts.URL + "/threads/thread-agent-name")
+	if err != nil {
+		t.Fatalf("get thread: %v", err)
+	}
+	defer threadResp.Body.Close()
+	var thread map[string]any
+	if err := json.NewDecoder(threadResp.Body).Decode(&thread); err != nil {
+		t.Fatalf("decode thread: %v", err)
+	}
+	metadata, ok := thread["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("metadata=%#v", thread["metadata"])
+	}
+	if metadata["agent_name"] != "writer" {
+		t.Fatalf("agent_name=%v", metadata["agent_name"])
+	}
+
+	stateResp, err := http.Get(ts.URL + "/threads/thread-agent-name/state")
+	if err != nil {
+		t.Fatalf("get state: %v", err)
+	}
+	defer stateResp.Body.Close()
+	var state ThreadState
+	if err := json.NewDecoder(stateResp.Body).Decode(&state); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	config, ok := state.Config["configurable"].(map[string]any)
+	if !ok {
+		t.Fatalf("config=%#v", state.Config)
+	}
+	if config["agent_name"] != "writer" {
+		t.Fatalf("agent_name=%v", config["agent_name"])
+	}
+}
+
 func TestThreadRunAcceptsCamelCaseConfigFields(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.llmProvider = fakeLLMProvider{}

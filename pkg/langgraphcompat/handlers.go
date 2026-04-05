@@ -22,6 +22,7 @@ type runConfig struct {
 	ModelName       string
 	ReasoningEffort string
 	AgentType       agent.AgentType
+	AgentName       string
 	ThinkingEnabled *bool
 	IsPlanMode      *bool
 	SubagentEnabled *bool
@@ -811,6 +812,12 @@ func parseRunConfig(raw map[string]any) runConfig {
 			stringFromAny(configurable["agent_type"]),
 			stringFromAny(configurable["agentType"]),
 		)),
+		AgentName: firstNonEmpty(
+			stringFromAny(raw["agent_name"]),
+			stringFromAny(raw["agentName"]),
+			stringFromAny(configurable["agent_name"]),
+			stringFromAny(configurable["agentName"]),
+		),
 		ThinkingEnabled: boolPointerFromAny(firstNonNil(
 			raw["thinking_enabled"],
 			raw["thinkingEnabled"],
@@ -874,6 +881,9 @@ func (s *Server) applyRunConfigMetadata(threadID string, cfg runConfig) {
 	}
 	if cfg.ReasoningEffort != "" {
 		s.setThreadMetadata(threadID, "reasoning_effort", cfg.ReasoningEffort)
+	}
+	if cfg.AgentName != "" {
+		s.setThreadMetadata(threadID, "agent_name", cfg.AgentName)
 	}
 	if cfg.ThinkingEnabled != nil {
 		s.setThreadMetadata(threadID, "thinking_enabled", *cfg.ThinkingEnabled)

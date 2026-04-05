@@ -660,6 +660,7 @@ func (s *Server) threadConfigurable(session *Session) map[string]any {
 	configurable := map[string]any{
 		"thread_id":        session.ThreadID,
 		"agent_type":       stringValue(session.Metadata["agent_type"]),
+		"agent_name":       stringValue(session.Metadata["agent_name"]),
 		"model_name":       stringValue(session.Metadata["model_name"]),
 		"is_plan_mode":     false,
 		"thinking_enabled": true,
