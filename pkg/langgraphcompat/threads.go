@@ -984,7 +984,7 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 	parentCheckpoint := checkpointObjectFromMetadata(session.Metadata, "parent_")
 
 	return &ThreadState{
-		CheckpointID:       firstNonEmpty(stringValue(session.Metadata["checkpoint_id"]), uuid.New().String()),
+		CheckpointID:       stringValue(session.Metadata["checkpoint_id"]),
 		ParentCheckpointID: stringValue(session.Metadata["parent_checkpoint_id"]),
 		Checkpoint:         checkpoint,
 		ParentCheckpoint:   parentCheckpoint,

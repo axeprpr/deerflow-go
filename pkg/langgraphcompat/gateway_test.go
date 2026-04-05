@@ -7417,6 +7417,45 @@ func TestThreadStatePostAcceptsCamelCaseCompatValues(t *testing.T) {
 	}
 }
 
+func TestThreadStateDoesNotInventCheckpointID(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-state-no-checkpoint"
+	s.ensureSession(threadID, nil)
+
+	getState := func() map[string]any {
+		resp, err := http.Get(ts.URL + "/threads/" + threadID + "/state")
+		if err != nil {
+			t.Fatalf("get state: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode state: %v", err)
+		}
+		return payload
+	}
+
+	first := getState()
+	second := getState()
+
+	if value, ok := first["checkpoint_id"]; ok && value != "" {
+		t.Fatalf("unexpected checkpoint_id in first state: %#v", first["checkpoint_id"])
+	}
+	if value, ok := second["checkpoint_id"]; ok && value != "" {
+		t.Fatalf("unexpected checkpoint_id in second state: %#v", second["checkpoint_id"])
+	}
+	if _, ok := first["checkpoint"]; ok && first["checkpoint"] != nil {
+		t.Fatalf("unexpected checkpoint object in first state: %#v", first["checkpoint"])
+	}
+	if _, ok := second["checkpoint"]; ok && second["checkpoint"] != nil {
+		t.Fatalf("unexpected checkpoint object in second state: %#v", second["checkpoint"])
+	}
+}
+
 func TestThreadStatePostAcceptsMetadata(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-state-post-metadata"
