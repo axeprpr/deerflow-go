@@ -2347,6 +2347,11 @@ func TestLoadPersistedThreadsPrefersValuesOverStaleMetadata(t *testing.T) {
 			"title":"Current Title",
 			"todos":[{"content":"current task","status":"completed"}],
 			"artifacts":["/tmp/current.html"],
+			"thread_data":{
+				"workspace_path":"/external/thread/workspace",
+				"uploads_path":"/external/thread/uploads",
+				"outputs_path":"/external/thread/outputs"
+			},
 			"uploaded_files":[{"filename":"notes.txt","size":42,"path":"/mnt/user-data/uploads/notes.txt","status":"uploaded"}]
 		},
 		"metadata":{
@@ -2385,6 +2390,10 @@ func TestLoadPersistedThreadsPrefersValuesOverStaleMetadata(t *testing.T) {
 	state := s.getThreadState("thread-values-override")
 	if state == nil {
 		t.Fatalf("state=nil")
+	}
+	threadData, _ := state.Values["thread_data"].(map[string]any)
+	if threadData["workspace_path"] != "/external/thread/workspace" || threadData["uploads_path"] != "/external/thread/uploads" || threadData["outputs_path"] != "/external/thread/outputs" {
+		t.Fatalf("thread_data=%#v", state.Values["thread_data"])
 	}
 	if files, ok := state.Values["uploaded_files"].([]map[string]any); ok {
 		if len(files) != 1 || files[0]["filename"] != "notes.txt" || files[0]["path"] != "/mnt/user-data/uploads/notes.txt" || toInt64(files[0]["size"]) != 42 {
