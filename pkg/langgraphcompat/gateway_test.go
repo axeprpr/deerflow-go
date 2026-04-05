@@ -417,6 +417,9 @@ func TestThreadSearchSelectProjectsFields(t *testing.T) {
 	if _, ok := selected["updated_at"]; !ok {
 		t.Fatalf("missing updated_at in %#v", selected)
 	}
+	if _, ok := selected["created_at"]; !ok {
+		t.Fatalf("missing created_at in %#v", selected)
+	}
 	if _, ok := selected["metadata"]; ok {
 		t.Fatalf("unexpected metadata in %#v", selected)
 	}

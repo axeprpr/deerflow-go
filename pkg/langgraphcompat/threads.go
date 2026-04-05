@@ -208,6 +208,11 @@ func selectThreadFields(thread map[string]any, selectFields []string) map[string
 			selected["thread_id"] = value
 		}
 	}
+	if _, ok := selected["created_at"]; !ok {
+		if value, exists := thread["created_at"]; exists {
+			selected["created_at"] = value
+		}
+	}
 	return selected
 }
 
