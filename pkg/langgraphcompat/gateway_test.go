@@ -8602,6 +8602,12 @@ func TestThreadRunStreamModeValuesFiltersMessageEvents(t *testing.T) {
 	if !strings.Contains(text, "event: values") {
 		t.Fatalf("missing values event: %s", text)
 	}
+	if !strings.Contains(text, `"messages":[`) {
+		t.Fatalf("missing messages in values payload: %s", text)
+	}
+	if !strings.Contains(text, `"content":"hello from fake llm"`) {
+		t.Fatalf("missing final message in values payload: %s", text)
+	}
 	if strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("unexpected messages-tuple event: %s", text)
 	}
