@@ -373,12 +373,26 @@ func (s *Server) handleAgentGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAgentCreate(w http.ResponseWriter, r *http.Request) {
-	var req gatewayAgent
+	var req struct {
+		Name        string   `json:"name"`
+		Description string   `json:"description"`
+		Model       *string  `json:"model"`
+		ToolGroups  []string `json:"tool_groups"`
+		ToolGroupsX []string `json:"toolGroups"`
+		Soul        string   `json:"soul"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid request body"})
 		return
 	}
-	name, ok := normalizeAgentName(req.Name)
+	agentReq := gatewayAgent{
+		Name:        req.Name,
+		Description: req.Description,
+		Model:       req.Model,
+		ToolGroups:  firstNonEmptySlice(req.ToolGroups, req.ToolGroupsX),
+		Soul:        req.Soul,
+	}
+	name, ok := normalizeAgentName(agentReq.Name)
 	if !ok {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": "Invalid agent name"})
 		return
@@ -391,10 +405,10 @@ func (s *Server) handleAgentCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]any{"detail": fmt.Sprintf("Agent '%s' already exists", name)})
 		return
 	}
-	req.Name = name
-	agents[name] = req
+	agentReq.Name = name
+	agents[name] = agentReq
 	s.uiStateMu.Unlock()
-	if err := s.persistAgentFiles(name, req); err != nil {
+	if err := s.persistAgentFiles(name, agentReq); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist agent files"})
 		return
 	}
@@ -402,7 +416,7 @@ func (s *Server) handleAgentCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
 		return
 	}
-	writeJSON(w, http.StatusCreated, req)
+	writeJSON(w, http.StatusCreated, agentReq)
 }
 
 func (s *Server) handleAgentUpdate(w http.ResponseWriter, r *http.Request) {
@@ -415,6 +429,7 @@ func (s *Server) handleAgentUpdate(w http.ResponseWriter, r *http.Request) {
 		Description *string   `json:"description"`
 		Model       **string  `json:"model"`
 		ToolGroups  *[]string `json:"tool_groups"`
+		ToolGroupsX *[]string `json:"toolGroups"`
 		Soul        *string   `json:"soul"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -438,6 +453,8 @@ func (s *Server) handleAgentUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ToolGroups != nil {
 		agent.ToolGroups = *req.ToolGroups
+	} else if req.ToolGroupsX != nil {
+		agent.ToolGroups = *req.ToolGroupsX
 	}
 	if req.Soul != nil {
 		agent.Soul = *req.Soul
@@ -1665,6 +1682,16 @@ func normalizeGatewayMCPServer(server gatewayMCPServerConfig) gatewayMCPServerCo
 		}
 	}
 	return server
+}
+
+func firstNonEmptySlice[T any](primary []T, fallback []T) []T {
+	if len(primary) > 0 {
+		return primary
+	}
+	if len(fallback) > 0 {
+		return fallback
+	}
+	return primary
 }
 
 func normalizeGatewayModels(models []gatewayModel) []gatewayModel {

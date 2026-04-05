@@ -724,6 +724,62 @@ func TestAgentEndpointsPersistFiles(t *testing.T) {
 	}
 }
 
+func TestAgentCreateAcceptsCamelCaseToolGroups(t *testing.T) {
+	_, ts := newCompatTestServer(t)
+
+	body := `{"name":"camel-writer","description":"Writes clearly","model":"qwen/Qwen3.5-9B","toolGroups":["file"],"soul":"Write with structure."}`
+	resp, err := http.Post(ts.URL+"/api/agents", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var agent map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&agent); err != nil {
+		t.Fatalf("decode agent: %v", err)
+	}
+	toolGroups, ok := agent["tool_groups"].([]any)
+	if !ok || len(toolGroups) != 1 || toolGroups[0] != "file" {
+		t.Fatalf("tool_groups=%#v", agent["tool_groups"])
+	}
+}
+
+func TestAgentUpdateAcceptsCamelCaseToolGroups(t *testing.T) {
+	_, ts := newCompatTestServer(t)
+
+	createBody := `{"name":"camel-updater","description":"a","model":"qwen/Qwen3.5-9B","tool_groups":["file"],"soul":"hello"}`
+	createResp, err := http.Post(ts.URL+"/api/agents", "application/json", strings.NewReader(createBody))
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	createResp.Body.Close()
+
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/agents/camel-updater", strings.NewReader(`{"toolGroups":["web","file"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("update agent: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var agent map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&agent); err != nil {
+		t.Fatalf("decode agent: %v", err)
+	}
+	toolGroups, ok := agent["tool_groups"].([]any)
+	if !ok || len(toolGroups) != 2 || toolGroups[0] != "web" || toolGroups[1] != "file" {
+		t.Fatalf("tool_groups=%#v", agent["tool_groups"])
+	}
+}
+
 func TestDefaultGatewayMemoryConfigFromEnv(t *testing.T) {
 	t.Setenv("DEERFLOW_MEMORY_CONFIG", `{"enabled":true,"debounce_seconds":10,"max_facts":55,"fact_confidence_threshold":0.9,"injection_enabled":false,"max_injection_tokens":999}`)
 	cfg := defaultGatewayMemoryConfig("/tmp/deerflow-test")
