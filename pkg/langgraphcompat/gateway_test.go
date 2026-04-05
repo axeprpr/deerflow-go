@@ -2910,6 +2910,49 @@ func TestLoadThreadHistoryNormalizesCheckpointObjects(t *testing.T) {
 	}
 }
 
+func TestLoadThreadHistoryAcceptsScalarStateItems(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{dataRoot: root}
+	threadID := "thread-history-scalar-state"
+	if err := os.MkdirAll(s.threadRoot(threadID), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `[
+		{
+			"checkpointId":"cp-1",
+			"next":"lead_agent",
+			"tasks":{"id":"task-1","name":"lead_agent"},
+			"interrupts":{"value":"Need input"},
+			"createdAt":"2026-01-01T00:00:00Z"
+		}
+	]`
+	if err := os.WriteFile(s.threadHistoryPath(threadID), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write history file: %v", err)
+	}
+
+	history := s.loadThreadHistory(threadID)
+	if len(history) != 1 {
+		t.Fatalf("history=%#v", history)
+	}
+	if len(history[0].Next) != 1 || history[0].Next[0] != "lead_agent" {
+		t.Fatalf("next=%#v", history[0].Next)
+	}
+	if len(history[0].Tasks) != 1 {
+		t.Fatalf("tasks=%#v", history[0].Tasks)
+	}
+	task, _ := history[0].Tasks[0].(map[string]any)
+	if task["id"] != "task-1" {
+		t.Fatalf("task=%#v", task)
+	}
+	if len(history[0].Interrupts) != 1 {
+		t.Fatalf("interrupts=%#v", history[0].Interrupts)
+	}
+	interrupt, _ := history[0].Interrupts[0].(map[string]any)
+	if interrupt["value"] != "Need input" {
+		t.Fatalf("interrupt=%#v", interrupt)
+	}
+}
+
 func TestLoadThreadHistoryAcceptsWrappedHistoryObject(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}
