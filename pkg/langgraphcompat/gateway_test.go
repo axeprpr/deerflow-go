@@ -6170,6 +6170,44 @@ func TestThreadHistoryReflectsWrittenMessages(t *testing.T) {
 	}
 }
 
+func TestThreadStateMessageWritesPersistAcrossReload(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-reload-messages"
+	s.ensureSession(threadID, nil)
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID+"/state",
+		strings.NewReader(`{"values":{"messages":[{"id":"m1","type":"human","content":"hello"}]}}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("patch state: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	loaded := &Server{
+		dataRoot: s.dataRoot,
+		sessions: map[string]*Session{},
+	}
+	loaded.loadPersistedThreads()
+
+	session := loaded.sessions[threadID]
+	if session == nil {
+		t.Fatal("expected thread restored")
+	}
+	if len(session.Messages) != 1 {
+		t.Fatalf("messages=%#v", session.Messages)
+	}
+	if session.Messages[0].ID != "m1" || session.Messages[0].Content != "hello" {
+		t.Fatalf("message=%#v", session.Messages[0])
+	}
+}
+
 func TestThreadGetIncludesCompatShape(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-get-shape"
