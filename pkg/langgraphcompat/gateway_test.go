@@ -4085,8 +4085,9 @@ func TestConvertToMessagesPreservesToolShape(t *testing.T) {
 			"tool_call_id": "call-1",
 			"content":      "presented",
 			"data": map[string]any{
-				"status": "completed",
-				"data":   map[string]any{"filepaths": []any{"/tmp/report.md"}},
+				"status":   "completed",
+				"duration": "1.5s",
+				"data":     map[string]any{"filepaths": []any{"/tmp/report.md"}},
 			},
 		},
 	}
@@ -4115,6 +4116,9 @@ func TestConvertToMessagesPreservesToolShape(t *testing.T) {
 	}
 	if messages[1].Metadata["message_status"] != "success" {
 		t.Fatalf("metadata=%#v", messages[1].Metadata)
+	}
+	if messages[1].ToolResult.Duration != 1500*time.Millisecond {
+		t.Fatalf("duration=%s", messages[1].ToolResult.Duration)
 	}
 	if got := anyStringSlice(messages[1].ToolResult.Data["filepaths"]); len(got) != 1 || got[0] != "/tmp/report.md" {
 		t.Fatalf("tool_result data=%#v", messages[1].ToolResult.Data)
@@ -4157,6 +4161,7 @@ func TestMessagesToLangChainPreservesToolShape(t *testing.T) {
 				ToolName: "present_files",
 				Status:   models.CallStatusCompleted,
 				Content:  "presented",
+				Duration: 1500 * time.Millisecond,
 				Data: map[string]any{
 					"files": []string{"/tmp/report.md"},
 				},
@@ -4183,6 +4188,9 @@ func TestMessagesToLangChainPreservesToolShape(t *testing.T) {
 	}
 	if _, ok := converted[1].AdditionalKwargs["message_status"]; ok {
 		t.Fatalf("additional_kwargs=%#v", converted[1].AdditionalKwargs)
+	}
+	if converted[1].Data["duration"] != "1.5s" {
+		t.Fatalf("duration=%#v", converted[1].Data["duration"])
 	}
 	data, ok := converted[1].Data["data"].(map[string]any)
 	if !ok || len(data) != 1 {

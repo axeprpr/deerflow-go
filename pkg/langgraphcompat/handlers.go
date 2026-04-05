@@ -516,6 +516,11 @@ func parseLangGraphToolResult(msg map[string]any) *models.ToolResult {
 	if inner, ok := data["data"].(map[string]any); ok && len(inner) > 0 {
 		result.Data = inner
 	}
+	if durationText := strings.TrimSpace(stringFromAny(data["duration"])); durationText != "" {
+		if duration, err := time.ParseDuration(durationText); err == nil {
+			result.Duration = duration
+		}
+	}
 	return result
 }
 
