@@ -2730,6 +2730,42 @@ func TestAgentsAndMemoryEndpoints(t *testing.T) {
 	}
 }
 
+func TestUserProfileAcceptsNullContent(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.setUserProfileLocked("existing profile")
+
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/user-profile", strings.NewReader(`{"content":null}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("put user profile: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if value, ok := payload["content"]; !ok || value != nil {
+		t.Fatalf("content=%#v", payload["content"])
+	}
+
+	if got := s.getUserProfileLocked(); got != "" {
+		t.Fatalf("userProfile=%q", got)
+	}
+	data, err := os.ReadFile(s.userProfilePath())
+	if err != nil {
+		t.Fatalf("read user profile file: %v", err)
+	}
+	if string(data) != "" {
+		t.Fatalf("user profile file=%q", string(data))
+	}
+}
+
 func writeSkillArchive(path, name string) error {
 	f, err := os.Create(path)
 	if err != nil {

@@ -520,17 +520,16 @@ func (s *Server) handleUserProfileGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUserProfilePut(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Content string `json:"content"`
-	}
+	var req map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid request body"})
 		return
 	}
+	content := stringFromAny(req["content"])
 	s.uiStateMu.Lock()
-	s.setUserProfileLocked(req.Content)
+	s.setUserProfileLocked(content)
 	s.uiStateMu.Unlock()
-	if err := os.WriteFile(s.userProfilePath(), []byte(req.Content), 0o644); err != nil {
+	if err := os.WriteFile(s.userProfilePath(), []byte(content), 0o644); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist user profile"})
 		return
 	}
@@ -538,7 +537,7 @@ func (s *Server) handleUserProfilePut(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"content": nullableString(req.Content)})
+	writeJSON(w, http.StatusOK, map[string]any{"content": nullableString(content)})
 }
 
 func (s *Server) handleMemoryGet(w http.ResponseWriter, r *http.Request) {
