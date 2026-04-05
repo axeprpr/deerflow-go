@@ -193,6 +193,20 @@ func (p *fakeClarificationLLMProvider) Stream(_ context.Context, _ llm.ChatReque
 	return ch, nil
 }
 
+func sseEventBlock(t *testing.T, text string, event string) string {
+	t.Helper()
+	marker := "event: " + event + "\n"
+	start := strings.Index(text, marker)
+	if start < 0 {
+		t.Fatalf("missing %s event in %s", event, text)
+	}
+	block := text[start:]
+	if next := strings.Index(block, "\n\nid: "); next >= 0 {
+		block = block[:next]
+	}
+	return block
+}
+
 func writeGatewaySkill(t *testing.T, root, category, name, frontmatter string) {
 	t.Helper()
 	skillDir := filepath.Join(root, "skills", category, name)
@@ -8652,6 +8666,7 @@ func TestThreadRunStreamEmitsToolEndAliasAndUsageMetadata(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	updatesBlock := sseEventBlock(t, text, "updates")
 	if !strings.Contains(text, "event: tool_call_start") {
 		t.Fatalf("missing tool_call_start event: %s", text)
 	}
@@ -8678,6 +8693,11 @@ func TestThreadRunStreamEmitsToolEndAliasAndUsageMetadata(t *testing.T) {
 	}
 	if strings.Contains(text, `"values":`) {
 		t.Fatalf("unexpected nested values payload in updates event: %s", text)
+	}
+	for _, forbidden := range []string{`"todos":`, `"sandbox":`, `"thread_data":`, `"uploaded_files":`, `"viewed_images":`} {
+		if strings.Contains(updatesBlock, forbidden) {
+			t.Fatalf("unexpected extra updates payload field %s: %s", forbidden, updatesBlock)
+		}
 	}
 	if !strings.Contains(text, "\"usage_metadata\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}") {
 		t.Fatalf("missing usage_metadata in messages-tuple: %s", text)
@@ -8817,6 +8837,7 @@ func TestThreadRunStreamModeUpdatesFiltersOtherEvents(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	updatesBlock := sseEventBlock(t, text, "updates")
 	if !strings.Contains(text, "event: updates") {
 		t.Fatalf("missing updates event: %s", text)
 	}
@@ -8828,6 +8849,11 @@ func TestThreadRunStreamModeUpdatesFiltersOtherEvents(t *testing.T) {
 	}
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
+	}
+	for _, forbidden := range []string{`"todos":`, `"sandbox":`, `"thread_data":`, `"uploaded_files":`, `"viewed_images":`} {
+		if strings.Contains(updatesBlock, forbidden) {
+			t.Fatalf("unexpected extra updates payload field %s: %s", forbidden, updatesBlock)
+		}
 	}
 	if !strings.Contains(text, "event: end") {
 		t.Fatalf("missing end event: %s", text)
@@ -10329,6 +10355,7 @@ func TestRecordedRunStreamModeSupportsUpdates(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	updatesBlock := sseEventBlock(t, text, "updates")
 	if !strings.Contains(text, "event: updates") {
 		t.Fatalf("missing updates event: %s", text)
 	}
@@ -10340,6 +10367,11 @@ func TestRecordedRunStreamModeSupportsUpdates(t *testing.T) {
 	}
 	if strings.Contains(text, `"values":`) {
 		t.Fatalf("unexpected nested values payload: %s", text)
+	}
+	for _, forbidden := range []string{`"todos":`, `"sandbox":`, `"thread_data":`, `"uploaded_files":`, `"viewed_images":`} {
+		if strings.Contains(updatesBlock, forbidden) {
+			t.Fatalf("unexpected extra updates payload field %s: %s", forbidden, updatesBlock)
+		}
 	}
 	if strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("unexpected messages-tuple event: %s", text)
@@ -10377,6 +10409,7 @@ func TestThreadJoinStreamModeSupportsUpdates(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	updatesBlock := sseEventBlock(t, text, "updates")
 	if !strings.Contains(text, "event: updates") {
 		t.Fatalf("missing updates event: %s", text)
 	}
@@ -10388,6 +10421,11 @@ func TestThreadJoinStreamModeSupportsUpdates(t *testing.T) {
 	}
 	if strings.Contains(text, `"values":`) {
 		t.Fatalf("unexpected nested values payload: %s", text)
+	}
+	for _, forbidden := range []string{`"todos":`, `"sandbox":`, `"thread_data":`, `"uploaded_files":`, `"viewed_images":`} {
+		if strings.Contains(updatesBlock, forbidden) {
+			t.Fatalf("unexpected extra updates payload field %s: %s", forbidden, updatesBlock)
+		}
 	}
 	if strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("unexpected messages-tuple event: %s", text)
