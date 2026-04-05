@@ -1503,10 +1503,116 @@ func (s *Server) loadMemoryFromFile() (gatewayMemoryResponse, bool) {
 	if err := json.Unmarshal(data, &mem); err != nil {
 		return gatewayMemoryResponse{}, false
 	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return gatewayMemoryResponse{}, false
+	}
+	compat := gatewayMemoryResponseFromMap(raw)
+	if mem.Version == "" {
+		mem.Version = compat.Version
+	}
+	if mem.LastUpdated == "" {
+		mem.LastUpdated = compat.LastUpdated
+	}
+	if mem.User == (memoryUser{}) {
+		mem.User = compat.User
+	}
+	if mem.History == (memoryHistory{}) {
+		mem.History = compat.History
+	}
+	if len(mem.Facts) == 0 && len(compat.Facts) > 0 {
+		mem.Facts = compat.Facts
+	} else if len(mem.Facts) == len(compat.Facts) {
+		for i := range mem.Facts {
+			if mem.Facts[i].ID == "" {
+				mem.Facts[i].ID = compat.Facts[i].ID
+			}
+			if mem.Facts[i].Content == "" {
+				mem.Facts[i].Content = compat.Facts[i].Content
+			}
+			if mem.Facts[i].Category == "" {
+				mem.Facts[i].Category = compat.Facts[i].Category
+			}
+			if mem.Facts[i].Confidence == 0 {
+				mem.Facts[i].Confidence = compat.Facts[i].Confidence
+			}
+			if mem.Facts[i].CreatedAt == "" {
+				mem.Facts[i].CreatedAt = compat.Facts[i].CreatedAt
+			}
+			if mem.Facts[i].Source == "" {
+				mem.Facts[i].Source = compat.Facts[i].Source
+			}
+		}
+	}
 	if mem.Version == "" {
 		return gatewayMemoryResponse{}, false
 	}
 	return mem, true
+}
+
+func gatewayMemoryResponseFromMap(raw map[string]any) gatewayMemoryResponse {
+	if raw == nil {
+		return gatewayMemoryResponse{}
+	}
+	mem := gatewayMemoryResponse{
+		Version:     firstNonEmpty(stringFromAny(raw["version"])),
+		LastUpdated: firstNonEmpty(stringFromAny(raw["lastUpdated"]), stringFromAny(raw["last_updated"])),
+		User: memoryUser{
+			WorkContext:     memorySectionFromMap(mapFromAny(firstNonNil(raw["workContext"], mapFromAny(raw["user"])["workContext"], mapFromAny(raw["user"])["work_context"]))),
+			PersonalContext: memorySectionFromMap(mapFromAny(firstNonNil(mapFromAny(raw["user"])["personalContext"], mapFromAny(raw["user"])["personal_context"]))),
+			TopOfMind:       memorySectionFromMap(mapFromAny(firstNonNil(mapFromAny(raw["user"])["topOfMind"], mapFromAny(raw["user"])["top_of_mind"]))),
+		},
+		History: memoryHistory{
+			RecentMonths:       memorySectionFromMap(mapFromAny(firstNonNil(mapFromAny(raw["history"])["recentMonths"], mapFromAny(raw["history"])["recent_months"]))),
+			EarlierContext:     memorySectionFromMap(mapFromAny(firstNonNil(mapFromAny(raw["history"])["earlierContext"], mapFromAny(raw["history"])["earlier_context"]))),
+			LongTermBackground: memorySectionFromMap(mapFromAny(firstNonNil(mapFromAny(raw["history"])["longTermBackground"], mapFromAny(raw["history"])["long_term_background"]))),
+		},
+		Facts: memoryFactsFromAny(raw["facts"]),
+	}
+	return mem
+}
+
+func memorySectionFromMap(raw map[string]any) memorySection {
+	if raw == nil {
+		return memorySection{}
+	}
+	return memorySection{
+		Summary:   firstNonEmpty(stringFromAny(raw["summary"])),
+		UpdatedAt: firstNonEmpty(stringFromAny(raw["updatedAt"]), stringFromAny(raw["updated_at"])),
+	}
+}
+
+func memoryFactsFromAny(raw any) []memoryFact {
+	items, _ := raw.([]any)
+	facts := make([]memoryFact, 0, len(items))
+	for _, item := range items {
+		factMap := mapFromAny(item)
+		if factMap == nil {
+			continue
+		}
+		facts = append(facts, memoryFact{
+			ID:       firstNonEmpty(stringFromAny(factMap["id"])),
+			Content:  firstNonEmpty(stringFromAny(factMap["content"])),
+			Category: firstNonEmpty(stringFromAny(factMap["category"])),
+			Confidence: func() float64 {
+				if v := floatPointerFromAny(factMap["confidence"]); v != nil {
+					return *v
+				}
+				return 0
+			}(),
+			CreatedAt: firstNonEmpty(stringFromAny(factMap["createdAt"]), stringFromAny(factMap["created_at"])),
+			Source:    firstNonEmpty(stringFromAny(factMap["source"])),
+		})
+	}
+	return facts
+}
+
+func mapFromAny(value any) map[string]any {
+	if value == nil {
+		return nil
+	}
+	out, _ := value.(map[string]any)
+	return out
 }
 
 func (s *Server) persistMemoryFile() error {

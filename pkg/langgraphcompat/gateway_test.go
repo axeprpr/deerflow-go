@@ -1229,6 +1229,45 @@ func TestAgentFilesPersistAndLoad(t *testing.T) {
 	}
 }
 
+func TestLoadMemoryFromFileAcceptsSnakeCaseFields(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{dataRoot: root}
+	raw := `{
+		"version":"1.0",
+		"last_updated":"2026-01-01T00:00:00Z",
+		"user":{
+			"work_context":{"summary":"Work","updated_at":"2026-01-01T00:00:00Z"},
+			"personal_context":{"summary":"Personal","updated_at":"2026-01-01T00:00:00Z"},
+			"top_of_mind":{"summary":"Mind","updated_at":"2026-01-01T00:00:00Z"}
+		},
+		"history":{
+			"recent_months":{"summary":"Recent","updated_at":"2026-01-01T00:00:00Z"},
+			"earlier_context":{"summary":"Earlier","updated_at":"2026-01-01T00:00:00Z"},
+			"long_term_background":{"summary":"Long","updated_at":"2026-01-01T00:00:00Z"}
+		},
+		"facts":[
+			{"id":"f1","content":"Fact","category":"general","confidence":0.8,"created_at":"2026-01-01T00:00:00Z","source":"thread-1"}
+		]
+	}`
+	if err := os.WriteFile(s.memoryPath(), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write memory file: %v", err)
+	}
+
+	mem, ok := s.loadMemoryFromFile()
+	if !ok {
+		t.Fatal("expected memory file to load")
+	}
+	if mem.LastUpdated != "2026-01-01T00:00:00Z" {
+		t.Fatalf("lastUpdated=%q", mem.LastUpdated)
+	}
+	if mem.User.WorkContext.Summary != "Work" || mem.History.LongTermBackground.Summary != "Long" {
+		t.Fatalf("unexpected memory=%#v", mem)
+	}
+	if len(mem.Facts) != 1 || mem.Facts[0].CreatedAt != "2026-01-01T00:00:00Z" {
+		t.Fatalf("facts=%#v", mem.Facts)
+	}
+}
+
 func TestUserProfileFileLoad(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}
