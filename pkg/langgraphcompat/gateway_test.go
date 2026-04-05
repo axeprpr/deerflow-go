@@ -8631,6 +8631,47 @@ func TestThreadRunStreamModeValuesFiltersMessageEvents(t *testing.T) {
 	}
 }
 
+func TestThreadRunStreamModeUpdatesFiltersOtherEvents(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = &fakeToolLLMProvider{}
+	if err := os.WriteFile("/tmp/demo.txt", []byte("demo"), 0o644); err != nil {
+		t.Fatalf("write tool fixture: %v", err)
+	}
+
+	reqBody := `{"assistant_id":"lead_agent","stream_mode":["updates"],"input":{"messages":[{"role":"user","content":"inspect file"}]}}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/thread-stream-updates/runs/stream", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: updates") {
+		t.Fatalf("missing updates event: %s", text)
+	}
+	if !strings.Contains(text, `"agent":{"artifacts":[`) {
+		t.Fatalf("missing updates payload: %s", text)
+	}
+	if strings.Contains(text, "event: messages-tuple") {
+		t.Fatalf("unexpected messages-tuple event: %s", text)
+	}
+	if strings.Contains(text, "event: values") {
+		t.Fatalf("unexpected values event: %s", text)
+	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+}
+
 func TestThreadRunStreamModeMessagesTupleFiltersValues(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.llmProvider = fakeLLMProvider{}
