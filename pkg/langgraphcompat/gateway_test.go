@@ -1383,6 +1383,35 @@ func TestLoadGatewayStateAcceptsLegacyFieldNames(t *testing.T) {
 	}
 }
 
+func TestLoadGatewayStateUsesModelMapKeyWhenNameMissing(t *testing.T) {
+	root := t.TempDir()
+	raw := `{
+		"models":{
+			"flash":{"model":"qwen/Qwen3.5-9B","displayName":"Flash"}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(root, "gateway_state.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write gateway_state.json: %v", err)
+	}
+
+	loaded := &Server{
+		dataRoot: root,
+		models:   map[string]gatewayModel{},
+		agents:   map[string]gatewayAgent{},
+	}
+	if err := loaded.loadGatewayState(); err != nil {
+		t.Fatalf("loadGatewayState: %v", err)
+	}
+
+	model, ok := loaded.findModelLocked("flash")
+	if !ok {
+		t.Fatalf("models=%#v", loaded.getModelsLocked())
+	}
+	if model.Name != "flash" || model.ID != "flash" || model.DisplayName != "Flash" {
+		t.Fatalf("model=%#v", model)
+	}
+}
+
 func TestLoadGatewayStateAcceptsBooleanSkillStateMap(t *testing.T) {
 	root := t.TempDir()
 	skillsRoot := filepath.Join(root, "skills", "public", "demo-skill")

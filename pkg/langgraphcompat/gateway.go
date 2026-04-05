@@ -1239,7 +1239,14 @@ func (s *Server) loadGatewayState() error {
 	if modelsRaw := mapFromAny(raw["models"]); modelsRaw != nil {
 		models := make(map[string]gatewayModel, len(modelsRaw))
 		for name, value := range modelsRaw {
-			models[name] = gatewayModelFromMap(mapFromAny(value))
+			model := gatewayModelFromMap(mapFromAny(value))
+			if strings.TrimSpace(model.Name) == "" {
+				model.Name = name
+			}
+			if strings.TrimSpace(model.ID) == "" {
+				model.ID = model.Name
+			}
+			models[name] = model
 		}
 		if len(models) > 0 {
 			state.Models = models
