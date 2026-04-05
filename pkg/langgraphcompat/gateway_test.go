@@ -8936,8 +8936,14 @@ func TestThreadRunStreamModeUpdatesFiltersOtherEvents(t *testing.T) {
 	if !strings.Contains(text, "event: end") {
 		t.Fatalf("missing end event: %s", text)
 	}
-	if strings.Contains(text, `"thread_id":"thread-stream-values"`) || strings.Contains(text, `"assistant_id":"lead_agent"`) {
-		t.Fatalf("unexpected extra fields in end payload: %s", text)
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
 	}
 }
 
@@ -9090,8 +9096,14 @@ func TestThreadRunStreamAcceptsTopLevelMessages(t *testing.T) {
 	if !strings.Contains(text, "event: end") {
 		t.Fatalf("missing end event: %s", text)
 	}
-	if !strings.Contains(text, `"run_id":"`) {
-		t.Fatalf("missing run_id in end payload: %s", text)
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
 	}
 }
 
@@ -10794,8 +10806,14 @@ func TestRecordedRunStreamModeSupportsCommaSeparatedAliases(t *testing.T) {
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
 	}
-	if !strings.Contains(text, `"run_id":"run-replay-2"`) {
-		t.Fatalf("missing run_id in end payload: %s", text)
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-replay-2"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
 	}
 }
 
@@ -10993,8 +11011,14 @@ func TestThreadJoinStreamModeSupportsCommaSeparatedAliases(t *testing.T) {
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
 	}
-	if !strings.Contains(text, `"run_id":"run-join-2"`) {
-		t.Fatalf("missing run_id in end payload: %s", text)
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-join-2"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
 	}
 }
 
