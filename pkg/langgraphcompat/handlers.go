@@ -367,10 +367,11 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 		}
 
 		content := extractMessageContent(msgMap["content"])
+		toolCalls := parseLangGraphToolCalls(msgMap["tool_calls"])
 		if s.convertRole(role) == models.RoleHuman {
 			content = s.injectUploadedFilesContext(threadID, msgMap, content)
 		}
-		if role == "" || content == "" {
+		if role == "" || (content == "" && len(toolCalls) == 0) {
 			continue
 		}
 
@@ -385,10 +386,72 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 			Role:      s.convertRole(role),
 			Content:   content,
 		}
+		if len(toolCalls) > 0 {
+			msg.ToolCalls = toolCalls
+		}
+		if msg.Role == models.RoleTool {
+			msg.ToolResult = parseLangGraphToolResult(msgMap)
+		}
 		messages = append(messages, msg)
 	}
 
 	return messages
+}
+
+func parseLangGraphToolCalls(raw any) []models.ToolCall {
+	items, _ := raw.([]any)
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]models.ToolCall, 0, len(items))
+	for _, item := range items {
+		call, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		id := strings.TrimSpace(stringFromAny(call["id"]))
+		name := strings.TrimSpace(stringFromAny(call["name"]))
+		if id == "" || name == "" {
+			continue
+		}
+		args, _ := call["args"].(map[string]any)
+		out = append(out, models.ToolCall{
+			ID:        id,
+			Name:      name,
+			Arguments: args,
+			Status:    models.CallStatusCompleted,
+		})
+	}
+	return out
+}
+
+func parseLangGraphToolResult(msg map[string]any) *models.ToolResult {
+	callID := strings.TrimSpace(stringFromAny(msg["tool_call_id"]))
+	toolName := strings.TrimSpace(stringFromAny(msg["name"]))
+	if callID == "" || toolName == "" {
+		return nil
+	}
+	result := &models.ToolResult{
+		CallID:   callID,
+		ToolName: toolName,
+		Status:   models.CallStatusCompleted,
+		Content:  extractMessageContent(msg["content"]),
+	}
+	data, _ := msg["data"].(map[string]any)
+	if len(data) == 0 {
+		return result
+	}
+	if status := strings.TrimSpace(stringFromAny(data["status"])); status != "" {
+		switch models.CallStatus(status) {
+		case models.CallStatusPending, models.CallStatusRunning, models.CallStatusCompleted, models.CallStatusFailed:
+			result.Status = models.CallStatus(status)
+		}
+	}
+	result.Error = stringFromAny(data["error"])
+	if inner, ok := data["data"].(map[string]any); ok && len(inner) > 0 {
+		result.Data = inner
+	}
+	return result
 }
 
 func (s *Server) injectUploadedFilesContext(threadID string, message map[string]any, content string) string {

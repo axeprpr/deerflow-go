@@ -4047,6 +4047,52 @@ func TestConvertToMessagesInjectsUploadedFilesContext(t *testing.T) {
 	}
 }
 
+func TestConvertToMessagesPreservesToolShape(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	input := []any{
+		map[string]any{
+			"id":      "ai-1",
+			"type":    "ai",
+			"content": "",
+			"tool_calls": []any{
+				map[string]any{
+					"id":   "call-1",
+					"name": "present_files",
+					"args": map[string]any{"filepaths": []any{"/tmp/report.md"}},
+				},
+			},
+		},
+		map[string]any{
+			"id":           "tool-1",
+			"type":         "tool",
+			"name":         "present_files",
+			"tool_call_id": "call-1",
+			"content":      "presented",
+			"data": map[string]any{
+				"status": "completed",
+				"data":   map[string]any{"filepaths": []any{"/tmp/report.md"}},
+			},
+		},
+	}
+
+	messages := s.convertToMessages("thread-tools", input)
+	if len(messages) != 2 {
+		t.Fatalf("messages=%d", len(messages))
+	}
+	if len(messages[0].ToolCalls) != 1 || messages[0].ToolCalls[0].ID != "call-1" || messages[0].ToolCalls[0].Name != "present_files" {
+		t.Fatalf("tool_calls=%#v", messages[0].ToolCalls)
+	}
+	if messages[1].ToolResult == nil {
+		t.Fatalf("tool_result=nil message=%#v", messages[1])
+	}
+	if messages[1].ToolResult.CallID != "call-1" || messages[1].ToolResult.ToolName != "present_files" {
+		t.Fatalf("tool_result=%#v", messages[1].ToolResult)
+	}
+	if got := anyStringSlice(messages[1].ToolResult.Data["filepaths"]); len(got) != 1 || got[0] != "/tmp/report.md" {
+		t.Fatalf("tool_result data=%#v", messages[1].ToolResult.Data)
+	}
+}
+
 func TestMessagesToLangChainPreservesToolShape(t *testing.T) {
 	s, _ := newCompatTestServer(t)
 	converted := s.messagesToLangChain([]models.Message{
