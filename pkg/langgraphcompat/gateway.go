@@ -1352,20 +1352,22 @@ func defaultGatewayMemoryConfig(dataRoot string) gatewayMemoryConfig {
 	}
 	if raw := strings.TrimSpace(os.Getenv("DEERFLOW_MEMORY_CONFIG")); raw != "" {
 		var override gatewayMemoryConfig
+		var overrideRaw map[string]any
 		if err := json.Unmarshal([]byte(raw), &override); err == nil {
+			_ = json.Unmarshal([]byte(raw), &overrideRaw)
 			if override.StoragePath == "" {
 				override.StoragePath = config.StoragePath
 			}
-			if override.DebounceSeconds == 0 {
+			if _, ok := overrideRaw["debounce_seconds"]; !ok && override.DebounceSeconds == 0 {
 				override.DebounceSeconds = config.DebounceSeconds
 			}
-			if override.MaxFacts == 0 {
+			if _, ok := overrideRaw["max_facts"]; !ok && override.MaxFacts == 0 {
 				override.MaxFacts = config.MaxFacts
 			}
-			if override.FactConfidenceThreshold == 0 {
+			if _, ok := overrideRaw["fact_confidence_threshold"]; !ok && override.FactConfidenceThreshold == 0 {
 				override.FactConfidenceThreshold = config.FactConfidenceThreshold
 			}
-			if override.MaxInjectionTokens == 0 {
+			if _, ok := overrideRaw["max_injection_tokens"]; !ok && override.MaxInjectionTokens == 0 {
 				override.MaxInjectionTokens = config.MaxInjectionTokens
 			}
 			config = override

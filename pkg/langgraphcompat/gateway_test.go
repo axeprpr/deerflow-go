@@ -1357,6 +1357,23 @@ func TestDefaultGatewayMemoryConfigPathOverride(t *testing.T) {
 	}
 }
 
+func TestDefaultGatewayMemoryConfigHonorsExplicitZeroValues(t *testing.T) {
+	t.Setenv("DEERFLOW_MEMORY_CONFIG", `{"enabled":true,"debounce_seconds":0,"max_facts":0,"fact_confidence_threshold":0,"injection_enabled":false,"max_injection_tokens":0}`)
+	cfg := defaultGatewayMemoryConfig("/tmp/deerflow-test")
+	if cfg.DebounceSeconds != 0 {
+		t.Fatalf("debounce_seconds=%d want 0", cfg.DebounceSeconds)
+	}
+	if cfg.MaxFacts != 0 {
+		t.Fatalf("max_facts=%d want 0", cfg.MaxFacts)
+	}
+	if cfg.FactConfidenceThreshold != 0 {
+		t.Fatalf("fact_confidence_threshold=%v want 0", cfg.FactConfidenceThreshold)
+	}
+	if cfg.MaxInjectionTokens != 0 {
+		t.Fatalf("max_injection_tokens=%d want 0", cfg.MaxInjectionTokens)
+	}
+}
+
 func TestDefaultGatewayChannelsStatusFromEnv(t *testing.T) {
 	t.Setenv("DEERFLOW_CHANNELS_CONFIG", `{"service_running":true,"channels":{"telegram":{"enabled":true,"connected":false}}}`)
 	status := defaultGatewayChannelsStatus()
