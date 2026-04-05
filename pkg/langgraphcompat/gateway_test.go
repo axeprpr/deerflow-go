@@ -9536,14 +9536,17 @@ func TestRecordedRunStreamReplaysEndUsagePayload(t *testing.T) {
 	if !strings.Contains(text, "event: end") {
 		t.Fatalf("missing end event: %s", text)
 	}
-	if !strings.Contains(text, `"run_id":"run-replay-end-usage"`) {
-		t.Fatalf("missing run_id in end payload: %s", text)
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-replay-end-usage"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
 	}
-	if !strings.Contains(text, `"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}`) {
-		t.Fatalf("missing usage in end payload: %s", text)
+	if !strings.Contains(endBlock, `"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}`) {
+		t.Fatalf("missing usage in end payload: %s", endBlock)
 	}
-	if strings.Contains(text, `"thread_id":"thread-replay-end-usage"`) || strings.Contains(text, `"assistant_id":"lead_agent"`) {
-		t.Fatalf("unexpected extra fields in end payload: %s", text)
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
 	}
 }
 
@@ -10131,14 +10134,17 @@ func TestThreadJoinStreamReplaysEndUsagePayload(t *testing.T) {
 	if !strings.Contains(text, "event: end") {
 		t.Fatalf("missing end event: %s", text)
 	}
-	if !strings.Contains(text, `"run_id":"run-join-end-usage"`) {
-		t.Fatalf("missing run_id in end payload: %s", text)
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-join-end-usage"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
 	}
-	if !strings.Contains(text, `"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}`) {
-		t.Fatalf("missing usage in end payload: %s", text)
+	if !strings.Contains(endBlock, `"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}`) {
+		t.Fatalf("missing usage in end payload: %s", endBlock)
 	}
-	if strings.Contains(text, `"thread_id":"thread-join-end-usage"`) || strings.Contains(text, `"assistant_id":"lead_agent"`) {
-		t.Fatalf("unexpected extra fields in end payload: %s", text)
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
 	}
 }
 
