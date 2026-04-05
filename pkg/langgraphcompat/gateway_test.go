@@ -343,6 +343,50 @@ func TestSuggestionsEndpointAcceptsCountAlias(t *testing.T) {
 	}
 }
 
+func TestSuggestionsEndpointHonorsExplicitZeroN(t *testing.T) {
+	_, ts := newCompatTestServer(t)
+	payload := `{"messages":[{"role":"user","content":"请帮我分析部署方案"}],"n":0}`
+	resp, err := http.Post(ts.URL+"/api/threads/t1/suggestions", "application/json", strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("suggestions request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	var data struct {
+		Suggestions []string `json:"suggestions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(data.Suggestions) != 0 {
+		t.Fatalf("len=%d want 0", len(data.Suggestions))
+	}
+}
+
+func TestSuggestionsEndpointHonorsExplicitZeroCount(t *testing.T) {
+	_, ts := newCompatTestServer(t)
+	payload := `{"messages":[{"role":"user","content":"请帮我分析部署方案"}],"count":0}`
+	resp, err := http.Post(ts.URL+"/api/threads/t1/suggestions", "application/json", strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("suggestions request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	var data struct {
+		Suggestions []string `json:"suggestions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(data.Suggestions) != 0 {
+		t.Fatalf("len=%d want 0", len(data.Suggestions))
+	}
+}
+
 func TestGatewayThreadDeleteRemovesLocalData(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-delete-1"

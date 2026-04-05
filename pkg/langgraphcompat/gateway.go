@@ -780,6 +780,7 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSuggestions(w http.ResponseWriter, r *http.Request) {
+	var raw map[string]any
 	var req struct {
 		Messages []struct {
 			Role    string `json:"role"`
@@ -790,18 +791,36 @@ func (s *Server) handleSuggestions(w http.ResponseWriter, r *http.Request) {
 		ModelName  string `json:"model_name"`
 		ModelNameX string `json:"modelName"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"suggestions": []string{}})
 		return
 	}
-	if req.N <= 0 {
+	if len(body) > 0 {
+		_ = json.Unmarshal(body, &raw)
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"suggestions": []string{}})
+		return
+	}
+	_, hasN := raw["n"]
+	_, hasCount := raw["count"]
+	countProvided := hasN || hasCount
+	if req.N == 0 {
 		req.N = req.Count
 	}
-	if req.N <= 0 {
+	if req.N < 0 {
+		req.N = 0
+	}
+	if !countProvided && req.N == 0 {
 		req.N = 3
 	}
 	if req.N > 5 {
 		req.N = 5
+	}
+	if req.N == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"suggestions": []string{}})
+		return
 	}
 
 	lastUser := ""
