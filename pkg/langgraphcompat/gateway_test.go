@@ -9080,6 +9080,44 @@ func TestThreadJoinStreamReplaysMetadataPayload(t *testing.T) {
 	}
 }
 
+func TestThreadJoinStreamReplaysValuesPayload(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-join-values",
+		ThreadID:    "thread-join-values",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "values", Data: map[string]any{"title": "done"}},
+			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-join-values"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-join-values/stream")
+	if err != nil {
+		t.Fatalf("join stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: values") {
+		t.Fatalf("missing values event: %s", text)
+	}
+	if !strings.Contains(text, `"title":"done"`) {
+		t.Fatalf("missing values payload: %s", text)
+	}
+}
+
 func TestRecordedRunStreamModeSupportsCommaSeparatedAliases(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	run := &Run{
