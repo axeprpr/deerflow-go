@@ -8935,6 +8935,9 @@ func TestRecordedRunStreamModeFiltersReplayEvents(t *testing.T) {
 	if !strings.Contains(text, "event: values") {
 		t.Fatalf("missing values event: %s", text)
 	}
+	if !strings.Contains(text, `"title":"done"`) {
+		t.Fatalf("missing values payload: %s", text)
+	}
 	if strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("unexpected messages-tuple event: %s", text)
 	}
