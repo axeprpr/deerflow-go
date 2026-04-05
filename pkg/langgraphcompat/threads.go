@@ -1904,6 +1904,44 @@ func normalizeThreadValues(raw map[string]any) map[string]any {
 	return out
 }
 
+func normalizeThreadConfig(raw map[string]any) map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(raw))
+	for key, value := range raw {
+		out[key] = value
+	}
+	configurable := mapFromAny(out["configurable"])
+	if len(configurable) == 0 {
+		return out
+	}
+	normalized := make(map[string]any, len(configurable))
+	for key, value := range configurable {
+		normalized[key] = value
+	}
+	for canonicalKey, aliases := range map[string][]string{
+		"thread_id":        {"thread_id", "threadId"},
+		"agent_type":       {"agent_type", "agentType"},
+		"agent_name":       {"agent_name", "agentName"},
+		"model_name":       {"model_name", "modelName", "model"},
+		"reasoning_effort": {"reasoning_effort", "reasoningEffort"},
+		"thinking_enabled": {"thinking_enabled", "thinkingEnabled"},
+		"is_plan_mode":     {"is_plan_mode", "isPlanMode"},
+		"subagent_enabled": {"subagent_enabled", "subagentEnabled"},
+		"max_tokens":       {"max_tokens", "maxTokens"},
+	} {
+		for _, alias := range aliases {
+			if value, ok := configurable[alias]; ok {
+				normalized[canonicalKey] = value
+				break
+			}
+		}
+	}
+	out["configurable"] = normalized
+	return out
+}
+
 func normalizeLoadedThreadHistory(history []ThreadState, rawItems []map[string]any) []ThreadState {
 	if len(rawItems) == 0 {
 		return history
@@ -1938,6 +1976,7 @@ func normalizeLoadedThreadHistory(history []ThreadState, rawItems []map[string]a
 		if len(history[i].Config) == 0 {
 			history[i].Config = mapFromAny(rawItems[i]["config"])
 		}
+		history[i].Config = normalizeThreadConfig(history[i].Config)
 		if len(history[i].Metadata) == 0 {
 			history[i].Metadata = mapFromAny(rawItems[i]["metadata"])
 		}

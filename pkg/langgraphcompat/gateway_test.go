@@ -3035,6 +3035,57 @@ func TestLoadThreadHistoryNormalizesCamelCaseValues(t *testing.T) {
 	}
 }
 
+func TestLoadThreadHistoryNormalizesCamelCaseConfig(t *testing.T) {
+	root := t.TempDir()
+	threadID := "thread-history-config-camel"
+	threadDir := filepath.Join(root, "threads", threadID, "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `[
+		{
+			"checkpointId":"cp-1",
+			"createdAt":"2026-01-01T00:00:00Z",
+			"config":{
+				"configurable":{
+					"threadId":"thread-history-config-camel",
+					"agentType":"deep_research",
+					"agentName":"writer",
+					"modelName":"deepseek/deepseek-r1",
+					"reasoningEffort":"high",
+					"thinkingEnabled":false,
+					"isPlanMode":true,
+					"subagentEnabled":true,
+					"maxTokens":321
+				}
+			}
+		}
+	]`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread_history.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write history: %v", err)
+	}
+
+	s := &Server{dataRoot: root}
+	history := s.loadThreadHistory(threadID)
+	if len(history) != 1 {
+		t.Fatalf("history=%d", len(history))
+	}
+	configurable, _ := history[0].Config["configurable"].(map[string]any)
+	if configurable["thread_id"] != "thread-history-config-camel" ||
+		configurable["agent_type"] != "deep_research" ||
+		configurable["agent_name"] != "writer" ||
+		configurable["model_name"] != "deepseek/deepseek-r1" ||
+		configurable["reasoning_effort"] != "high" {
+		t.Fatalf("config=%#v", history[0].Config)
+	}
+	if configurable["thinking_enabled"] != false || configurable["is_plan_mode"] != true || configurable["subagent_enabled"] != true {
+		t.Fatalf("config=%#v", history[0].Config)
+	}
+	if configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != 321 {
+		t.Fatalf("config=%#v", history[0].Config)
+	}
+}
+
 func TestLoadThreadHistoryNormalizesCheckpointObjects(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}
