@@ -1467,6 +1467,19 @@ func TestThreadRunResponsesIncludeError(t *testing.T) {
 	if getData["error"] != "boom" {
 		t.Fatalf("unexpected run payload: %#v", getData)
 	}
+
+	globalResp, err := http.Get(ts.URL + "/runs/run-error-1")
+	if err != nil {
+		t.Fatalf("get global run: %v", err)
+	}
+	defer globalResp.Body.Close()
+	var globalData map[string]any
+	if err := json.NewDecoder(globalResp.Body).Decode(&globalData); err != nil {
+		t.Fatalf("decode global run: %v", err)
+	}
+	if globalData["error"] != "boom" {
+		t.Fatalf("unexpected global run payload: %#v", globalData)
+	}
 }
 
 func TestThreadRunsCreateReturnsFinalState(t *testing.T) {
