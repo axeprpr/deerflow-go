@@ -2549,6 +2549,45 @@ func TestLoadPersistedThreadsAcceptsFlatTopLevelConfig(t *testing.T) {
 	}
 }
 
+func TestLoadPersistedThreadsAcceptsFlatTopLevelMetadata(t *testing.T) {
+	root := t.TempDir()
+	threadDir := filepath.Join(root, "threads", "thread-flat-metadata", "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"messages":[{"id":"m1","type":"human","content":"hello from state"}],
+		"threadId":"thread-flat-metadata",
+		"assistantId":"assistant-1",
+		"graphId":"graph-1",
+		"runId":"run-1",
+		"mode":"thinking",
+		"step":7,
+		"created_at":"2026-01-01T00:00:00Z"
+	}`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write thread file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, sessions: map[string]*Session{}}
+	s.loadPersistedThreads()
+
+	state := s.getThreadState("thread-flat-metadata")
+	if state == nil {
+		t.Fatalf("state=nil")
+	}
+	if state.Metadata["assistant_id"] != "assistant-1" || state.Metadata["graph_id"] != "graph-1" || state.Metadata["run_id"] != "run-1" {
+		t.Fatalf("metadata=%#v", state.Metadata)
+	}
+	if state.Metadata["step"] != float64(7) && state.Metadata["step"] != 7 {
+		t.Fatalf("metadata=%#v", state.Metadata)
+	}
+	configurable, _ := state.Config["configurable"].(map[string]any)
+	if configurable["mode"] != "thinking" {
+		t.Fatalf("configurable=%#v", configurable)
+	}
+}
+
 func TestLoadPersistedThreadsAcceptsTopLevelCompatValues(t *testing.T) {
 	root := t.TempDir()
 	threadDir := filepath.Join(root, "threads", "thread-top-level-values", "user-data")
@@ -3323,6 +3362,42 @@ func TestLoadThreadHistoryAcceptsFlatTopLevelConfig(t *testing.T) {
 	configurable, _ := history[0].Config["configurable"].(map[string]any)
 	if configurable["thread_id"] != "thread-history-flat-config" || configurable["model_name"] != "deepseek/deepseek-r1" || configurable["agent_type"] != "deep_research" {
 		t.Fatalf("config=%#v", history[0].Config)
+	}
+}
+
+func TestLoadThreadHistoryAcceptsFlatTopLevelMetadata(t *testing.T) {
+	root := t.TempDir()
+	threadID := "thread-history-flat-metadata"
+	threadDir := filepath.Join(root, "threads", threadID, "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `[
+		{
+			"checkpointId":"cp-1",
+			"createdAt":"2026-01-01T00:00:00Z",
+			"threadId":"thread-history-flat-metadata",
+			"assistantId":"assistant-1",
+			"graphId":"graph-1",
+			"runId":"run-1",
+			"mode":"thinking",
+			"step":7
+		}
+	]`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread_history.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write history: %v", err)
+	}
+
+	s := &Server{dataRoot: root}
+	history := s.loadThreadHistory(threadID)
+	if len(history) != 1 {
+		t.Fatalf("history=%d", len(history))
+	}
+	if history[0].Metadata["assistant_id"] != "assistant-1" || history[0].Metadata["graph_id"] != "graph-1" || history[0].Metadata["run_id"] != "run-1" {
+		t.Fatalf("metadata=%#v", history[0].Metadata)
+	}
+	if history[0].Metadata["step"] != float64(7) && history[0].Metadata["step"] != 7 {
+		t.Fatalf("metadata=%#v", history[0].Metadata)
 	}
 }
 

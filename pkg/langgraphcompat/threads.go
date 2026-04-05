@@ -1604,7 +1604,29 @@ func (s *Server) loadPersistedThreads() {
 		if persisted.ThreadID == "" {
 			persisted.ThreadID = entry.Name()
 		}
+		normalizedTopLevelMetadata := normalizePersistedThreadMetadata(mapFromAny(raw))
 		persisted.Metadata = normalizePersistedThreadMetadata(persisted.Metadata)
+		for _, key := range []string{
+			"thread_id",
+			"assistant_id",
+			"graph_id",
+			"run_id",
+			"step",
+			"mode",
+			"model_name",
+			"reasoning_effort",
+			"agent_name",
+			"agent_type",
+			"thinking_enabled",
+			"is_plan_mode",
+			"subagent_enabled",
+		} {
+			if _, ok := persisted.Metadata[key]; !ok {
+				if value, ok := normalizedTopLevelMetadata[key]; ok {
+					persisted.Metadata[key] = value
+				}
+			}
+		}
 		s.sessions[persisted.ThreadID] = &Session{
 			ThreadID:     persisted.ThreadID,
 			Messages:     persisted.Messages,
@@ -2016,7 +2038,32 @@ func normalizeLoadedThreadHistory(history []ThreadState, rawItems []map[string]a
 		if len(history[i].Metadata) == 0 {
 			history[i].Metadata = mapFromAny(rawItems[i]["metadata"])
 		}
+		if history[i].Metadata == nil {
+			history[i].Metadata = map[string]any{}
+		}
 		history[i].Metadata = normalizePersistedThreadMetadata(history[i].Metadata)
+		normalizedTopLevelMetadata := normalizePersistedThreadMetadata(mapFromAny(rawItems[i]))
+		for _, key := range []string{
+			"thread_id",
+			"assistant_id",
+			"graph_id",
+			"run_id",
+			"step",
+			"mode",
+			"model_name",
+			"reasoning_effort",
+			"agent_name",
+			"agent_type",
+			"thinking_enabled",
+			"is_plan_mode",
+			"subagent_enabled",
+		} {
+			if _, ok := history[i].Metadata[key]; !ok {
+				if value, ok := normalizedTopLevelMetadata[key]; ok {
+					history[i].Metadata[key] = value
+				}
+			}
+		}
 		if len(history[i].Checkpoint) == 0 {
 			history[i].Checkpoint = checkpointObjectFromMetadata(history[i].Metadata, "")
 		}
