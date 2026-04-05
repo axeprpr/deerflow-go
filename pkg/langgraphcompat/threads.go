@@ -108,10 +108,11 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Limit     int    `json:"limit"`
-		Offset    int    `json:"offset"`
-		SortBy    string `json:"sort_by"`
-		SortOrder string `json:"sort_order"`
+		Limit     int      `json:"limit"`
+		Offset    int      `json:"offset"`
+		SortBy    string   `json:"sort_by"`
+		SortOrder string   `json:"sort_order"`
+		Select    []string `json:"select"`
 	}
 	if r.Body != nil {
 		defer r.Body.Close()
@@ -131,7 +132,7 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 	s.sessionsMu.RLock()
 	threads := make([]map[string]any, 0, len(s.sessions))
 	for _, session := range s.sessions {
-		threads = append(threads, s.threadResponse(session))
+		threads = append(threads, selectThreadFields(s.threadResponse(session), req.Select))
 	}
 	s.sessionsMu.RUnlock()
 
@@ -163,6 +164,28 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, threads[start:end])
+}
+
+func selectThreadFields(thread map[string]any, selectFields []string) map[string]any {
+	if len(selectFields) == 0 {
+		return thread
+	}
+	selected := make(map[string]any, len(selectFields))
+	for _, field := range selectFields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		if value, ok := thread[field]; ok {
+			selected[field] = value
+		}
+	}
+	if _, ok := selected["thread_id"]; !ok {
+		if value, exists := thread["thread_id"]; exists {
+			selected["thread_id"] = value
+		}
+	}
+	return selected
 }
 
 func (s *Server) handleThreadFiles(w http.ResponseWriter, r *http.Request) {

@@ -268,6 +268,62 @@ func TestGatewayThreadDeleteRemovesLocalData(t *testing.T) {
 	}
 }
 
+func TestThreadSearchSelectProjectsFields(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	session := s.ensureSession("thread-search-select", map[string]any{"title": "Projected"})
+	session.Messages = []models.Message{{
+		ID:        "m1",
+		SessionID: "thread-search-select",
+		Role:      models.RoleHuman,
+		Content:   "hello",
+	}}
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"limit":10,"select":["thread_id","updated_at","values"]}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) == 0 {
+		t.Fatal("expected threads")
+	}
+
+	var selected map[string]any
+	for _, thread := range threads {
+		if thread["thread_id"] == "thread-search-select" {
+			selected = thread
+			break
+		}
+	}
+	if selected == nil {
+		t.Fatalf("missing projected thread in %#v", threads)
+	}
+	if _, ok := selected["values"]; !ok {
+		t.Fatalf("missing values in %#v", selected)
+	}
+	if _, ok := selected["updated_at"]; !ok {
+		t.Fatalf("missing updated_at in %#v", selected)
+	}
+	if _, ok := selected["metadata"]; ok {
+		t.Fatalf("unexpected metadata in %#v", selected)
+	}
+	if _, ok := selected["status"]; ok {
+		t.Fatalf("unexpected status in %#v", selected)
+	}
+}
+
 func TestModelsSkillsMCPConfigEndpoints(t *testing.T) {
 	_, ts := newCompatTestServer(t)
 
