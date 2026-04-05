@@ -4048,6 +4048,50 @@ func TestThreadStatePostPersistsCompatFields(t *testing.T) {
 	}
 }
 
+func TestThreadStatePostAcceptsCamelCaseCompatValues(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-state-post-camel"
+	s.ensureSession(threadID, nil)
+
+	body := `{"values":{"threadData":{"workspace_path":"/tmp/workspace","uploads_path":"/tmp/uploads","outputs_path":"/tmp/outputs"},"uploadedFiles":[{"filename":"notes.txt","path":"/tmp/uploads/notes.txt","size":42,"status":"uploaded"}]}}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/"+threadID+"/state", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post state: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("state missing")
+	}
+	threadData, _ := state.Values["thread_data"].(map[string]any)
+	if threadData["workspace_path"] != "/tmp/workspace" || threadData["uploads_path"] != "/tmp/uploads" || threadData["outputs_path"] != "/tmp/outputs" {
+		t.Fatalf("thread_data=%#v", state.Values["thread_data"])
+	}
+	switch uploadedFiles := state.Values["uploaded_files"].(type) {
+	case []map[string]any:
+		if len(uploadedFiles) != 1 || uploadedFiles[0]["filename"] != "notes.txt" || uploadedFiles[0]["path"] != "/tmp/uploads/notes.txt" {
+			t.Fatalf("uploaded_files=%#v", state.Values["uploaded_files"])
+		}
+	case []any:
+		if len(uploadedFiles) != 1 {
+			t.Fatalf("uploaded_files=%#v", state.Values["uploaded_files"])
+		}
+		file, _ := uploadedFiles[0].(map[string]any)
+		if file["filename"] != "notes.txt" || file["path"] != "/tmp/uploads/notes.txt" {
+			t.Fatalf("uploaded_files=%#v", state.Values["uploaded_files"])
+		}
+	default:
+		t.Fatalf("uploaded_files=%#v", state.Values["uploaded_files"])
+	}
+}
+
 func TestThreadStatePostAcceptsMetadata(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-state-post-metadata"

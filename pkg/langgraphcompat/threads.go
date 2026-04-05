@@ -270,6 +270,14 @@ func applyThreadValues(session *Session, values map[string]any) {
 	if viewedImages, ok := normalizeViewedImages(firstNonNil(values["viewed_images"], values["viewedImages"])); ok {
 		session.Metadata["viewed_images"] = viewedImages
 	}
+	if uploadedFiles, ok := firstNonNil(values["uploaded_files"], values["uploadedFiles"]).([]any); ok {
+		session.Metadata["uploaded_files"] = uploadedFiles
+	} else if uploadedFiles, ok := firstNonNil(values["uploaded_files"], values["uploadedFiles"]).([]map[string]any); ok {
+		session.Metadata["uploaded_files"] = uploadedFiles
+	}
+	if threadData, ok := normalizeStringMap(firstNonNil(values["thread_data"], values["threadData"])); ok {
+		session.Metadata["thread_data"] = threadData
+	}
 }
 
 func applyThreadMetadata(session *Session, metadata map[string]any) {
@@ -286,9 +294,19 @@ func extractThreadValues(raw map[string]any) map[string]any {
 		return nil
 	}
 	values := map[string]any{}
-	for _, key := range []string{"title", "todos", "sandbox", "viewed_images", "viewedImages"} {
-		if value, ok := raw[key]; ok {
-			values[key] = value
+	for canonicalKey, aliases := range map[string][]string{
+		"title":          {"title"},
+		"todos":          {"todos"},
+		"sandbox":        {"sandbox"},
+		"viewed_images":  {"viewed_images", "viewedImages"},
+		"uploaded_files": {"uploaded_files", "uploadedFiles"},
+		"thread_data":    {"thread_data", "threadData"},
+	} {
+		for _, alias := range aliases {
+			if value, ok := raw[alias]; ok {
+				values[canonicalKey] = value
+				break
+			}
 		}
 	}
 	if nested, ok := raw["values"].(map[string]any); ok {
