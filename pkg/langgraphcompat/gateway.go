@@ -1317,7 +1317,7 @@ func (s *Server) loadGatewayState() error {
 			state.Skills = skills
 		}
 	}
-	if mcpRaw := mapFromAny(firstNonNil(raw["mcp_config"], raw["mcpConfig"])); mcpRaw != nil {
+	if mcpRaw := mapFromAny(firstNonNil(raw["mcp_config"], raw["mcpConfig"], raw["mcp"])); mcpRaw != nil {
 		state.MCPConfig = gatewayMCPConfigFromMap(mcpRaw)
 	}
 	if agentsRaw := mapFromAny(raw["agents"]); agentsRaw != nil {

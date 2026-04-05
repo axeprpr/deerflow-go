@@ -1721,6 +1721,37 @@ func TestLoadGatewayStateAcceptsWrappedGatewayObject(t *testing.T) {
 	}
 }
 
+func TestLoadGatewayStateAcceptsMCPAlias(t *testing.T) {
+	root := t.TempDir()
+	raw := `{
+		"mcp":{
+			"mcpServers":{
+				"github":{
+					"enabled":true,
+					"oauth":{"enabled":true,"tokenUrl":"https://example.com/token","refreshSkewSeconds":0}
+				}
+			}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(root, "gateway_state.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write gateway_state.json: %v", err)
+	}
+
+	loaded := &Server{
+		dataRoot: root,
+		models:   map[string]gatewayModel{},
+		agents:   map[string]gatewayAgent{},
+	}
+	if err := loaded.loadGatewayState(); err != nil {
+		t.Fatalf("loadGatewayState: %v", err)
+	}
+
+	server := loaded.mcpConfig.MCPServers["github"]
+	if !server.Enabled || server.OAuth == nil || server.OAuth.RefreshSkewSecond != 0 {
+		t.Fatalf("mcp=%#v", loaded.mcpConfig)
+	}
+}
+
 func TestGatewayModelsFromEnvUsesModelIDWhenNameMissing(t *testing.T) {
 	t.Setenv("DEERFLOW_MODELS", `[{"id":"flash","displayName":"Flash"}]`)
 	models := defaultGatewayModels("")
