@@ -1711,6 +1711,9 @@ func (s *Server) loadUserProfileFromFile() (string, bool) {
 			data = nested
 		}
 	}
+	if err := json.Unmarshal(data, &rawString); err == nil {
+		return rawString, true
+	}
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err == nil {
 		if value, ok := raw["content"]; ok {
