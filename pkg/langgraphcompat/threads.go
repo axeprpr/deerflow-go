@@ -1504,28 +1504,31 @@ func (s *Server) loadPersistedThreads() {
 		if persisted.Metadata == nil {
 			persisted.Metadata = mapFromAny(raw["metadata"])
 		}
+		values := normalizeThreadValues(mapFromAny(raw["values"]))
+		if len(values) == 0 {
+			values = normalizeThreadValues(raw)
+		}
 		if len(persisted.Messages) == 0 {
-			values := mapFromAny(raw["values"])
 			if rawMessages, ok := values["messages"].([]any); ok {
 				persisted.Messages = s.convertToMessages(entry.Name(), rawMessages)
 			}
-			if persisted.Metadata == nil {
-				persisted.Metadata = map[string]any{}
-			}
-			for metadataKey, valueKeys := range map[string][]string{
-				"title":          {"title"},
-				"todos":          {"todos"},
-				"sandbox":        {"sandbox"},
-				"viewed_images":  {"viewed_images", "viewedImages"},
-				"artifacts":      {"artifacts"},
-				"uploaded_files": {"uploaded_files", "uploadedFiles"},
-				"thread_data":    {"thread_data", "threadData"},
-			} {
-				for _, valueKey := range valueKeys {
-					if value, ok := values[valueKey]; ok {
-						persisted.Metadata[metadataKey] = value
-						break
-					}
+		}
+		if persisted.Metadata == nil {
+			persisted.Metadata = map[string]any{}
+		}
+		for metadataKey, valueKeys := range map[string][]string{
+			"title":          {"title"},
+			"todos":          {"todos"},
+			"sandbox":        {"sandbox"},
+			"viewed_images":  {"viewed_images", "viewedImages"},
+			"artifacts":      {"artifacts"},
+			"uploaded_files": {"uploaded_files", "uploadedFiles"},
+			"thread_data":    {"thread_data", "threadData"},
+		} {
+			for _, valueKey := range valueKeys {
+				if value, ok := values[valueKey]; ok {
+					persisted.Metadata[metadataKey] = value
+					break
 				}
 			}
 		}
@@ -1986,6 +1989,9 @@ func normalizeLoadedThreadHistory(history []ThreadState, rawItems []map[string]a
 		}
 		if len(history[i].Values) == 0 {
 			history[i].Values = normalizeThreadValues(mapFromAny(rawItems[i]["values"]))
+			if len(history[i].Values) == 0 {
+				history[i].Values = normalizeThreadValues(rawItems[i])
+			}
 		} else {
 			history[i].Values = normalizeThreadValues(history[i].Values)
 		}
