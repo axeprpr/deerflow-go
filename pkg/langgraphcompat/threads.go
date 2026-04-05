@@ -605,7 +605,10 @@ func (s *Server) messagesToLangChain(messages []models.Message) []Message {
 			Role:    role,
 			Content: msg.Content,
 		}
-		if additionalKwargs := stringMetadataToAny(msg.Metadata); len(additionalKwargs) > 0 {
+		if usageMetadata := usageMetadataFromMessageMetadata(msg.Metadata); len(usageMetadata) > 0 {
+			converted.UsageMetadata = usageMetadata
+		}
+		if additionalKwargs := additionalKwargsFromMessageMetadata(msg.Metadata); len(additionalKwargs) > 0 {
 			converted.AdditionalKwargs = additionalKwargs
 		}
 		if len(msg.ToolCalls) > 0 {
@@ -629,6 +632,43 @@ func (s *Server) messagesToLangChain(messages []models.Message) []Message {
 		result = append(result, converted)
 	}
 	return result
+}
+
+func additionalKwargsFromMessageMetadata(metadata map[string]string) map[string]any {
+	if len(metadata) == 0 {
+		return nil
+	}
+	out := make(map[string]any)
+	for key, value := range metadata {
+		if strings.HasPrefix(key, "usage_") {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func usageMetadataFromMessageMetadata(metadata map[string]string) map[string]any {
+	if len(metadata) == 0 {
+		return nil
+	}
+	out := make(map[string]any)
+	for _, key := range []string{"input_tokens", "output_tokens", "total_tokens"} {
+		raw, ok := metadata["usage_"+key]
+		if !ok {
+			continue
+		}
+		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
+			out[key] = n
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func convertToolCalls(calls []models.ToolCall) []ToolCall {

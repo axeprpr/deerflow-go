@@ -4064,6 +4064,11 @@ func TestConvertToMessagesPreservesToolShape(t *testing.T) {
 				"finish_reason":      "tool_calls",
 				"system_fingerprint": "fpv0_abc",
 			},
+			"usage_metadata": map[string]any{
+				"input_tokens":  10,
+				"output_tokens": 5,
+				"total_tokens":  15,
+			},
 			"tool_calls": []any{
 				map[string]any{
 					"id":   "call-1",
@@ -4098,6 +4103,9 @@ func TestConvertToMessagesPreservesToolShape(t *testing.T) {
 	if messages[0].Metadata["model_name"] != "deepseek-v3-2-251201" || messages[0].Metadata["model_provider"] != "deepseek" || messages[0].Metadata["system_fingerprint"] != "fpv0_abc" {
 		t.Fatalf("metadata=%#v", messages[0].Metadata)
 	}
+	if messages[0].Metadata["usage_input_tokens"] != "10" || messages[0].Metadata["usage_output_tokens"] != "5" || messages[0].Metadata["usage_total_tokens"] != "15" {
+		t.Fatalf("metadata=%#v", messages[0].Metadata)
+	}
 	if messages[1].ToolResult == nil {
 		t.Fatalf("tool_result=nil message=%#v", messages[1])
 	}
@@ -4106,6 +4114,10 @@ func TestConvertToMessagesPreservesToolShape(t *testing.T) {
 	}
 	if got := anyStringSlice(messages[1].ToolResult.Data["filepaths"]); len(got) != 1 || got[0] != "/tmp/report.md" {
 		t.Fatalf("tool_result data=%#v", messages[1].ToolResult.Data)
+	}
+	roundTrip := s.messagesToLangChain(messages)
+	if usage := roundTrip[0].UsageMetadata; usage["input_tokens"] != 10 || usage["output_tokens"] != 5 || usage["total_tokens"] != 15 {
+		t.Fatalf("usage_metadata=%#v", usage)
 	}
 }
 

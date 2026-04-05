@@ -400,6 +400,15 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 				}
 			}
 		}
+		if metadata := parseLangGraphUsageMetadata(msgMap["usage_metadata"]); len(metadata) > 0 {
+			if msg.Metadata == nil {
+				msg.Metadata = metadata
+			} else {
+				for key, value := range metadata {
+					msg.Metadata[key] = value
+				}
+			}
+		}
 		if len(toolCalls) > 0 {
 			msg.ToolCalls = toolCalls
 		}
@@ -424,6 +433,23 @@ func parseLangGraphMessageMetadata(raw any) map[string]string {
 			continue
 		}
 		out[key] = text
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func parseLangGraphUsageMetadata(raw any) map[string]string {
+	data, _ := raw.(map[string]any)
+	if len(data) == 0 {
+		return nil
+	}
+	out := make(map[string]string)
+	for _, key := range []string{"input_tokens", "output_tokens", "total_tokens"} {
+		if value, ok := data[key]; ok {
+			out["usage_"+key] = strconv.FormatInt(toInt64(value), 10)
+		}
 	}
 	if len(out) == 0 {
 		return nil
