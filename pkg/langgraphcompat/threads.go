@@ -1432,6 +1432,7 @@ func (s *Server) loadThreadHistory(threadID string) []ThreadState {
 				if history[i].CreatedAt == "" {
 					history[i].CreatedAt = firstNonEmpty(stringValue(rawItems[i]["createdAt"]), stringValue(rawItems[i]["created_at"]))
 				}
+				history[i].Metadata = normalizePersistedThreadMetadata(history[i].Metadata)
 			}
 		}
 		return history

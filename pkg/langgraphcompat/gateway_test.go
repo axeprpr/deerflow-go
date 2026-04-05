@@ -1768,6 +1768,43 @@ func TestLoadThreadHistoryAcceptsCamelCaseCheckpointID(t *testing.T) {
 	}
 }
 
+func TestLoadThreadHistoryNormalizesCamelCaseMetadata(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{dataRoot: root}
+	threadID := "thread-history-meta"
+	if err := os.MkdirAll(s.threadRoot(threadID), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `[
+		{
+			"checkpointId":"cp-1",
+			"values":{"title":"History"},
+			"metadata":{
+				"threadId":"thread-history-meta",
+				"assistantId":"assistant-1",
+				"graphId":"graph-1",
+				"runId":"run-1",
+				"viewedImages":{"a":{"base64":"x"}}
+			},
+			"createdAt":"2026-01-01T00:00:00Z"
+		}
+	]`
+	if err := os.WriteFile(s.threadHistoryPath(threadID), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write history file: %v", err)
+	}
+
+	history := s.loadThreadHistory(threadID)
+	if len(history) != 1 {
+		t.Fatalf("history=%#v", history)
+	}
+	if history[0].Metadata["thread_id"] != "thread-history-meta" || history[0].Metadata["assistant_id"] != "assistant-1" || history[0].Metadata["graph_id"] != "graph-1" || history[0].Metadata["run_id"] != "run-1" {
+		t.Fatalf("metadata=%#v", history[0].Metadata)
+	}
+	if _, ok := history[0].Metadata["viewed_images"]; !ok {
+		t.Fatalf("metadata=%#v", history[0].Metadata)
+	}
+}
+
 func TestUserProfileFileLoad(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}
