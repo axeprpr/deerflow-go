@@ -1205,6 +1205,17 @@ func (s *Server) loadPersistedThreads() {
 		if err := json.Unmarshal(data, &persisted); err != nil {
 			continue
 		}
+		var raw map[string]any
+		_ = json.Unmarshal(data, &raw)
+		if persisted.ThreadID == "" {
+			persisted.ThreadID = stringValue(raw["threadId"])
+		}
+		if persisted.CreatedAt.IsZero() {
+			persisted.CreatedAt = timeValue(firstNonNil(raw["createdAt"], raw["created_at"]))
+		}
+		if persisted.UpdatedAt.IsZero() {
+			persisted.UpdatedAt = timeValue(firstNonNil(raw["updatedAt"], raw["updated_at"]))
+		}
 		if persisted.ThreadID == "" {
 			persisted.ThreadID = entry.Name()
 		}
@@ -1240,6 +1251,23 @@ func (s *Server) loadPersistedRuns() {
 		if err := json.Unmarshal(data, &persisted); err != nil {
 			continue
 		}
+		var raw map[string]any
+		_ = json.Unmarshal(data, &raw)
+		if persisted.RunID == "" {
+			persisted.RunID = stringValue(raw["runId"])
+		}
+		if persisted.ThreadID == "" {
+			persisted.ThreadID = stringValue(raw["threadId"])
+		}
+		if persisted.AssistantID == "" {
+			persisted.AssistantID = stringValue(raw["assistantId"])
+		}
+		if persisted.CreatedAt.IsZero() {
+			persisted.CreatedAt = timeValue(firstNonNil(raw["createdAt"], raw["created_at"]))
+		}
+		if persisted.UpdatedAt.IsZero() {
+			persisted.UpdatedAt = timeValue(firstNonNil(raw["updatedAt"], raw["updated_at"]))
+		}
 		if persisted.RunID == "" {
 			continue
 		}
@@ -1254,6 +1282,19 @@ func (s *Server) loadPersistedRuns() {
 			Error:       persisted.Error,
 		}
 	}
+}
+
+func timeValue(value any) time.Time {
+	switch typed := value.(type) {
+	case string:
+		if parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(typed)); err == nil {
+			return parsed
+		}
+		if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(typed)); err == nil {
+			return parsed
+		}
+	}
+	return time.Time{}
 }
 
 func (s *Server) appendThreadHistorySnapshot(threadID string) error {

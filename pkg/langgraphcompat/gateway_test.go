@@ -1268,6 +1268,74 @@ func TestLoadMemoryFromFileAcceptsSnakeCaseFields(t *testing.T) {
 	}
 }
 
+func TestLoadPersistedThreadsAcceptsCamelCaseFields(t *testing.T) {
+	root := t.TempDir()
+	threadDir := filepath.Join(root, "threads", "thread-camel", "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"threadId":"thread-camel",
+		"messages":[{"id":"m1","role":"human","content":"hello"}],
+		"metadata":{"title":"Camel Thread"},
+		"status":"idle",
+		"createdAt":"2026-01-01T00:00:00Z",
+		"updatedAt":"2026-01-02T00:00:00Z"
+	}`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write thread file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, sessions: map[string]*Session{}}
+	s.loadPersistedThreads()
+
+	session, ok := s.sessions["thread-camel"]
+	if !ok {
+		t.Fatalf("missing session: %#v", s.sessions)
+	}
+	if session.Metadata["title"] != "Camel Thread" {
+		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+	if session.CreatedAt.IsZero() || session.UpdatedAt.IsZero() {
+		t.Fatalf("timestamps not loaded: %#v", session)
+	}
+}
+
+func TestLoadPersistedRunsAcceptsCamelCaseFields(t *testing.T) {
+	root := t.TempDir()
+	runDir := filepath.Join(root, "runs")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"runId":"run-camel",
+		"threadId":"thread-camel",
+		"assistantId":"lead_agent",
+		"status":"success",
+		"createdAt":"2026-01-01T00:00:00Z",
+		"updatedAt":"2026-01-02T00:00:00Z",
+		"events":[],
+		"error":""
+	}`
+	if err := os.WriteFile(filepath.Join(runDir, "run-camel.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write run file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, runs: map[string]*Run{}}
+	s.loadPersistedRuns()
+
+	run, ok := s.runs["run-camel"]
+	if !ok {
+		t.Fatalf("missing run: %#v", s.runs)
+	}
+	if run.ThreadID != "thread-camel" || run.AssistantID != "lead_agent" {
+		t.Fatalf("run=%#v", run)
+	}
+	if run.CreatedAt.IsZero() || run.UpdatedAt.IsZero() {
+		t.Fatalf("timestamps not loaded: %#v", run)
+	}
+}
+
 func TestUserProfileFileLoad(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}
