@@ -9335,7 +9335,7 @@ func TestRecordedRunStreamReplaysToolMessageTuple(t *testing.T) {
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 		Events: []StreamEvent{
-			{ID: "1", Event: "messages-tuple", Data: map[string]any{"type": "tool", "id": "tool:call-1", "tool_call_id": "call-1", "status": "success", "content": "done"}},
+			{ID: "1", Event: "messages-tuple", Data: map[string]any{"type": "tool", "id": "tool:call-1", "tool_call_id": "call-1", "status": "success", "content": "done", "data": map[string]any{"duration": "1.5s", "error": ""}}},
 			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-replay-tool-message"}},
 		},
 	}
@@ -9360,6 +9360,9 @@ func TestRecordedRunStreamReplaysToolMessageTuple(t *testing.T) {
 	}
 	if !strings.Contains(text, `"tool_call_id":"call-1"`) || !strings.Contains(text, `"status":"success"`) {
 		t.Fatalf("missing tool message tuple payload: %s", text)
+	}
+	if !strings.Contains(text, `"duration":"1.5s"`) || !strings.Contains(text, `"error":""`) {
+		t.Fatalf("missing tool message tuple data payload: %s", text)
 	}
 }
 
@@ -9818,7 +9821,7 @@ func TestThreadJoinStreamReplaysToolMessageTuple(t *testing.T) {
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 		Events: []StreamEvent{
-			{ID: "1", Event: "messages-tuple", Data: map[string]any{"type": "tool", "id": "tool:call-1", "tool_call_id": "call-1", "status": "success", "content": "done"}},
+			{ID: "1", Event: "messages-tuple", Data: map[string]any{"type": "tool", "id": "tool:call-1", "tool_call_id": "call-1", "status": "success", "content": "done", "data": map[string]any{"duration": "1.5s", "error": ""}}},
 			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-join-tool-message"}},
 		},
 	}
@@ -9843,6 +9846,9 @@ func TestThreadJoinStreamReplaysToolMessageTuple(t *testing.T) {
 	}
 	if !strings.Contains(text, `"tool_call_id":"call-1"`) || !strings.Contains(text, `"status":"success"`) {
 		t.Fatalf("missing tool message tuple payload: %s", text)
+	}
+	if !strings.Contains(text, `"duration":"1.5s"`) || !strings.Contains(text, `"error":""`) {
+		t.Fatalf("missing tool message tuple data payload: %s", text)
 	}
 }
 
