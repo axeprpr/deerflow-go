@@ -1703,6 +1703,12 @@ func (s *Server) loadMemoryFromFile() (gatewayMemoryResponse, bool) {
 	if err != nil {
 		return gatewayMemoryResponse{}, false
 	}
+	var wrapper map[string]json.RawMessage
+	if err := json.Unmarshal(data, &wrapper); err == nil {
+		if nested, ok := wrapper["memory"]; ok && len(nested) > 0 {
+			data = nested
+		}
+	}
 	var mem gatewayMemoryResponse
 	if err := json.Unmarshal(data, &mem); err != nil {
 		return gatewayMemoryResponse{}, false

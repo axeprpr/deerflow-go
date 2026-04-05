@@ -1417,6 +1417,34 @@ func TestLoadMemoryFromFileAcceptsFlatLegacySections(t *testing.T) {
 	}
 }
 
+func TestLoadMemoryFromFileAcceptsWrappedMemoryObject(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{dataRoot: root}
+	raw := `{
+		"memory":{
+			"version":"1.0",
+			"lastUpdated":"2026-01-01T00:00:00Z",
+			"user":{"workContext":{"summary":"Work","updatedAt":"2026-01-01T00:00:00Z"}},
+			"history":{},
+			"facts":[]
+		}
+	}`
+	if err := os.WriteFile(s.memoryPath(), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write memory file: %v", err)
+	}
+
+	mem, ok := s.loadMemoryFromFile()
+	if !ok {
+		t.Fatal("expected memory file to load")
+	}
+	if mem.Version != "1.0" || mem.LastUpdated != "2026-01-01T00:00:00Z" {
+		t.Fatalf("memory=%#v", mem)
+	}
+	if mem.User.WorkContext.Summary != "Work" {
+		t.Fatalf("memory=%#v", mem)
+	}
+}
+
 func TestLoadGatewayStateAcceptsLegacyFieldNames(t *testing.T) {
 	root := t.TempDir()
 	raw := `{
