@@ -1647,6 +1647,8 @@ func (s *Server) loadPersistedThreads() {
 			"thinking_enabled",
 			"is_plan_mode",
 			"subagent_enabled",
+			"temperature",
+			"max_tokens",
 		} {
 			if _, ok := persisted.Metadata[key]; !ok {
 				if value, ok := normalizedTopLevelMetadata[key]; ok {
@@ -2090,6 +2092,8 @@ func normalizeLoadedThreadHistory(history []ThreadState, rawItems []map[string]a
 			"thinking_enabled",
 			"is_plan_mode",
 			"subagent_enabled",
+			"temperature",
+			"max_tokens",
 		} {
 			if _, ok := history[i].Metadata[key]; !ok {
 				if value, ok := normalizedTopLevelMetadata[key]; ok {

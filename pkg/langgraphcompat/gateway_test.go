@@ -2578,6 +2578,8 @@ func TestLoadPersistedThreadsAcceptsFlatTopLevelMetadata(t *testing.T) {
 		"graphId":"graph-1",
 		"runId":"run-1",
 		"mode":"thinking",
+		"temperature":0.2,
+		"maxTokens":321,
 		"step":7,
 		"created_at":"2026-01-01T00:00:00Z"
 	}`
@@ -2600,6 +2602,12 @@ func TestLoadPersistedThreadsAcceptsFlatTopLevelMetadata(t *testing.T) {
 	}
 	configurable, _ := state.Config["configurable"].(map[string]any)
 	if configurable["mode"] != "thinking" {
+		t.Fatalf("configurable=%#v", configurable)
+	}
+	if configurable["temperature"] != 0.2 {
+		t.Fatalf("configurable=%#v", configurable)
+	}
+	if configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != int64(321) && configurable["max_tokens"] != 321 {
 		t.Fatalf("configurable=%#v", configurable)
 	}
 }
@@ -3401,6 +3409,8 @@ func TestLoadThreadHistoryAcceptsFlatTopLevelMetadata(t *testing.T) {
 			"graphId":"graph-1",
 			"runId":"run-1",
 			"mode":"thinking",
+			"temperature":0.2,
+			"maxTokens":321,
 			"step":7
 		}
 	]`
@@ -3418,6 +3428,13 @@ func TestLoadThreadHistoryAcceptsFlatTopLevelMetadata(t *testing.T) {
 	}
 	if history[0].Metadata["step"] != float64(7) && history[0].Metadata["step"] != 7 {
 		t.Fatalf("metadata=%#v", history[0].Metadata)
+	}
+	configurable, _ := history[0].Config["configurable"].(map[string]any)
+	if configurable["temperature"] != 0.2 {
+		t.Fatalf("config=%#v metadata=%#v", history[0].Config, history[0].Metadata)
+	}
+	if configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != int64(321) && configurable["max_tokens"] != 321 {
+		t.Fatalf("config=%#v metadata=%#v", history[0].Config, history[0].Metadata)
 	}
 }
 
