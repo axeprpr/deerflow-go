@@ -1947,6 +1947,38 @@ func TestThreadRunCamelCaseStreamModeFiltersValues(t *testing.T) {
 	}
 }
 
+func TestThreadRunStreamAcceptsTopLevelMessages(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+
+	reqBody := `{"assistant_id":"lead_agent","messages":[{"role":"user","content":"hello from top level"}]}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/thread-stream-top-level/runs/stream", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: metadata") {
+		t.Fatalf("missing metadata event: %s", text)
+	}
+	if !strings.Contains(text, "event: messages-tuple") {
+		t.Fatalf("missing messages-tuple event: %s", text)
+	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+}
+
 func TestRunsStreamAcceptsCamelCaseIDs(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.llmProvider = fakeLLMProvider{}
