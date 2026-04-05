@@ -1273,9 +1273,6 @@ func (s *Server) loadPersistedThreads() {
 			"checkpoint_id":        {"checkpoint_id", "checkpointId"},
 			"parent_checkpoint_id": {"parent_checkpoint_id", "parentCheckpointId"},
 		} {
-			if _, exists := persisted.Metadata[key]; exists {
-				continue
-			}
 			for _, alias := range aliases {
 				if value, ok := raw[alias]; ok {
 					persisted.Metadata[key] = value
