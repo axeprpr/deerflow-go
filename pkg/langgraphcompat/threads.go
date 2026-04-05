@@ -352,29 +352,71 @@ func applyThreadValues(session *Session, values map[string]any) {
 	if session == nil || len(values) == 0 {
 		return
 	}
-	if title, ok := values["title"].(string); ok {
-		session.Metadata["title"] = title
+	if hasAnyKey(values, "title") {
+		if title, ok := values["title"].(string); ok {
+			title = strings.TrimSpace(title)
+			if title == "" {
+				delete(session.Metadata, "title")
+			} else {
+				session.Metadata["title"] = title
+			}
+		} else if values["title"] == nil {
+			delete(session.Metadata, "title")
+		}
 	}
-	if todos, ok := normalizeTodos(values["todos"]); ok {
-		session.Metadata["todos"] = todos
+	if hasAnyKey(values, "todos") {
+		if todos, ok := normalizeTodos(values["todos"]); ok && len(todos) > 0 {
+			session.Metadata["todos"] = todos
+		} else {
+			delete(session.Metadata, "todos")
+		}
 	}
-	if sandboxState, ok := normalizeStringMap(values["sandbox"]); ok {
-		session.Metadata["sandbox"] = sandboxState
+	if hasAnyKey(values, "sandbox") {
+		if sandboxState, ok := normalizeStringMap(values["sandbox"]); ok && len(sandboxState) > 0 {
+			session.Metadata["sandbox"] = sandboxState
+		} else {
+			delete(session.Metadata, "sandbox")
+		}
 	}
-	if artifacts := anyStringSlice(values["artifacts"]); len(artifacts) > 0 {
-		session.Metadata["artifacts"] = artifacts
+	if hasAnyKey(values, "artifacts") {
+		if artifacts := anyStringSlice(values["artifacts"]); len(artifacts) > 0 {
+			session.Metadata["artifacts"] = artifacts
+		} else {
+			delete(session.Metadata, "artifacts")
+		}
 	}
-	if viewedImages, ok := normalizeViewedImages(firstNonNil(values["viewed_images"], values["viewedImages"])); ok {
-		session.Metadata["viewed_images"] = viewedImages
+	if hasAnyKey(values, "viewed_images", "viewedImages") {
+		if viewedImages, ok := normalizeViewedImages(firstNonNil(values["viewed_images"], values["viewedImages"])); ok && len(viewedImages) > 0 {
+			session.Metadata["viewed_images"] = viewedImages
+		} else {
+			delete(session.Metadata, "viewed_images")
+		}
 	}
-	if uploadedFiles, ok := firstNonNil(values["uploaded_files"], values["uploadedFiles"]).([]any); ok {
-		session.Metadata["uploaded_files"] = uploadedFiles
-	} else if uploadedFiles, ok := firstNonNil(values["uploaded_files"], values["uploadedFiles"]).([]map[string]any); ok {
-		session.Metadata["uploaded_files"] = uploadedFiles
+	if hasAnyKey(values, "uploaded_files", "uploadedFiles") {
+		if uploadedFiles, ok := firstNonNil(values["uploaded_files"], values["uploadedFiles"]).([]any); ok && len(uploadedFiles) > 0 {
+			session.Metadata["uploaded_files"] = uploadedFiles
+		} else if uploadedFiles, ok := firstNonNil(values["uploaded_files"], values["uploadedFiles"]).([]map[string]any); ok && len(uploadedFiles) > 0 {
+			session.Metadata["uploaded_files"] = uploadedFiles
+		} else {
+			delete(session.Metadata, "uploaded_files")
+		}
 	}
-	if threadData, ok := normalizeStringMap(firstNonNil(values["thread_data"], values["threadData"])); ok {
-		session.Metadata["thread_data"] = threadData
+	if hasAnyKey(values, "thread_data", "threadData") {
+		if threadData, ok := normalizeStringMap(firstNonNil(values["thread_data"], values["threadData"])); ok && len(threadData) > 0 {
+			session.Metadata["thread_data"] = threadData
+		} else {
+			delete(session.Metadata, "thread_data")
+		}
 	}
+}
+
+func hasAnyKey(values map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		if _, ok := values[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func applyThreadMetadata(session *Session, metadata map[string]any) {

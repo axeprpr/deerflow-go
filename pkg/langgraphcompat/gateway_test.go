@@ -6238,6 +6238,73 @@ func TestThreadStatePatchAcceptsTopLevelValues(t *testing.T) {
 	}
 }
 
+func TestThreadStatePatchClearsValueSummaries(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-patch-clear-values"
+	s.ensureSession(threadID, map[string]any{
+		"title":          "Before",
+		"todos":          []any{map[string]any{"content": "ship sqlite", "status": "pending"}},
+		"sandbox":        map[string]any{"sandbox_id": "sb-1"},
+		"artifacts":      []any{"/tmp/report.html"},
+		"viewed_images":  map[string]any{"/tmp/chart.png": map[string]any{"base64": "xyz", "mime_type": "image/png"}},
+		"thread_data":    map[string]any{"workspace_path": "/tmp/workspace"},
+		"uploaded_files": []any{map[string]any{"filename": "notes.txt", "path": "/tmp/uploads/notes.txt"}},
+	})
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID+"/state",
+		strings.NewReader(`{"title":"","todos":[],"sandbox":{},"artifacts":[],"viewedImages":{},"threadData":{},"uploadedFiles":[]}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("patch request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var stateResp ThreadState
+	if err := json.NewDecoder(resp.Body).Decode(&stateResp); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	if stateResp.Values["title"] != "" {
+		t.Fatalf("values=%#v", stateResp.Values)
+	}
+	if len(anyStringSlice(stateResp.Values["artifacts"])) != 0 {
+		t.Fatalf("values=%#v", stateResp.Values)
+	}
+	if todos := anySlice(stateResp.Values["todos"]); len(todos) != 0 {
+		t.Fatalf("values=%#v", stateResp.Values)
+	}
+	if sandbox, _ := stateResp.Values["sandbox"].(map[string]any); len(sandbox) != 0 {
+		t.Fatalf("values=%#v", stateResp.Values)
+	}
+	if viewedImages, _ := stateResp.Values["viewed_images"].(map[string]any); len(viewedImages) != 0 {
+		t.Fatalf("values=%#v", stateResp.Values)
+	}
+	threadData, _ := stateResp.Values["thread_data"].(map[string]any)
+	if threadData["uploads_path"] != s.uploadsDir(threadID) {
+		t.Fatalf("values=%#v", stateResp.Values)
+	}
+	if uploadedFiles := anySlice(stateResp.Values["uploaded_files"]); len(uploadedFiles) != 0 {
+		t.Fatalf("values=%#v", stateResp.Values)
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("state missing")
+	}
+	for _, key := range []string{"title", "todos", "sandbox", "artifacts", "viewed_images", "thread_data", "uploaded_files"} {
+		if _, ok := state.Metadata[key]; ok {
+			t.Fatalf("metadata=%#v", state.Metadata)
+		}
+	}
+}
+
 func TestThreadUpdateAcceptsValuesPayload(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-update-values"
@@ -6339,6 +6406,73 @@ func TestThreadUpdateAcceptsValuesPayload(t *testing.T) {
 	todos, ok := state.Values["todos"].([]map[string]any)
 	if !ok || len(todos) != 1 {
 		t.Fatalf("todos=%#v", state.Values["todos"])
+	}
+}
+
+func TestThreadUpdateClearsValueSummaries(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-update-clear-values"
+	s.ensureSession(threadID, map[string]any{
+		"title":          "Before",
+		"todos":          []any{map[string]any{"content": "ship sqlite", "status": "pending"}},
+		"sandbox":        map[string]any{"sandbox_id": "sb-1"},
+		"artifacts":      []any{"/tmp/report.html"},
+		"viewed_images":  map[string]any{"/tmp/chart.png": map[string]any{"base64": "xyz", "mime_type": "image/png"}},
+		"thread_data":    map[string]any{"workspace_path": "/tmp/workspace"},
+		"uploaded_files": []any{map[string]any{"filename": "notes.txt", "path": "/tmp/uploads/notes.txt"}},
+	})
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID,
+		strings.NewReader(`{"title":"","todos":[],"sandbox":{},"artifacts":[],"viewedImages":{},"threadData":{},"uploadedFiles":[]}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("update request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var thread map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&thread); err != nil {
+		t.Fatalf("decode thread: %v", err)
+	}
+	if thread["title"] != "" {
+		t.Fatalf("thread=%#v", thread)
+	}
+	if len(anyStringSlice(thread["artifacts"])) != 0 {
+		t.Fatalf("thread=%#v", thread)
+	}
+	if todos := anySlice(thread["todos"]); len(todos) != 0 {
+		t.Fatalf("thread=%#v", thread)
+	}
+	if sandbox, _ := thread["sandbox"].(map[string]any); len(sandbox) != 0 {
+		t.Fatalf("thread=%#v", thread)
+	}
+	if viewedImages, _ := thread["viewed_images"].(map[string]any); len(viewedImages) != 0 {
+		t.Fatalf("thread=%#v", thread)
+	}
+	threadData, _ := thread["thread_data"].(map[string]any)
+	if threadData["uploads_path"] != s.uploadsDir(threadID) {
+		t.Fatalf("thread=%#v", thread)
+	}
+	if uploadedFiles := anySlice(thread["uploaded_files"]); len(uploadedFiles) != 0 {
+		t.Fatalf("thread=%#v", thread)
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("state missing")
+	}
+	for _, key := range []string{"title", "todos", "sandbox", "artifacts", "viewed_images", "thread_data", "uploaded_files"} {
+		if _, ok := state.Metadata[key]; ok {
+			t.Fatalf("metadata=%#v", state.Metadata)
+		}
 	}
 }
 
