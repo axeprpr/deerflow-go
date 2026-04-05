@@ -2142,6 +2142,7 @@ func TestLoadPersistedThreadsAcceptsValuesStateObject(t *testing.T) {
 			"thread_id":"thread-values-state",
 			"assistant_id":"assistant-1",
 			"model_name":"qwen/Qwen3.5-9B",
+			"step":7,
 			"mode":"thinking"
 		},
 		"checkpoint":{"checkpoint_id":"cp-checkpoint-object","thread_id":"thread-values-state","checkpoint_ns":"ns-current"},
@@ -2200,6 +2201,9 @@ func TestLoadPersistedThreadsAcceptsValuesStateObject(t *testing.T) {
 	}
 	if state.CreatedAt != "2026-01-01T00:00:00Z" {
 		t.Fatalf("created_at=%q", state.CreatedAt)
+	}
+	if state.Metadata["step"] != float64(7) && state.Metadata["step"] != 7 {
+		t.Fatalf("metadata=%#v", state.Metadata)
 	}
 	configurable, _ := state.Config["configurable"].(map[string]any)
 	if configurable["mode"] != "thinking" {

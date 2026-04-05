@@ -828,10 +828,12 @@ func (s *Server) threadConfigurable(session *Session) map[string]any {
 func threadMetadata(session *Session) map[string]any {
 	metadata := map[string]any{
 		"thread_id": session.ThreadID,
-		"step":      0,
 	}
 	for key, value := range session.Metadata {
 		metadata[key] = value
+	}
+	if _, ok := metadata["step"]; !ok {
+		metadata["step"] = 0
 	}
 	return metadata
 }
