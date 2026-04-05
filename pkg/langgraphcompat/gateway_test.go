@@ -211,7 +211,7 @@ func TestCreateThreadAcceptsTopLevelValues(t *testing.T) {
 	resp, err := http.Post(
 		ts.URL+"/threads",
 		"application/json",
-		strings.NewReader(`{"threadId":"thread-create-top-level","metadata":{"mode":"thinking","modelName":"deepseek/deepseek-r1","reasoningEffort":"high","agentName":"planner","agentType":"research","thinkingEnabled":false,"isPlanMode":true,"subagentEnabled":true,"Temperature":0.2,"maxTokens":321,"checkpointId":"cp-1","parentCheckpointId":"cp-parent-1","checkpointNs":"ns-1","parentCheckpointNs":"ns-parent-1","checkpointThreadId":"checkpoint-thread-1","parentCheckpointThreadId":"checkpoint-thread-parent-1"},"title":"Created Top","viewedImages":{"/tmp/chart.png":{"base64":"xyz","mime_type":"image/png"}}}`),
+		strings.NewReader(`{"threadId":"thread-create-top-level","metadata":{"assistantId":"assistant-1","graphId":"graph-1","runId":"run-1","mode":"thinking","modelName":"deepseek/deepseek-r1","reasoningEffort":"high","agentName":"planner","agentType":"research","thinkingEnabled":false,"isPlanMode":true,"subagentEnabled":true,"Temperature":0.2,"maxTokens":321,"checkpointId":"cp-1","parentCheckpointId":"cp-parent-1","checkpointNs":"ns-1","parentCheckpointNs":"ns-parent-1","checkpointThreadId":"checkpoint-thread-1","parentCheckpointThreadId":"checkpoint-thread-parent-1"},"title":"Created Top","viewedImages":{"/tmp/chart.png":{"base64":"xyz","mime_type":"image/png"}}}`),
 	)
 	if err != nil {
 		t.Fatalf("post thread: %v", err)
@@ -261,8 +261,14 @@ func TestCreateThreadAcceptsTopLevelValues(t *testing.T) {
 	if metadata["checkpoint_thread_id"] != "checkpoint-thread-1" || metadata["parent_checkpoint_thread_id"] != "checkpoint-thread-parent-1" {
 		t.Fatalf("metadata=%#v", metadata)
 	}
+	if metadata["assistant_id"] != "assistant-1" || metadata["graph_id"] != "graph-1" || metadata["run_id"] != "run-1" {
+		t.Fatalf("metadata=%#v", metadata)
+	}
 	if metadata["agent_name"] != "planner" || metadata["agent_type"] != "research" {
 		t.Fatalf("metadata=%#v", metadata)
+	}
+	if thread["assistant_id"] != "assistant-1" || thread["graph_id"] != "graph-1" || thread["run_id"] != "run-1" {
+		t.Fatalf("thread=%#v", thread)
 	}
 	if thread["checkpoint_id"] != "cp-1" || thread["parent_checkpoint_id"] != "cp-parent-1" {
 		t.Fatalf("thread=%#v", thread)
@@ -5282,7 +5288,7 @@ func TestThreadUpdateAcceptsValuesPayload(t *testing.T) {
 	req, _ := http.NewRequest(
 		http.MethodPatch,
 		ts.URL+"/threads/"+threadID,
-		strings.NewReader(`{"metadata":{"mode":"thinking","modelName":"deepseek/deepseek-r1","reasoningEffort":"high","agentName":"planner","agentType":"research","thinkingEnabled":false,"isPlanMode":true,"subagentEnabled":true,"Temperature":0.2,"maxTokens":321,"checkpointId":"cp-1","parentCheckpointId":"cp-parent-1","checkpointNs":"ns-1","parentCheckpointNs":"ns-parent-1","checkpointThreadId":"checkpoint-thread-1","parentCheckpointThreadId":"checkpoint-thread-parent-1"},"values":{"title":"After","todos":[{"content":"ship sqlite","status":"completed"}]}}`),
+		strings.NewReader(`{"metadata":{"assistantId":"assistant-1","graphId":"graph-1","runId":"run-1","mode":"thinking","modelName":"deepseek/deepseek-r1","reasoningEffort":"high","agentName":"planner","agentType":"research","thinkingEnabled":false,"isPlanMode":true,"subagentEnabled":true,"Temperature":0.2,"maxTokens":321,"checkpointId":"cp-1","parentCheckpointId":"cp-parent-1","checkpointNs":"ns-1","parentCheckpointNs":"ns-parent-1","checkpointThreadId":"checkpoint-thread-1","parentCheckpointThreadId":"checkpoint-thread-parent-1"},"values":{"title":"After","todos":[{"content":"ship sqlite","status":"completed"}]}}`),
 	)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
@@ -5329,8 +5335,14 @@ func TestThreadUpdateAcceptsValuesPayload(t *testing.T) {
 	if metadata["checkpoint_thread_id"] != "checkpoint-thread-1" || metadata["parent_checkpoint_thread_id"] != "checkpoint-thread-parent-1" {
 		t.Fatalf("metadata=%#v", metadata)
 	}
+	if metadata["assistant_id"] != "assistant-1" || metadata["graph_id"] != "graph-1" || metadata["run_id"] != "run-1" {
+		t.Fatalf("metadata=%#v", metadata)
+	}
 	if metadata["agent_name"] != "planner" || metadata["agent_type"] != "research" {
 		t.Fatalf("metadata=%#v", metadata)
+	}
+	if thread["assistant_id"] != "assistant-1" || thread["graph_id"] != "graph-1" || thread["run_id"] != "run-1" {
+		t.Fatalf("thread=%#v", thread)
 	}
 	if thread["checkpoint_id"] != "cp-1" || thread["parent_checkpoint_id"] != "cp-parent-1" {
 		t.Fatalf("thread=%#v", thread)
