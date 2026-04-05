@@ -10892,6 +10892,18 @@ func TestRecordedRunStreamModeSupportsUpdates(t *testing.T) {
 	if strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("unexpected messages-tuple event: %s", text)
 	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-replay-updates"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
+	}
 }
 
 func TestThreadJoinStreamModeSupportsUpdates(t *testing.T) {
@@ -10945,6 +10957,18 @@ func TestThreadJoinStreamModeSupportsUpdates(t *testing.T) {
 	}
 	if strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("unexpected messages-tuple event: %s", text)
+	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-join-updates"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
 	}
 }
 
