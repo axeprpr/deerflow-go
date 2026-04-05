@@ -5713,6 +5713,50 @@ func TestThreadRunsCreatePersistsMessagesAcrossReload(t *testing.T) {
 	}
 }
 
+func TestThreadRunsCreateUpdatesHistoryMessages(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+	body := `{"assistant_id":"lead_agent","input":{"messages":[{"id":"user-1","role":"user","content":"hi"}]}}`
+	resp, err := http.Post(ts.URL+"/threads/thread-run-history/runs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	historyResp, err := http.Get(ts.URL + "/threads/thread-run-history/history?limit=1")
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+	defer historyResp.Body.Close()
+	if historyResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(historyResp.Body)
+		t.Fatalf("status=%d body=%s", historyResp.StatusCode, string(b))
+	}
+
+	var history []ThreadState
+	if err := json.NewDecoder(historyResp.Body).Decode(&history); err != nil {
+		t.Fatalf("decode history: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len=%d", len(history))
+	}
+	messages, _ := history[0].Values["messages"].([]any)
+	if len(messages) < 2 {
+		t.Fatalf("values=%#v", history[0].Values)
+	}
+	first, _ := messages[0].(map[string]any)
+	last, _ := messages[len(messages)-1].(map[string]any)
+	if first["id"] != "user-1" || first["content"] != "hi" {
+		t.Fatalf("first message=%#v", first)
+	}
+	if last["content"] != "hello from fake llm" {
+		t.Fatalf("last message=%#v", last)
+	}
+}
+
 func TestThreadClarificationsList(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.ensureSession("thread-clarify", nil)
