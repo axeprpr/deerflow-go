@@ -8744,6 +8744,9 @@ func TestThreadRunStreamEmitsChunkEvent(t *testing.T) {
 	if !strings.Contains(text, `"delta":"hello from fake llm"`) {
 		t.Fatalf("missing chunk payload: %s", text)
 	}
+	if !strings.Contains(text, `"content":"hello from fake llm"`) {
+		t.Fatalf("missing chunk content payload: %s", text)
+	}
 }
 
 func TestThreadRunStreamModeValuesFiltersMessageEvents(t *testing.T) {
@@ -9627,6 +9630,9 @@ func TestRecordedRunStreamReplaysChunkEvent(t *testing.T) {
 	if !strings.Contains(text, `"delta":"hello from replay"`) {
 		t.Fatalf("missing chunk payload: %s", text)
 	}
+	if !strings.Contains(text, `"content":"hello from replay"`) {
+		t.Fatalf("missing chunk content payload: %s", text)
+	}
 }
 
 func TestRecordedRunStreamReplaysErrorEvent(t *testing.T) {
@@ -10168,6 +10174,9 @@ func TestThreadJoinStreamReplaysChunkEvent(t *testing.T) {
 	}
 	if !strings.Contains(text, `"delta":"hello from join"`) {
 		t.Fatalf("missing chunk payload: %s", text)
+	}
+	if !strings.Contains(text, `"content":"hello from join"`) {
+		t.Fatalf("missing chunk content payload: %s", text)
 	}
 }
 
