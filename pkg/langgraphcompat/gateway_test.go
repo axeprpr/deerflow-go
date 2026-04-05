@@ -1260,6 +1260,60 @@ func TestThreadSearchIncludesCheckpointFieldsByDefault(t *testing.T) {
 	}
 }
 
+func TestThreadSearchSelectProjectsExecutionSummaries(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.ensureSession("thread-search-execution-select", map[string]any{
+		"next":       []any{"lead_agent"},
+		"tasks":      []any{map[string]any{"id": "task-1", "name": "lead_agent"}},
+		"interrupts": []any{map[string]any{"value": "Need input"}},
+	})
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"limit":10,"select":["threadId","next","tasks","interrupts"]}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) == 0 {
+		t.Fatal("expected threads")
+	}
+
+	var selected map[string]any
+	for _, thread := range threads {
+		if thread["thread_id"] == "thread-search-execution-select" {
+			selected = thread
+			break
+		}
+	}
+	if selected == nil {
+		t.Fatalf("missing projected thread in %#v", threads)
+	}
+	next, _ := selected["next"].([]any)
+	if len(next) != 1 || next[0] != "lead_agent" {
+		t.Fatalf("selected=%#v", selected)
+	}
+	tasks, _ := selected["tasks"].([]any)
+	if len(tasks) != 1 {
+		t.Fatalf("selected=%#v", selected)
+	}
+	interrupts, _ := selected["interrupts"].([]any)
+	if len(interrupts) != 1 {
+		t.Fatalf("selected=%#v", selected)
+	}
+}
+
 func TestThreadSearchAcceptsCamelCaseCoreIDSelectFields(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.ensureSession("thread-search-core-id-select", map[string]any{
