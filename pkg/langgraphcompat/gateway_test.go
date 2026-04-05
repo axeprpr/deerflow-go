@@ -2122,6 +2122,53 @@ func TestLoadPersistedThreadsAcceptsDataWrapper(t *testing.T) {
 	}
 }
 
+func TestLoadPersistedThreadsAcceptsValuesStateObject(t *testing.T) {
+	root := t.TempDir()
+	threadDir := filepath.Join(root, "threads", "thread-values-state", "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"values":{
+			"messages":[
+				{"id":"m1","type":"human","content":"hello from state"}
+			],
+			"title":"Values Thread",
+			"todos":[{"content":"task","status":"pending"}],
+			"viewed_images":{"/tmp/chart.png":{"base64":"xyz","mime_type":"image/png"}}
+		},
+		"metadata":{
+			"thread_id":"thread-values-state",
+			"assistant_id":"assistant-1",
+			"model_name":"qwen/Qwen3.5-9B"
+		},
+		"created_at":"2026-01-01T00:00:00Z"
+	}`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write thread file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, sessions: map[string]*Session{}}
+	s.loadPersistedThreads()
+
+	session := s.sessions["thread-values-state"]
+	if session == nil {
+		t.Fatalf("sessions=%#v", s.sessions)
+	}
+	if len(session.Messages) != 1 || session.Messages[0].Content != "hello from state" {
+		t.Fatalf("messages=%#v", session.Messages)
+	}
+	if session.Metadata["title"] != "Values Thread" || session.Metadata["assistant_id"] != "assistant-1" || session.Metadata["model_name"] != "qwen/Qwen3.5-9B" {
+		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+	if _, ok := session.Metadata["viewed_images"]; !ok {
+		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+	if session.CreatedAt.IsZero() {
+		t.Fatalf("created_at not loaded: %#v", session)
+	}
+}
+
 func TestLoadPersistedRunsAcceptsCamelCaseFields(t *testing.T) {
 	root := t.TempDir()
 	runDir := filepath.Join(root, "runs")

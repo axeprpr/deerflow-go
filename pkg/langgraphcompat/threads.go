@@ -1215,8 +1215,28 @@ func (s *Server) loadPersistedThreads() {
 		}
 		var raw map[string]any
 		_ = json.Unmarshal(data, &raw)
+		if persisted.Metadata == nil {
+			persisted.Metadata = mapFromAny(raw["metadata"])
+		}
+		if len(persisted.Messages) == 0 {
+			values := mapFromAny(raw["values"])
+			if rawMessages, ok := values["messages"].([]any); ok {
+				persisted.Messages = s.convertToMessages(entry.Name(), rawMessages)
+			}
+			if persisted.Metadata == nil {
+				persisted.Metadata = map[string]any{}
+			}
+			for _, key := range []string{"title", "todos", "sandbox", "viewed_images", "viewedImages"} {
+				if _, exists := persisted.Metadata[key]; exists {
+					continue
+				}
+				if value, ok := values[key]; ok {
+					persisted.Metadata[key] = value
+				}
+			}
+		}
 		if persisted.ThreadID == "" {
-			persisted.ThreadID = stringValue(raw["threadId"])
+			persisted.ThreadID = firstNonEmpty(stringValue(raw["threadId"]), stringValue(raw["thread_id"]))
 		}
 		if persisted.CreatedAt.IsZero() {
 			persisted.CreatedAt = timeValue(firstNonNil(raw["createdAt"], raw["created_at"]))
