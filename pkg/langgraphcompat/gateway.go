@@ -1227,6 +1227,14 @@ func (s *Server) loadGatewayState() error {
 		}
 		return err
 	}
+	var wrapper map[string]json.RawMessage
+	if err := json.Unmarshal(data, &wrapper); err == nil {
+		if nested, ok := wrapper["state"]; ok && len(nested) > 0 {
+			data = nested
+		} else if nested, ok := wrapper["gateway"]; ok && len(nested) > 0 {
+			data = nested
+		}
+	}
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err

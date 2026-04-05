@@ -1632,6 +1632,66 @@ license: MIT
 	}
 }
 
+func TestLoadGatewayStateAcceptsWrappedStateObject(t *testing.T) {
+	root := t.TempDir()
+	raw := `{
+		"state":{
+			"models":{"flash":{"modelName":"qwen/Qwen3.5-9B","displayName":"Flash"}},
+			"agents":{"writer":{"name":"writer","model_name":"qwen/Qwen3.5-9B"}}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(root, "gateway_state.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write gateway_state.json: %v", err)
+	}
+
+	loaded := &Server{
+		dataRoot: root,
+		models:   map[string]gatewayModel{},
+		agents:   map[string]gatewayAgent{},
+	}
+	if err := loaded.loadGatewayState(); err != nil {
+		t.Fatalf("loadGatewayState: %v", err)
+	}
+
+	model, ok := loaded.findModelLocked("flash")
+	if !ok || model.Model != "qwen/Qwen3.5-9B" {
+		t.Fatalf("model=%#v", model)
+	}
+	agent, ok := loaded.getAgentsLocked()["writer"]
+	if !ok || agent.Model == nil || *agent.Model != "qwen/Qwen3.5-9B" {
+		t.Fatalf("agent=%#v", agent)
+	}
+}
+
+func TestLoadGatewayStateAcceptsWrappedGatewayObject(t *testing.T) {
+	root := t.TempDir()
+	raw := `{
+		"gateway":{
+			"userProfile":"Wrapped profile",
+			"memory":{"version":"1.0","lastUpdated":"2026-01-01T00:00:00Z","user":{},"history":{},"facts":[]}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(root, "gateway_state.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write gateway_state.json: %v", err)
+	}
+
+	loaded := &Server{
+		dataRoot: root,
+		models:   map[string]gatewayModel{},
+		agents:   map[string]gatewayAgent{},
+	}
+	if err := loaded.loadGatewayState(); err != nil {
+		t.Fatalf("loadGatewayState: %v", err)
+	}
+
+	if loaded.getUserProfileLocked() != "Wrapped profile" {
+		t.Fatalf("userProfile=%q", loaded.getUserProfileLocked())
+	}
+	if loaded.getMemoryLocked().LastUpdated != "2026-01-01T00:00:00Z" {
+		t.Fatalf("memory=%#v", loaded.getMemoryLocked())
+	}
+}
+
 func TestGatewayModelsFromEnvUsesModelIDWhenNameMissing(t *testing.T) {
 	t.Setenv("DEERFLOW_MODELS", `[{"id":"flash","displayName":"Flash"}]`)
 	models := defaultGatewayModels("")
