@@ -9225,7 +9225,7 @@ func TestRecordedRunStreamModeFiltersReplayEvents(t *testing.T) {
 		Events: []StreamEvent{
 			{ID: "1", Event: "metadata", Data: map[string]any{"run_id": "run-replay-1", "thread_id": "thread-replay-1", "assistant_id": "lead_agent"}},
 			{ID: "2", Event: "messages-tuple", Data: map[string]any{"type": "ai", "content": "hello"}},
-			{ID: "3", Event: "values", Data: map[string]any{"title": "done", "messages": []any{map[string]any{"id": "ai-1", "type": "ai", "content": "hello"}}, "artifacts": []any{"/tmp/report.md"}, "todos": []any{map[string]any{"content": "ship sqlite", "status": "pending"}}, "sandbox": map[string]any{"sandbox_id": "sb-1"}, "thread_data": map[string]any{"workspace_path": "/tmp/workspace"}}},
+			{ID: "3", Event: "values", Data: map[string]any{"title": "done", "messages": []any{map[string]any{"id": "ai-1", "type": "ai", "content": "hello"}}, "artifacts": []any{"/tmp/report.md"}, "todos": []any{map[string]any{"content": "ship sqlite", "status": "pending"}}, "sandbox": map[string]any{"sandbox_id": "sb-1"}, "thread_data": map[string]any{"workspace_path": "/tmp/workspace"}, "uploaded_files": []any{map[string]any{"filename": "notes.txt", "path": "/tmp/uploads/notes.txt"}}, "viewed_images": map[string]any{"/tmp/chart.png": map[string]any{"mime_type": "image/png"}}}},
 			{ID: "4", Event: "end", Data: map[string]any{"run_id": "run-replay-1"}},
 		},
 	}
@@ -9268,6 +9268,12 @@ func TestRecordedRunStreamModeFiltersReplayEvents(t *testing.T) {
 	}
 	if !strings.Contains(text, `"thread_data":{"workspace_path":"/tmp/workspace"}`) {
 		t.Fatalf("missing values thread_data payload: %s", text)
+	}
+	if !strings.Contains(text, `"uploaded_files":[{`) || !strings.Contains(text, `"filename":"notes.txt"`) || !strings.Contains(text, `"path":"/tmp/uploads/notes.txt"`) {
+		t.Fatalf("missing values uploaded_files payload: %s", text)
+	}
+	if !strings.Contains(text, `"viewed_images":{"/tmp/chart.png":{"mime_type":"image/png"}}`) {
+		t.Fatalf("missing values viewed_images payload: %s", text)
 	}
 	if strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("unexpected messages-tuple event: %s", text)
@@ -10036,7 +10042,7 @@ func TestThreadJoinStreamReplaysValuesPayload(t *testing.T) {
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 		Events: []StreamEvent{
-			{ID: "1", Event: "values", Data: map[string]any{"title": "done", "messages": []any{map[string]any{"id": "ai-1", "type": "ai", "content": "hello"}}, "artifacts": []any{"/tmp/report.md"}, "todos": []any{map[string]any{"content": "ship sqlite", "status": "pending"}}, "sandbox": map[string]any{"sandbox_id": "sb-1"}, "thread_data": map[string]any{"workspace_path": "/tmp/workspace"}}},
+			{ID: "1", Event: "values", Data: map[string]any{"title": "done", "messages": []any{map[string]any{"id": "ai-1", "type": "ai", "content": "hello"}}, "artifacts": []any{"/tmp/report.md"}, "todos": []any{map[string]any{"content": "ship sqlite", "status": "pending"}}, "sandbox": map[string]any{"sandbox_id": "sb-1"}, "thread_data": map[string]any{"workspace_path": "/tmp/workspace"}, "uploaded_files": []any{map[string]any{"filename": "notes.txt", "path": "/tmp/uploads/notes.txt"}}, "viewed_images": map[string]any{"/tmp/chart.png": map[string]any{"mime_type": "image/png"}}}},
 			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-join-values"}},
 		},
 	}
@@ -10076,6 +10082,12 @@ func TestThreadJoinStreamReplaysValuesPayload(t *testing.T) {
 	}
 	if !strings.Contains(text, `"thread_data":{"workspace_path":"/tmp/workspace"}`) {
 		t.Fatalf("missing values thread_data payload: %s", text)
+	}
+	if !strings.Contains(text, `"uploaded_files":[{`) || !strings.Contains(text, `"filename":"notes.txt"`) || !strings.Contains(text, `"path":"/tmp/uploads/notes.txt"`) {
+		t.Fatalf("missing values uploaded_files payload: %s", text)
+	}
+	if !strings.Contains(text, `"viewed_images":{"/tmp/chart.png":{"mime_type":"image/png"}}`) {
+		t.Fatalf("missing values viewed_images payload: %s", text)
 	}
 }
 
