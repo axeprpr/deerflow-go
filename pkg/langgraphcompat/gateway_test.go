@@ -211,7 +211,7 @@ func TestCreateThreadAcceptsTopLevelValues(t *testing.T) {
 	resp, err := http.Post(
 		ts.URL+"/threads",
 		"application/json",
-		strings.NewReader(`{"threadId":"thread-create-top-level","title":"Created Top","viewedImages":{"/tmp/chart.png":{"base64":"xyz","mime_type":"image/png"}}}`),
+		strings.NewReader(`{"threadId":"thread-create-top-level","metadata":{"mode":"thinking","model_name":"deepseek/deepseek-r1","reasoning_effort":"high","thinking_enabled":false,"is_plan_mode":true,"subagent_enabled":true,"temperature":0.2,"max_tokens":321,"checkpoint_id":"cp-1","parent_checkpoint_id":"cp-parent-1"},"title":"Created Top","viewedImages":{"/tmp/chart.png":{"base64":"xyz","mime_type":"image/png"}}}`),
 	)
 	if err != nil {
 		t.Fatalf("post thread: %v", err)
@@ -222,16 +222,40 @@ func TestCreateThreadAcceptsTopLevelValues(t *testing.T) {
 		t.Fatalf("status=%d body=%s", resp.StatusCode, string(body))
 	}
 
+	var thread map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&thread); err != nil {
+		t.Fatalf("decode thread: %v", err)
+	}
+	values, _ := thread["values"].(map[string]any)
+	if got := values["title"]; got != "Created Top" {
+		t.Fatalf("title=%v want Created Top", got)
+	}
+	viewedImages, ok := values["viewed_images"].(map[string]any)
+	if !ok || len(viewedImages) != 1 {
+		t.Fatalf("viewed_images=%#v", values["viewed_images"])
+	}
+	config, _ := thread["config"].(map[string]any)
+	configurable, _ := config["configurable"].(map[string]any)
+	if configurable["mode"] != "thinking" || configurable["model_name"] != "deepseek/deepseek-r1" || configurable["reasoning_effort"] != "high" {
+		t.Fatalf("config=%#v", config)
+	}
+	if configurable["thinking_enabled"] != false || configurable["is_plan_mode"] != true || configurable["subagent_enabled"] != true {
+		t.Fatalf("config=%#v", config)
+	}
+	if configurable["temperature"] != 0.2 {
+		t.Fatalf("config=%#v", config)
+	}
+	if configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != int64(321) && configurable["max_tokens"] != 321 {
+		t.Fatalf("config=%#v", config)
+	}
+	metadata, _ := thread["metadata"].(map[string]any)
+	if metadata["checkpoint_id"] != "cp-1" || metadata["parent_checkpoint_id"] != "cp-parent-1" {
+		t.Fatalf("metadata=%#v", metadata)
+	}
+
 	state := s.getThreadState("thread-create-top-level")
 	if state == nil {
 		t.Fatal("state missing")
-	}
-	if got := state.Values["title"]; got != "Created Top" {
-		t.Fatalf("title=%v want Created Top", got)
-	}
-	viewedImages, ok := state.Values["viewed_images"].(map[string]any)
-	if !ok || len(viewedImages) != 1 {
-		t.Fatalf("viewed_images=%#v", state.Values["viewed_images"])
 	}
 }
 
@@ -4891,12 +4915,12 @@ func TestThreadStatePatchAcceptsTopLevelValues(t *testing.T) {
 func TestThreadUpdateAcceptsValuesPayload(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-update-values"
-	s.ensureSession(threadID, map[string]any{"title": "Before"})
+	s.ensureSession(threadID, map[string]any{"title": "Before", "mode": "flash"})
 
 	req, _ := http.NewRequest(
 		http.MethodPatch,
 		ts.URL+"/threads/"+threadID,
-		strings.NewReader(`{"values":{"title":"After","todos":[{"content":"ship sqlite","status":"completed"}]}}`),
+		strings.NewReader(`{"metadata":{"mode":"thinking","model_name":"deepseek/deepseek-r1","reasoning_effort":"high","thinking_enabled":false,"is_plan_mode":true,"subagent_enabled":true,"temperature":0.2,"max_tokens":321,"checkpoint_id":"cp-1","parent_checkpoint_id":"cp-parent-1"},"values":{"title":"After","todos":[{"content":"ship sqlite","status":"completed"}]}}`),
 	)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
@@ -4907,6 +4931,32 @@ func TestThreadUpdateAcceptsValuesPayload(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	var thread map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&thread); err != nil {
+		t.Fatalf("decode thread: %v", err)
+	}
+	values, _ := thread["values"].(map[string]any)
+	if got := values["title"]; got != "After" {
+		t.Fatalf("title=%v want After", got)
+	}
+	config, _ := thread["config"].(map[string]any)
+	configurable, _ := config["configurable"].(map[string]any)
+	if configurable["mode"] != "thinking" || configurable["model_name"] != "deepseek/deepseek-r1" || configurable["reasoning_effort"] != "high" {
+		t.Fatalf("config=%#v", config)
+	}
+	if configurable["thinking_enabled"] != false || configurable["is_plan_mode"] != true || configurable["subagent_enabled"] != true {
+		t.Fatalf("config=%#v", config)
+	}
+	if configurable["temperature"] != 0.2 {
+		t.Fatalf("config=%#v", config)
+	}
+	if configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != int64(321) && configurable["max_tokens"] != 321 {
+		t.Fatalf("config=%#v", config)
+	}
+	metadata, _ := thread["metadata"].(map[string]any)
+	if metadata["checkpoint_id"] != "cp-1" || metadata["parent_checkpoint_id"] != "cp-parent-1" {
+		t.Fatalf("metadata=%#v", metadata)
 	}
 
 	state := s.getThreadState(threadID)
