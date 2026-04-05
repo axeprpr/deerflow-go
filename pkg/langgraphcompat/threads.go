@@ -786,7 +786,7 @@ func (s *Server) threadValues(session *Session) map[string]any {
 		"todos":          todosFromMetadata(session.Metadata["todos"]),
 		"sandbox":        mapFromMetadata(session.Metadata["sandbox"]),
 		"thread_data":    s.threadDataState(session.ThreadID),
-		"uploaded_files": s.uploadedFilesState(session.ThreadID),
+		"uploaded_files": s.messageUploadedFilesState(session),
 		"viewed_images":  viewedImagesFromMetadata(session.Metadata["viewed_images"]),
 	}
 	return values
@@ -869,6 +869,55 @@ func (s *Server) uploadedFilesState(threadID string) []map[string]any {
 		return li > lj
 	})
 	return files
+}
+
+func (s *Server) messageUploadedFilesState(session *Session) []map[string]any {
+	if session == nil {
+		return []map[string]any{}
+	}
+	files := s.uploadedFilesState(session.ThreadID)
+	if len(files) > 0 {
+		return files
+	}
+	if restored := uploadedFilesFromMetadata(session.Metadata["uploaded_files"]); len(restored) > 0 {
+		return restored
+	}
+	return []map[string]any{}
+}
+
+func uploadedFilesFromMetadata(raw any) []map[string]any {
+	items, ok := raw.([]any)
+	if !ok || len(items) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		file, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		filename := strings.TrimSpace(stringFromAny(file["filename"]))
+		if filename == "" {
+			continue
+		}
+		normalized := map[string]any{
+			"filename": filename,
+		}
+		if path := strings.TrimSpace(stringFromAny(firstNonNil(file["path"], file["virtual_path"]))); path != "" {
+			normalized["path"] = path
+		}
+		if size := toInt64(file["size"]); size > 0 {
+			normalized["size"] = size
+		}
+		if status := strings.TrimSpace(stringFromAny(file["status"])); status != "" {
+			normalized["status"] = status
+		}
+		out = append(out, normalized)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func todosFromMetadata(raw any) []map[string]any {
@@ -1327,7 +1376,7 @@ func (s *Server) loadPersistedThreads() {
 			if persisted.Metadata == nil {
 				persisted.Metadata = map[string]any{}
 			}
-			for _, key := range []string{"title", "todos", "sandbox", "viewed_images", "viewedImages", "artifacts"} {
+			for _, key := range []string{"title", "todos", "sandbox", "viewed_images", "viewedImages", "artifacts", "uploaded_files"} {
 				if value, ok := values[key]; ok {
 					persisted.Metadata[key] = value
 				}

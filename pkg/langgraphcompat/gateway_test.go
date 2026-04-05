@@ -2339,7 +2339,8 @@ func TestLoadPersistedThreadsPrefersValuesOverStaleMetadata(t *testing.T) {
 			"messages":[{"id":"m1","type":"human","content":"hello"}],
 			"title":"Current Title",
 			"todos":[{"content":"current task","status":"completed"}],
-			"artifacts":["/tmp/current.html"]
+			"artifacts":["/tmp/current.html"],
+			"uploaded_files":[{"filename":"notes.txt","size":42,"path":"/mnt/user-data/uploads/notes.txt","status":"uploaded"}]
 		},
 		"metadata":{
 			"thread_id":"thread-values-override",
@@ -2373,6 +2374,24 @@ func TestLoadPersistedThreadsPrefersValuesOverStaleMetadata(t *testing.T) {
 	}
 	if artifacts := anyStringSlice(session.Metadata["artifacts"]); len(artifacts) != 1 || artifacts[0] != "/tmp/current.html" {
 		t.Fatalf("artifacts=%#v metadata=%#v", artifacts, session.Metadata)
+	}
+	state := s.getThreadState("thread-values-override")
+	if state == nil {
+		t.Fatalf("state=nil")
+	}
+	if files, ok := state.Values["uploaded_files"].([]map[string]any); ok {
+		if len(files) != 1 || files[0]["filename"] != "notes.txt" || files[0]["path"] != "/mnt/user-data/uploads/notes.txt" || toInt64(files[0]["size"]) != 42 {
+			t.Fatalf("uploaded_files=%#v", files)
+		}
+	} else {
+		rawFiles, _ := state.Values["uploaded_files"].([]any)
+		if len(rawFiles) != 1 {
+			t.Fatalf("uploaded_files=%#v", state.Values["uploaded_files"])
+		}
+		file, _ := rawFiles[0].(map[string]any)
+		if file["filename"] != "notes.txt" || file["path"] != "/mnt/user-data/uploads/notes.txt" || toInt64(file["size"]) != 42 {
+			t.Fatalf("uploaded_file=%#v", file)
+		}
 	}
 }
 
