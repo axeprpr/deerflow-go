@@ -1955,6 +1955,39 @@ func TestLoadThreadHistoryNormalizesCamelCaseMetadata(t *testing.T) {
 	}
 }
 
+func TestLoadThreadHistoryAcceptsWrappedHistoryObject(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{dataRoot: root}
+	threadID := "thread-history-wrapped"
+	if err := os.MkdirAll(s.threadRoot(threadID), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"history":[
+			{
+				"checkpointId":"cp-1",
+				"values":{"title":"History"},
+				"metadata":{"threadId":"thread-history-wrapped"},
+				"createdAt":"2026-01-01T00:00:00Z"
+			}
+		]
+	}`
+	if err := os.WriteFile(s.threadHistoryPath(threadID), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write history file: %v", err)
+	}
+
+	history := s.loadThreadHistory(threadID)
+	if len(history) != 1 {
+		t.Fatalf("history=%#v", history)
+	}
+	if history[0].CheckpointID != "cp-1" || history[0].CreatedAt != "2026-01-01T00:00:00Z" {
+		t.Fatalf("history=%#v", history[0])
+	}
+	if history[0].Metadata["thread_id"] != "thread-history-wrapped" {
+		t.Fatalf("metadata=%#v", history[0].Metadata)
+	}
+}
+
 func TestUserProfileFileLoad(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}

@@ -1421,6 +1421,12 @@ func (s *Server) loadThreadHistory(threadID string) []ThreadState {
 	if err != nil {
 		return nil
 	}
+	var wrapper map[string]json.RawMessage
+	if err := json.Unmarshal(data, &wrapper); err == nil {
+		if nested, ok := wrapper["history"]; ok && len(nested) > 0 {
+			data = nested
+		}
+	}
 	var history []ThreadState
 	if err := json.Unmarshal(data, &history); err == nil {
 		var rawItems []map[string]any
