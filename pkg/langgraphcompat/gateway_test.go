@@ -9438,6 +9438,7 @@ func TestRecordedRunStreamReplaysToolMessageTuple(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	tupleBlock := sseEventBlock(t, text, "messages-tuple")
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
 	}
@@ -9449,6 +9450,11 @@ func TestRecordedRunStreamReplaysToolMessageTuple(t *testing.T) {
 	}
 	if !strings.Contains(text, `"data":{"path":"/tmp/demo.txt"}`) {
 		t.Fatalf("missing tool message tuple nested data payload: %s", text)
+	}
+	for _, forbidden := range []string{`"usage_metadata":`, `"additional_kwargs":`, `"tool_calls":`} {
+		if strings.Contains(tupleBlock, forbidden) {
+			t.Fatalf("unexpected tool tuple field %s: %s", forbidden, tupleBlock)
+		}
 	}
 }
 
@@ -9482,6 +9488,7 @@ func TestRecordedRunStreamReplaysAIUsageTuple(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	tupleBlock := sseEventBlock(t, text, "messages-tuple")
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
 	}
@@ -9490,6 +9497,11 @@ func TestRecordedRunStreamReplaysAIUsageTuple(t *testing.T) {
 	}
 	if !strings.Contains(text, `"usage_metadata":{"input_tokens":10,"output_tokens":5,"total_tokens":15}`) {
 		t.Fatalf("missing ai usage tuple payload: %s", text)
+	}
+	for _, forbidden := range []string{`"additional_kwargs":`, `"tool_calls":`, `"tool_call_id":`, `"status":`, `"data":{`} {
+		if strings.Contains(tupleBlock, forbidden) {
+			t.Fatalf("unexpected ai usage tuple field %s: %s", forbidden, tupleBlock)
+		}
 	}
 }
 
@@ -9523,11 +9535,17 @@ func TestRecordedRunStreamReplaysAIAdditionalKwargsTuple(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	tupleBlock := sseEventBlock(t, text, "messages-tuple")
 	if !strings.Contains(text, `"additional_kwargs":{"reasoning_content":"Need to inspect report","stop_reason":"end_turn"}`) {
 		t.Fatalf("missing ai additional_kwargs tuple payload: %s", text)
 	}
 	if !strings.Contains(text, `"id":"ai-1"`) {
 		t.Fatalf("missing ai message id in tuple payload: %s", text)
+	}
+	for _, forbidden := range []string{`"usage_metadata":`, `"tool_calls":`, `"tool_call_id":`, `"status":`, `"data":{`} {
+		if strings.Contains(tupleBlock, forbidden) {
+			t.Fatalf("unexpected ai kwargs tuple field %s: %s", forbidden, tupleBlock)
+		}
 	}
 }
 
@@ -9561,8 +9579,14 @@ func TestRecordedRunStreamReplaysAIToolCallsTuple(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	tupleBlock := sseEventBlock(t, text, "messages-tuple")
 	if !strings.Contains(text, `"tool_calls":[{`) || !strings.Contains(text, `"id":"call-1"`) || !strings.Contains(text, `"name":"read_file"`) || !strings.Contains(text, `"args":{"path":"/tmp/demo.txt"}`) {
 		t.Fatalf("missing ai tool_calls tuple payload: %s", text)
+	}
+	for _, forbidden := range []string{`"usage_metadata":`, `"additional_kwargs":`, `"tool_call_id":`, `"status":`, `"data":{`} {
+		if strings.Contains(tupleBlock, forbidden) {
+			t.Fatalf("unexpected ai tool_calls tuple field %s: %s", forbidden, tupleBlock)
+		}
 	}
 }
 
@@ -9942,6 +9966,7 @@ func TestThreadJoinStreamReplaysToolMessageTuple(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	tupleBlock := sseEventBlock(t, text, "messages-tuple")
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
 	}
@@ -9953,6 +9978,11 @@ func TestThreadJoinStreamReplaysToolMessageTuple(t *testing.T) {
 	}
 	if !strings.Contains(text, `"data":{"path":"/tmp/demo.txt"}`) {
 		t.Fatalf("missing tool message tuple nested data payload: %s", text)
+	}
+	for _, forbidden := range []string{`"usage_metadata":`, `"additional_kwargs":`, `"tool_calls":`} {
+		if strings.Contains(tupleBlock, forbidden) {
+			t.Fatalf("unexpected tool tuple field %s: %s", forbidden, tupleBlock)
+		}
 	}
 }
 
@@ -9986,6 +10016,7 @@ func TestThreadJoinStreamReplaysAIUsageTuple(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	tupleBlock := sseEventBlock(t, text, "messages-tuple")
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
 	}
@@ -9994,6 +10025,11 @@ func TestThreadJoinStreamReplaysAIUsageTuple(t *testing.T) {
 	}
 	if !strings.Contains(text, `"usage_metadata":{"input_tokens":10,"output_tokens":5,"total_tokens":15}`) {
 		t.Fatalf("missing ai usage tuple payload: %s", text)
+	}
+	for _, forbidden := range []string{`"additional_kwargs":`, `"tool_calls":`, `"tool_call_id":`, `"status":`, `"data":{`} {
+		if strings.Contains(tupleBlock, forbidden) {
+			t.Fatalf("unexpected ai usage tuple field %s: %s", forbidden, tupleBlock)
+		}
 	}
 }
 
@@ -10027,11 +10063,17 @@ func TestThreadJoinStreamReplaysAIAdditionalKwargsTuple(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	tupleBlock := sseEventBlock(t, text, "messages-tuple")
 	if !strings.Contains(text, `"additional_kwargs":{"reasoning_content":"Need to inspect report","stop_reason":"end_turn"}`) {
 		t.Fatalf("missing ai additional_kwargs tuple payload: %s", text)
 	}
 	if !strings.Contains(text, `"id":"ai-1"`) {
 		t.Fatalf("missing ai message id in tuple payload: %s", text)
+	}
+	for _, forbidden := range []string{`"usage_metadata":`, `"tool_calls":`, `"tool_call_id":`, `"status":`, `"data":{`} {
+		if strings.Contains(tupleBlock, forbidden) {
+			t.Fatalf("unexpected ai kwargs tuple field %s: %s", forbidden, tupleBlock)
+		}
 	}
 }
 
@@ -10065,8 +10107,14 @@ func TestThreadJoinStreamReplaysAIToolCallsTuple(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	tupleBlock := sseEventBlock(t, text, "messages-tuple")
 	if !strings.Contains(text, `"tool_calls":[{`) || !strings.Contains(text, `"id":"call-1"`) || !strings.Contains(text, `"name":"read_file"`) || !strings.Contains(text, `"args":{"path":"/tmp/demo.txt"}`) {
 		t.Fatalf("missing ai tool_calls tuple payload: %s", text)
+	}
+	for _, forbidden := range []string{`"usage_metadata":`, `"additional_kwargs":`, `"tool_call_id":`, `"status":`, `"data":{`} {
+		if strings.Contains(tupleBlock, forbidden) {
+			t.Fatalf("unexpected ai tool_calls tuple field %s: %s", forbidden, tupleBlock)
+		}
 	}
 }
 
