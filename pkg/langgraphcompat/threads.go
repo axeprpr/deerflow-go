@@ -233,6 +233,15 @@ func (s *Server) handleThreadStatePost(w http.ResponseWriter, r *http.Request) {
 	if title, ok := req.Values["title"].(string); ok {
 		session.Metadata["title"] = title
 	}
+	if todos, ok := normalizeTodos(req.Values["todos"]); ok {
+		session.Metadata["todos"] = todos
+	}
+	if sandboxState, ok := normalizeStringMap(req.Values["sandbox"]); ok {
+		session.Metadata["sandbox"] = sandboxState
+	}
+	if viewedImages, ok := normalizeViewedImages(req.Values["viewed_images"]); ok {
+		session.Metadata["viewed_images"] = viewedImages
+	}
 	session.UpdatedAt = time.Now().UTC()
 	s.sessionsMu.Unlock()
 	if err := s.persistSessionFile(session); err != nil {
@@ -394,6 +403,19 @@ func (s *Server) handleThreadClarificationCreate(w http.ResponseWriter, r *http.
 	s.clarifyAPI.HandleCreate(w, r, threadID)
 }
 
+func (s *Server) handleThreadClarificationsList(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	if threadID == "" {
+		http.Error(w, "thread ID required", http.StatusBadRequest)
+		return
+	}
+	if s.getThreadState(threadID) == nil {
+		http.Error(w, "thread not found", http.StatusNotFound)
+		return
+	}
+	s.clarifyAPI.HandleList(w, r, threadID)
+}
+
 func (s *Server) handleThreadClarificationGet(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
@@ -430,17 +452,82 @@ func (s *Server) messagesToLangChain(messages []models.Message) []Message {
 			role = "tool"
 		}
 
-		result = append(result, Message{
+		converted := Message{
 			Type:    msgType,
 			ID:      msg.ID,
 			Role:    role,
 			Content: msg.Content,
-		})
+		}
+		if additionalKwargs := stringMetadataToAny(msg.Metadata); len(additionalKwargs) > 0 {
+			converted.AdditionalKwargs = additionalKwargs
+		}
+		if len(msg.ToolCalls) > 0 {
+			converted.ToolCalls = convertToolCalls(msg.ToolCalls)
+		}
+		if msg.ToolResult != nil {
+			converted.Name = msg.ToolResult.ToolName
+			converted.ToolCallID = msg.ToolResult.CallID
+			converted.Data = map[string]any{
+				"status":   string(msg.ToolResult.Status),
+				"error":    msg.ToolResult.Error,
+				"duration": msg.ToolResult.Duration.String(),
+			}
+			if len(msg.ToolResult.Data) > 0 {
+				converted.Data["data"] = msg.ToolResult.Data
+			}
+			if converted.Content == "" {
+				converted.Content = firstNonEmpty(msg.ToolResult.Content, msg.ToolResult.Error)
+			}
+		}
+		result = append(result, converted)
 	}
 	return result
 }
 
+func convertToolCalls(calls []models.ToolCall) []ToolCall {
+	out := make([]ToolCall, 0, len(calls))
+	for _, call := range calls {
+		name := call.Name
+		args := call.Arguments
+		if normalizedArgs, ok := normalizePresentFileCall(call); ok {
+			name = "present_files"
+			args = normalizedArgs
+		}
+		out = append(out, ToolCall{
+			ID:   call.ID,
+			Name: name,
+			Args: args,
+		})
+	}
+	return out
+}
+
+func normalizePresentFileCall(call models.ToolCall) (map[string]any, bool) {
+	if call.Name != "present_file" {
+		return nil, false
+	}
+	path, _ := call.Arguments["path"].(string)
+	if strings.TrimSpace(path) == "" {
+		return nil, false
+	}
+	return map[string]any{
+		"filepaths": []string{path},
+	}, true
+}
+
+func stringMetadataToAny(metadata map[string]string) map[string]any {
+	if len(metadata) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(metadata))
+	for key, value := range metadata {
+		out[key] = value
+	}
+	return out
+}
+
 func (s *Server) threadResponse(session *Session) map[string]any {
+	values := s.threadValues(session)
 	return map[string]any{
 		"thread_id":  session.ThreadID,
 		"created_at": session.CreatedAt.Format(time.RFC3339Nano),
@@ -448,14 +535,9 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 		"metadata":   session.Metadata,
 		"status":     session.Status,
 		"config": map[string]any{
-			"configurable": map[string]any{
-				"agent_type": stringValue(session.Metadata["agent_type"]),
-			},
+			"configurable": s.threadConfigurable(session),
 		},
-		"values": map[string]any{
-			"title":     session.Metadata["title"],
-			"artifacts": sessionArtifactPaths(session),
-		},
+		"values": values,
 	}
 }
 
@@ -467,23 +549,201 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 		return nil
 	}
 
-	values := map[string]any{
-		"messages":  s.messagesToLangChain(session.Messages),
-		"title":     stringValue(session.Metadata["title"]),
-		"artifacts": sessionArtifactPaths(session),
-	}
+	values := s.threadValues(session)
+	values["messages"] = s.messagesToLangChain(session.Messages)
 
 	return &ThreadState{
 		CheckpointID: uuid.New().String(),
 		Values:       values,
-		Next:         []string{},
-		Tasks:        []any{},
-		Metadata: map[string]any{
-			"thread_id": threadID,
-			"step":      0,
+		Config: map[string]any{
+			"configurable": s.threadConfigurable(session),
 		},
+		Next:      []string{},
+		Tasks:     []any{},
+		Metadata:  threadMetadata(session),
 		CreatedAt: session.UpdatedAt.Format(time.RFC3339Nano),
 	}
+}
+
+func (s *Server) threadValues(session *Session) map[string]any {
+	values := map[string]any{
+		"title":          stringValue(session.Metadata["title"]),
+		"artifacts":      sessionArtifactPaths(session),
+		"todos":          todosFromMetadata(session.Metadata["todos"]),
+		"sandbox":        mapFromMetadata(session.Metadata["sandbox"]),
+		"thread_data":    s.threadDataState(session.ThreadID),
+		"uploaded_files": s.uploadedFilesState(session.ThreadID),
+		"viewed_images":  viewedImagesFromMetadata(session.Metadata["viewed_images"]),
+	}
+	return values
+}
+
+func (s *Server) threadConfigurable(session *Session) map[string]any {
+	configurable := map[string]any{
+		"thread_id":        session.ThreadID,
+		"agent_type":       stringValue(session.Metadata["agent_type"]),
+		"model_name":       stringValue(session.Metadata["model_name"]),
+		"is_plan_mode":     false,
+		"thinking_enabled": true,
+		"subagent_enabled": false,
+	}
+	if reasoningEffort := stringValue(session.Metadata["reasoning_effort"]); reasoningEffort != "" {
+		configurable["reasoning_effort"] = reasoningEffort
+	}
+	if value, ok := session.Metadata["thinking_enabled"].(bool); ok {
+		configurable["thinking_enabled"] = value
+	}
+	if value, ok := session.Metadata["is_plan_mode"].(bool); ok {
+		configurable["is_plan_mode"] = value
+	}
+	if value, ok := session.Metadata["subagent_enabled"].(bool); ok {
+		configurable["subagent_enabled"] = value
+	}
+	return configurable
+}
+
+func threadMetadata(session *Session) map[string]any {
+	metadata := map[string]any{
+		"thread_id": session.ThreadID,
+		"step":      0,
+	}
+	for key, value := range session.Metadata {
+		metadata[key] = value
+	}
+	return metadata
+}
+
+func (s *Server) threadDataState(threadID string) map[string]any {
+	return map[string]any{
+		"workspace_path": s.workspaceDir(threadID),
+		"uploads_path":   s.uploadsDir(threadID),
+		"outputs_path":   s.outputsDir(threadID),
+	}
+}
+
+func (s *Server) workspaceDir(threadID string) string {
+	return filepath.Join(s.threadRoot(threadID), "workspace")
+}
+
+func (s *Server) outputsDir(threadID string) string {
+	return filepath.Join(s.threadRoot(threadID), "outputs")
+}
+
+func (s *Server) uploadedFilesState(threadID string) []map[string]any {
+	entries, err := os.ReadDir(s.uploadsDir(threadID))
+	if err != nil {
+		return []map[string]any{}
+	}
+	files := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, s.uploadInfo(threadID, filepath.Join(s.uploadsDir(threadID), entry.Name()), entry.Name(), info.Size(), info.ModTime().Unix()))
+	}
+	sort.Slice(files, func(i, j int) bool {
+		li := toInt64(files[i]["modified"])
+		lj := toInt64(files[j]["modified"])
+		if li == lj {
+			return asString(files[i]["filename"]) < asString(files[j]["filename"])
+		}
+		return li > lj
+	})
+	return files
+}
+
+func todosFromMetadata(raw any) []map[string]any {
+	if todos, ok := normalizeTodos(raw); ok {
+		return todos
+	}
+	return []map[string]any{}
+}
+
+func normalizeTodos(raw any) ([]map[string]any, bool) {
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, false
+	}
+	todos := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		itemMap, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		todo := map[string]any{}
+		if content := strings.TrimSpace(stringValue(itemMap["content"])); content != "" {
+			todo["content"] = content
+		}
+		status := strings.TrimSpace(stringValue(itemMap["status"]))
+		switch status {
+		case "pending", "in_progress", "completed":
+			todo["status"] = status
+		case "":
+		default:
+			todo["status"] = "pending"
+		}
+		if len(todo) > 0 {
+			todos = append(todos, todo)
+		}
+	}
+	return todos, true
+}
+
+func mapFromMetadata(raw any) map[string]any {
+	if values, ok := normalizeStringMap(raw); ok {
+		return values
+	}
+	return map[string]any{}
+}
+
+func normalizeStringMap(raw any) (map[string]any, bool) {
+	items, ok := raw.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	values := make(map[string]any, len(items))
+	for key, value := range items {
+		text := strings.TrimSpace(stringValue(value))
+		if text == "" {
+			continue
+		}
+		values[key] = text
+	}
+	return values, true
+}
+
+func viewedImagesFromMetadata(raw any) map[string]any {
+	if values, ok := normalizeViewedImages(raw); ok {
+		return values
+	}
+	return map[string]any{}
+}
+
+func normalizeViewedImages(raw any) (map[string]any, bool) {
+	items, ok := raw.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	values := make(map[string]any, len(items))
+	for path, item := range items {
+		image, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		normalized := make(map[string]any, 2)
+		if base64 := strings.TrimSpace(stringValue(image["base64"])); base64 != "" {
+			normalized["base64"] = base64
+		}
+		if mimeType := strings.TrimSpace(stringValue(image["mime_type"])); mimeType != "" {
+			normalized["mime_type"] = mimeType
+		}
+		values[path] = normalized
+	}
+	return values, true
 }
 
 func (s *Server) ensureSession(threadID string, metadata map[string]any) *Session {
@@ -501,6 +761,9 @@ func (s *Server) ensureSession(threadID string, metadata map[string]any) *Sessio
 
 	if metadata == nil {
 		metadata = make(map[string]any)
+	}
+	if _, exists := metadata["thread_id"]; !exists {
+		metadata["thread_id"] = threadID
 	}
 	now := time.Now().UTC()
 	session := &Session{
@@ -604,16 +867,86 @@ func stringValue(v any) string {
 }
 
 func sessionArtifactPaths(session *Session) []string {
-	if session == nil || session.PresentFiles == nil {
+	if session == nil {
 		return []string{}
 	}
 
-	files := session.PresentFiles.List()
-	paths := make([]string, 0, len(files))
-	for _, file := range files {
-		paths = append(paths, file.Path)
+	seen := make(map[string]struct{})
+	paths := make([]string, 0)
+	if session.PresentFiles != nil {
+		for _, file := range session.PresentFiles.List() {
+			if addArtifactPath(&paths, seen, file.Path) {
+				continue
+			}
+		}
+	}
+	for _, message := range session.Messages {
+		for _, path := range messageArtifactPaths(message) {
+			addArtifactPath(&paths, seen, path)
+		}
 	}
 	return paths
+}
+
+func addArtifactPath(paths *[]string, seen map[string]struct{}, path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	if _, exists := seen[path]; exists {
+		return true
+	}
+	seen[path] = struct{}{}
+	*paths = append(*paths, path)
+	return true
+}
+
+func messageArtifactPaths(message models.Message) []string {
+	paths := make([]string, 0)
+	for _, call := range message.ToolCalls {
+		switch call.Name {
+		case "present_file":
+			if path, _ := call.Arguments["path"].(string); strings.TrimSpace(path) != "" {
+				paths = append(paths, path)
+			}
+		case "present_files":
+			paths = append(paths, anyStringSlice(call.Arguments["filepaths"])...)
+		}
+	}
+	if message.ToolResult != nil {
+		switch message.ToolResult.ToolName {
+		case "present_file":
+			if path, _ := message.ToolResult.Data["path"].(string); strings.TrimSpace(path) != "" {
+				paths = append(paths, path)
+			}
+		case "present_files":
+			paths = append(paths, anyStringSlice(message.ToolResult.Data["filepaths"])...)
+		}
+	}
+	return paths
+}
+
+func anyStringSlice(v any) []string {
+	switch items := v.(type) {
+	case []string:
+		out := make([]string, 0, len(items))
+		for _, item := range items {
+			if strings.TrimSpace(item) != "" {
+				out = append(out, strings.TrimSpace(item))
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(items))
+		for _, item := range items {
+			if text := strings.TrimSpace(stringFromAny(item)); text != "" {
+				out = append(out, text)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 type persistedSession struct {

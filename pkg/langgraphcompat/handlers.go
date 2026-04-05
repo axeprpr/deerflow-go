@@ -22,6 +22,9 @@ type runConfig struct {
 	ModelName       string
 	ReasoningEffort string
 	AgentType       agent.AgentType
+	ThinkingEnabled *bool
+	IsPlanMode      *bool
+	SubagentEnabled *bool
 	Temperature     *float64
 	MaxTokens       *int
 }
@@ -78,11 +81,12 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 		UpdatedAt:   time.Now().UTC(),
 	}
 	s.saveRun(run)
+	s.setThreadMetadata(threadID, "assistant_id", req.AssistantID)
+	s.setThreadMetadata(threadID, "graph_id", firstNonEmpty(req.AssistantID, "lead_agent"))
+	s.setThreadMetadata(threadID, "run_id", runID)
 
-	runCfg := parseRunConfig(req.Config)
-	if runCfg.AgentType != "" {
-		s.setThreadMetadata(threadID, "agent_type", string(runCfg.AgentType))
-	}
+	runCfg := parseRunConfig(mergeRunConfig(req.Config, req.Context))
+	s.applyRunConfigMetadata(threadID, runCfg)
 	runAgent := s.newAgent(agent.AgentConfig{
 		PresentFiles:    session.PresentFiles,
 		AgentType:       runCfg.AgentType,
@@ -183,6 +187,9 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		UpdatedAt:   time.Now().UTC(),
 	}
 	s.saveRun(run)
+	s.setThreadMetadata(threadID, "assistant_id", req.AssistantID)
+	s.setThreadMetadata(threadID, "graph_id", firstNonEmpty(req.AssistantID, "lead_agent"))
+	s.setThreadMetadata(threadID, "run_id", runID)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -195,10 +202,8 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		"thread_id": threadID,
 	})
 
-	runCfg := parseRunConfig(req.Config)
-	if runCfg.AgentType != "" {
-		s.setThreadMetadata(threadID, "agent_type", string(runCfg.AgentType))
-	}
+	runCfg := parseRunConfig(mergeRunConfig(req.Config, req.Context))
+	s.applyRunConfigMetadata(threadID, runCfg)
 	runAgent := s.newAgent(agent.AgentConfig{
 		PresentFiles:    session.PresentFiles,
 		AgentType:       runCfg.AgentType,
@@ -239,6 +244,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 
 	s.saveSession(threadID, result.Messages)
 	state := s.getThreadState(threadID)
+	s.emitFinalMessagesTuple(w, flusher, run, existingMessages, result.Messages, result.Usage)
 
 	s.recordAndSendEvent(w, flusher, run, "updates", map[string]any{
 		"agent": map[string]any{
@@ -346,6 +352,9 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 		}
 
 		content := extractMessageContent(msgMap["content"])
+		if s.convertRole(role) == models.RoleHuman {
+			content = s.injectUploadedFilesContext(threadID, msgMap, content)
+		}
 		if role == "" || content == "" {
 			continue
 		}
@@ -361,6 +370,99 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 	}
 
 	return messages
+}
+
+func (s *Server) injectUploadedFilesContext(threadID string, message map[string]any, content string) string {
+	newFiles := extractMessageFiles(message)
+	historical := s.uploadedFilesState(threadID)
+	if len(newFiles) == 0 && len(historical) == 0 {
+		return content
+	}
+
+	newNames := make(map[string]struct{}, len(newFiles))
+	for _, file := range newFiles {
+		if name := stringFromAny(file["filename"]); name != "" {
+			newNames[name] = struct{}{}
+		}
+	}
+
+	lines := []string{
+		"<uploaded_files>",
+		"The following files were uploaded in this message:",
+		"",
+	}
+	if len(newFiles) == 0 {
+		lines = append(lines, "(empty)")
+	} else {
+		for _, file := range newFiles {
+			lines = append(lines, formatUploadedFileBullet(file)...)
+		}
+	}
+
+	historicalLines := make([]string, 0)
+	for _, file := range historical {
+		filename := asString(file["filename"])
+		if _, exists := newNames[filename]; exists {
+			continue
+		}
+		historicalLines = append(historicalLines, formatUploadedFileBullet(file)...)
+	}
+	if len(historicalLines) > 0 {
+		lines = append(lines, "The following files were uploaded in previous messages and are still available:", "")
+		lines = append(lines, historicalLines...)
+	}
+	lines = append(lines, "You can read these files using the `read_file` tool with the paths shown above.", "</uploaded_files>")
+
+	filesMessage := strings.Join(lines, "\n")
+	if strings.TrimSpace(content) == "" {
+		return filesMessage
+	}
+	return filesMessage + "\n\n" + content
+}
+
+func extractMessageFiles(message map[string]any) []map[string]any {
+	additionalKwargs, _ := message["additional_kwargs"].(map[string]any)
+	if len(additionalKwargs) == 0 {
+		return nil
+	}
+	rawFiles, _ := additionalKwargs["files"].([]any)
+	if len(rawFiles) == 0 {
+		return nil
+	}
+	files := make([]map[string]any, 0, len(rawFiles))
+	for _, raw := range rawFiles {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		filename := stringFromAny(item["filename"])
+		if filename == "" {
+			continue
+		}
+		path := firstNonEmpty(stringFromAny(item["path"]), "/mnt/user-data/uploads/"+filename)
+		files = append(files, map[string]any{
+			"filename": filename,
+			"size":     toInt64(item["size"]),
+			"path":     path,
+		})
+	}
+	return files
+}
+
+func formatUploadedFileBullet(file map[string]any) []string {
+	filename := asString(file["filename"])
+	path := firstNonEmpty(asString(file["path"]), asString(file["virtual_path"]))
+	size := toInt64(file["size"])
+	sizeValue := float64(size) / 1024
+	sizeLabel := fmt.Sprintf("%.1f KB", sizeValue)
+	if sizeValue >= 1024 {
+		sizeLabel = fmt.Sprintf("%.1f MB", sizeValue/1024)
+	}
+	return []string{
+		fmt.Sprintf("- %s (%s)", filename, sizeLabel),
+		fmt.Sprintf("  Path: %s", path),
+		"",
+	}
 }
 
 func extractMessageContent(raw any) string {
@@ -483,8 +585,14 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 			return
 		}
 		s.recordAndSendEvent(w, flusher, run, "tool_call_end", evt.ToolEvent)
+		s.recordAndSendEvent(w, flusher, run, "on_tool_end", map[string]any{
+			"event": "on_tool_end",
+			"name":  evt.ToolEvent.Name,
+			"data":  evt.ToolEvent,
+		})
 		s.recordAndSendEvent(w, flusher, run, "messages-tuple", Message{
 			Type:       "tool",
+			ID:         toolMessageID(evt.ToolEvent.ID),
 			Role:       "tool",
 			Name:       evt.ToolEvent.Name,
 			Content:    evt.ToolEvent.ResultPreview,
@@ -511,6 +619,20 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 	}
 }
 
+func (s *Server) emitFinalMessagesTuple(w http.ResponseWriter, flusher http.Flusher, run *Run, existingMessages []models.Message, resultMessages []models.Message, usage *agent.Usage) {
+	start := len(existingMessages)
+	if start > len(resultMessages) {
+		start = 0
+	}
+	finalMessages := s.messagesToLangChain(resultMessages[start:])
+	for i := range finalMessages {
+		if finalMessages[i].Type == "ai" && usage != nil {
+			finalMessages[i].UsageMetadata = usageMetadataMap(usage)
+		}
+		s.recordAndSendEvent(w, flusher, run, "messages-tuple", finalMessages[i])
+	}
+}
+
 func (s *Server) forwardTaskEvent(w http.ResponseWriter, flusher http.Flusher, run *Run, evt subagent.TaskEvent) {
 	data := map[string]any{
 		"type":        evt.Type,
@@ -533,10 +655,59 @@ func parseRunConfig(raw map[string]any) runConfig {
 		ModelName:       firstNonEmpty(stringFromAny(raw["model_name"]), stringFromAny(raw["model"]), stringFromAny(configurable["model_name"]), stringFromAny(configurable["model"])),
 		ReasoningEffort: firstNonEmpty(stringFromAny(raw["reasoning_effort"]), stringFromAny(configurable["reasoning_effort"])),
 		AgentType:       agent.AgentType(firstNonEmpty(stringFromAny(raw["agent_type"]), stringFromAny(configurable["agent_type"]))),
+		ThinkingEnabled: boolPointerFromAny(firstNonNil(raw["thinking_enabled"], configurable["thinking_enabled"])),
+		IsPlanMode:      boolPointerFromAny(firstNonNil(raw["is_plan_mode"], configurable["is_plan_mode"])),
+		SubagentEnabled: boolPointerFromAny(firstNonNil(raw["subagent_enabled"], configurable["subagent_enabled"])),
 		Temperature:     floatPointerFromAny(firstNonNil(raw["temperature"], configurable["temperature"])),
 		MaxTokens:       intPointerFromAny(firstNonNil(raw["max_tokens"], configurable["max_tokens"])),
 	}
 	return cfg
+}
+
+func mergeRunConfig(config map[string]any, context map[string]any) map[string]any {
+	if len(config) == 0 && len(context) == 0 {
+		return nil
+	}
+	merged := make(map[string]any, len(config)+1)
+	for key, value := range config {
+		merged[key] = value
+	}
+	if len(context) == 0 {
+		return merged
+	}
+	configurable, _ := merged["configurable"].(map[string]any)
+	if configurable == nil {
+		configurable = make(map[string]any, len(context))
+	}
+	for key, value := range context {
+		if _, exists := configurable[key]; exists {
+			continue
+		}
+		configurable[key] = value
+	}
+	merged["configurable"] = configurable
+	return merged
+}
+
+func (s *Server) applyRunConfigMetadata(threadID string, cfg runConfig) {
+	if cfg.AgentType != "" {
+		s.setThreadMetadata(threadID, "agent_type", string(cfg.AgentType))
+	}
+	if cfg.ModelName != "" {
+		s.setThreadMetadata(threadID, "model_name", cfg.ModelName)
+	}
+	if cfg.ReasoningEffort != "" {
+		s.setThreadMetadata(threadID, "reasoning_effort", cfg.ReasoningEffort)
+	}
+	if cfg.ThinkingEnabled != nil {
+		s.setThreadMetadata(threadID, "thinking_enabled", *cfg.ThinkingEnabled)
+	}
+	if cfg.IsPlanMode != nil {
+		s.setThreadMetadata(threadID, "is_plan_mode", *cfg.IsPlanMode)
+	}
+	if cfg.SubagentEnabled != nil {
+		s.setThreadMetadata(threadID, "subagent_enabled", *cfg.SubagentEnabled)
+	}
 }
 
 func firstNonEmpty(values ...string) string {
@@ -614,4 +785,40 @@ func intPointerFromAny(v any) *int {
 		}
 	}
 	return nil
+}
+
+func boolPointerFromAny(v any) *bool {
+	switch value := v.(type) {
+	case bool:
+		out := value
+		return &out
+	case string:
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "true", "1", "yes", "on":
+			out := true
+			return &out
+		case "false", "0", "no", "off":
+			out := false
+			return &out
+		}
+	}
+	return nil
+}
+
+func usageMetadataMap(usage *agent.Usage) map[string]any {
+	if usage == nil {
+		return nil
+	}
+	return map[string]any{
+		"input_tokens":  usage.InputTokens,
+		"output_tokens": usage.OutputTokens,
+		"total_tokens":  usage.TotalTokens,
+	}
+}
+
+func toolMessageID(toolCallID string) string {
+	if strings.TrimSpace(toolCallID) == "" {
+		return ""
+	}
+	return "tool:" + strings.TrimSpace(toolCallID)
 }

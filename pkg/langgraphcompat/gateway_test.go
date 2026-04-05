@@ -3,6 +3,7 @@ package langgraphcompat
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -11,11 +12,100 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/axeprpr/deerflow-go/pkg/clarification"
+	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
+
+type fakeLLMProvider struct{}
+
+func (fakeLLMProvider) Chat(_ context.Context, _ llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, nil
+}
+
+func (fakeLLMProvider) Stream(_ context.Context, req llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	ch := make(chan llm.StreamChunk, 2)
+	go func() {
+		defer close(ch)
+		ch <- llm.StreamChunk{Delta: "hello from fake llm"}
+		ch <- llm.StreamChunk{
+			Done: true,
+			Message: &models.Message{
+				ID:        "ai-final",
+				SessionID: "session",
+				Role:      models.RoleAI,
+				Content:   "hello from fake llm",
+			},
+		}
+	}()
+	return ch, nil
+}
+
+type fakeToolLLMProvider struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (*fakeToolLLMProvider) Chat(_ context.Context, _ llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, nil
+}
+
+func (p *fakeToolLLMProvider) Stream(_ context.Context, _ llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	p.mu.Lock()
+	p.calls++
+	callIndex := p.calls
+	p.mu.Unlock()
+
+	ch := make(chan llm.StreamChunk, 2)
+	go func() {
+		defer close(ch)
+		if callIndex == 1 {
+			ch <- llm.StreamChunk{
+				ToolCalls: []models.ToolCall{
+					{
+						ID:        "call-1",
+						Name:      "read_file",
+						Arguments: map[string]any{"path": "/tmp/demo.txt"},
+						Status:    models.CallStatusPending,
+					},
+				},
+			}
+			ch <- llm.StreamChunk{
+				Done: true,
+				Message: &models.Message{
+					ID:        "ai-final-tool",
+					SessionID: "session",
+					Role:      models.RoleAI,
+					ToolCalls: []models.ToolCall{
+						{
+							ID:        "call-1",
+							Name:      "read_file",
+							Arguments: map[string]any{"path": "/tmp/demo.txt"},
+							Status:    models.CallStatusPending,
+						},
+					},
+				},
+			}
+			return
+		}
+		ch <- llm.StreamChunk{Delta: "done"}
+		ch <- llm.StreamChunk{
+			Done: true,
+			Message: &models.Message{
+				ID:        "ai-final-answer",
+				SessionID: "session",
+				Role:      models.RoleAI,
+				Content:   "done",
+			},
+			Usage: &llm.Usage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
+		}
+	}()
+	return ch, nil
+}
 
 func writeGatewaySkill(t *testing.T, root, category, name, frontmatter string) {
 	t.Helper()
@@ -43,6 +133,8 @@ func newCompatTestServer(t *testing.T) (*Server, *httptest.Server) {
 		agents:    map[string]gatewayAgent{},
 		memory:    defaultGatewayMemory(),
 	}
+	s.clarify = clarification.NewManager(8)
+	s.clarifyAPI = clarification.NewAPI(s.clarify)
 	s.skills = s.discoverGatewaySkills(nil)
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
@@ -679,6 +771,537 @@ func TestThreadRunsListAndScopedGet(t *testing.T) {
 	defer getResp.Body.Close()
 	if getResp.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d", getResp.StatusCode)
+	}
+}
+
+func TestThreadRunsCreateReturnsFinalState(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+	body := `{"assistant_id":"lead_agent","input":{"messages":[{"role":"user","content":"hi"}]}}`
+	resp, err := http.Post(ts.URL+"/threads/thread-sync-run/runs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload["thread_id"] != "thread-sync-run" {
+		t.Fatalf("thread_id=%v", payload["thread_id"])
+	}
+	if payload["run_id"] == "" {
+		t.Fatalf("run_id missing: %#v", payload)
+	}
+	messages, ok := payload["messages"].([]any)
+	if !ok || len(messages) == 0 {
+		t.Fatalf("messages missing: %#v", payload)
+	}
+}
+
+func TestThreadClarificationsList(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.ensureSession("thread-clarify", nil)
+
+	createBody := `{"question":"Need more detail?","required":true}`
+	createReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/thread-clarify/clarifications", strings.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createResp, err := http.DefaultClient.Do(createReq)
+	if err != nil {
+		t.Fatalf("create clarification: %v", err)
+	}
+	createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status=%d", createResp.StatusCode)
+	}
+
+	listResp, err := http.Get(ts.URL + "/threads/thread-clarify/clarifications")
+	if err != nil {
+		t.Fatalf("list clarifications: %v", err)
+	}
+	defer listResp.Body.Close()
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("list status=%d", listResp.StatusCode)
+	}
+	var payload struct {
+		Clarifications []map[string]any `json:"clarifications"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if len(payload.Clarifications) != 1 {
+		t.Fatalf("clarifications=%d", len(payload.Clarifications))
+	}
+}
+
+func TestThreadClarificationsListIsStable(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.ensureSession("thread-clarify-order", nil)
+
+	for _, body := range []string{
+		`{"question":"First?","required":true}`,
+		`{"question":"Second?","required":true}`,
+	} {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/thread-clarify-order/clarifications", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("create clarification: %v", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("create status=%d", resp.StatusCode)
+		}
+	}
+
+	resp, err := http.Get(ts.URL + "/threads/thread-clarify-order/clarifications")
+	if err != nil {
+		t.Fatalf("list clarifications: %v", err)
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		Clarifications []map[string]any `json:"clarifications"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if len(payload.Clarifications) != 2 {
+		t.Fatalf("clarifications=%d", len(payload.Clarifications))
+	}
+	if payload.Clarifications[0]["question"] != "First?" || payload.Clarifications[1]["question"] != "Second?" {
+		t.Fatalf("clarifications=%#v", payload.Clarifications)
+	}
+}
+
+func TestThreadStateIncludesCompatFields(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-state-fields"
+	s.ensureSession(threadID, map[string]any{
+		"title": "Compat Thread",
+		"todos": []any{
+			map[string]any{"content": "first", "status": "pending"},
+		},
+		"sandbox": map[string]any{
+			"sandbox_id": "sb-1",
+		},
+		"viewed_images": map[string]any{
+			"/tmp/example.png": map[string]any{
+				"base64":    "abc",
+				"mime_type": "image/png",
+			},
+		},
+	})
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir upload dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "brief.txt"), []byte("brief"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+
+	resp, err := http.Get(ts.URL + "/threads/" + threadID + "/state")
+	if err != nil {
+		t.Fatalf("get state: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	var state ThreadState
+	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+
+	threadData, ok := state.Values["thread_data"].(map[string]any)
+	if !ok {
+		t.Fatalf("thread_data missing: %#v", state.Values)
+	}
+	if threadData["uploads_path"] != s.uploadsDir(threadID) {
+		t.Fatalf("uploads_path=%v want %s", threadData["uploads_path"], s.uploadsDir(threadID))
+	}
+
+	todos, ok := state.Values["todos"].([]any)
+	if !ok || len(todos) != 1 {
+		t.Fatalf("todos=%#v", state.Values["todos"])
+	}
+
+	uploadedFiles, ok := state.Values["uploaded_files"].([]any)
+	if !ok || len(uploadedFiles) != 1 {
+		t.Fatalf("uploaded_files=%#v", state.Values["uploaded_files"])
+	}
+
+	sandboxState, ok := state.Values["sandbox"].(map[string]any)
+	if !ok || sandboxState["sandbox_id"] != "sb-1" {
+		t.Fatalf("sandbox=%#v", state.Values["sandbox"])
+	}
+}
+
+func TestThreadStatePostPersistsCompatFields(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-state-post"
+	s.ensureSession(threadID, nil)
+
+	body := `{"values":{"title":"Updated","todos":[{"content":"ship sqlite","status":"in_progress"}],"sandbox":{"sandbox_id":"sb-2"},"viewed_images":{"/tmp/chart.png":{"base64":"xyz","mime_type":"image/png"}}}}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/"+threadID+"/state", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post state: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	s.sessionsMu.RLock()
+	session := s.sessions[threadID]
+	s.sessionsMu.RUnlock()
+	if session == nil {
+		t.Fatal("session missing")
+	}
+	if session.Metadata["title"] != "Updated" {
+		t.Fatalf("title=%v", session.Metadata["title"])
+	}
+
+	todos, ok := session.Metadata["todos"].([]map[string]any)
+	if !ok || len(todos) != 1 || todos[0]["content"] != "ship sqlite" {
+		t.Fatalf("todos=%#v", session.Metadata["todos"])
+	}
+
+	sandboxState, ok := session.Metadata["sandbox"].(map[string]any)
+	if !ok || sandboxState["sandbox_id"] != "sb-2" {
+		t.Fatalf("sandbox=%#v", session.Metadata["sandbox"])
+	}
+
+	viewedImages, ok := session.Metadata["viewed_images"].(map[string]any)
+	if !ok || len(viewedImages) != 1 {
+		t.Fatalf("viewed_images=%#v", session.Metadata["viewed_images"])
+	}
+}
+
+func TestThreadRunPersistsConfigMetadata(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+	body := `{"assistant_id":"lead_agent","input":{"messages":[{"role":"user","content":"hi"}]},"config":{"configurable":{"model_name":"deepseek/deepseek-r1","thinking_enabled":false,"is_plan_mode":true,"subagent_enabled":true,"reasoning_effort":"high","agent_type":"deep_research"}}}`
+	resp, err := http.Post(ts.URL+"/threads/thread-config-run/runs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	threadResp, err := http.Get(ts.URL + "/threads/thread-config-run")
+	if err != nil {
+		t.Fatalf("get thread: %v", err)
+	}
+	defer threadResp.Body.Close()
+	if threadResp.StatusCode != http.StatusOK {
+		t.Fatalf("thread status=%d", threadResp.StatusCode)
+	}
+	var thread map[string]any
+	if err := json.NewDecoder(threadResp.Body).Decode(&thread); err != nil {
+		t.Fatalf("decode thread: %v", err)
+	}
+	metadata, ok := thread["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("metadata=%#v", thread["metadata"])
+	}
+	if metadata["model_name"] != "deepseek/deepseek-r1" {
+		t.Fatalf("model_name=%v", metadata["model_name"])
+	}
+	if metadata["thinking_enabled"] != false {
+		t.Fatalf("thinking_enabled=%v", metadata["thinking_enabled"])
+	}
+	if metadata["is_plan_mode"] != true || metadata["subagent_enabled"] != true {
+		t.Fatalf("metadata=%#v", metadata)
+	}
+
+	stateResp, err := http.Get(ts.URL + "/threads/thread-config-run/state")
+	if err != nil {
+		t.Fatalf("get state: %v", err)
+	}
+	defer stateResp.Body.Close()
+	var state ThreadState
+	if err := json.NewDecoder(stateResp.Body).Decode(&state); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	config, ok := state.Config["configurable"].(map[string]any)
+	if !ok {
+		t.Fatalf("config=%#v", state.Config)
+	}
+	if config["model_name"] != "deepseek/deepseek-r1" {
+		t.Fatalf("config=%#v", config)
+	}
+	if config["reasoning_effort"] != "high" {
+		t.Fatalf("reasoning_effort=%v", config["reasoning_effort"])
+	}
+	if config["thinking_enabled"] != false || config["is_plan_mode"] != true || config["subagent_enabled"] != true {
+		t.Fatalf("config=%#v", config)
+	}
+}
+
+func TestThreadRunAcceptsTopLevelContext(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+	body := `{"assistant_id":"lead_agent","input":{"messages":[{"role":"user","content":"hi"}]},"context":{"model_name":"qwen/Qwen3.5-9B","thinking_enabled":false,"is_plan_mode":true,"subagent_enabled":true,"reasoning_effort":"medium"}}`
+	resp, err := http.Post(ts.URL+"/threads/thread-context-run/runs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	stateResp, err := http.Get(ts.URL + "/threads/thread-context-run/state")
+	if err != nil {
+		t.Fatalf("get state: %v", err)
+	}
+	defer stateResp.Body.Close()
+	var state ThreadState
+	if err := json.NewDecoder(stateResp.Body).Decode(&state); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	config, ok := state.Config["configurable"].(map[string]any)
+	if !ok {
+		t.Fatalf("config=%#v", state.Config)
+	}
+	if config["model_name"] != "qwen/Qwen3.5-9B" || config["reasoning_effort"] != "medium" {
+		t.Fatalf("config=%#v", config)
+	}
+	if config["thinking_enabled"] != false || config["is_plan_mode"] != true || config["subagent_enabled"] != true {
+		t.Fatalf("config=%#v", config)
+	}
+}
+
+func TestThreadRunPersistsCoreMetadataFields(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+	body := `{"assistant_id":"lead_agent","input":{"messages":[{"role":"user","content":"hi"}]}}`
+	resp, err := http.Post(ts.URL+"/threads/thread-core-meta/runs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	threadResp, err := http.Get(ts.URL + "/threads/thread-core-meta")
+	if err != nil {
+		t.Fatalf("get thread: %v", err)
+	}
+	defer threadResp.Body.Close()
+	var thread map[string]any
+	if err := json.NewDecoder(threadResp.Body).Decode(&thread); err != nil {
+		t.Fatalf("decode thread: %v", err)
+	}
+	metadata, ok := thread["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("metadata=%#v", thread["metadata"])
+	}
+	if metadata["thread_id"] != "thread-core-meta" {
+		t.Fatalf("thread_id=%v", metadata["thread_id"])
+	}
+	if metadata["assistant_id"] != "lead_agent" || metadata["graph_id"] != "lead_agent" {
+		t.Fatalf("metadata=%#v", metadata)
+	}
+	if metadata["run_id"] == "" {
+		t.Fatalf("run_id missing: %#v", metadata)
+	}
+}
+
+func TestConvertToMessagesInjectsUploadedFilesContext(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	threadID := "thread-upload-context"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir upload dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "existing.txt"), []byte("existing"), 0o644); err != nil {
+		t.Fatalf("write existing upload: %v", err)
+	}
+
+	input := []any{
+		map[string]any{
+			"role": "user",
+			"content": []any{
+				map[string]any{"type": "text", "text": "Please read the docs"},
+			},
+			"additional_kwargs": map[string]any{
+				"files": []any{
+					map[string]any{
+						"filename": "brief.md",
+						"size":     2048,
+						"path":     "/mnt/user-data/uploads/brief.md",
+					},
+				},
+			},
+		},
+	}
+
+	messages := s.convertToMessages(threadID, input)
+	if len(messages) != 1 {
+		t.Fatalf("messages=%d", len(messages))
+	}
+	content := messages[0].Content
+	if !strings.Contains(content, "<uploaded_files>") {
+		t.Fatalf("content missing upload block: %q", content)
+	}
+	if !strings.Contains(content, "brief.md") || !strings.Contains(content, "existing.txt") {
+		t.Fatalf("content missing file names: %q", content)
+	}
+	if !strings.Contains(content, "Please read the docs") {
+		t.Fatalf("content missing original text: %q", content)
+	}
+}
+
+func TestMessagesToLangChainPreservesToolShape(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	converted := s.messagesToLangChain([]models.Message{
+		{
+			ID:        "ai-1",
+			SessionID: "thread-1",
+			Role:      models.RoleAI,
+			Content:   "",
+			ToolCalls: []models.ToolCall{
+				{
+					ID:        "call-1",
+					Name:      "present_files",
+					Arguments: map[string]any{"filepaths": []string{"/tmp/report.md"}},
+					Status:    models.CallStatusCompleted,
+				},
+			},
+			Metadata: map[string]string{
+				"stop_reason": "tool_calls",
+			},
+		},
+		{
+			ID:        "tool-1",
+			SessionID: "thread-1",
+			Role:      models.RoleTool,
+			ToolResult: &models.ToolResult{
+				CallID:   "call-1",
+				ToolName: "present_files",
+				Status:   models.CallStatusCompleted,
+				Content:  "presented",
+				Data: map[string]any{
+					"files": []string{"/tmp/report.md"},
+				},
+			},
+		},
+	})
+	if len(converted) != 2 {
+		t.Fatalf("messages=%d", len(converted))
+	}
+	if len(converted[0].ToolCalls) != 1 || converted[0].ToolCalls[0].Name != "present_files" {
+		t.Fatalf("tool calls=%#v", converted[0].ToolCalls)
+	}
+	if converted[0].AdditionalKwargs["stop_reason"] != "tool_calls" {
+		t.Fatalf("additional_kwargs=%#v", converted[0].AdditionalKwargs)
+	}
+	if converted[1].ToolCallID != "call-1" || converted[1].Name != "present_files" {
+		t.Fatalf("tool message=%#v", converted[1])
+	}
+	data, ok := converted[1].Data["data"].(map[string]any)
+	if !ok || len(data) != 1 {
+		t.Fatalf("tool data=%#v", converted[1].Data)
+	}
+	if converted[0].ToolCalls[0].Args["filepaths"] == nil {
+		t.Fatalf("normalized present_file args=%#v", converted[0].ToolCalls[0].Args)
+	}
+}
+
+func TestThreadArtifactsRecoveredFromMessageHistory(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	session := s.ensureSession("thread-artifacts", map[string]any{"title": "Artifacts"})
+	session.Messages = []models.Message{
+		{
+			ID:        "ai-1",
+			SessionID: "thread-artifacts",
+			Role:      models.RoleAI,
+			ToolCalls: []models.ToolCall{
+				{
+					ID:        "call-1",
+					Name:      "present_file",
+					Arguments: map[string]any{"path": "/tmp/report.md"},
+					Status:    models.CallStatusCompleted,
+				},
+			},
+		},
+		{
+			ID:        "tool-1",
+			SessionID: "thread-artifacts",
+			Role:      models.RoleTool,
+			ToolResult: &models.ToolResult{
+				CallID:   "call-2",
+				ToolName: "present_files",
+				Status:   models.CallStatusCompleted,
+				Data: map[string]any{
+					"filepaths": []any{"/tmp/slides.html"},
+				},
+			},
+		},
+	}
+
+	state := s.getThreadState("thread-artifacts")
+	if state == nil {
+		t.Fatal("state missing")
+	}
+	artifacts, ok := state.Values["artifacts"].([]string)
+	if !ok {
+		t.Fatalf("artifacts=%#v", state.Values["artifacts"])
+	}
+	if len(artifacts) != 2 {
+		t.Fatalf("artifacts=%#v", artifacts)
+	}
+	if artifacts[0] != "/tmp/report.md" || artifacts[1] != "/tmp/slides.html" {
+		t.Fatalf("artifacts=%#v", artifacts)
+	}
+}
+
+func TestThreadRunStreamEmitsToolEndAliasAndUsageMetadata(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = &fakeToolLLMProvider{}
+	if err := os.WriteFile("/tmp/demo.txt", []byte("demo"), 0o644); err != nil {
+		t.Fatalf("write tool fixture: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/thread-stream-events/runs/stream", strings.NewReader(`{"assistant_id":"lead_agent","input":{"messages":[{"role":"user","content":"inspect file"}]}}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: on_tool_end") {
+		t.Fatalf("missing on_tool_end event: %s", text)
+	}
+	if !strings.Contains(text, "\"usage_metadata\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}") {
+		t.Fatalf("missing usage_metadata in messages-tuple: %s", text)
+	}
+	if !strings.Contains(text, "\"type\":\"tool\",\"id\":\"tool:call-1\"") {
+		t.Fatalf("missing stable tool message id: %s", text)
 	}
 }
 

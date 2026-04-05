@@ -73,6 +73,7 @@ type Session struct {
 type ThreadState struct {
 	CheckpointID string         `json:"checkpoint_id,omitempty"`
 	Values       map[string]any `json:"values"`
+	Config       map[string]any `json:"config,omitempty"`
 	Next         []string       `json:"next"`
 	Tasks        []any          `json:"tasks"`
 	Metadata     map[string]any `json:"metadata"`
@@ -96,18 +97,21 @@ type RunCreateRequest struct {
 	ThreadID    string         `json:"thread_id,omitempty"`
 	Input       map[string]any `json:"input,omitempty"`
 	Config      map[string]any `json:"config,omitempty"`
+	Context     map[string]any `json:"context,omitempty"`
 }
 
 // Message represents a LangGraph-compatible message
 type Message struct {
-	Type       string         `json:"type"`
-	ID         string         `json:"id"`
-	Role       string         `json:"role,omitempty"`
-	Content    string         `json:"content,omitempty"`
-	Name       string         `json:"name,omitempty"`
-	Data       map[string]any `json:"data,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	ToolCalls  []ToolCall     `json:"tool_calls,omitempty"`
+	Type             string         `json:"type"`
+	ID               string         `json:"id"`
+	Role             string         `json:"role,omitempty"`
+	Content          string         `json:"content,omitempty"`
+	Name             string         `json:"name,omitempty"`
+	Data             map[string]any `json:"data,omitempty"`
+	ToolCallID       string         `json:"tool_call_id,omitempty"`
+	ToolCalls        []ToolCall     `json:"tool_calls,omitempty"`
+	AdditionalKwargs map[string]any `json:"additional_kwargs,omitempty"`
+	UsageMetadata    map[string]any `json:"usage_metadata,omitempty"`
 }
 
 // ToolCall represents a LangGraph-compatible tool call
@@ -266,6 +270,7 @@ func (s *Server) registerLangGraphRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/runs/stream", s.handleThreadRunsStream)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/runs/{run_id}/stream", s.handleThreadRunStream)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/stream", s.handleThreadJoinStream)
+	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/clarifications", s.handleThreadClarificationsList)
 	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/clarifications", s.handleThreadClarificationCreate)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/clarifications/{id}", s.handleThreadClarificationGet)
 	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/clarifications/{id}/resolve", s.handleThreadClarificationResolve)
