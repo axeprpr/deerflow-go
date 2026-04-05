@@ -1283,6 +1283,20 @@ func (s *Server) loadPersistedThreads() {
 				}
 			}
 		}
+		if checkpoint := mapFromAny(raw["checkpoint"]); len(checkpoint) > 0 {
+			if _, exists := persisted.Metadata["checkpoint_ns"]; !exists {
+				if value, ok := checkpoint["checkpoint_ns"]; ok {
+					persisted.Metadata["checkpoint_ns"] = value
+				}
+			}
+		}
+		if checkpoint := mapFromAny(raw["parent_checkpoint"]); len(checkpoint) > 0 {
+			if _, exists := persisted.Metadata["parent_checkpoint_ns"]; !exists {
+				if value, ok := checkpoint["checkpoint_ns"]; ok {
+					persisted.Metadata["parent_checkpoint_ns"] = value
+				}
+			}
+		}
 		if persisted.ThreadID == "" {
 			persisted.ThreadID = firstNonEmpty(stringValue(raw["threadId"]), stringValue(raw["thread_id"]))
 		}
