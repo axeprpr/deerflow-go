@@ -2577,6 +2577,12 @@ func TestLoadPersistedThreadsAcceptsFlatTopLevelMetadata(t *testing.T) {
 		"assistantId":"assistant-1",
 		"graphId":"graph-1",
 		"runId":"run-1",
+		"checkpointId":"cp-1",
+		"parentCheckpointId":"cp-parent-1",
+		"checkpointNs":"ns-1",
+		"parentCheckpointNs":"ns-parent-1",
+		"checkpointThreadId":"checkpoint-thread-1",
+		"parentCheckpointThreadId":"checkpoint-thread-parent-1",
 		"mode":"thinking",
 		"temperature":0.2,
 		"maxTokens":321,
@@ -2597,6 +2603,15 @@ func TestLoadPersistedThreadsAcceptsFlatTopLevelMetadata(t *testing.T) {
 	if state.Metadata["assistant_id"] != "assistant-1" || state.Metadata["graph_id"] != "graph-1" || state.Metadata["run_id"] != "run-1" {
 		t.Fatalf("metadata=%#v", state.Metadata)
 	}
+	if state.Metadata["checkpoint_id"] != "cp-1" || state.Metadata["parent_checkpoint_id"] != "cp-parent-1" {
+		t.Fatalf("metadata=%#v", state.Metadata)
+	}
+	if state.Metadata["checkpoint_ns"] != "ns-1" || state.Metadata["parent_checkpoint_ns"] != "ns-parent-1" {
+		t.Fatalf("metadata=%#v", state.Metadata)
+	}
+	if state.Metadata["checkpoint_thread_id"] != "checkpoint-thread-1" || state.Metadata["parent_checkpoint_thread_id"] != "checkpoint-thread-parent-1" {
+		t.Fatalf("metadata=%#v", state.Metadata)
+	}
 	if state.Metadata["step"] != float64(7) && state.Metadata["step"] != 7 {
 		t.Fatalf("metadata=%#v", state.Metadata)
 	}
@@ -2609,6 +2624,12 @@ func TestLoadPersistedThreadsAcceptsFlatTopLevelMetadata(t *testing.T) {
 	}
 	if configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != int64(321) && configurable["max_tokens"] != 321 {
 		t.Fatalf("configurable=%#v", configurable)
+	}
+	if state.Checkpoint == nil || state.Checkpoint["checkpoint_id"] != "cp-1" || state.Checkpoint["checkpoint_ns"] != "ns-1" || state.Checkpoint["thread_id"] != "checkpoint-thread-1" {
+		t.Fatalf("checkpoint=%#v", state.Checkpoint)
+	}
+	if state.ParentCheckpoint == nil || state.ParentCheckpoint["checkpoint_id"] != "cp-parent-1" || state.ParentCheckpoint["checkpoint_ns"] != "ns-parent-1" || state.ParentCheckpoint["thread_id"] != "checkpoint-thread-parent-1" {
+		t.Fatalf("parent_checkpoint=%#v", state.ParentCheckpoint)
 	}
 }
 
@@ -3419,6 +3440,11 @@ func TestLoadThreadHistoryAcceptsFlatTopLevelMetadata(t *testing.T) {
 	raw := `[
 		{
 			"checkpointId":"cp-1",
+			"parentCheckpointId":"cp-parent-1",
+			"checkpointNs":"ns-1",
+			"parentCheckpointNs":"ns-parent-1",
+			"checkpointThreadId":"checkpoint-thread-1",
+			"parentCheckpointThreadId":"checkpoint-thread-parent-1",
 			"createdAt":"2026-01-01T00:00:00Z",
 			"threadId":"thread-history-flat-metadata",
 			"assistantId":"assistant-1",
@@ -3442,6 +3468,15 @@ func TestLoadThreadHistoryAcceptsFlatTopLevelMetadata(t *testing.T) {
 	if history[0].Metadata["assistant_id"] != "assistant-1" || history[0].Metadata["graph_id"] != "graph-1" || history[0].Metadata["run_id"] != "run-1" {
 		t.Fatalf("metadata=%#v", history[0].Metadata)
 	}
+	if history[0].Metadata["checkpoint_id"] != "cp-1" || history[0].Metadata["parent_checkpoint_id"] != "cp-parent-1" {
+		t.Fatalf("metadata=%#v", history[0].Metadata)
+	}
+	if history[0].Metadata["checkpoint_ns"] != "ns-1" || history[0].Metadata["parent_checkpoint_ns"] != "ns-parent-1" {
+		t.Fatalf("metadata=%#v", history[0].Metadata)
+	}
+	if history[0].Metadata["checkpoint_thread_id"] != "checkpoint-thread-1" || history[0].Metadata["parent_checkpoint_thread_id"] != "checkpoint-thread-parent-1" {
+		t.Fatalf("metadata=%#v", history[0].Metadata)
+	}
 	if history[0].Metadata["step"] != float64(7) && history[0].Metadata["step"] != 7 {
 		t.Fatalf("metadata=%#v", history[0].Metadata)
 	}
@@ -3451,6 +3486,12 @@ func TestLoadThreadHistoryAcceptsFlatTopLevelMetadata(t *testing.T) {
 	}
 	if configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != int64(321) && configurable["max_tokens"] != 321 {
 		t.Fatalf("config=%#v metadata=%#v", history[0].Config, history[0].Metadata)
+	}
+	if history[0].Checkpoint == nil || history[0].Checkpoint["checkpoint_id"] != "cp-1" || history[0].Checkpoint["checkpoint_ns"] != "ns-1" || history[0].Checkpoint["thread_id"] != "checkpoint-thread-1" {
+		t.Fatalf("checkpoint=%#v metadata=%#v", history[0].Checkpoint, history[0].Metadata)
+	}
+	if history[0].ParentCheckpoint == nil || history[0].ParentCheckpoint["checkpoint_id"] != "cp-parent-1" || history[0].ParentCheckpoint["checkpoint_ns"] != "ns-parent-1" || history[0].ParentCheckpoint["thread_id"] != "checkpoint-thread-parent-1" {
+		t.Fatalf("parent_checkpoint=%#v metadata=%#v", history[0].ParentCheckpoint, history[0].Metadata)
 	}
 }
 
