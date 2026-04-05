@@ -787,6 +787,8 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 		"model_name":           stringValue(configurable["model_name"]),
 		"mode":                 stringValue(configurable["mode"]),
 		"reasoning_effort":     stringValue(configurable["reasoning_effort"]),
+		"temperature":          configurable["temperature"],
+		"max_tokens":           configurable["max_tokens"],
 		"checkpoint_id":        stringValue(session.Metadata["checkpoint_id"]),
 		"parent_checkpoint_id": stringValue(session.Metadata["parent_checkpoint_id"]),
 		"checkpoint":           checkpoint,

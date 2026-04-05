@@ -1081,6 +1081,12 @@ func TestThreadSearchIncludesCheckpointFieldsByDefault(t *testing.T) {
 	if selected["mode"] != "flash" || selected["model_name"] != "" || selected["reasoning_effort"] != "minimal" {
 		t.Fatalf("selected=%#v", selected)
 	}
+	if value, ok := selected["temperature"]; !ok || value != nil {
+		t.Fatalf("temperature=%#v in %#v", selected["temperature"], selected)
+	}
+	if value, ok := selected["max_tokens"]; !ok || value != nil {
+		t.Fatalf("max_tokens=%#v in %#v", selected["max_tokens"], selected)
+	}
 	metadata, _ := selected["metadata"].(map[string]any)
 	if metadata["assistant_id"] != "assistant-1" || metadata["graph_id"] != "graph-1" || metadata["run_id"] != "run-1" {
 		t.Fatalf("metadata=%#v", selected["metadata"])
@@ -5048,6 +5054,12 @@ func TestThreadGetIncludesCompatShape(t *testing.T) {
 		t.Fatalf("thread=%#v", thread)
 	}
 	if thread["mode"] != "thinking" || thread["model_name"] != "deepseek/deepseek-r1" || thread["reasoning_effort"] != "high" {
+		t.Fatalf("thread=%#v", thread)
+	}
+	if thread["temperature"] != 0.2 {
+		t.Fatalf("thread=%#v", thread)
+	}
+	if thread["max_tokens"] != float64(321) && thread["max_tokens"] != int64(321) && thread["max_tokens"] != 321 {
 		t.Fatalf("thread=%#v", thread)
 	}
 	values, _ := thread["values"].(map[string]any)
