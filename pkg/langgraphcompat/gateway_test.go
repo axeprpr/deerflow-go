@@ -9049,6 +9049,52 @@ func TestRecordedRunStreamReplaysMetadataPayload(t *testing.T) {
 	}
 }
 
+func TestRecordedRunStreamReplaysToolCallEvents(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-replay-tools",
+		ThreadID:    "thread-replay-tools",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "tool_call_start", Data: map[string]any{"id": "call-1", "name": "read_file"}},
+			{ID: "2", Event: "tool_call_end", Data: map[string]any{"id": "call-1", "name": "read_file"}},
+			{ID: "3", Event: "on_tool_end", Data: map[string]any{"event": "on_tool_end", "name": "read_file", "data": map[string]any{"id": "call-1"}}},
+			{ID: "4", Event: "end", Data: map[string]any{"run_id": "run-replay-tools"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-replay-tools/runs/run-replay-tools/stream?streamMode=events")
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: tool_call_start") {
+		t.Fatalf("missing tool_call_start event: %s", text)
+	}
+	if !strings.Contains(text, "event: tool_call_end") {
+		t.Fatalf("missing tool_call_end event: %s", text)
+	}
+	if !strings.Contains(text, "event: on_tool_end") {
+		t.Fatalf("missing on_tool_end event: %s", text)
+	}
+	if !strings.Contains(text, `"id":"call-1"`) {
+		t.Fatalf("missing tool call id: %s", text)
+	}
+}
+
 func TestThreadJoinStreamModeFiltersReplayEvents(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	run := &Run{
