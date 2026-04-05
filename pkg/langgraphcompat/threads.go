@@ -114,6 +114,7 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
+	var raw map[string]any
 	var req struct {
 		Limit      int      `json:"limit"`
 		PageSizeX  int      `json:"pageSize"`
@@ -124,15 +125,26 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 		SortOrderX string   `json:"sortOrder"`
 		Select     []string `json:"select"`
 	}
+	limitProvided := false
 	if r.Body != nil {
 		defer r.Body.Close()
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		body, _ := io.ReadAll(r.Body)
+		if len(body) > 0 {
+			_ = json.Unmarshal(body, &raw)
+			_ = json.Unmarshal(body, &req)
+			_, hasLimit := raw["limit"]
+			_, hasPageSize := raw["pageSize"]
+			limitProvided = hasLimit || hasPageSize
+		}
 	}
 
-	if req.Limit <= 0 {
+	if req.Limit == 0 {
 		req.Limit = req.PageSizeX
 	}
-	if req.Limit <= 0 {
+	if req.Limit < 0 {
+		req.Limit = 0
+	}
+	if !limitProvided && req.Limit == 0 {
 		req.Limit = 50
 	}
 	if req.Offset < 0 {

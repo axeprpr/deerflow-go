@@ -457,6 +457,60 @@ func TestThreadSearchDefaultsToFiftyResults(t *testing.T) {
 	}
 }
 
+func TestThreadSearchHonorsExplicitZeroLimit(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.ensureSession("thread-search-zero-limit", nil)
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"limit":0}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) != 0 {
+		t.Fatalf("len=%d want 0", len(threads))
+	}
+}
+
+func TestThreadSearchHonorsExplicitZeroPageSize(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.ensureSession("thread-search-zero-pagesize", nil)
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"pageSize":0}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) != 0 {
+		t.Fatalf("len=%d want 0", len(threads))
+	}
+}
+
 func TestThreadSearchClampsNegativeOffset(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.ensureSession("thread-search-negative-offset", nil)
