@@ -3,10 +3,8 @@ package langgraphcompat
 import (
 	"context"
 	"errors"
-	"io/fs"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,7 +15,6 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/checkpoint"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
-	"github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/sandbox"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
@@ -29,48 +26,32 @@ import (
 // Implements the endpoints expected by @langchain/langgraph-sdk
 
 type Server struct {
-	httpServer        *http.Server
-	logger            *log.Logger
-	llmProvider       llm.LLMProvider
-	tools             *tools.Registry
-	sandbox           *sandbox.Sandbox
-	sandboxMu         sync.Mutex
-	sandboxRoot       string
-	subagents         *subagent.Pool
-	clarify           *clarification.Manager
-	clarifyAPI        *clarification.API
-	defaultModel      string
-	maxTurns          int
-	store             checkpoint.Store
-	startedAt         time.Time
-	sessions          map[string]*Session
-	sessionsMu        sync.RWMutex
-	runs              map[string]*Run
-	runsMu            sync.RWMutex
-	runStreams        map[string]map[uint64]chan StreamEvent
-	runStreamSeq      uint64
-	dataRoot          string
-	compatFSManaged   bool
-	uiStateMu         sync.RWMutex
-	skills            map[string]gatewaySkill
-	mcpConfig         gatewayMCPConfig
-	channelConfig     gatewayChannelsConfig
-	agents            map[string]gatewayAgent
-	userProfile       string
-	memory            gatewayMemoryResponse
-	memoryStore       memory.Storage
-	memoryStoreCloser interface{ Close() }
-	memorySvc         *memory.Service
-	memoryThread      string
-	mcpMu             sync.Mutex
-	mcpClients        map[string]gatewayMCPClient
-	mcpToolNames      map[string]struct{}
-	mcpDeferredTools  []models.Tool
-	mcpConnector      gatewayMCPConnector
-	channelMu         sync.Mutex
-	channelService    *gatewayChannelService
-	backgroundTasks   sync.WaitGroup
-	frontend          http.Handler
+	httpServer   *http.Server
+	logger       *log.Logger
+	llmProvider  llm.LLMProvider
+	tools        *tools.Registry
+	sandbox      *sandbox.Sandbox
+	subagents    *subagent.Pool
+	clarify      *clarification.Manager
+	clarifyAPI   *clarification.API
+	defaultModel string
+	maxTurns     int
+	store        checkpoint.Store
+	startedAt    time.Time
+	sessions     map[string]*Session
+	sessionsMu   sync.RWMutex
+	runs         map[string]*Run
+	runsMu       sync.RWMutex
+	dataRoot     string
+	uiStateMu    sync.RWMutex
+	models       map[string]gatewayModel
+	skills       map[string]gatewaySkill
+	mcpConfig    gatewayMCPConfig
+	agents       map[string]gatewayAgent
+	userProfile  string
+	memory       gatewayMemoryResponse
+	memoryConfig gatewayMemoryConfig
+	channels     gatewayChannelsStatus
 }
 
 type HealthStatus struct {
@@ -80,22 +61,13 @@ type HealthStatus struct {
 }
 
 type Session struct {
-	CheckpointID string
 	ThreadID     string
 	Messages     []models.Message
-	Todos        []Todo
-	Values       map[string]any
 	Metadata     map[string]any
-	Configurable map[string]any
 	Status       string
 	PresentFiles *tools.PresentFileRegistry
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
-}
-
-type Todo struct {
-	Content string `json:"content,omitempty"`
-	Status  string `json:"status,omitempty"`
 }
 
 type ThreadState struct {
@@ -104,64 +76,38 @@ type ThreadState struct {
 	Next         []string       `json:"next"`
 	Tasks        []any          `json:"tasks"`
 	Metadata     map[string]any `json:"metadata"`
-	Config       map[string]any `json:"config,omitempty"`
 	CreatedAt    string         `json:"created_at,omitempty"`
 }
 
 type Run struct {
-	RunID        string
-	ThreadID     string
-	AssistantID  string
-	Status       string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	Events       []StreamEvent
-	Error        string
-	cancel       context.CancelFunc
-	abandonTimer *time.Timer
+	RunID       string
+	ThreadID    string
+	AssistantID string
+	Status      string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	Events      []StreamEvent
+	Error       string
 }
-
-const generalPurposeSubagentPrompt = "You are a general-purpose subagent working on a delegated task. Complete it autonomously and return a clear, actionable result.\n\n" +
-	"<guidelines>\n" +
-	"- Focus on completing the delegated task efficiently\n" +
-	"- Use available tools as needed to accomplish the goal\n" +
-	"- Think step by step but act decisively\n" +
-	"- If you hit issues, explain them clearly in your response\n" +
-	"- Do not ask for clarification; work with the provided information\n" +
-	"</guidelines>"
-
-const bashSubagentPrompt = "You are a bash command execution specialist. Execute the requested commands carefully and report results clearly.\n\n" +
-	"<guidelines>\n" +
-	"- Execute commands one at a time when they depend on each other\n" +
-	"- Use parallel execution only when commands are independent\n" +
-	"- Report both success/failure and relevant output\n" +
-	"- Use absolute paths for file operations\n" +
-	"- Be cautious with destructive operations\n" +
-	"</guidelines>"
 
 // LangGraph API types
 type RunCreateRequest struct {
-	AssistantID      string         `json:"assistant_id"`
-	ThreadID         string         `json:"thread_id,omitempty"`
-	Input            map[string]any `json:"input,omitempty"`
-	Config           map[string]any `json:"config,omitempty"`
-	Context          map[string]any `json:"context,omitempty"`
-	AutoAcceptedPlan *bool          `json:"auto_accepted_plan,omitempty"`
-	Feedback         string         `json:"feedback,omitempty"`
+	AssistantID string         `json:"assistant_id"`
+	ThreadID    string         `json:"thread_id,omitempty"`
+	Input       map[string]any `json:"input,omitempty"`
+	Config      map[string]any `json:"config,omitempty"`
 }
 
 // Message represents a LangGraph-compatible message
 type Message struct {
-	Type             string         `json:"type"`
-	ID               string         `json:"id"`
-	Role             string         `json:"role,omitempty"`
-	Content          any            `json:"content,omitempty"`
-	Name             string         `json:"name,omitempty"`
-	Data             map[string]any `json:"data,omitempty"`
-	AdditionalKwargs map[string]any `json:"additional_kwargs,omitempty"`
-	ToolCallID       string         `json:"tool_call_id,omitempty"`
-	ToolCalls        []ToolCall     `json:"tool_calls,omitempty"`
-	UsageMetadata    map[string]int `json:"usage_metadata,omitempty"`
+	Type       string         `json:"type"`
+	ID         string         `json:"id"`
+	Role       string         `json:"role,omitempty"`
+	Content    string         `json:"content,omitempty"`
+	Name       string         `json:"name,omitempty"`
+	Data       map[string]any `json:"data,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
+	ToolCalls  []ToolCall     `json:"tool_calls,omitempty"`
 }
 
 // ToolCall represents a LangGraph-compatible tool call
@@ -181,25 +127,7 @@ type StreamEvent struct {
 	ThreadID string
 }
 
-const defaultGatewaySubagentMaxConcurrent = 3
-
-type ServerOption func(*Server) error
-
-func WithFrontendFS(frontend fs.FS) ServerOption {
-	return func(s *Server) error {
-		if s == nil {
-			return errors.New("server is nil")
-		}
-		if frontend == nil {
-			return nil
-		}
-
-		s.frontend = http.FileServer(http.FS(frontend))
-		return nil
-	}
-}
-
-func NewServer(addr string, dbURL string, defaultModel string, opts ...ServerOption) (*Server, error) {
+func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) {
 	logger := log.Default()
 	ctx := context.Background()
 
@@ -213,21 +141,14 @@ func NewServer(addr string, dbURL string, defaultModel string, opts ...ServerOpt
 	for _, tool := range builtin.FileTools() {
 		registry.Register(tool)
 	}
-	for _, tool := range builtin.WebTools() {
-		registry.Register(tool)
-	}
-	registry.Register(builtin.ViewImageTool())
 	registry.Register(clarification.AskClarificationTool(clarifyManager))
-	if acpAgents := loadACPAgentConfigs(); len(acpAgents) > 0 {
-		registry.Register(tools.InvokeACPAgentTool(acpAgents))
+	var sb *sandbox.Sandbox
+	sb, err := sandbox.New("langgraph", filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox"))
+	if err != nil {
+		logger.Printf("Warning: failed to create sandbox: %v", err)
 	}
-	subagentAppCfg := loadSubagentsAppConfig()
-	subagentExecutor := agent.NewSubagentExecutor(provider, registry, nil)
-	subagentPool := subagent.NewPool(subagentExecutor, subagent.PoolConfig{
-		MaxConcurrent: defaultGatewaySubagentMaxConcurrent,
-		Timeout:       subagentAppCfg.timeoutFor(subagent.SubagentGeneralPurpose),
-		Defaults:      gatewayDefaultSubagentConfigs(subagentAppCfg),
-	})
+
+	subagentPool := agent.NewSubagentPool(provider, registry, sb, 2, 2*time.Minute)
 	registry.Register(tools.TaskTool(subagentPool))
 
 	// Create checkpoint store
@@ -252,209 +173,55 @@ func NewServer(addr string, dbURL string, defaultModel string, opts ...ServerOpt
 		return nil, err
 	}
 
-	var memoryStore memory.Storage
-	var memoryStoreCloser interface{ Close() }
-	var memorySvc *memory.Service
-	if dbURL != "" {
-		postgresMemoryStore, err := memory.NewPostgresStore(ctx, dbURL)
-		if err != nil {
-			logger.Printf("Warning: failed to create memory store: %v", err)
-		} else {
-			memoryStore = postgresMemoryStore
-			memoryStoreCloser = postgresMemoryStore
-			timeout := 30 * time.Second
-			if raw := strings.TrimSpace(os.Getenv("MEMORY_UPDATE_TIMEOUT")); raw != "" {
-				if parsed, parseErr := time.ParseDuration(raw); parseErr == nil && parsed > 0 {
-					timeout = parsed
-				}
-			}
-			memoryModel := strings.TrimSpace(os.Getenv("MEMORY_LLM_MODEL"))
-			if memoryModel == "" {
-				memoryModel = defaultModel
-			}
-			memorySvc = memory.NewService(memoryStore, memory.NewLLMClient(provider, memoryModel)).WithUpdateTimeout(timeout)
-		}
-	}
-	if memoryStore == nil {
-		fileMemoryStore, err := memory.NewFileStore(filepath.Join(dataRootAbs, "memory"))
-		if err != nil {
-			logger.Printf("Warning: failed to create file-backed memory store: %v", err)
-		} else {
-			if err := fileMemoryStore.AutoMigrate(ctx); err != nil {
-				logger.Printf("Warning: failed to initialize file-backed memory store: %v", err)
-			} else {
-				memoryStore = fileMemoryStore
-				timeout := 30 * time.Second
-				if raw := strings.TrimSpace(os.Getenv("MEMORY_UPDATE_TIMEOUT")); raw != "" {
-					if parsed, parseErr := time.ParseDuration(raw); parseErr == nil && parsed > 0 {
-						timeout = parsed
-					}
-				}
-				memoryModel := strings.TrimSpace(os.Getenv("MEMORY_LLM_MODEL"))
-				if memoryModel == "" {
-					memoryModel = defaultModel
-				}
-				memorySvc = memory.NewService(memoryStore, memory.NewLLMClient(provider, memoryModel)).WithUpdateTimeout(timeout)
-			}
-		}
-	}
-
 	s := &Server{
-		logger:            logger,
-		llmProvider:       provider,
-		tools:             registry,
-		sandboxRoot:       filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox"),
-		subagents:         subagentPool,
-		clarify:           clarifyManager,
-		clarifyAPI:        clarification.NewAPI(clarifyManager),
-		defaultModel:      defaultModel,
-		maxTurns:          8,
-		store:             store,
-		startedAt:         time.Now().UTC(),
-		sessions:          make(map[string]*Session),
-		runs:              make(map[string]*Run),
-		runStreams:        make(map[string]map[uint64]chan StreamEvent),
-		dataRoot:          dataRootAbs,
-		skills:            defaultGatewaySkills(),
-		mcpConfig:         defaultGatewayMCPConfig(),
-		agents:            map[string]gatewayAgent{},
-		memory:            defaultGatewayMemory(),
-		memoryStore:       memoryStore,
-		memoryStoreCloser: memoryStoreCloser,
-		memorySvc:         memorySvc,
-		mcpClients:        map[string]gatewayMCPClient{},
-		mcpToolNames:      map[string]struct{}{},
-		mcpConnector:      defaultGatewayMCPConnector,
+		logger:       logger,
+		llmProvider:  provider,
+		tools:        registry,
+		sandbox:      sb,
+		subagents:    subagentPool,
+		clarify:      clarifyManager,
+		clarifyAPI:   clarification.NewAPI(clarifyManager),
+		defaultModel: defaultModel,
+		maxTurns:     8,
+		store:        store,
+		startedAt:    time.Now().UTC(),
+		sessions:     make(map[string]*Session),
+		runs:         make(map[string]*Run),
+		dataRoot:     dataRootAbs,
+		models:       defaultGatewayModels(defaultModel),
+		skills:       nil,
+		mcpConfig:    defaultGatewayMCPConfig(),
+		agents:       map[string]gatewayAgent{},
+		memory:       defaultGatewayMemory(),
+		memoryConfig: defaultGatewayMemoryConfig(dataRootAbs),
+		channels:     defaultGatewayChannelsStatus(),
 	}
-	s.channelService = newGatewayChannelService(s)
-	s.channelService.start()
-	for _, opt := range opts {
-		if opt == nil {
-			continue
-		}
-		if err := opt(s); err != nil {
-			return nil, err
-		}
-	}
-	subagentExecutor.SetSandboxProvider(s.getOrCreateSandbox)
-	registry.Register(s.setupAgentTool())
-	registry.Register(s.todoTool())
+	s.skills = s.discoverGatewaySkills(nil)
 	if err := s.loadGatewayState(); err != nil {
 		logger.Printf("Warning: failed to load gateway state: %v", err)
 	}
-	if err := s.loadGatewayCompatFiles(); err != nil {
-		logger.Printf("Warning: failed to load gateway compatibility files: %v", err)
-	}
-	s.applyGatewayMCPConfig(ctx, s.mcpConfig)
-	if err := s.loadPersistedSessions(); err != nil {
-		logger.Printf("Warning: failed to load persisted sessions: %v", err)
-	}
+	s.loadPersistedThreads()
+	s.loadPersistedRuns()
 
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
 
 	s.httpServer = &http.Server{
 		Addr:    addr,
-		Handler: wrapAuth(wrapTrailingSlashCompat(wrapCORSCompat(mux)), defaultAuthConfig()),
+		Handler: mux,
 	}
 
 	return s, nil
 }
 
-func wrapTrailingSlashCompat(next http.Handler) http.Handler {
-	if next == nil {
-		return http.NotFoundHandler()
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r == nil || r.URL == nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-		path := r.URL.Path
-		if path == "" || path == "/" || !strings.HasSuffix(path, "/") {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		trimmedPath := strings.TrimRight(path, "/")
-		if trimmedPath == "" {
-			trimmedPath = "/"
-		}
-
-		cloned := r.Clone(r.Context())
-		cloned.URL = cloneURL(r.URL)
-		cloned.URL.Path = trimmedPath
-		if rawPath := cloned.URL.RawPath; rawPath != "" {
-			cloned.URL.RawPath = strings.TrimRight(rawPath, "/")
-			if cloned.URL.RawPath == "" {
-				cloned.URL.RawPath = "/"
-			}
-		}
-		next.ServeHTTP(w, cloned)
-	})
-}
-
-func wrapCORSCompat(next http.Handler) http.Handler {
-	if next == nil {
-		return http.NotFoundHandler()
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		setCORSHeaders(w, r)
-		if r != nil && r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func setCORSHeaders(w http.ResponseWriter, r *http.Request) {
-	if w == nil {
-		return
-	}
-	header := w.Header()
-	header.Add("Vary", "Origin")
-	header.Add("Vary", "Access-Control-Request-Method")
-	header.Add("Vary", "Access-Control-Request-Headers")
-
-	origin := "*"
-	if r != nil {
-		if candidate := strings.TrimSpace(r.Header.Get("Origin")); candidate != "" {
-			origin = candidate
-		}
-	}
-	header.Set("Access-Control-Allow-Origin", origin)
-	header.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS")
-	header.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Last-Event-ID, X-Requested-With")
-	header.Set("Access-Control-Expose-Headers", "Content-Disposition, Content-Length, Content-Type, Content-Location, Location")
-	header.Set("Access-Control-Max-Age", "600")
-}
-
-func cloneURL(src *url.URL) *url.URL {
-	if src == nil {
-		return &url.URL{}
-	}
-	dst := *src
-	return &dst
-}
-
 func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
 	sandboxRef := cfg.Sandbox
 	if sandboxRef == nil {
-		if sb, err := s.getOrCreateSandbox(); err == nil {
-			sandboxRef = sb
-		} else if s.logger != nil {
-			s.logger.Printf("Warning: failed to initialize sandbox: %v", err)
-		}
-	}
-	registry := cfg.Tools
-	if registry == nil {
-		registry = s.tools
+		sandboxRef = s.sandbox
 	}
 	return agent.New(agent.AgentConfig{
 		LLMProvider:     s.llmProvider,
-		Tools:           registry,
-		DeferredTools:   s.currentDeferredMCPTools(),
+		Tools:           s.tools,
 		PresentFiles:    cfg.PresentFiles,
 		MaxTurns:        s.maxTurns,
 		AgentType:       cfg.AgentType,
@@ -468,92 +235,34 @@ func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
 	})
 }
 
-func (s *Server) getOrCreateSandbox() (*sandbox.Sandbox, error) {
-	if s == nil {
-		return nil, errors.New("server is nil")
-	}
-
-	s.sandboxMu.Lock()
-	defer s.sandboxMu.Unlock()
-
-	if s.sandbox != nil {
-		return s.sandbox, nil
-	}
-
-	root := strings.TrimSpace(s.sandboxRoot)
-	if root == "" {
-		root = filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
-		s.sandboxRoot = root
-	}
-
-	sb, err := sandbox.New("langgraph", root)
-	if err != nil {
-		return nil, err
-	}
-	s.sandbox = sb
-	return sb, nil
-}
-
-func (s *Server) currentDeferredMCPTools() []models.Tool {
-	if s == nil {
-		return nil
-	}
-	s.mcpMu.Lock()
-	defer s.mcpMu.Unlock()
-	if len(s.mcpDeferredTools) == 0 {
-		return nil
-	}
-	out := make([]models.Tool, 0, len(s.mcpDeferredTools))
-	for _, tool := range s.mcpDeferredTools {
-		out = append(out, tool)
-	}
-	return out
-}
-
 func (s *Server) registerRoutes(mux *http.ServeMux) {
 	s.registerLangGraphRoutes(mux, "")
 	s.registerLangGraphRoutes(mux, "/api/langgraph")
 	s.registerGatewayRoutes(mux)
-	s.registerDocsRoutes(mux)
 
 	// Health check
 	mux.HandleFunc("GET /health", s.handleHealth)
-	if s.frontend != nil {
-		mux.Handle("/", s.frontend)
-	} else {
-		mux.HandleFunc("/", s.handleEmbeddedUI)
-	}
+	mux.HandleFunc("/", s.handleEmbeddedUI)
 }
 
 func (s *Server) registerLangGraphRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("POST "+prefix+"/runs/stream", s.handleRunsStream)
-	mux.HandleFunc("POST "+prefix+"/runs", s.handleRunsCreate)
 	mux.HandleFunc("GET "+prefix+"/runs/{run_id}", s.handleRunGet)
 	mux.HandleFunc("GET "+prefix+"/runs/{run_id}/stream", s.handleRunStream)
-	mux.HandleFunc("POST "+prefix+"/runs/{run_id}/cancel", s.handleRunCancel)
 
-	mux.HandleFunc("GET "+prefix+"/threads", s.handleThreadsList)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}", s.handleThreadGet)
 	mux.HandleFunc("POST "+prefix+"/threads", s.handleThreadCreate)
-	mux.HandleFunc("PUT "+prefix+"/threads/{thread_id}", s.handleThreadUpdate)
 	mux.HandleFunc("PATCH "+prefix+"/threads/{thread_id}", s.handleThreadUpdate)
 	mux.HandleFunc("DELETE "+prefix+"/threads/{thread_id}", s.handleThreadDelete)
 	mux.HandleFunc("POST "+prefix+"/threads/search", s.handleThreadSearch)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/files", s.handleThreadFiles)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/state", s.handleThreadStateGet)
-	mux.HandleFunc("PUT "+prefix+"/threads/{thread_id}/state", s.handleThreadStatePost)
 	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/state", s.handleThreadStatePost)
 	mux.HandleFunc("PATCH "+prefix+"/threads/{thread_id}/state", s.handleThreadStatePatch)
-	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/history", s.handleThreadHistory)
 	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/history", s.handleThreadHistory)
-	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/runs", s.handleThreadRunsList)
-	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/runs/{run_id}", s.handleThreadRunGet)
-	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/runs", s.handleThreadRunsCreate)
 	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/runs/stream", s.handleThreadRunsStream)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/runs/{run_id}/stream", s.handleThreadRunStream)
-	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/runs/{run_id}/cancel", s.handleThreadRunCancel)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/stream", s.handleThreadJoinStream)
-	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/clarifications", s.handleThreadClarificationList)
 	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/clarifications", s.handleThreadClarificationCreate)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/clarifications/{id}", s.handleThreadClarificationGet)
 	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/clarifications/{id}/resolve", s.handleThreadClarificationResolve)
@@ -569,30 +278,15 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.httpServer != nil {
 		shutdownErr = s.httpServer.Shutdown(ctx)
 	}
-	s.waitForBackgroundTasks()
 	if s.store != nil {
 		s.store.Close()
 	}
-	if s.channelService != nil {
-		s.channelService.stop()
-	}
-	if s.memoryStoreCloser != nil {
-		s.memoryStoreCloser.Close()
-	}
-	s.closeGatewayMCPClients()
 	if s.sandbox != nil {
 		if err := s.sandbox.Close(); err != nil && shutdownErr == nil {
 			shutdownErr = err
 		}
 	}
 	return shutdownErr
-}
-
-func (s *Server) waitForBackgroundTasks() {
-	if s == nil {
-		return
-	}
-	s.backgroundTasks.Wait()
 }
 
 func (s *Server) healthStatus(ctx context.Context) HealthStatus {
@@ -665,16 +359,10 @@ func (s *Server) checkDatabase(ctx context.Context) string {
 }
 
 func (s *Server) checkSandbox(ctx context.Context) string {
-	if s == nil {
+	if s == nil || s.sandbox == nil {
 		return "disabled"
 	}
-
-	sb, err := s.getOrCreateSandbox()
-	if err != nil {
-		s.logger.Printf("health check: sandbox init failed: %v", err)
-		return "down"
-	}
-	result, err := sb.Exec(ctx, "printf sandbox-ok", 2*time.Second)
+	result, err := s.sandbox.Exec(ctx, "printf sandbox-ok", 2*time.Second)
 	if err != nil {
 		s.logger.Printf("health check: sandbox down: %v", err)
 		return "down"
