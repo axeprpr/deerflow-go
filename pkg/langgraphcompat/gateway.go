@@ -1637,6 +1637,8 @@ func (s *Server) loadAgentsFromFiles() map[string]gatewayAgent {
 					data = nested
 				} else if nested, ok := wrapper["config"]; ok && len(nested) > 0 {
 					data = nested
+				} else if nested, ok := wrapper["data"]; ok && len(nested) > 0 {
+					data = nested
 				}
 			}
 			if err := json.Unmarshal(data, &agent); err == nil {
@@ -1702,6 +1704,12 @@ func (s *Server) loadUserProfileFromFile() (string, bool) {
 	var rawString string
 	if err := json.Unmarshal(data, &rawString); err == nil {
 		return rawString, true
+	}
+	var wrapper map[string]json.RawMessage
+	if err := json.Unmarshal(data, &wrapper); err == nil {
+		if nested, ok := wrapper["data"]; ok && len(nested) > 0 {
+			data = nested
+		}
 	}
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err == nil {
