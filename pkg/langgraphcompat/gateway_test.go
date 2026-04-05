@@ -2507,6 +2507,48 @@ func TestLoadPersistedThreadsAcceptsTopLevelConfigurable(t *testing.T) {
 	}
 }
 
+func TestLoadPersistedThreadsAcceptsFlatTopLevelConfig(t *testing.T) {
+	root := t.TempDir()
+	threadDir := filepath.Join(root, "threads", "thread-flat-config", "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"values":{"messages":[{"id":"m1","type":"human","content":"hello from state"}]},
+		"threadId":"thread-flat-config",
+		"agentType":"deep_research",
+		"agentName":"writer",
+		"modelName":"deepseek/deepseek-r1",
+		"reasoningEffort":"high",
+		"thinkingEnabled":false,
+		"isPlanMode":true,
+		"subagentEnabled":true,
+		"created_at":"2026-01-01T00:00:00Z"
+	}`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write thread file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, sessions: map[string]*Session{}}
+	s.loadPersistedThreads()
+
+	state := s.getThreadState("thread-flat-config")
+	if state == nil {
+		t.Fatalf("state=nil")
+	}
+	configurable, _ := state.Config["configurable"].(map[string]any)
+	if configurable["thread_id"] != "thread-flat-config" ||
+		configurable["agent_type"] != "deep_research" ||
+		configurable["agent_name"] != "writer" ||
+		configurable["model_name"] != "deepseek/deepseek-r1" ||
+		configurable["reasoning_effort"] != "high" {
+		t.Fatalf("configurable=%#v", configurable)
+	}
+	if configurable["thinking_enabled"] != false || configurable["is_plan_mode"] != true || configurable["subagent_enabled"] != true {
+		t.Fatalf("configurable=%#v", configurable)
+	}
+}
+
 func TestLoadPersistedThreadsAcceptsTopLevelCompatValues(t *testing.T) {
 	root := t.TempDir()
 	threadDir := filepath.Join(root, "threads", "thread-top-level-values", "user-data")
@@ -3250,6 +3292,37 @@ func TestLoadThreadHistoryAcceptsTopLevelCompatValues(t *testing.T) {
 		}
 	default:
 		t.Fatalf("values=%#v", history[0].Values)
+	}
+}
+
+func TestLoadThreadHistoryAcceptsFlatTopLevelConfig(t *testing.T) {
+	root := t.TempDir()
+	threadID := "thread-history-flat-config"
+	threadDir := filepath.Join(root, "threads", threadID, "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `[
+		{
+			"checkpointId":"cp-1",
+			"createdAt":"2026-01-01T00:00:00Z",
+			"threadId":"thread-history-flat-config",
+			"modelName":"deepseek/deepseek-r1",
+			"agentType":"deep_research"
+		}
+	]`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread_history.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write history: %v", err)
+	}
+
+	s := &Server{dataRoot: root}
+	history := s.loadThreadHistory(threadID)
+	if len(history) != 1 {
+		t.Fatalf("history=%d", len(history))
+	}
+	configurable, _ := history[0].Config["configurable"].(map[string]any)
+	if configurable["thread_id"] != "thread-history-flat-config" || configurable["model_name"] != "deepseek/deepseek-r1" || configurable["agent_type"] != "deep_research" {
+		t.Fatalf("config=%#v", history[0].Config)
 	}
 }
 

@@ -1538,6 +1538,9 @@ func (s *Server) loadPersistedThreads() {
 				config = normalizeThreadConfig(map[string]any{"configurable": configurable})
 			}
 		}
+		if len(config) == 0 {
+			config = normalizeThreadConfig(raw)
+		}
 		if configurable := mapFromAny(config["configurable"]); len(configurable) > 0 {
 			if persisted.Metadata == nil {
 				persisted.Metadata = map[string]any{}
@@ -1933,6 +1936,9 @@ func normalizeThreadConfig(raw map[string]any) map[string]any {
 	}
 	configurable := mapFromAny(out["configurable"])
 	if len(configurable) == 0 {
+		configurable = raw
+	}
+	if len(configurable) == 0 {
 		return out
 	}
 	normalized := make(map[string]any, len(configurable))
@@ -2002,6 +2008,9 @@ func normalizeLoadedThreadHistory(history []ThreadState, rawItems []map[string]a
 			if configurable := mapFromAny(rawItems[i]["configurable"]); len(configurable) > 0 {
 				history[i].Config = map[string]any{"configurable": configurable}
 			}
+		}
+		if len(history[i].Config) == 0 {
+			history[i].Config = normalizeThreadConfig(rawItems[i])
 		}
 		history[i].Config = normalizeThreadConfig(history[i].Config)
 		if len(history[i].Metadata) == 0 {
