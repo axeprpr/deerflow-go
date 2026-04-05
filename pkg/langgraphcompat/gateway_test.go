@@ -9643,6 +9643,18 @@ func TestRecordedRunStreamReplaysToolMessageTuple(t *testing.T) {
 			t.Fatalf("unexpected tool tuple field %s: %s", forbidden, tupleBlock)
 		}
 	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-replay-tool-message"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
+	}
 }
 
 func TestRecordedRunStreamReplaysAIUsageTuple(t *testing.T) {
@@ -9690,6 +9702,18 @@ func TestRecordedRunStreamReplaysAIUsageTuple(t *testing.T) {
 			t.Fatalf("unexpected ai usage tuple field %s: %s", forbidden, tupleBlock)
 		}
 	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-replay-ai-usage"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
+	}
 }
 
 func TestRecordedRunStreamReplaysAIAdditionalKwargsTuple(t *testing.T) {
@@ -9734,6 +9758,18 @@ func TestRecordedRunStreamReplaysAIAdditionalKwargsTuple(t *testing.T) {
 			t.Fatalf("unexpected ai kwargs tuple field %s: %s", forbidden, tupleBlock)
 		}
 	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-replay-ai-kwargs"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
+	}
 }
 
 func TestRecordedRunStreamReplaysAIToolCallsTuple(t *testing.T) {
@@ -9773,6 +9809,18 @@ func TestRecordedRunStreamReplaysAIToolCallsTuple(t *testing.T) {
 	for _, forbidden := range []string{`"usage_metadata":`, `"additional_kwargs":`, `"tool_call_id":`, `"status":`, `"data":{`} {
 		if strings.Contains(tupleBlock, forbidden) {
 			t.Fatalf("unexpected ai tool_calls tuple field %s: %s", forbidden, tupleBlock)
+		}
+	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-replay-ai-tool-calls"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
 		}
 	}
 }
@@ -10313,6 +10361,18 @@ func TestThreadJoinStreamReplaysToolMessageTuple(t *testing.T) {
 			t.Fatalf("unexpected tool tuple field %s: %s", forbidden, tupleBlock)
 		}
 	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-join-tool-message"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
+	}
 }
 
 func TestThreadJoinStreamReplaysAIUsageTuple(t *testing.T) {
@@ -10360,6 +10420,18 @@ func TestThreadJoinStreamReplaysAIUsageTuple(t *testing.T) {
 			t.Fatalf("unexpected ai usage tuple field %s: %s", forbidden, tupleBlock)
 		}
 	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-join-ai-usage"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
+	}
 }
 
 func TestThreadJoinStreamReplaysAIAdditionalKwargsTuple(t *testing.T) {
@@ -10404,6 +10476,18 @@ func TestThreadJoinStreamReplaysAIAdditionalKwargsTuple(t *testing.T) {
 			t.Fatalf("unexpected ai kwargs tuple field %s: %s", forbidden, tupleBlock)
 		}
 	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-join-ai-kwargs"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
+	}
 }
 
 func TestThreadJoinStreamReplaysAIToolCallsTuple(t *testing.T) {
@@ -10443,6 +10527,18 @@ func TestThreadJoinStreamReplaysAIToolCallsTuple(t *testing.T) {
 	for _, forbidden := range []string{`"usage_metadata":`, `"additional_kwargs":`, `"tool_call_id":`, `"status":`, `"data":{`} {
 		if strings.Contains(tupleBlock, forbidden) {
 			t.Fatalf("unexpected ai tool_calls tuple field %s: %s", forbidden, tupleBlock)
+		}
+	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-join-ai-tool-calls"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
 		}
 	}
 }
