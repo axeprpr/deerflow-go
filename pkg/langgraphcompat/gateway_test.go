@@ -707,6 +707,15 @@ func TestThreadHistorySnapshots(t *testing.T) {
 	if len(history) == 0 {
 		t.Fatal("expected non-empty history")
 	}
+
+	getResp, err := http.Get(ts.URL + "/threads/history-me/history")
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+	defer getResp.Body.Close()
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("get history status=%d", getResp.StatusCode)
+	}
 }
 
 func TestThreadDeleteRemovesRunFiles(t *testing.T) {
