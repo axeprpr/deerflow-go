@@ -8715,6 +8715,34 @@ func TestThreadRunStreamEmitsToolCallEvent(t *testing.T) {
 	}
 }
 
+func TestThreadRunStreamEmitsChunkEvent(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/thread-stream-chunk/runs/stream", strings.NewReader(`{"assistant_id":"lead_agent","stream_mode":["events"],"input":{"messages":[{"role":"user","content":"hello"}]}}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: chunk") {
+		t.Fatalf("missing chunk event: %s", text)
+	}
+	if !strings.Contains(text, `"delta":"hello from fake llm"`) {
+		t.Fatalf("missing chunk payload: %s", text)
+	}
+}
+
 func TestThreadRunStreamModeValuesFiltersMessageEvents(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.llmProvider = fakeLLMProvider{}
@@ -9323,6 +9351,44 @@ func TestRecordedRunStreamReplaysToolCallEvent(t *testing.T) {
 	}
 }
 
+func TestRecordedRunStreamReplaysChunkEvent(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-replay-chunk",
+		ThreadID:    "thread-replay-chunk",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "chunk", Data: map[string]any{"delta": "hello from replay", "content": "hello from replay", "type": "ai"}},
+			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-replay-chunk"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-replay-chunk/runs/run-replay-chunk/stream?streamMode=events")
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: chunk") {
+		t.Fatalf("missing chunk event: %s", text)
+	}
+	if !strings.Contains(text, `"delta":"hello from replay"`) {
+		t.Fatalf("missing chunk payload: %s", text)
+	}
+}
+
 func TestRecordedRunStreamReplaysErrorEvent(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	run := &Run{
@@ -9617,6 +9683,44 @@ func TestThreadJoinStreamReplaysToolCallEvent(t *testing.T) {
 	}
 	if !strings.Contains(text, `"id":"call-1"`) || !strings.Contains(text, `"name":"read_file"`) {
 		t.Fatalf("missing tool_call payload: %s", text)
+	}
+}
+
+func TestThreadJoinStreamReplaysChunkEvent(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-join-chunk",
+		ThreadID:    "thread-join-chunk",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "chunk", Data: map[string]any{"delta": "hello from join", "content": "hello from join", "type": "ai"}},
+			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-join-chunk"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-join-chunk/stream?streamMode=events")
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: chunk") {
+		t.Fatalf("missing chunk event: %s", text)
+	}
+	if !strings.Contains(text, `"delta":"hello from join"`) {
+		t.Fatalf("missing chunk payload: %s", text)
 	}
 }
 
