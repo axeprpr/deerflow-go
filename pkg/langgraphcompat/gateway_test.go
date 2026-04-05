@@ -11769,6 +11769,32 @@ func TestSkillInstallAcceptsCamelCaseThreadID(t *testing.T) {
 	}
 }
 
+func TestMemoryFactsWithSourceThreads(t *testing.T) {
+	s := &Server{sessions: map[string]*Session{
+		"thread-agent-memory": {
+			ThreadID: "thread-agent-memory",
+			Metadata: map[string]any{"agent_name": "researcher"},
+		},
+	}}
+
+	facts := s.memoryFactsWithSourceThreads([]memoryFact{{
+		ID:        "fact-1",
+		Content:   "Fact",
+		Category:  "general",
+		CreatedAt: "2026-01-01T00:00:00Z",
+		Source:    "thread-agent-memory",
+	}})
+	if len(facts) != 1 || facts[0].SourceThread == nil {
+		t.Fatalf("facts=%#v", facts)
+	}
+	if facts[0].SourceThread.ThreadID != "thread-agent-memory" {
+		t.Fatalf("thread_id=%q", facts[0].SourceThread.ThreadID)
+	}
+	if facts[0].SourceThread.AgentName != "researcher" {
+		t.Fatalf("agent_name=%q", facts[0].SourceThread.AgentName)
+	}
+}
+
 func TestAgentsAndMemoryEndpoints(t *testing.T) {
 	_, ts := newCompatTestServer(t)
 

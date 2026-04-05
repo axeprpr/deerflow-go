@@ -110,13 +110,19 @@ type memoryHistory struct {
 	LongTermBackground memorySection `json:"longTermBackground"`
 }
 
+type memoryFactSourceThread struct {
+	ThreadID  string `json:"thread_id"`
+	AgentName string `json:"agent_name,omitempty"`
+}
+
 type memoryFact struct {
-	ID         string  `json:"id"`
-	Content    string  `json:"content"`
-	Category   string  `json:"category"`
-	Confidence float64 `json:"confidence"`
-	CreatedAt  string  `json:"createdAt"`
-	Source     string  `json:"source"`
+	ID           string                  `json:"id"`
+	Content      string                  `json:"content"`
+	Category     string                  `json:"category"`
+	Confidence   float64                 `json:"confidence"`
+	CreatedAt    string                  `json:"createdAt"`
+	Source       string                  `json:"source"`
+	SourceThread *memoryFactSourceThread `json:"source_thread,omitempty"`
 }
 
 type gatewayMemoryResponse struct {
@@ -544,7 +550,29 @@ func (s *Server) handleMemoryGet(w http.ResponseWriter, r *http.Request) {
 	s.uiStateMu.RLock()
 	m := s.getMemoryLocked()
 	s.uiStateMu.RUnlock()
+	m.Facts = s.memoryFactsWithSourceThreads(m.Facts)
 	writeJSON(w, http.StatusOK, m)
+}
+
+func (s *Server) memoryFactsWithSourceThreads(facts []memoryFact) []memoryFact {
+	if len(facts) == 0 {
+		return facts
+	}
+	enriched := make([]memoryFact, 0, len(facts))
+	for _, fact := range facts {
+		clone := fact
+		if source := strings.TrimSpace(fact.Source); source != "" {
+			s.sessionsMu.RLock()
+			session := s.sessions[source]
+			s.sessionsMu.RUnlock()
+			clone.SourceThread = &memoryFactSourceThread{ThreadID: source}
+			if session != nil {
+				clone.SourceThread.AgentName = stringValue(session.Metadata["agent_name"])
+			}
+		}
+		enriched = append(enriched, clone)
+	}
+	return enriched
 }
 
 func (s *Server) handleMemoryReload(w http.ResponseWriter, r *http.Request) {
