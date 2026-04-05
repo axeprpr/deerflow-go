@@ -1016,6 +1016,9 @@ func (s *Server) threadValues(session *Session) map[string]any {
 
 func (s *Server) threadConfigurable(session *Session) map[string]any {
 	mode := deriveThreadMode(session.Metadata)
+	thinkingEnabled := mode != "flash"
+	isPlanMode := mode == "pro" || mode == "ultra"
+	subagentEnabled := mode == "ultra"
 	configurable := map[string]any{
 		"thread_id":        session.ThreadID,
 		"agent_type":       stringValue(session.Metadata["agent_type"]),
@@ -1023,9 +1026,9 @@ func (s *Server) threadConfigurable(session *Session) map[string]any {
 		"model_name":       stringValue(session.Metadata["model_name"]),
 		"mode":             mode,
 		"reasoning_effort": deriveReasoningEffort(session.Metadata, mode),
-		"is_plan_mode":     false,
-		"thinking_enabled": true,
-		"subagent_enabled": false,
+		"is_plan_mode":     isPlanMode,
+		"thinking_enabled": thinkingEnabled,
+		"subagent_enabled": subagentEnabled,
 	}
 	if value, ok := float64FromAny(session.Metadata["temperature"]); ok {
 		configurable["temperature"] = value

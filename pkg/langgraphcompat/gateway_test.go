@@ -1506,7 +1506,7 @@ func TestThreadSearchIncludesCheckpointFieldsByDefault(t *testing.T) {
 	if selected["mode"] != "flash" || selected["model_name"] != "" || selected["reasoning_effort"] != "minimal" {
 		t.Fatalf("selected=%#v", selected)
 	}
-	if selected["thinking_enabled"] != true || selected["is_plan_mode"] != false || selected["subagent_enabled"] != false {
+	if selected["thinking_enabled"] != false || selected["is_plan_mode"] != false || selected["subagent_enabled"] != false {
 		t.Fatalf("selected=%#v", selected)
 	}
 	if value, ok := selected["temperature"]; !ok || value != nil {
@@ -3982,6 +3982,41 @@ func TestLoadPersistedThreadsPrefersCheckpointObjectsOverStaleMetadata(t *testin
 	}
 	if session.Metadata["checkpoint_id"] != "cp-current" || session.Metadata["parent_checkpoint_id"] != "cp-parent-current" {
 		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+}
+
+func TestThreadConfigurableDerivesBooleansFromMode(t *testing.T) {
+	s := &Server{sessions: map[string]*Session{}}
+
+	tests := []struct {
+		name            string
+		mode            string
+		thinkingEnabled bool
+		isPlanMode      bool
+		subagentEnabled bool
+		reasoningEffort string
+	}{
+		{name: "flash", mode: "flash", thinkingEnabled: false, isPlanMode: false, subagentEnabled: false, reasoningEffort: "minimal"},
+		{name: "pro", mode: "pro", thinkingEnabled: true, isPlanMode: true, subagentEnabled: false, reasoningEffort: "medium"},
+		{name: "ultra", mode: "ultra", thinkingEnabled: true, isPlanMode: true, subagentEnabled: true, reasoningEffort: "high"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			session := s.ensureSession("thread-mode-"+tc.name, map[string]any{"mode": tc.mode})
+			configurable := s.threadConfigurable(session)
+			if configurable["mode"] != tc.mode {
+				t.Fatalf("mode=%#v want %q", configurable["mode"], tc.mode)
+			}
+			if configurable["thinking_enabled"] != tc.thinkingEnabled ||
+				configurable["is_plan_mode"] != tc.isPlanMode ||
+				configurable["subagent_enabled"] != tc.subagentEnabled {
+				t.Fatalf("configurable=%#v", configurable)
+			}
+			if configurable["reasoning_effort"] != tc.reasoningEffort {
+				t.Fatalf("reasoning_effort=%#v want %q", configurable["reasoning_effort"], tc.reasoningEffort)
+			}
+		})
 	}
 }
 
