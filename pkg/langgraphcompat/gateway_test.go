@@ -1278,6 +1278,25 @@ func TestLoadAgentsFromFilesAcceptsSoulOnlyDirectories(t *testing.T) {
 	}
 }
 
+func TestLoadAgentsFromFilesAcceptsModelNameAliases(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{dataRoot: root}
+	dir := filepath.Join(s.agentsRoot(), "writer")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{"name":"writer","modelName":"qwen/Qwen3.5-9B"}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	loaded := s.loadAgentsFromFiles()
+	got, ok := loaded["writer"]
+	if !ok || got.Model == nil || *got.Model != "qwen/Qwen3.5-9B" {
+		t.Fatalf("agent=%#v", got)
+	}
+}
+
 func TestLoadMemoryFromFileAcceptsSnakeCaseFields(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}
@@ -1430,6 +1449,35 @@ func TestLoadGatewayStateUsesModelMapKeyWhenNameMissing(t *testing.T) {
 	}
 	if model.Name != "flash" || model.ID != "flash" || model.DisplayName != "Flash" {
 		t.Fatalf("model=%#v", model)
+	}
+}
+
+func TestLoadGatewayStateAcceptsModelNameAliases(t *testing.T) {
+	root := t.TempDir()
+	raw := `{
+		"models":{"flash":{"modelName":"qwen/Qwen3.5-9B","displayName":"Flash"}},
+		"agents":{"writer":{"name":"writer","model_name":"qwen/Qwen3.5-9B"}}
+	}`
+	if err := os.WriteFile(filepath.Join(root, "gateway_state.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write gateway_state.json: %v", err)
+	}
+
+	loaded := &Server{
+		dataRoot: root,
+		models:   map[string]gatewayModel{},
+		agents:   map[string]gatewayAgent{},
+	}
+	if err := loaded.loadGatewayState(); err != nil {
+		t.Fatalf("loadGatewayState: %v", err)
+	}
+
+	model, ok := loaded.findModelLocked("flash")
+	if !ok || model.Model != "qwen/Qwen3.5-9B" {
+		t.Fatalf("model=%#v", model)
+	}
+	agent, ok := loaded.getAgentsLocked()["writer"]
+	if !ok || agent.Model == nil || *agent.Model != "qwen/Qwen3.5-9B" {
+		t.Fatalf("agent=%#v", agent)
 	}
 }
 

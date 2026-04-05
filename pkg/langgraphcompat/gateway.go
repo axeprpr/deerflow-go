@@ -1324,7 +1324,7 @@ func (s *Server) loadGatewayState() error {
 				Description: stringFromAny(agentMap["description"]),
 				Soul:        stringFromAny(agentMap["soul"]),
 			}
-			if rawModel, exists := agentMap["model"]; exists {
+			if rawModel := firstNonNil(agentMap["model"], agentMap["model_name"], agentMap["modelName"]); rawModel != nil {
 				if rawModel == nil {
 					agent.Model = nil
 				} else {
@@ -1358,7 +1358,7 @@ func (s *Server) loadGatewayState() error {
 				Description: stringFromAny(agentMap["description"]),
 				Soul:        stringFromAny(agentMap["soul"]),
 			}
-			if rawModel, exists := agentMap["model"]; exists {
+			if rawModel := firstNonNil(agentMap["model"], agentMap["model_name"], agentMap["modelName"]); rawModel != nil {
 				if rawModel == nil {
 					agent.Model = nil
 				} else {
@@ -1628,7 +1628,7 @@ func (s *Server) loadAgentsFromFiles() map[string]gatewayAgent {
 				if agent.Description == "" {
 					agent.Description = stringFromAny(raw["description"])
 				}
-				if rawModel, exists := raw["model"]; exists && agent.Model == nil && rawModel != nil {
+				if rawModel := firstNonNil(raw["model"], raw["model_name"], raw["modelName"]); agent.Model == nil && rawModel != nil {
 					model := stringFromAny(rawModel)
 					agent.Model = &model
 				}
@@ -2043,7 +2043,7 @@ func gatewayModelFromMap(raw map[string]any) gatewayModel {
 	return gatewayModel{
 		ID:                      firstNonEmpty(stringFromAny(raw["id"])),
 		Name:                    firstNonEmpty(stringFromAny(raw["name"])),
-		Model:                   firstNonEmpty(stringFromAny(raw["model"])),
+		Model:                   firstNonEmpty(stringFromAny(raw["model"]), stringFromAny(raw["model_name"]), stringFromAny(raw["modelName"])),
 		DisplayName:             firstNonEmpty(stringFromAny(raw["display_name"]), stringFromAny(raw["displayName"])),
 		Description:             firstNonEmpty(stringFromAny(raw["description"])),
 		SupportsThinking:        boolValue(firstNonNil(raw["supports_thinking"], raw["supportsThinking"])),
