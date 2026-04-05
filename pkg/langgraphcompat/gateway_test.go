@@ -6522,6 +6522,96 @@ func TestThreadGetReflectsClearedMessages(t *testing.T) {
 	}
 }
 
+func TestThreadStateGetReflectsWrittenMessages(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-state-get-written-messages"
+	s.ensureSession(threadID, nil)
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID+"/state",
+		strings.NewReader(`{"values":{"messages":[{"id":"m1","type":"human","content":"hello"}]}}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("patch state: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	stateResp, err := http.Get(ts.URL + "/threads/" + threadID + "/state")
+	if err != nil {
+		t.Fatalf("get state: %v", err)
+	}
+	defer stateResp.Body.Close()
+	if stateResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(stateResp.Body)
+		t.Fatalf("status=%d body=%s", stateResp.StatusCode, string(b))
+	}
+
+	var state ThreadState
+	if err := json.NewDecoder(stateResp.Body).Decode(&state); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	messages, _ := state.Values["messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("values=%#v", state.Values)
+	}
+	message, _ := messages[0].(map[string]any)
+	if message["id"] != "m1" || message["content"] != "hello" {
+		t.Fatalf("message=%#v", message)
+	}
+}
+
+func TestThreadStateGetReflectsClearedMessages(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-state-get-cleared-messages"
+	session := s.ensureSession(threadID, nil)
+	session.Messages = []models.Message{{
+		ID:        "m1",
+		SessionID: threadID,
+		Role:      models.RoleHuman,
+		Content:   "hello",
+	}}
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID+"/state",
+		strings.NewReader(`{"values":{"messages":[]}}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("patch state: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	stateResp, err := http.Get(ts.URL + "/threads/" + threadID + "/state")
+	if err != nil {
+		t.Fatalf("get state: %v", err)
+	}
+	defer stateResp.Body.Close()
+	if stateResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(stateResp.Body)
+		t.Fatalf("status=%d body=%s", stateResp.StatusCode, string(b))
+	}
+
+	var state ThreadState
+	if err := json.NewDecoder(stateResp.Body).Decode(&state); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	messages, _ := state.Values["messages"].([]any)
+	if len(messages) != 0 {
+		t.Fatalf("values=%#v", state.Values)
+	}
+}
+
 func TestThreadStateMessageWritesPersistAcrossReload(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-reload-messages"
