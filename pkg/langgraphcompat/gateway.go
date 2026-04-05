@@ -1233,6 +1233,8 @@ func (s *Server) loadGatewayState() error {
 			data = nested
 		} else if nested, ok := wrapper["gateway"]; ok && len(nested) > 0 {
 			data = nested
+		} else if nested, ok := wrapper["ui_state"]; ok && len(nested) > 0 {
+			data = nested
 		}
 	}
 	var raw map[string]any

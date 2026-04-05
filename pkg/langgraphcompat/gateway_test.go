@@ -1721,6 +1721,36 @@ func TestLoadGatewayStateAcceptsWrappedGatewayObject(t *testing.T) {
 	}
 }
 
+func TestLoadGatewayStateAcceptsWrappedUIStateObject(t *testing.T) {
+	root := t.TempDir()
+	raw := `{
+		"ui_state":{
+			"userProfile":"Wrapped UI profile",
+			"models":{"flash":{"modelName":"qwen/Qwen3.5-9B","displayName":"Flash"}}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(root, "gateway_state.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write gateway_state.json: %v", err)
+	}
+
+	loaded := &Server{
+		dataRoot: root,
+		models:   map[string]gatewayModel{},
+		agents:   map[string]gatewayAgent{},
+	}
+	if err := loaded.loadGatewayState(); err != nil {
+		t.Fatalf("loadGatewayState: %v", err)
+	}
+
+	if loaded.getUserProfileLocked() != "Wrapped UI profile" {
+		t.Fatalf("userProfile=%q", loaded.getUserProfileLocked())
+	}
+	model, ok := loaded.findModelLocked("flash")
+	if !ok || model.Model != "qwen/Qwen3.5-9B" {
+		t.Fatalf("model=%#v", model)
+	}
+}
+
 func TestLoadGatewayStateAcceptsMCPAlias(t *testing.T) {
 	root := t.TempDir()
 	raw := `{
