@@ -1135,6 +1135,60 @@ func TestMCPConfigPutAcceptsCamelCaseFields(t *testing.T) {
 	}
 }
 
+func TestMCPConfigPutHonorsExplicitZeroRefreshSkew(t *testing.T) {
+	_, ts := newCompatTestServer(t)
+
+	body := `{
+		"mcpServers": {
+			"github": {
+				"enabled": true,
+				"oauth": {
+					"enabled": true,
+					"tokenUrl": "https://example.com/token",
+					"refreshSkewSeconds": 0
+				}
+			}
+		}
+	}`
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/mcp/config", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("mcp put request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var cfg map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	servers := cfg["mcp_servers"].(map[string]any)
+	server := servers["github"].(map[string]any)
+	oauth := server["oauth"].(map[string]any)
+	if oauth["refresh_skew_seconds"] != float64(0) {
+		t.Fatalf("refresh_skew_seconds=%v want 0", oauth["refresh_skew_seconds"])
+	}
+}
+
+func TestGatewayMCPConfigFromEnvHonorsExplicitZeroRefreshSkew(t *testing.T) {
+	t.Setenv("DEERFLOW_MCP_CONFIG", `{"mcp_servers":{"github":{"enabled":true,"oauth":{"enabled":true,"token_url":"https://example.com/token","refresh_skew_seconds":0}}}}`)
+	cfg := gatewayMCPConfigFromEnv(os.Getenv("DEERFLOW_MCP_CONFIG"))
+	server, ok := cfg.MCPServers["github"]
+	if !ok {
+		t.Fatalf("missing github server: %#v", cfg)
+	}
+	if server.OAuth == nil {
+		t.Fatalf("missing oauth: %#v", server)
+	}
+	if server.OAuth.RefreshSkewSecond != 0 {
+		t.Fatalf("refresh_skew_seconds=%d want 0", server.OAuth.RefreshSkewSecond)
+	}
+}
+
 func TestAgentFilesPersistAndLoad(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}

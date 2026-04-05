@@ -63,7 +63,7 @@ type gatewayMCPOAuthConfig struct {
 	TokenTypeField    string            `json:"token_type_field,omitempty"`
 	ExpiresInField    string            `json:"expires_in_field,omitempty"`
 	DefaultTokenType  string            `json:"default_token_type,omitempty"`
-	RefreshSkewSecond int               `json:"refresh_skew_seconds,omitempty"`
+	RefreshSkewSecond int               `json:"refresh_skew_seconds"`
 	ExtraTokenParams  map[string]string `json:"extra_token_params,omitempty"`
 }
 
@@ -1673,17 +1673,11 @@ func gatewayMCPConfigFromEnv(raw string) gatewayMCPConfig {
 	if raw == "" {
 		return gatewayMCPConfig{}
 	}
-	var config gatewayMCPConfig
-	if err := json.Unmarshal([]byte(raw), &config); err != nil {
+	var configRaw map[string]any
+	if err := json.Unmarshal([]byte(raw), &configRaw); err != nil {
 		return gatewayMCPConfig{}
 	}
-	if config.MCPServers == nil {
-		config.MCPServers = map[string]gatewayMCPServerConfig{}
-	}
-	for name, server := range config.MCPServers {
-		config.MCPServers[name] = normalizeGatewayMCPServer(server)
-	}
-	return config
+	return gatewayMCPConfigFromMap(configRaw)
 }
 
 func normalizeGatewayMCPServer(server gatewayMCPServerConfig) gatewayMCPServerConfig {
@@ -1714,9 +1708,6 @@ func normalizeGatewayMCPServer(server gatewayMCPServerConfig) gatewayMCPServerCo
 		}
 		if strings.TrimSpace(server.OAuth.DefaultTokenType) == "" {
 			server.OAuth.DefaultTokenType = "Bearer"
-		}
-		if server.OAuth.RefreshSkewSecond == 0 {
-			server.OAuth.RefreshSkewSecond = 60
 		}
 		if server.OAuth.ExtraTokenParams == nil {
 			server.OAuth.ExtraTokenParams = map[string]string{}
@@ -1762,7 +1753,7 @@ func gatewayMCPOAuthFromMap(raw map[string]any) *gatewayMCPOAuthConfig {
 	if raw == nil {
 		return nil
 	}
-	return &gatewayMCPOAuthConfig{
+	oauth := &gatewayMCPOAuthConfig{
 		Enabled:           boolValue(raw["enabled"]),
 		TokenURL:          firstNonEmpty(stringFromAny(raw["token_url"]), stringFromAny(raw["tokenUrl"])),
 		GrantType:         firstNonEmpty(stringFromAny(raw["grant_type"]), stringFromAny(raw["grantType"])),
@@ -1778,6 +1769,12 @@ func gatewayMCPOAuthFromMap(raw map[string]any) *gatewayMCPOAuthConfig {
 		RefreshSkewSecond: intValue(firstNonNil(raw["refresh_skew_seconds"], raw["refreshSkewSeconds"])),
 		ExtraTokenParams:  stringMapFromAny(firstNonNil(raw["extra_token_params"], raw["extraTokenParams"])),
 	}
+	if _, ok := raw["refresh_skew_seconds"]; !ok {
+		if _, ok := raw["refreshSkewSeconds"]; !ok && oauth.RefreshSkewSecond == 0 {
+			oauth.RefreshSkewSecond = 60
+		}
+	}
+	return oauth
 }
 
 func stringSliceFromAny(value any) []string {
