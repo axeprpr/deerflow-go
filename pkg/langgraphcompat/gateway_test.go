@@ -2266,6 +2266,35 @@ func TestLoadPersistedThreadsPrefersTopLevelCheckpointObjects(t *testing.T) {
 	}
 }
 
+func TestLoadPersistedThreadsUsesCheckpointObjectsAsIDFallback(t *testing.T) {
+	root := t.TempDir()
+	threadDir := filepath.Join(root, "threads", "thread-checkpoint-object-fallback", "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"values":{"messages":[{"id":"m1","type":"human","content":"hello"}]},
+		"metadata":{"thread_id":"thread-checkpoint-object-fallback"},
+		"checkpoint":{"checkpoint_id":"cp-current","thread_id":"thread-current","checkpoint_ns":"ns-current"},
+		"parent_checkpoint":{"checkpoint_id":"cp-parent-current","thread_id":"thread-parent","checkpoint_ns":"ns-parent"},
+		"created_at":"2026-01-01T00:00:00Z"
+	}`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write thread file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, sessions: map[string]*Session{}}
+	s.loadPersistedThreads()
+
+	session := s.sessions["thread-checkpoint-object-fallback"]
+	if session == nil {
+		t.Fatalf("sessions=%#v", s.sessions)
+	}
+	if session.Metadata["checkpoint_id"] != "cp-current" || session.Metadata["parent_checkpoint_id"] != "cp-parent-current" {
+		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+}
+
 func TestLoadPersistedThreadsDerivesBusyStatusFromNextTasks(t *testing.T) {
 	root := t.TempDir()
 	threadDir := filepath.Join(root, "threads", "thread-busy-state", "user-data")
