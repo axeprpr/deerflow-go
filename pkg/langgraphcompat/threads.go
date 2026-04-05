@@ -1349,6 +1349,9 @@ func anySlice(v any) []any {
 		}
 		return out
 	default:
+		if v != nil {
+			return []any{v}
+		}
 		return nil
 	}
 }

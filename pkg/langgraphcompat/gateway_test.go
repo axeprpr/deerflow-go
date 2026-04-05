@@ -2541,6 +2541,46 @@ func TestLoadPersistedThreadsAcceptsScalarNext(t *testing.T) {
 	}
 }
 
+func TestLoadPersistedThreadsAcceptsScalarTasksAndInterrupts(t *testing.T) {
+	root := t.TempDir()
+	threadDir := filepath.Join(root, "threads", "thread-scalar-state-items", "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"values":{"messages":[{"id":"m1","type":"human","content":"hello"}]},
+		"metadata":{"thread_id":"thread-scalar-state-items"},
+		"tasks":{"id":"task-1","name":"lead_agent"},
+		"interrupts":{"value":"Need input"},
+		"created_at":"2026-01-01T00:00:00Z"
+	}`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write thread file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, sessions: map[string]*Session{}}
+	s.loadPersistedThreads()
+
+	state := s.getThreadState("thread-scalar-state-items")
+	if state == nil {
+		t.Fatalf("state=nil")
+	}
+	if len(state.Tasks) != 1 {
+		t.Fatalf("tasks=%#v", state.Tasks)
+	}
+	task, _ := state.Tasks[0].(map[string]any)
+	if task["id"] != "task-1" {
+		t.Fatalf("task=%#v", task)
+	}
+	if len(state.Interrupts) != 1 {
+		t.Fatalf("interrupts=%#v", state.Interrupts)
+	}
+	interrupt, _ := state.Interrupts[0].(map[string]any)
+	if interrupt["value"] != "Need input" {
+		t.Fatalf("interrupt=%#v", interrupt)
+	}
+}
+
 func TestLoadPersistedThreadsDerivesInterruptedStatus(t *testing.T) {
 	root := t.TempDir()
 	threadDir := filepath.Join(root, "threads", "thread-interrupted-state", "user-data")
