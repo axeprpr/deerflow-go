@@ -1044,7 +1044,7 @@ func TestThreadSearchAcceptsCamelCaseCheckpointSelectFields(t *testing.T) {
 	resp, err := http.Post(
 		ts.URL+"/threads/search",
 		"application/json",
-		strings.NewReader(`{"limit":10,"select":["threadId","checkpointId","parentCheckpointId","checkpoint","parentCheckpoint"]}`),
+		strings.NewReader(`{"limit":10,"select":["threadId","checkpointId","parentCheckpointId","checkpointNs","parentCheckpointNs","checkpointThreadId","parentCheckpointThreadId","checkpoint","parentCheckpoint"]}`),
 	)
 	if err != nil {
 		t.Fatalf("search request: %v", err)
@@ -1076,6 +1076,12 @@ func TestThreadSearchAcceptsCamelCaseCheckpointSelectFields(t *testing.T) {
 	if selected["checkpoint_id"] != "cp-1" || selected["parent_checkpoint_id"] != "cp-parent-1" {
 		t.Fatalf("selected=%#v", selected)
 	}
+	if selected["checkpoint_ns"] != "ns-1" || selected["parent_checkpoint_ns"] != "ns-parent-1" {
+		t.Fatalf("selected=%#v", selected)
+	}
+	if selected["checkpoint_thread_id"] != "checkpoint-thread-1" || selected["parent_checkpoint_thread_id"] != "checkpoint-thread-parent-1" {
+		t.Fatalf("selected=%#v", selected)
+	}
 	checkpoint, _ := selected["checkpoint"].(map[string]any)
 	if checkpoint["checkpoint_id"] != "cp-1" || checkpoint["checkpoint_ns"] != "ns-1" || checkpoint["thread_id"] != "checkpoint-thread-1" {
 		t.Fatalf("checkpoint=%#v", selected["checkpoint"])
@@ -1084,11 +1090,67 @@ func TestThreadSearchAcceptsCamelCaseCheckpointSelectFields(t *testing.T) {
 	if parentCheckpoint["checkpoint_id"] != "cp-parent-1" || parentCheckpoint["checkpoint_ns"] != "ns-parent-1" || parentCheckpoint["thread_id"] != "checkpoint-thread-parent-1" {
 		t.Fatalf("parent_checkpoint=%#v", selected["parent_checkpoint"])
 	}
-	if _, ok := selected["checkpointId"]; ok {
-		t.Fatalf("unexpected checkpointId alias in %#v", selected)
+	for _, alias := range []string{"checkpointId", "parentCheckpointId", "checkpointNs", "parentCheckpointNs", "checkpointThreadId", "parentCheckpointThreadId", "parentCheckpoint"} {
+		if _, ok := selected[alias]; ok {
+			t.Fatalf("unexpected %s alias in %#v", alias, selected)
+		}
 	}
-	if _, ok := selected["parentCheckpoint"]; ok {
-		t.Fatalf("unexpected parentCheckpoint alias in %#v", selected)
+}
+
+func TestThreadSearchAcceptsCamelCaseCheckpointSummarySortFields(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	first := s.ensureSession("thread-search-checkpoint-summary-b", map[string]any{
+		"checkpoint_ns":               "ns-b",
+		"parent_checkpoint_ns":        "parent-ns-b",
+		"checkpoint_thread_id":        "checkpoint-thread-b",
+		"parent_checkpoint_thread_id": "parent-checkpoint-thread-b",
+	})
+	second := s.ensureSession("thread-search-checkpoint-summary-a", map[string]any{
+		"checkpoint_ns":               "ns-a",
+		"parent_checkpoint_ns":        "parent-ns-a",
+		"checkpoint_thread_id":        "checkpoint-thread-a",
+		"parent_checkpoint_thread_id": "parent-checkpoint-thread-a",
+	})
+	first.UpdatedAt = time.Now().UTC().Add(-time.Hour)
+	second.UpdatedAt = time.Now().UTC()
+
+	tests := []struct {
+		name   string
+		sortBy string
+	}{
+		{name: "checkpoint_ns", sortBy: "checkpointNs"},
+		{name: "parent_checkpoint_ns", sortBy: "parentCheckpointNs"},
+		{name: "checkpoint_thread_id", sortBy: "checkpointThreadId"},
+		{name: "parent_checkpoint_thread_id", sortBy: "parentCheckpointThreadId"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := http.Post(
+				ts.URL+"/threads/search",
+				"application/json",
+				strings.NewReader(`{"limit":10,"sortBy":"`+tc.sortBy+`","sortOrder":"asc","select":["threadId"]}`),
+			)
+			if err != nil {
+				t.Fatalf("search request: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				b, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+			}
+
+			var threads []map[string]any
+			if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if len(threads) < 2 {
+				t.Fatalf("threads=%#v", threads)
+			}
+			if threads[0]["thread_id"] != "thread-search-checkpoint-summary-a" {
+				t.Fatalf("first thread=%v want thread-search-checkpoint-summary-a", threads[0]["thread_id"])
+			}
+		})
 	}
 }
 

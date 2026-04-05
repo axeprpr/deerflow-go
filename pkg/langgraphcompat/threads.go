@@ -204,6 +204,14 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 			less = asString(left["checkpoint_id"]) < asString(right["checkpoint_id"])
 		case "parent_checkpoint_id":
 			less = asString(left["parent_checkpoint_id"]) < asString(right["parent_checkpoint_id"])
+		case "checkpoint_ns":
+			less = asString(left["checkpoint_ns"]) < asString(right["checkpoint_ns"])
+		case "parent_checkpoint_ns":
+			less = asString(left["parent_checkpoint_ns"]) < asString(right["parent_checkpoint_ns"])
+		case "checkpoint_thread_id":
+			less = asString(left["checkpoint_thread_id"]) < asString(right["checkpoint_thread_id"])
+		case "parent_checkpoint_thread_id":
+			less = asString(left["parent_checkpoint_thread_id"]) < asString(right["parent_checkpoint_thread_id"])
 		case "thread_id":
 			less = left["thread_id"].(string) < right["thread_id"].(string)
 		default:
@@ -297,6 +305,14 @@ func normalizeThreadFieldName(field string) string {
 		return "checkpoint_id"
 	case "parentCheckpointId":
 		return "parent_checkpoint_id"
+	case "checkpointNs":
+		return "checkpoint_ns"
+	case "parentCheckpointNs":
+		return "parent_checkpoint_ns"
+	case "checkpointThreadId":
+		return "checkpoint_thread_id"
+	case "parentCheckpointThreadId":
+		return "parent_checkpoint_thread_id"
 	case "parentCheckpoint":
 		return "parent_checkpoint"
 	default:
