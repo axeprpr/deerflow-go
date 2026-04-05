@@ -2,6 +2,7 @@ package langgraphcompat
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -408,6 +409,7 @@ func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var raw map[string]any
 	var req struct {
 		Limit     int `json:"limit"`
 		PageSizeX int `json:"pageSize"`
@@ -415,9 +417,14 @@ func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
 	limitProvided := false
 	if r.Body != nil {
 		defer r.Body.Close()
-		decoder := json.NewDecoder(r.Body)
-		_ = decoder.Decode(&req)
-		limitProvided = req.Limit != 0 || req.PageSizeX != 0
+		body, _ := io.ReadAll(r.Body)
+		if len(body) > 0 {
+			_ = json.Unmarshal(body, &raw)
+			_ = json.Unmarshal(body, &req)
+			_, hasLimit := raw["limit"]
+			_, hasPageSize := raw["pageSize"]
+			limitProvided = hasLimit || hasPageSize
+		}
 	}
 	if req.Limit == 0 {
 		req.Limit = req.PageSizeX

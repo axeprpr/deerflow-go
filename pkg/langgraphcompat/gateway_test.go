@@ -518,6 +518,40 @@ func TestThreadHistoryClampsNegativeLimit(t *testing.T) {
 	}
 }
 
+func TestThreadHistoryHonorsExplicitZeroLimit(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-history-zero-limit"
+	session := s.ensureSession(threadID, map[string]any{"title": "History"})
+	if err := s.persistSessionFile(session); err != nil {
+		t.Fatalf("persist session: %v", err)
+	}
+	if err := s.appendThreadHistorySnapshot(threadID); err != nil {
+		t.Fatalf("append history: %v", err)
+	}
+
+	resp, err := http.Post(
+		ts.URL+"/threads/"+threadID+"/history",
+		"application/json",
+		strings.NewReader(`{"limit":0}`),
+	)
+	if err != nil {
+		t.Fatalf("history request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var history []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&history); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(history) != 0 {
+		t.Fatalf("len=%d want 0", len(history))
+	}
+}
+
 func TestThreadSearchSelectStillSortsByUnselectedField(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	oldSession := s.ensureSession("thread-search-old", map[string]any{"title": "Old"})
