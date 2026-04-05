@@ -4638,6 +4638,78 @@ func TestThreadStateIncludesCompatFields(t *testing.T) {
 	}
 }
 
+func TestThreadGetIncludesCompatShape(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-get-shape"
+	session := s.ensureSession(threadID, map[string]any{
+		"title":                       "Compat Thread",
+		"mode":                        "thinking",
+		"model_name":                  "deepseek/deepseek-r1",
+		"reasoning_effort":            "high",
+		"thinking_enabled":            false,
+		"is_plan_mode":                true,
+		"subagent_enabled":            true,
+		"temperature":                 0.2,
+		"max_tokens":                  321,
+		"checkpoint_id":               "cp-1",
+		"parent_checkpoint_id":        "cp-parent-1",
+		"checkpoint_ns":               "ns-1",
+		"parent_checkpoint_ns":        "ns-parent-1",
+		"checkpoint_thread_id":        "checkpoint-thread-1",
+		"parent_checkpoint_thread_id": "checkpoint-thread-parent-1",
+		"next":                        []any{"lead_agent"},
+		"tasks":                       []any{map[string]any{"id": "task-1", "name": "lead_agent"}},
+		"interrupts":                  []any{map[string]any{"value": "Need input"}},
+	})
+	session.Status = "busy"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir upload dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "brief.txt"), []byte("brief"), 0o644); err != nil {
+		t.Fatalf("write upload: %v", err)
+	}
+
+	resp, err := http.Get(ts.URL + "/threads/" + threadID)
+	if err != nil {
+		t.Fatalf("get thread: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	var thread map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&thread); err != nil {
+		t.Fatalf("decode thread: %v", err)
+	}
+	if thread["thread_id"] != threadID || thread["status"] != "busy" {
+		t.Fatalf("thread=%#v", thread)
+	}
+	values, _ := thread["values"].(map[string]any)
+	if values["title"] != "Compat Thread" {
+		t.Fatalf("values=%#v", values)
+	}
+	config, _ := thread["config"].(map[string]any)
+	configurable, _ := config["configurable"].(map[string]any)
+	if configurable["mode"] != "thinking" || configurable["model_name"] != "deepseek/deepseek-r1" || configurable["reasoning_effort"] != "high" {
+		t.Fatalf("config=%#v", config)
+	}
+	if configurable["thinking_enabled"] != false || configurable["is_plan_mode"] != true || configurable["subagent_enabled"] != true {
+		t.Fatalf("config=%#v", config)
+	}
+	if configurable["temperature"] != 0.2 {
+		t.Fatalf("config=%#v", config)
+	}
+	if configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != int64(321) && configurable["max_tokens"] != 321 {
+		t.Fatalf("config=%#v", config)
+	}
+	metadata, _ := thread["metadata"].(map[string]any)
+	if metadata["checkpoint_id"] != "cp-1" || metadata["parent_checkpoint_id"] != "cp-parent-1" {
+		t.Fatalf("metadata=%#v", metadata)
+	}
+}
+
 func TestThreadStatePostPersistsCompatFields(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-state-post"
