@@ -9535,6 +9535,18 @@ func TestRecordedRunStreamReplaysMetadataPayload(t *testing.T) {
 			t.Fatalf("unexpected metadata field %s: %s", forbidden, metadataBlock)
 		}
 	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-replay-meta"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
+	}
 }
 
 func TestRecordedRunStreamReplaysEndUsagePayload(t *testing.T) {
@@ -10131,6 +10143,18 @@ func TestThreadJoinStreamReplaysMetadataPayload(t *testing.T) {
 	for _, forbidden := range []string{`"messages":`, `"values":`, `"config":`, `"metadata":`, `"checkpoint":`, `"parent_checkpoint":`} {
 		if strings.Contains(metadataBlock, forbidden) {
 			t.Fatalf("unexpected metadata field %s: %s", forbidden, metadataBlock)
+		}
+	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-join-meta"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
 		}
 	}
 }
