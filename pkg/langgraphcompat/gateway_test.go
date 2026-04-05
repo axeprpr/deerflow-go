@@ -1158,6 +1158,69 @@ func TestThreadSearchAcceptsCamelCaseCoreIDSelectFields(t *testing.T) {
 	}
 }
 
+func TestThreadSearchAcceptsCamelCaseRuntimeSelectFields(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.ensureSession("thread-search-runtime-select", map[string]any{
+		"model_name":       "deepseek/deepseek-r1",
+		"reasoning_effort": "high",
+		"thinking_enabled": false,
+		"is_plan_mode":     true,
+		"subagent_enabled": true,
+		"temperature":      0.2,
+		"max_tokens":       321,
+	})
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"limit":10,"select":["threadId","modelName","reasoningEffort","thinkingEnabled","isPlanMode","subagentEnabled","temperature","maxTokens"]}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) == 0 {
+		t.Fatal("expected threads")
+	}
+
+	var selected map[string]any
+	for _, thread := range threads {
+		if thread["thread_id"] == "thread-search-runtime-select" {
+			selected = thread
+			break
+		}
+	}
+	if selected == nil {
+		t.Fatalf("missing projected thread in %#v", threads)
+	}
+	if selected["model_name"] != "deepseek/deepseek-r1" || selected["reasoning_effort"] != "high" {
+		t.Fatalf("selected=%#v", selected)
+	}
+	if selected["thinking_enabled"] != false || selected["is_plan_mode"] != true || selected["subagent_enabled"] != true {
+		t.Fatalf("selected=%#v", selected)
+	}
+	if selected["temperature"] != 0.2 {
+		t.Fatalf("selected=%#v", selected)
+	}
+	if selected["max_tokens"] != float64(321) && selected["max_tokens"] != int64(321) && selected["max_tokens"] != 321 {
+		t.Fatalf("selected=%#v", selected)
+	}
+	for _, alias := range []string{"modelName", "reasoningEffort", "thinkingEnabled", "isPlanMode", "subagentEnabled", "maxTokens"} {
+		if _, ok := selected[alias]; ok {
+			t.Fatalf("unexpected %s alias in %#v", alias, selected)
+		}
+	}
+}
+
 func TestThreadSearchSortsByCamelCaseAssistantID(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	first := s.ensureSession("thread-search-assistant-b", map[string]any{"assistant_id": "beta"})

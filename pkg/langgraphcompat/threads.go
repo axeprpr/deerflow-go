@@ -255,6 +255,18 @@ func normalizeThreadFieldName(field string) string {
 		return "graph_id"
 	case "runId":
 		return "run_id"
+	case "modelName":
+		return "model_name"
+	case "reasoningEffort":
+		return "reasoning_effort"
+	case "thinkingEnabled":
+		return "thinking_enabled"
+	case "isPlanMode":
+		return "is_plan_mode"
+	case "subagentEnabled":
+		return "subagent_enabled"
+	case "maxTokens":
+		return "max_tokens"
 	case "checkpointId":
 		return "checkpoint_id"
 	case "parentCheckpointId":
