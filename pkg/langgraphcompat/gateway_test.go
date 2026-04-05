@@ -8699,6 +8699,12 @@ func TestThreadRunStreamEmitsToolEndAliasAndUsageMetadata(t *testing.T) {
 	if !strings.Contains(text, "event: on_tool_end") {
 		t.Fatalf("missing on_tool_end event: %s", text)
 	}
+	if !strings.Contains(startBlock, `"name":"read_file"`) || !strings.Contains(endBlock, `"name":"read_file"`) {
+		t.Fatalf("missing tool call name in start/end payloads: %s %s", startBlock, endBlock)
+	}
+	if !strings.Contains(aliasBlock, `"name":"read_file"`) || !strings.Contains(aliasBlock, `"data":{"id":"call-1"`) {
+		t.Fatalf("missing on_tool_end payload shape: %s", aliasBlock)
+	}
 	for _, forbidden := range []string{`"messages":`, `"usage_metadata":`, `"additional_kwargs":`, `"tool_calls":`, `"tool_call_id":`, `"thread_id":`, `"run_id":`} {
 		if strings.Contains(startBlock, forbidden) {
 			t.Fatalf("unexpected tool_call_start field %s: %s", forbidden, startBlock)
@@ -9718,6 +9724,12 @@ func TestRecordedRunStreamReplaysToolCallEvents(t *testing.T) {
 	}
 	if !strings.Contains(text, `"id":"call-1"`) {
 		t.Fatalf("missing tool call id: %s", text)
+	}
+	if !strings.Contains(startBlock, `"name":"read_file"`) || !strings.Contains(endBlock, `"name":"read_file"`) {
+		t.Fatalf("missing tool call name in start/end payloads: %s %s", startBlock, endBlock)
+	}
+	if !strings.Contains(aliasBlock, `"name":"read_file"`) || !strings.Contains(aliasBlock, `"data":{"id":"call-1"`) {
+		t.Fatalf("missing on_tool_end payload shape: %s", aliasBlock)
 	}
 	for _, forbidden := range []string{`"messages":`, `"usage_metadata":`, `"additional_kwargs":`, `"tool_calls":`, `"tool_call_id":`, `"thread_id":`, `"run_id":`} {
 		if strings.Contains(startBlock, forbidden) {
