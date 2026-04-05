@@ -1205,6 +1205,8 @@ func (s *Server) loadPersistedThreads() {
 		if err := json.Unmarshal(data, &wrapper); err == nil {
 			if nested, ok := wrapper["thread"]; ok && len(nested) > 0 {
 				data = nested
+			} else if nested, ok := wrapper["data"]; ok && len(nested) > 0 {
+				data = nested
 			}
 		}
 		var persisted persistedSession
@@ -1353,6 +1355,8 @@ func (s *Server) loadPersistedRuns() {
 		if err := json.Unmarshal(data, &wrapper); err == nil {
 			if nested, ok := wrapper["run"]; ok && len(nested) > 0 {
 				data = nested
+			} else if nested, ok := wrapper["data"]; ok && len(nested) > 0 {
+				data = nested
 			}
 		}
 		var persisted persistedRun
@@ -1438,6 +1442,8 @@ func (s *Server) loadThreadHistory(threadID string) []ThreadState {
 		if nested, ok := wrapper["history"]; ok && len(nested) > 0 {
 			data = nested
 		} else if nested, ok := wrapper["items"]; ok && len(nested) > 0 {
+			data = nested
+		} else if nested, ok := wrapper["data"]; ok && len(nested) > 0 {
 			data = nested
 		}
 	}

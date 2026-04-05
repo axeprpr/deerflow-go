@@ -1235,6 +1235,8 @@ func (s *Server) loadGatewayState() error {
 			data = nested
 		} else if nested, ok := wrapper["ui_state"]; ok && len(nested) > 0 {
 			data = nested
+		} else if nested, ok := wrapper["data"]; ok && len(nested) > 0 {
+			data = nested
 		}
 	}
 	var raw map[string]any
@@ -1724,6 +1726,8 @@ func (s *Server) loadMemoryFromFile() (gatewayMemoryResponse, bool) {
 	var wrapper map[string]json.RawMessage
 	if err := json.Unmarshal(data, &wrapper); err == nil {
 		if nested, ok := wrapper["memory"]; ok && len(nested) > 0 {
+			data = nested
+		} else if nested, ok := wrapper["data"]; ok && len(nested) > 0 {
 			data = nested
 		}
 	}

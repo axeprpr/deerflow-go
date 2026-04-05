@@ -1503,6 +1503,28 @@ func TestLoadMemoryFromFileAcceptsWrappedMemoryObject(t *testing.T) {
 	}
 }
 
+func TestLoadMemoryFromFileAcceptsDataWrapper(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{dataRoot: root}
+	raw := `{
+		"data":{
+			"version":"1.0",
+			"lastUpdated":"2026-01-01T00:00:00Z",
+			"user":{"workContext":{"summary":"Work","updatedAt":"2026-01-01T00:00:00Z"}},
+			"history":{},
+			"facts":[]
+		}
+	}`
+	if err := os.WriteFile(s.memoryPath(), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write memory file: %v", err)
+	}
+
+	mem, ok := s.loadMemoryFromFile()
+	if !ok || mem.User.WorkContext.Summary != "Work" {
+		t.Fatalf("memory=%#v ok=%v", mem, ok)
+	}
+}
+
 func TestLoadMemoryFromFileAcceptsWrappedFacts(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}
@@ -1780,6 +1802,30 @@ func TestLoadGatewayStateAcceptsWrappedUIStateObject(t *testing.T) {
 	}
 }
 
+func TestLoadGatewayStateAcceptsDataWrapper(t *testing.T) {
+	root := t.TempDir()
+	raw := `{
+		"data":{
+			"userProfile":"Wrapped data profile",
+			"models":{"flash":{"modelName":"qwen/Qwen3.5-9B","displayName":"Flash"}}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(root, "gateway_state.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write gateway_state.json: %v", err)
+	}
+
+	loaded := &Server{dataRoot: root, models: map[string]gatewayModel{}, agents: map[string]gatewayAgent{}}
+	if err := loaded.loadGatewayState(); err != nil {
+		t.Fatalf("loadGatewayState: %v", err)
+	}
+	if loaded.getUserProfileLocked() != "Wrapped data profile" {
+		t.Fatalf("userProfile=%q", loaded.getUserProfileLocked())
+	}
+	if model, ok := loaded.findModelLocked("flash"); !ok || model.Model != "qwen/Qwen3.5-9B" {
+		t.Fatalf("model=%#v ok=%v", model, ok)
+	}
+}
+
 func TestLoadGatewayStateAcceptsMCPAlias(t *testing.T) {
 	root := t.TempDir()
 	raw := `{
@@ -1987,6 +2033,32 @@ func TestLoadPersistedThreadsAcceptsWrappedThreadObject(t *testing.T) {
 	}
 }
 
+func TestLoadPersistedThreadsAcceptsDataWrapper(t *testing.T) {
+	root := t.TempDir()
+	threadDir := filepath.Join(root, "threads", "thread-data-wrap", "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"data":{
+			"threadId":"thread-data-wrap",
+			"messages":[{"id":"m1","role":"human","content":"hello"}],
+			"metadata":{"title":"Data Wrapped Thread"},
+			"status":"idle",
+			"createdAt":"2026-01-01T00:00:00Z",
+			"updatedAt":"2026-01-02T00:00:00Z"
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write thread file: %v", err)
+	}
+	s := &Server{dataRoot: root, sessions: map[string]*Session{}}
+	s.loadPersistedThreads()
+	if session := s.sessions["thread-data-wrap"]; session == nil || session.Metadata["title"] != "Data Wrapped Thread" {
+		t.Fatalf("sessions=%#v", s.sessions)
+	}
+}
+
 func TestLoadPersistedRunsAcceptsCamelCaseFields(t *testing.T) {
 	root := t.TempDir()
 	runDir := filepath.Join(root, "runs")
@@ -2102,6 +2174,33 @@ func TestLoadPersistedRunsAcceptsWrappedRunObject(t *testing.T) {
 	}
 	if run.ThreadID != "thread-wrapped" || run.AssistantID != "lead_agent" || len(run.Events) != 1 || run.Events[0].Event != "end" {
 		t.Fatalf("run=%#v", run)
+	}
+}
+
+func TestLoadPersistedRunsAcceptsDataWrapper(t *testing.T) {
+	root := t.TempDir()
+	runDir := filepath.Join(root, "runs")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"data":{
+			"runId":"run-data-wrap",
+			"threadId":"thread-data-wrap",
+			"assistantId":"lead_agent",
+			"status":"success",
+			"createdAt":"2026-01-01T00:00:00Z",
+			"updatedAt":"2026-01-02T00:00:00Z",
+			"events":[{"id":"evt-1","event":"end","data":{"ok":true},"runId":"run-data-wrap","threadId":"thread-data-wrap"}]
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(runDir, "run-data-wrap.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write run file: %v", err)
+	}
+	s := &Server{dataRoot: root, runs: map[string]*Run{}}
+	s.loadPersistedRuns()
+	if run := s.runs["run-data-wrap"]; run == nil || run.ThreadID != "thread-data-wrap" || len(run.Events) != 1 {
+		t.Fatalf("runs=%#v", s.runs)
 	}
 }
 
@@ -2262,6 +2361,32 @@ func TestLoadThreadHistoryAcceptsWrappedItemsObject(t *testing.T) {
 	}
 	if history[0].Metadata["thread_id"] != "thread-history-items" {
 		t.Fatalf("metadata=%#v", history[0].Metadata)
+	}
+}
+
+func TestLoadThreadHistoryAcceptsDataWrapper(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{dataRoot: root}
+	threadID := "thread-history-data"
+	if err := os.MkdirAll(s.threadRoot(threadID), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"data":[
+			{
+				"checkpointId":"cp-1",
+				"values":{"title":"History"},
+				"metadata":{"threadId":"thread-history-data"},
+				"createdAt":"2026-01-01T00:00:00Z"
+			}
+		]
+	}`
+	if err := os.WriteFile(s.threadHistoryPath(threadID), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write history file: %v", err)
+	}
+	history := s.loadThreadHistory(threadID)
+	if len(history) != 1 || history[0].Metadata["thread_id"] != "thread-history-data" {
+		t.Fatalf("history=%#v", history)
 	}
 }
 
