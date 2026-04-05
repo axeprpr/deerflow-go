@@ -8941,6 +8941,9 @@ func TestThreadJoinStreamModeFiltersReplayEvents(t *testing.T) {
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
 	}
+	if !strings.Contains(text, `"content":"hello"`) {
+		t.Fatalf("missing message payload: %s", text)
+	}
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
 	}
@@ -8987,6 +8990,9 @@ func TestRecordedRunStreamModeSupportsCommaSeparatedAliases(t *testing.T) {
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
 	}
+	if !strings.Contains(text, `"content":"hello"`) {
+		t.Fatalf("missing message payload: %s", text)
+	}
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
 	}
@@ -9029,6 +9035,9 @@ func TestThreadJoinStreamModeSupportsCommaSeparatedAliases(t *testing.T) {
 	}
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
+	}
+	if !strings.Contains(text, `"content":"hello"`) {
+		t.Fatalf("missing message payload: %s", text)
 	}
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
