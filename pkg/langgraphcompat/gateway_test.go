@@ -1353,6 +1353,48 @@ func TestLoadGatewayStateAcceptsLegacyFieldNames(t *testing.T) {
 	}
 }
 
+func TestLoadGatewayStateAcceptsBooleanSkillStateMap(t *testing.T) {
+	root := t.TempDir()
+	skillsRoot := filepath.Join(root, "skills", "public", "demo-skill")
+	if err := os.MkdirAll(skillsRoot, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	content := `---
+name: demo-skill
+description: Demo skill
+category: public
+license: MIT
+---
+# Demo
+`
+	if err := os.WriteFile(filepath.Join(skillsRoot, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+	raw := `{
+		"skills":{"demo-skill":true}
+	}`
+	if err := os.WriteFile(filepath.Join(root, "gateway_state.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write gateway_state.json: %v", err)
+	}
+
+	loaded := &Server{
+		dataRoot: root,
+		models:   map[string]gatewayModel{},
+		agents:   map[string]gatewayAgent{},
+	}
+	if err := loaded.loadGatewayState(); err != nil {
+		t.Fatalf("loadGatewayState: %v", err)
+	}
+
+	skill, ok := loaded.getSkillsLocked()["demo-skill"]
+	if !ok {
+		t.Fatalf("skills=%#v", loaded.getSkillsLocked())
+	}
+	if !skill.Enabled {
+		t.Fatalf("skill not enabled: %#v", skill)
+	}
+}
+
 func TestLoadPersistedThreadsAcceptsCamelCaseFields(t *testing.T) {
 	root := t.TempDir()
 	threadDir := filepath.Join(root, "threads", "thread-camel", "user-data")

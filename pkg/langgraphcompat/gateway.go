@@ -1227,13 +1227,14 @@ func (s *Server) loadGatewayState() error {
 		}
 		return err
 	}
-	var state gatewayPersistedState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return err
-	}
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
+	}
+	var state gatewayPersistedState
+	_ = json.Unmarshal(data, &state)
+	if raw == nil {
+		raw = map[string]any{}
 	}
 	if modelsRaw := mapFromAny(raw["models"]); modelsRaw != nil {
 		models := make(map[string]gatewayModel, len(modelsRaw))
@@ -1242,6 +1243,29 @@ func (s *Server) loadGatewayState() error {
 		}
 		if len(models) > 0 {
 			state.Models = models
+		}
+	}
+	if skillsRaw := mapFromAny(raw["skills"]); skillsRaw != nil {
+		skills := make(map[string]gatewaySkill, len(skillsRaw))
+		for name, value := range skillsRaw {
+			if enabled, ok := value.(bool); ok {
+				skills[name] = gatewaySkill{Name: name, Enabled: enabled}
+				continue
+			}
+			skillMap := mapFromAny(value)
+			if skillMap == nil {
+				continue
+			}
+			skills[name] = gatewaySkill{
+				Name:        firstNonEmpty(stringFromAny(skillMap["name"]), name),
+				Description: stringFromAny(skillMap["description"]),
+				Category:    stringFromAny(skillMap["category"]),
+				License:     stringFromAny(skillMap["license"]),
+				Enabled:     boolValue(skillMap["enabled"]),
+			}
+		}
+		if len(skills) > 0 {
+			state.Skills = skills
 		}
 	}
 	if mcpRaw := mapFromAny(firstNonNil(raw["mcp_config"], raw["mcpConfig"])); mcpRaw != nil {
