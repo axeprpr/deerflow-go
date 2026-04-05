@@ -2179,6 +2179,9 @@ func TestLoadPersistedThreadsAcceptsValuesStateObject(t *testing.T) {
 	if session.CreatedAt.IsZero() {
 		t.Fatalf("created_at not loaded: %#v", session)
 	}
+	if session.UpdatedAt.IsZero() || !session.UpdatedAt.Equal(session.CreatedAt) {
+		t.Fatalf("updated_at=%v created_at=%v", session.UpdatedAt, session.CreatedAt)
+	}
 }
 
 func TestLoadPersistedRunsAcceptsCamelCaseFields(t *testing.T) {

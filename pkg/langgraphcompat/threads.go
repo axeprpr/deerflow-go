@@ -1261,6 +1261,9 @@ func (s *Server) loadPersistedThreads() {
 		if persisted.UpdatedAt.IsZero() {
 			persisted.UpdatedAt = timeValue(firstNonNil(raw["updatedAt"], raw["updated_at"]))
 		}
+		if persisted.UpdatedAt.IsZero() {
+			persisted.UpdatedAt = persisted.CreatedAt
+		}
 		if persisted.ThreadID == "" {
 			persisted.ThreadID = entry.Name()
 		}
