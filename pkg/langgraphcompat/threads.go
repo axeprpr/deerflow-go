@@ -412,18 +412,25 @@ func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
 		Limit     int `json:"limit"`
 		PageSizeX int `json:"pageSize"`
 	}
+	limitProvided := false
 	if r.Body != nil {
 		defer r.Body.Close()
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		decoder := json.NewDecoder(r.Body)
+		_ = decoder.Decode(&req)
+		limitProvided = req.Limit != 0 || req.PageSizeX != 0
 	}
 	if req.Limit == 0 {
 		req.Limit = req.PageSizeX
 	}
-	if req.Limit == 0 {
+	if !limitProvided && req.Limit == 0 {
 		query := r.URL.Query()
 		if rawLimit := firstNonEmpty(query.Get("limit"), query.Get("pageSize")); rawLimit != "" {
 			req.Limit, _ = strconv.Atoi(rawLimit)
+			limitProvided = true
 		}
+	}
+	if req.Limit < 0 {
+		req.Limit = 0
 	}
 
 	state := s.getThreadState(threadID)
@@ -436,7 +443,10 @@ func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
 	if len(history) == 0 {
 		history = []ThreadState{*state}
 	}
-	if req.Limit == 0 || req.Limit > len(history) {
+	if !limitProvided && req.Limit == 0 {
+		req.Limit = len(history)
+	}
+	if req.Limit > len(history) {
 		req.Limit = len(history)
 	}
 	writeJSON(w, http.StatusOK, history[:req.Limit])
