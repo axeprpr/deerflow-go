@@ -285,6 +285,7 @@ func (s *Server) handleThreadStatePatch(w http.ResponseWriter, r *http.Request) 
 
 	var req struct {
 		Metadata map[string]any `json:"metadata"`
+		Values   map[string]any `json:"values"`
 	}
 	defer r.Body.Close()
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -298,6 +299,18 @@ func (s *Server) handleThreadStatePatch(w http.ResponseWriter, r *http.Request) 
 		s.sessionsMu.Unlock()
 		http.Error(w, "thread not found", http.StatusNotFound)
 		return
+	}
+	if title, ok := req.Values["title"].(string); ok {
+		session.Metadata["title"] = title
+	}
+	if todos, ok := normalizeTodos(req.Values["todos"]); ok {
+		session.Metadata["todos"] = todos
+	}
+	if sandboxState, ok := normalizeStringMap(req.Values["sandbox"]); ok {
+		session.Metadata["sandbox"] = sandboxState
+	}
+	if viewedImages, ok := normalizeViewedImages(req.Values["viewed_images"]); ok {
+		session.Metadata["viewed_images"] = viewedImages
 	}
 	for k, v := range req.Metadata {
 		session.Metadata[k] = v

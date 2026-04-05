@@ -1050,6 +1050,36 @@ func TestThreadStatePostPersistsCompatFields(t *testing.T) {
 	}
 }
 
+func TestThreadStatePatchAcceptsValuesPayload(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-patch-values"
+	s.ensureSession(threadID, map[string]any{"title": "Before"})
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID+"/state",
+		strings.NewReader(`{"values":{"title":"After"}}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("patch request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("state missing")
+	}
+	if got := state.Values["title"]; got != "After" {
+		t.Fatalf("title=%v want After", got)
+	}
+}
+
 func TestThreadRunPersistsConfigMetadata(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.llmProvider = fakeLLMProvider{}
