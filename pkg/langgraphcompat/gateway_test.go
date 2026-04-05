@@ -8782,6 +8782,9 @@ func TestThreadRunStreamModeValuesFiltersMessageEvents(t *testing.T) {
 	if !strings.Contains(text, `"run_id":"`) {
 		t.Fatalf("missing run_id in end payload: %s", text)
 	}
+	if strings.Contains(text, `"thread_id":"thread-stream-top-level"`) || strings.Contains(text, `"assistant_id":"lead_agent"`) {
+		t.Fatalf("unexpected extra fields in end payload: %s", text)
+	}
 }
 
 func TestThreadRunStreamModeUpdatesFiltersOtherEvents(t *testing.T) {
@@ -8823,6 +8826,9 @@ func TestThreadRunStreamModeUpdatesFiltersOtherEvents(t *testing.T) {
 	if !strings.Contains(text, "event: end") {
 		t.Fatalf("missing end event: %s", text)
 	}
+	if strings.Contains(text, `"thread_id":"thread-stream-values"`) || strings.Contains(text, `"assistant_id":"lead_agent"`) {
+		t.Fatalf("unexpected extra fields in end payload: %s", text)
+	}
 }
 
 func TestThreadRunStreamModeMessagesTupleFiltersValues(t *testing.T) {
@@ -8860,6 +8866,9 @@ func TestThreadRunStreamModeMessagesTupleFiltersValues(t *testing.T) {
 	}
 	if !strings.Contains(text, `"run_id":"`) {
 		t.Fatalf("missing run_id in end payload: %s", text)
+	}
+	if strings.Contains(text, `"thread_id":"thread-stream-messages"`) || strings.Contains(text, `"assistant_id":"lead_agent"`) {
+		t.Fatalf("unexpected extra fields in end payload: %s", text)
 	}
 }
 
