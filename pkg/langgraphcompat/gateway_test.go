@@ -2328,6 +2328,54 @@ func TestLoadPersistedThreadsPrefersCheckpointObjectsOverStaleMetadata(t *testin
 	}
 }
 
+func TestLoadPersistedThreadsPrefersValuesOverStaleMetadata(t *testing.T) {
+	root := t.TempDir()
+	threadDir := filepath.Join(root, "threads", "thread-values-override", "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"values":{
+			"messages":[{"id":"m1","type":"human","content":"hello"}],
+			"title":"Current Title",
+			"todos":[{"content":"current task","status":"completed"}],
+			"artifacts":["/tmp/current.html"]
+		},
+		"metadata":{
+			"thread_id":"thread-values-override",
+			"title":"Stale Title",
+			"todos":[{"content":"stale task","status":"pending"}],
+			"artifacts":["/tmp/stale.html"]
+		},
+		"created_at":"2026-01-01T00:00:00Z"
+	}`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write thread file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, sessions: map[string]*Session{}}
+	s.loadPersistedThreads()
+
+	session := s.sessions["thread-values-override"]
+	if session == nil {
+		t.Fatalf("sessions=%#v", s.sessions)
+	}
+	if session.Metadata["title"] != "Current Title" {
+		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+	todos, _ := session.Metadata["todos"].([]any)
+	if len(todos) != 1 {
+		t.Fatalf("todos=%#v", session.Metadata["todos"])
+	}
+	todo, _ := todos[0].(map[string]any)
+	if todo["content"] != "current task" {
+		t.Fatalf("todo=%#v", todo)
+	}
+	if artifacts := anyStringSlice(session.Metadata["artifacts"]); len(artifacts) != 1 || artifacts[0] != "/tmp/current.html" {
+		t.Fatalf("artifacts=%#v metadata=%#v", artifacts, session.Metadata)
+	}
+}
+
 func TestLoadPersistedThreadsDerivesBusyStatusFromNextTasks(t *testing.T) {
 	root := t.TempDir()
 	threadDir := filepath.Join(root, "threads", "thread-busy-state", "user-data")
