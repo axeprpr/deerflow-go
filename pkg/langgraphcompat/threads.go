@@ -830,6 +830,9 @@ func (s *Server) threadConfigurable(session *Session) map[string]any {
 		"thinking_enabled": true,
 		"subagent_enabled": false,
 	}
+	if value, ok := float64FromAny(session.Metadata["temperature"]); ok {
+		configurable["temperature"] = value
+	}
 	if value := toInt64(session.Metadata["max_tokens"]); value > 0 {
 		configurable["max_tokens"] = value
 	}
@@ -935,6 +938,27 @@ func firstNonZeroTime(times ...time.Time) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+func float64FromAny(v any) (float64, bool) {
+	switch value := v.(type) {
+	case float64:
+		return value, true
+	case float32:
+		return float64(value), true
+	case int:
+		return float64(value), true
+	case int64:
+		return float64(value), true
+	case json.Number:
+		parsed, err := value.Float64()
+		return parsed, err == nil
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
 }
 
 func deriveThreadMode(metadata map[string]any) string {
@@ -1548,7 +1572,7 @@ func (s *Server) loadPersistedThreads() {
 			if persisted.Metadata == nil {
 				persisted.Metadata = map[string]any{}
 			}
-			for _, key := range []string{"thread_id", "agent_type", "agent_name", "model_name", "mode", "reasoning_effort", "thinking_enabled", "is_plan_mode", "subagent_enabled", "max_tokens"} {
+			for _, key := range []string{"thread_id", "agent_type", "agent_name", "model_name", "mode", "reasoning_effort", "thinking_enabled", "is_plan_mode", "subagent_enabled", "temperature", "max_tokens"} {
 				if value, ok := configurable[key]; ok {
 					persisted.Metadata[key] = value
 				}
@@ -1736,6 +1760,11 @@ func normalizePersistedThreadMetadata(metadata map[string]any) map[string]any {
 	if _, ok := metadata["subagent_enabled"]; !ok {
 		if value, ok := metadata["subagentEnabled"]; ok {
 			metadata["subagent_enabled"] = value
+		}
+	}
+	if _, ok := metadata["temperature"]; !ok {
+		if value, ok := metadata["Temperature"]; ok {
+			metadata["temperature"] = value
 		}
 	}
 	return metadata
@@ -1979,6 +2008,7 @@ func normalizeThreadConfig(raw map[string]any) map[string]any {
 		"thinking_enabled": {"thinking_enabled", "thinkingEnabled"},
 		"is_plan_mode":     {"is_plan_mode", "isPlanMode"},
 		"subagent_enabled": {"subagent_enabled", "subagentEnabled"},
+		"temperature":      {"temperature", "Temperature"},
 		"max_tokens":       {"max_tokens", "maxTokens"},
 	} {
 		for _, alias := range aliases {

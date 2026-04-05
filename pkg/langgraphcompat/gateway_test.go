@@ -2480,6 +2480,7 @@ func TestLoadPersistedThreadsAcceptsTopLevelConfigurable(t *testing.T) {
 			"thinkingEnabled":false,
 			"isPlanMode":true,
 			"subagentEnabled":true,
+			"temperature":0.2,
 			"maxTokens":321
 		},
 		"created_at":"2026-01-01T00:00:00Z"
@@ -2506,6 +2507,9 @@ func TestLoadPersistedThreadsAcceptsTopLevelConfigurable(t *testing.T) {
 	if configurable["thinking_enabled"] != false || configurable["is_plan_mode"] != true || configurable["subagent_enabled"] != true {
 		t.Fatalf("configurable=%#v", configurable)
 	}
+	if configurable["temperature"] != 0.2 {
+		t.Fatalf("configurable=%#v", configurable)
+	}
 	if configurable["max_tokens"] != int64(321) && configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != 321 {
 		t.Fatalf("configurable=%#v", configurable)
 	}
@@ -2527,6 +2531,7 @@ func TestLoadPersistedThreadsAcceptsFlatTopLevelConfig(t *testing.T) {
 		"thinkingEnabled":false,
 		"isPlanMode":true,
 		"subagentEnabled":true,
+		"temperature":0.2,
 		"maxTokens":321,
 		"created_at":"2026-01-01T00:00:00Z"
 	}`
@@ -2550,6 +2555,9 @@ func TestLoadPersistedThreadsAcceptsFlatTopLevelConfig(t *testing.T) {
 		t.Fatalf("configurable=%#v", configurable)
 	}
 	if configurable["thinking_enabled"] != false || configurable["is_plan_mode"] != true || configurable["subagent_enabled"] != true {
+		t.Fatalf("configurable=%#v", configurable)
+	}
+	if configurable["temperature"] != 0.2 {
 		t.Fatalf("configurable=%#v", configurable)
 	}
 	if configurable["max_tokens"] != int64(321) && configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != 321 {
@@ -3234,6 +3242,7 @@ func TestLoadThreadHistoryNormalizesCamelCaseConfig(t *testing.T) {
 					"thinkingEnabled":false,
 					"isPlanMode":true,
 					"subagentEnabled":true,
+					"temperature":0.2,
 					"maxTokens":321
 				}
 			}
@@ -3257,6 +3266,9 @@ func TestLoadThreadHistoryNormalizesCamelCaseConfig(t *testing.T) {
 		t.Fatalf("config=%#v", history[0].Config)
 	}
 	if configurable["thinking_enabled"] != false || configurable["is_plan_mode"] != true || configurable["subagent_enabled"] != true {
+		t.Fatalf("config=%#v", history[0].Config)
+	}
+	if configurable["temperature"] != 0.2 {
 		t.Fatalf("config=%#v", history[0].Config)
 	}
 	if configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != 321 {

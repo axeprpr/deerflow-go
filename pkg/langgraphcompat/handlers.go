@@ -1031,6 +1031,12 @@ func (s *Server) applyRunConfigMetadata(threadID string, cfg runConfig) {
 	if cfg.SubagentEnabled != nil {
 		s.setThreadMetadata(threadID, "subagent_enabled", *cfg.SubagentEnabled)
 	}
+	if cfg.Temperature != nil {
+		s.setThreadMetadata(threadID, "temperature", *cfg.Temperature)
+	}
+	if cfg.MaxTokens != nil {
+		s.setThreadMetadata(threadID, "max_tokens", *cfg.MaxTokens)
+	}
 }
 
 func firstNonEmpty(values ...string) string {
