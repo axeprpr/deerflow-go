@@ -1876,6 +1876,34 @@ func normalizeCheckpointObject(raw map[string]any) map[string]any {
 	return out
 }
 
+func normalizeThreadValues(raw map[string]any) map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for canonicalKey, aliases := range map[string][]string{
+		"title":          {"title"},
+		"todos":          {"todos"},
+		"sandbox":        {"sandbox"},
+		"viewed_images":  {"viewed_images", "viewedImages"},
+		"artifacts":      {"artifacts"},
+		"uploaded_files": {"uploaded_files", "uploadedFiles"},
+		"thread_data":    {"thread_data", "threadData"},
+		"messages":       {"messages"},
+	} {
+		for _, alias := range aliases {
+			if value, ok := raw[alias]; ok {
+				out[canonicalKey] = value
+				break
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func normalizeLoadedThreadHistory(history []ThreadState, rawItems []map[string]any) []ThreadState {
 	if len(rawItems) == 0 {
 		return history
@@ -1903,7 +1931,9 @@ func normalizeLoadedThreadHistory(history []ThreadState, rawItems []map[string]a
 			history[i].Interrupts = anySlice(rawItems[i]["interrupts"])
 		}
 		if len(history[i].Values) == 0 {
-			history[i].Values = mapFromAny(rawItems[i]["values"])
+			history[i].Values = normalizeThreadValues(mapFromAny(rawItems[i]["values"]))
+		} else {
+			history[i].Values = normalizeThreadValues(history[i].Values)
 		}
 		if len(history[i].Config) == 0 {
 			history[i].Config = mapFromAny(rawItems[i]["config"])

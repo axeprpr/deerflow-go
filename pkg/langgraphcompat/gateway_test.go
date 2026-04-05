@@ -2986,6 +2986,55 @@ func TestLoadThreadHistoryNormalizesCamelCaseMetadata(t *testing.T) {
 	}
 }
 
+func TestLoadThreadHistoryNormalizesCamelCaseValues(t *testing.T) {
+	root := t.TempDir()
+	threadID := "thread-history-values-camel"
+	threadDir := filepath.Join(root, "threads", threadID, "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `[
+		{
+			"checkpointId":"cp-1",
+			"createdAt":"2026-01-01T00:00:00Z",
+			"values":{
+				"viewedImages":{"a":{"base64":"x"}},
+				"threadData":{"workspace_path":"/tmp/workspace","uploads_path":"/tmp/uploads","outputs_path":"/tmp/outputs"},
+				"uploadedFiles":[{"filename":"notes.txt","path":"/tmp/uploads/notes.txt","status":"uploaded"}]
+			}
+		}
+	]`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread_history.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write history: %v", err)
+	}
+
+	s := &Server{dataRoot: root}
+	history := s.loadThreadHistory(threadID)
+	if len(history) != 1 {
+		t.Fatalf("history=%d", len(history))
+	}
+	viewedImages, _ := history[0].Values["viewed_images"].(map[string]any)
+	if len(viewedImages) != 1 {
+		t.Fatalf("values=%#v", history[0].Values)
+	}
+	threadData, _ := history[0].Values["thread_data"].(map[string]any)
+	if threadData["workspace_path"] != "/tmp/workspace" || threadData["uploads_path"] != "/tmp/uploads" || threadData["outputs_path"] != "/tmp/outputs" {
+		t.Fatalf("values=%#v", history[0].Values)
+	}
+	switch uploadedFiles := history[0].Values["uploaded_files"].(type) {
+	case []any:
+		if len(uploadedFiles) != 1 {
+			t.Fatalf("values=%#v", history[0].Values)
+		}
+	case []map[string]any:
+		if len(uploadedFiles) != 1 || uploadedFiles[0]["filename"] != "notes.txt" {
+			t.Fatalf("values=%#v", history[0].Values)
+		}
+	default:
+		t.Fatalf("values=%#v", history[0].Values)
+	}
+}
+
 func TestLoadThreadHistoryNormalizesCheckpointObjects(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}
