@@ -9096,6 +9096,9 @@ func TestThreadRunStreamEmitsErrorEvent(t *testing.T) {
 	if !strings.Contains(text, `"message":"boom"`) {
 		t.Fatalf("missing error message: %s", text)
 	}
+	if !strings.Contains(text, `"error":"RunError"`) || !strings.Contains(text, `"name":"RunError"`) {
+		t.Fatalf("missing error identity: %s", text)
+	}
 	if !strings.Contains(text, `"suggestion":"Retry the run or inspect the previous tool and model events."`) {
 		t.Fatalf("missing error suggestion: %s", text)
 	}
@@ -9146,6 +9149,9 @@ func TestThreadRunStreamEmitsClarificationRequest(t *testing.T) {
 	}
 	if !strings.Contains(text, `"type":"text"`) {
 		t.Fatalf("missing clarification type: %s", text)
+	}
+	if !strings.Contains(text, `"id":"`) || !strings.Contains(text, `"required":true`) {
+		t.Fatalf("missing clarification identity payload: %s", text)
 	}
 	for _, forbidden := range []string{`"run_id":`, `"assistant_id":`, `"messages":`, `"usage_metadata":`, `"tool_calls":`, `"tool_call_id":`, `"retryable":`} {
 		if strings.Contains(clarifyBlock, forbidden) {
@@ -9877,6 +9883,9 @@ func TestRecordedRunStreamReplaysErrorEvent(t *testing.T) {
 	if !strings.Contains(text, `"message":"boom"`) || !strings.Contains(text, `"suggestion":"retry"`) {
 		t.Fatalf("missing error payload: %s", text)
 	}
+	if !strings.Contains(text, `"error":"RunError"`) || !strings.Contains(text, `"name":"RunError"`) {
+		t.Fatalf("missing replay error identity: %s", text)
+	}
 	if !strings.Contains(text, `"retryable":true`) {
 		t.Fatalf("missing retryable flag: %s", text)
 	}
@@ -9926,6 +9935,9 @@ func TestRecordedRunStreamReplaysClarificationRequest(t *testing.T) {
 	}
 	if !strings.Contains(text, `"question":"Need more detail?"`) {
 		t.Fatalf("missing clarification question: %s", text)
+	}
+	if !strings.Contains(text, `"id":"clarify-1"`) || !strings.Contains(text, `"type":"text"`) || !strings.Contains(text, `"required":true`) {
+		t.Fatalf("missing replay clarification identity: %s", text)
 	}
 	for _, forbidden := range []string{`"run_id":`, `"assistant_id":`, `"messages":`, `"usage_metadata":`, `"tool_calls":`, `"tool_call_id":`, `"retryable":`} {
 		if strings.Contains(clarifyBlock, forbidden) {
@@ -10513,6 +10525,9 @@ func TestThreadJoinStreamReplaysErrorEvent(t *testing.T) {
 	if !strings.Contains(text, `"message":"boom"`) || !strings.Contains(text, `"suggestion":"retry"`) {
 		t.Fatalf("missing error payload: %s", text)
 	}
+	if !strings.Contains(text, `"error":"RunError"`) || !strings.Contains(text, `"name":"RunError"`) {
+		t.Fatalf("missing join error identity: %s", text)
+	}
 	if !strings.Contains(text, `"retryable":true`) {
 		t.Fatalf("missing retryable flag: %s", text)
 	}
@@ -10562,6 +10577,9 @@ func TestThreadJoinStreamReplaysClarificationRequest(t *testing.T) {
 	}
 	if !strings.Contains(text, `"question":"Need more detail?"`) {
 		t.Fatalf("missing clarification question: %s", text)
+	}
+	if !strings.Contains(text, `"id":"clarify-1"`) || !strings.Contains(text, `"type":"text"`) || !strings.Contains(text, `"required":true`) {
+		t.Fatalf("missing join clarification identity: %s", text)
 	}
 	for _, forbidden := range []string{`"run_id":`, `"assistant_id":`, `"messages":`, `"usage_metadata":`, `"tool_calls":`, `"tool_call_id":`, `"retryable":`} {
 		if strings.Contains(clarifyBlock, forbidden) {
