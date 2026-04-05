@@ -8608,6 +8608,9 @@ func TestThreadRunStreamModeValuesFiltersMessageEvents(t *testing.T) {
 	if !strings.Contains(text, "event: end") {
 		t.Fatalf("missing end event: %s", text)
 	}
+	if !strings.Contains(text, `"run_id":"`) {
+		t.Fatalf("missing run_id in end payload: %s", text)
+	}
 }
 
 func TestThreadRunStreamModeMessagesTupleFiltersValues(t *testing.T) {
@@ -8642,6 +8645,9 @@ func TestThreadRunStreamModeMessagesTupleFiltersValues(t *testing.T) {
 	}
 	if !strings.Contains(text, "event: end") {
 		t.Fatalf("missing end event: %s", text)
+	}
+	if !strings.Contains(text, `"run_id":"`) {
+		t.Fatalf("missing run_id in end payload: %s", text)
 	}
 }
 
@@ -8715,6 +8721,9 @@ func TestThreadRunStreamAcceptsTopLevelMessages(t *testing.T) {
 	}
 	if !strings.Contains(text, "event: end") {
 		t.Fatalf("missing end event: %s", text)
+	}
+	if !strings.Contains(text, `"run_id":"`) {
+		t.Fatalf("missing run_id in end payload: %s", text)
 	}
 }
 
@@ -8965,6 +8974,9 @@ func TestThreadJoinStreamModeFiltersReplayEvents(t *testing.T) {
 	if !strings.Contains(text, "event: end") {
 		t.Fatalf("missing end event: %s", text)
 	}
+	if !strings.Contains(text, `"run_id":"run-join-1"`) {
+		t.Fatalf("missing run_id in end payload: %s", text)
+	}
 }
 
 func TestRecordedRunStreamModeSupportsCommaSeparatedAliases(t *testing.T) {
@@ -9011,6 +9023,9 @@ func TestRecordedRunStreamModeSupportsCommaSeparatedAliases(t *testing.T) {
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
 	}
+	if !strings.Contains(text, `"run_id":"run-replay-2"`) {
+		t.Fatalf("missing run_id in end payload: %s", text)
+	}
 }
 
 func TestThreadJoinStreamModeSupportsCommaSeparatedAliases(t *testing.T) {
@@ -9056,6 +9071,9 @@ func TestThreadJoinStreamModeSupportsCommaSeparatedAliases(t *testing.T) {
 	}
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
+	}
+	if !strings.Contains(text, `"run_id":"run-join-2"`) {
+		t.Fatalf("missing run_id in end payload: %s", text)
 	}
 }
 
