@@ -825,6 +825,8 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 		"assistant_id":         stringValue(session.Metadata["assistant_id"]),
 		"graph_id":             stringValue(session.Metadata["graph_id"]),
 		"run_id":               stringValue(session.Metadata["run_id"]),
+		"agent_name":           stringValue(configurable["agent_name"]),
+		"agent_type":           stringValue(configurable["agent_type"]),
 		"model_name":           stringValue(configurable["model_name"]),
 		"mode":                 stringValue(configurable["mode"]),
 		"reasoning_effort":     stringValue(configurable["reasoning_effort"]),

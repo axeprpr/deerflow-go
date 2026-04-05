@@ -1144,6 +1144,9 @@ func TestThreadSearchIncludesCheckpointFieldsByDefault(t *testing.T) {
 	if selected["assistant_id"] != "assistant-1" || selected["graph_id"] != "graph-1" || selected["run_id"] != "run-1" {
 		t.Fatalf("selected=%#v", selected)
 	}
+	if selected["agent_name"] != "" || selected["agent_type"] != "" {
+		t.Fatalf("selected=%#v", selected)
+	}
 	if selected["mode"] != "flash" || selected["model_name"] != "" || selected["reasoning_effort"] != "minimal" {
 		t.Fatalf("selected=%#v", selected)
 	}
@@ -5135,6 +5138,8 @@ func TestThreadGetIncludesCompatShape(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-get-shape"
 	session := s.ensureSession(threadID, map[string]any{
+		"agent_name":                  "writer",
+		"agent_type":                  "deep_research",
 		"assistant_id":                "assistant-1",
 		"graph_id":                    "graph-1",
 		"run_id":                      "run-1",
@@ -5183,6 +5188,9 @@ func TestThreadGetIncludesCompatShape(t *testing.T) {
 		t.Fatalf("thread=%#v", thread)
 	}
 	if thread["assistant_id"] != "assistant-1" || thread["graph_id"] != "graph-1" || thread["run_id"] != "run-1" {
+		t.Fatalf("thread=%#v", thread)
+	}
+	if thread["agent_name"] != "writer" || thread["agent_type"] != "deep_research" {
 		t.Fatalf("thread=%#v", thread)
 	}
 	if thread["mode"] != "thinking" || thread["model_name"] != "deepseek/deepseek-r1" || thread["reasoning_effort"] != "high" {
