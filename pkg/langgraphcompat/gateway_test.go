@@ -1314,6 +1314,71 @@ func TestThreadSearchSelectProjectsExecutionSummaries(t *testing.T) {
 	}
 }
 
+func TestThreadSearchDefaultIncludesRecoveredValueSummaries(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.ensureSession("thread-search-value-summaries", map[string]any{
+		"title":     "Summary Thread",
+		"artifacts": []any{"/tmp/report.html"},
+		"thread_data": map[string]any{
+			"workspace_path": "/tmp/workspace",
+			"uploads_path":   "/tmp/uploads",
+			"outputs_path":   "/tmp/outputs",
+		},
+		"uploaded_files": []any{
+			map[string]any{"filename": "notes.txt", "path": "/tmp/uploads/notes.txt", "status": "uploaded"},
+		},
+	})
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"limit":10}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) == 0 {
+		t.Fatal("expected threads")
+	}
+
+	var selected map[string]any
+	for _, thread := range threads {
+		if thread["thread_id"] == "thread-search-value-summaries" {
+			selected = thread
+			break
+		}
+	}
+	if selected == nil {
+		t.Fatalf("missing projected thread in %#v", threads)
+	}
+	values, _ := selected["values"].(map[string]any)
+	if values["title"] != "Summary Thread" {
+		t.Fatalf("values=%#v", values)
+	}
+	artifacts, _ := values["artifacts"].([]any)
+	if len(artifacts) != 1 || artifacts[0] != "/tmp/report.html" {
+		t.Fatalf("values=%#v", values)
+	}
+	threadData, _ := values["thread_data"].(map[string]any)
+	if threadData["workspace_path"] != "/tmp/workspace" || threadData["uploads_path"] != "/tmp/uploads" || threadData["outputs_path"] != "/tmp/outputs" {
+		t.Fatalf("values=%#v", values)
+	}
+	uploadedFiles, _ := values["uploaded_files"].([]any)
+	if len(uploadedFiles) != 1 {
+		t.Fatalf("values=%#v", values)
+	}
+}
+
 func TestThreadSearchAcceptsCamelCaseCoreIDSelectFields(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.ensureSession("thread-search-core-id-select", map[string]any{
