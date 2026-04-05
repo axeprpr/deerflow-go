@@ -5767,6 +5767,95 @@ func TestThreadStateIncludesCompatFields(t *testing.T) {
 	}
 }
 
+func TestThreadStatePreservesMessageCompatShape(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-state-message-shape"
+	session := s.ensureSession(threadID, nil)
+	session.Messages = []models.Message{
+		{
+			ID:        "ai-1",
+			SessionID: threadID,
+			Role:      models.RoleAI,
+			Content:   "",
+			ToolCalls: []models.ToolCall{
+				{
+					ID:        "call-1",
+					Name:      "present_files",
+					Arguments: map[string]any{"filepaths": []string{"/tmp/report.md"}},
+					Status:    models.CallStatusCompleted,
+				},
+			},
+			Metadata: map[string]string{
+				"reasoning_content":   "Need to inspect report",
+				"usage_input_tokens":  "10",
+				"usage_output_tokens": "5",
+				"usage_total_tokens":  "15",
+			},
+		},
+		{
+			ID:        "tool-1",
+			SessionID: threadID,
+			Role:      models.RoleTool,
+			ToolResult: &models.ToolResult{
+				CallID:   "call-1",
+				ToolName: "present_files",
+				Status:   models.CallStatusCompleted,
+				Content:  "presented",
+				Duration: 1500 * time.Millisecond,
+				Data: map[string]any{
+					"files": []string{"/tmp/report.md"},
+				},
+			},
+			Metadata: map[string]string{
+				"message_status": "success",
+			},
+		},
+	}
+
+	resp, err := http.Get(ts.URL + "/threads/" + threadID + "/state")
+	if err != nil {
+		t.Fatalf("get state: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	var state ThreadState
+	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+
+	messages, _ := state.Values["messages"].([]any)
+	if len(messages) != 2 {
+		t.Fatalf("values=%#v", state.Values)
+	}
+	ai, _ := messages[0].(map[string]any)
+	if ai["id"] != "ai-1" {
+		t.Fatalf("message=%#v", ai)
+	}
+	toolCalls, _ := ai["tool_calls"].([]any)
+	if len(toolCalls) != 1 {
+		t.Fatalf("message=%#v", ai)
+	}
+	additionalKwargs, _ := ai["additional_kwargs"].(map[string]any)
+	if additionalKwargs["reasoning_content"] != "Need to inspect report" {
+		t.Fatalf("additional_kwargs=%#v", additionalKwargs)
+	}
+	usage, _ := ai["usage_metadata"].(map[string]any)
+	if usage["input_tokens"] != float64(10) || usage["output_tokens"] != float64(5) || usage["total_tokens"] != float64(15) {
+		t.Fatalf("usage_metadata=%#v", usage)
+	}
+	tool, _ := messages[1].(map[string]any)
+	if tool["id"] != "tool-1" || tool["tool_call_id"] != "call-1" || tool["status"] != "success" {
+		t.Fatalf("message=%#v", tool)
+	}
+	data, _ := tool["data"].(map[string]any)
+	if data["duration"] != "1.5s" {
+		t.Fatalf("data=%#v", data)
+	}
+}
+
 func TestThreadGetIncludesCompatShape(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-get-shape"
