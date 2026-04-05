@@ -1412,6 +1412,18 @@ func TestLoadGatewayStateUsesModelMapKeyWhenNameMissing(t *testing.T) {
 	}
 }
 
+func TestGatewayModelsFromEnvUsesModelIDWhenNameMissing(t *testing.T) {
+	t.Setenv("DEERFLOW_MODELS", `[{"id":"flash","displayName":"Flash"}]`)
+	models := defaultGatewayModels("")
+	model, ok := models["flash"]
+	if !ok {
+		t.Fatalf("models=%#v", models)
+	}
+	if model.Name != "flash" || model.ID != "flash" || model.Model != "flash" || model.DisplayName != "Flash" {
+		t.Fatalf("model=%#v", model)
+	}
+}
+
 func TestLoadGatewayStateAcceptsBooleanSkillStateMap(t *testing.T) {
 	root := t.TempDir()
 	skillsRoot := filepath.Join(root, "skills", "public", "demo-skill")

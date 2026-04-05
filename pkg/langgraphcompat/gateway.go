@@ -2211,6 +2211,9 @@ func normalizeGatewayModel(model gatewayModel) (gatewayModel, bool) {
 		name = strings.TrimSpace(model.Model)
 	}
 	if name == "" {
+		name = strings.TrimSpace(model.ID)
+	}
+	if name == "" {
 		return gatewayModel{}, false
 	}
 	model.Name = name
