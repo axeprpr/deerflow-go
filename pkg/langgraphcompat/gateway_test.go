@@ -4054,6 +4054,10 @@ func TestConvertToMessagesPreservesToolShape(t *testing.T) {
 			"id":      "ai-1",
 			"type":    "ai",
 			"content": "",
+			"additional_kwargs": map[string]any{
+				"reasoning_content": "Need to present files",
+				"stop_reason":       "tool_calls",
+			},
 			"tool_calls": []any{
 				map[string]any{
 					"id":   "call-1",
@@ -4081,6 +4085,9 @@ func TestConvertToMessagesPreservesToolShape(t *testing.T) {
 	}
 	if len(messages[0].ToolCalls) != 1 || messages[0].ToolCalls[0].ID != "call-1" || messages[0].ToolCalls[0].Name != "present_files" {
 		t.Fatalf("tool_calls=%#v", messages[0].ToolCalls)
+	}
+	if messages[0].Metadata["reasoning_content"] != "Need to present files" || messages[0].Metadata["stop_reason"] != "tool_calls" {
+		t.Fatalf("metadata=%#v", messages[0].Metadata)
 	}
 	if messages[1].ToolResult == nil {
 		t.Fatalf("tool_result=nil message=%#v", messages[1])

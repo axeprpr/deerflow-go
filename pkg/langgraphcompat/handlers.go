@@ -386,6 +386,9 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 			Role:      s.convertRole(role),
 			Content:   content,
 		}
+		if metadata := parseLangGraphMessageMetadata(msgMap["additional_kwargs"]); len(metadata) > 0 {
+			msg.Metadata = metadata
+		}
 		if len(toolCalls) > 0 {
 			msg.ToolCalls = toolCalls
 		}
@@ -396,6 +399,25 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 	}
 
 	return messages
+}
+
+func parseLangGraphMessageMetadata(raw any) map[string]string {
+	data, _ := raw.(map[string]any)
+	if len(data) == 0 {
+		return nil
+	}
+	out := make(map[string]string)
+	for key, value := range data {
+		text := strings.TrimSpace(stringFromAny(value))
+		if text == "" {
+			continue
+		}
+		out[key] = text
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func parseLangGraphToolCalls(raw any) []models.ToolCall {
