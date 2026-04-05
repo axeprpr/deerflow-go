@@ -158,6 +158,10 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 		switch req.SortBy {
 		case "created_at":
 			less = left["created_at"].(string) < right["created_at"].(string)
+		case "assistant_id":
+			less = asString(left["metadata"].(map[string]any)["assistant_id"]) < asString(right["metadata"].(map[string]any)["assistant_id"])
+		case "graph_id":
+			less = asString(left["metadata"].(map[string]any)["graph_id"]) < asString(right["metadata"].(map[string]any)["graph_id"])
 		case "thread_id":
 			less = left["thread_id"].(string) < right["thread_id"].(string)
 		default:
