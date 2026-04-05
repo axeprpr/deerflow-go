@@ -1444,8 +1444,39 @@ func TestDefaultGatewayMemoryConfigHonorsExplicitZeroValues(t *testing.T) {
 	}
 }
 
+func TestDefaultGatewayMemoryConfigAcceptsCamelCaseFields(t *testing.T) {
+	t.Setenv("DEERFLOW_MEMORY_CONFIG", `{"enabled":true,"storagePath":"/tmp/custom-memory.json","debounceSeconds":12,"maxFacts":22,"factConfidenceThreshold":0.5,"injectionEnabled":false,"maxInjectionTokens":321}`)
+	cfg := defaultGatewayMemoryConfig("/tmp/deerflow-test")
+	if cfg.StoragePath != "/tmp/custom-memory.json" {
+		t.Fatalf("storage_path=%q want /tmp/custom-memory.json", cfg.StoragePath)
+	}
+	if cfg.DebounceSeconds != 12 || cfg.MaxFacts != 22 {
+		t.Fatalf("unexpected cfg: %#v", cfg)
+	}
+	if cfg.FactConfidenceThreshold != 0.5 {
+		t.Fatalf("fact_confidence_threshold=%v want 0.5", cfg.FactConfidenceThreshold)
+	}
+	if cfg.InjectionEnabled {
+		t.Fatalf("expected injection disabled: %#v", cfg)
+	}
+	if cfg.MaxInjectionTokens != 321 {
+		t.Fatalf("max_injection_tokens=%d want 321", cfg.MaxInjectionTokens)
+	}
+}
+
 func TestDefaultGatewayChannelsStatusFromEnv(t *testing.T) {
 	t.Setenv("DEERFLOW_CHANNELS_CONFIG", `{"service_running":true,"channels":{"telegram":{"enabled":true,"connected":false}}}`)
+	status := defaultGatewayChannelsStatus()
+	if !status.ServiceRunning {
+		t.Fatalf("expected service running: %#v", status)
+	}
+	if _, ok := status.Channels["telegram"]; !ok {
+		t.Fatalf("expected telegram channel: %#v", status)
+	}
+}
+
+func TestDefaultGatewayChannelsStatusFromEnvAcceptsCamelCase(t *testing.T) {
+	t.Setenv("DEERFLOW_CHANNELS_CONFIG", `{"serviceRunning":true,"channels":{"telegram":{"enabled":true,"connected":false}}}`)
 	status := defaultGatewayChannelsStatus()
 	if !status.ServiceRunning {
 		t.Fatalf("expected service running: %#v", status)

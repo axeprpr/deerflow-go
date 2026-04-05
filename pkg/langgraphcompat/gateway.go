@@ -1356,19 +1356,52 @@ func defaultGatewayMemoryConfig(dataRoot string) gatewayMemoryConfig {
 		if err := json.Unmarshal([]byte(raw), &override); err == nil {
 			_ = json.Unmarshal([]byte(raw), &overrideRaw)
 			if override.StoragePath == "" {
+				if value := stringFromAny(overrideRaw["storagePath"]); value != "" {
+					override.StoragePath = value
+				}
+			}
+			if _, ok := overrideRaw["debounceSeconds"]; ok {
+				override.DebounceSeconds = intValue(overrideRaw["debounceSeconds"])
+			}
+			if _, ok := overrideRaw["maxFacts"]; ok {
+				override.MaxFacts = intValue(overrideRaw["maxFacts"])
+			}
+			if _, ok := overrideRaw["factConfidenceThreshold"]; ok {
+				if value := floatPointerFromAny(overrideRaw["factConfidenceThreshold"]); value != nil {
+					override.FactConfidenceThreshold = *value
+				}
+			}
+			if _, ok := overrideRaw["maxInjectionTokens"]; ok {
+				override.MaxInjectionTokens = intValue(overrideRaw["maxInjectionTokens"])
+			}
+			if override.StoragePath == "" {
 				override.StoragePath = config.StoragePath
 			}
-			if _, ok := overrideRaw["debounce_seconds"]; !ok && override.DebounceSeconds == 0 {
-				override.DebounceSeconds = config.DebounceSeconds
+			if _, ok := overrideRaw["debounce_seconds"]; !ok {
+				if _, ok := overrideRaw["debounceSeconds"]; !ok && override.DebounceSeconds == 0 {
+					override.DebounceSeconds = config.DebounceSeconds
+				}
 			}
-			if _, ok := overrideRaw["max_facts"]; !ok && override.MaxFacts == 0 {
-				override.MaxFacts = config.MaxFacts
+			if _, ok := overrideRaw["max_facts"]; !ok {
+				if _, ok := overrideRaw["maxFacts"]; !ok && override.MaxFacts == 0 {
+					override.MaxFacts = config.MaxFacts
+				}
 			}
-			if _, ok := overrideRaw["fact_confidence_threshold"]; !ok && override.FactConfidenceThreshold == 0 {
-				override.FactConfidenceThreshold = config.FactConfidenceThreshold
+			if _, ok := overrideRaw["fact_confidence_threshold"]; !ok {
+				if _, ok := overrideRaw["factConfidenceThreshold"]; !ok && override.FactConfidenceThreshold == 0 {
+					override.FactConfidenceThreshold = config.FactConfidenceThreshold
+				}
 			}
-			if _, ok := overrideRaw["max_injection_tokens"]; !ok && override.MaxInjectionTokens == 0 {
-				override.MaxInjectionTokens = config.MaxInjectionTokens
+			if _, ok := overrideRaw["max_injection_tokens"]; !ok {
+				if _, ok := overrideRaw["maxInjectionTokens"]; !ok && override.MaxInjectionTokens == 0 {
+					override.MaxInjectionTokens = config.MaxInjectionTokens
+				}
+			}
+			if _, ok := overrideRaw["injectionEnabled"]; ok {
+				override.InjectionEnabled = boolValue(overrideRaw["injectionEnabled"])
+			}
+			if _, ok := overrideRaw["enabled"]; ok {
+				override.Enabled = boolValue(overrideRaw["enabled"])
 			}
 			config = override
 		}
@@ -1385,7 +1418,12 @@ func defaultGatewayChannelsStatus() gatewayChannelsStatus {
 		Channels:       map[string]map[string]any{},
 	}
 	if raw := strings.TrimSpace(os.Getenv("DEERFLOW_CHANNELS_CONFIG")); raw != "" {
+		var rawMap map[string]any
 		if err := json.Unmarshal([]byte(raw), &status); err == nil {
+			_ = json.Unmarshal([]byte(raw), &rawMap)
+			if _, ok := rawMap["serviceRunning"]; ok {
+				status.ServiceRunning = boolValue(rawMap["serviceRunning"])
+			}
 			if status.Channels == nil {
 				status.Channels = map[string]map[string]any{}
 			}
