@@ -1037,6 +1037,22 @@ func TestGatewayModelsFromEnvJSON(t *testing.T) {
 	}
 }
 
+func TestGatewayModelsFromEnvJSONAcceptsCamelCaseFields(t *testing.T) {
+	models := gatewayModelsFromEnv(`[
+		{"name":"flash","model":"qwen/Qwen3.5-9B","displayName":"Flash","supportsThinking":false},
+		{"name":"pro","model":"deepseek/deepseek-r1","displayName":"Pro","supportsThinking":true,"supportsReasoningEffort":true}
+	]`)
+	if len(models) != 2 {
+		t.Fatalf("len=%d want 2", len(models))
+	}
+	if models[0].DisplayName != "Flash" {
+		t.Fatalf("display_name=%q want Flash", models[0].DisplayName)
+	}
+	if !models[1].SupportsThinking || !models[1].SupportsReasoningEffort {
+		t.Fatalf("unexpected second model capabilities: %#v", models[1])
+	}
+}
+
 func TestGatewayModelsFromEnvCSV(t *testing.T) {
 	models := gatewayModelsFromEnv("qwen/Qwen3.5-9B, deepseek/deepseek-r1 , ,")
 	if len(models) != 2 {

@@ -1650,10 +1650,14 @@ func gatewayModelsFromEnv(raw string) []gatewayModel {
 	if raw == "" {
 		return nil
 	}
-	var fromJSON []gatewayModel
 	if strings.HasPrefix(raw, "[") {
+		var fromJSON []map[string]any
 		if err := json.Unmarshal([]byte(raw), &fromJSON); err == nil {
-			return normalizeGatewayModels(fromJSON)
+			models := make([]gatewayModel, 0, len(fromJSON))
+			for _, item := range fromJSON {
+				models = append(models, gatewayModelFromMap(item))
+			}
+			return normalizeGatewayModels(models)
 		}
 	}
 	parts := strings.Split(raw, ",")
@@ -1666,6 +1670,21 @@ func gatewayModelsFromEnv(raw string) []gatewayModel {
 		models = append(models, newGatewayDefaultModel(name))
 	}
 	return normalizeGatewayModels(models)
+}
+
+func gatewayModelFromMap(raw map[string]any) gatewayModel {
+	if raw == nil {
+		return gatewayModel{}
+	}
+	return gatewayModel{
+		ID:                      firstNonEmpty(stringFromAny(raw["id"])),
+		Name:                    firstNonEmpty(stringFromAny(raw["name"])),
+		Model:                   firstNonEmpty(stringFromAny(raw["model"])),
+		DisplayName:             firstNonEmpty(stringFromAny(raw["display_name"]), stringFromAny(raw["displayName"])),
+		Description:             firstNonEmpty(stringFromAny(raw["description"])),
+		SupportsThinking:        boolValue(firstNonNil(raw["supports_thinking"], raw["supportsThinking"])),
+		SupportsReasoningEffort: boolValue(firstNonNil(raw["supports_reasoning_effort"], raw["supportsReasoningEffort"])),
+	}
 }
 
 func gatewayMCPConfigFromEnv(raw string) gatewayMCPConfig {
