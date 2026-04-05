@@ -211,7 +211,7 @@ func TestCreateThreadAcceptsTopLevelValues(t *testing.T) {
 	resp, err := http.Post(
 		ts.URL+"/threads",
 		"application/json",
-		strings.NewReader(`{"threadId":"thread-create-top-level","metadata":{"assistantId":"assistant-1","graphId":"graph-1","runId":"run-1","mode":"thinking","modelName":"deepseek/deepseek-r1","reasoningEffort":"high","agentName":"planner","agentType":"research","thinkingEnabled":false,"isPlanMode":true,"subagentEnabled":true,"Temperature":0.2,"maxTokens":321,"checkpointId":"cp-1","parentCheckpointId":"cp-parent-1","checkpointNs":"ns-1","parentCheckpointNs":"ns-parent-1","checkpointThreadId":"checkpoint-thread-1","parentCheckpointThreadId":"checkpoint-thread-parent-1"},"title":"Created Top","viewedImages":{"/tmp/chart.png":{"base64":"xyz","mime_type":"image/png"}}}`),
+		strings.NewReader(`{"threadId":"thread-create-top-level","metadata":{"assistantId":"assistant-1","graphId":"graph-1","runId":"run-1","mode":"thinking","modelName":"deepseek/deepseek-r1","reasoningEffort":"high","agentName":"planner","agentType":"research","thinkingEnabled":false,"isPlanMode":true,"subagentEnabled":true,"Temperature":0.2,"maxTokens":321,"checkpointId":"cp-1","parentCheckpointId":"cp-parent-1","checkpointNs":"ns-1","parentCheckpointNs":"ns-parent-1","checkpointThreadId":"checkpoint-thread-1","parentCheckpointThreadId":"checkpoint-thread-parent-1"},"title":"Created Top","todos":[{"content":"ship sqlite","status":"pending"}],"sandbox":{"sandbox_id":"sb-1"},"threadData":{"workspace_path":"/tmp/workspace","uploads_path":"/tmp/uploads","outputs_path":"/tmp/outputs"},"uploadedFiles":[{"filename":"notes.txt","path":"/tmp/uploads/notes.txt","status":"uploaded"}],"artifacts":["/tmp/report.html"],"viewedImages":{"/tmp/chart.png":{"base64":"xyz","mime_type":"image/png"}}}`),
 	)
 	if err != nil {
 		t.Fatalf("post thread: %v", err)
@@ -240,6 +240,46 @@ func TestCreateThreadAcceptsTopLevelValues(t *testing.T) {
 	viewedImagesSummary, ok := thread["viewed_images"].(map[string]any)
 	if !ok || len(viewedImagesSummary) != 1 {
 		t.Fatalf("thread=%#v", thread)
+	}
+	todosSummary, _ := thread["todos"].([]any)
+	if len(todosSummary) != 1 {
+		t.Fatalf("thread=%#v", thread)
+	}
+	sandboxSummary, _ := thread["sandbox"].(map[string]any)
+	if sandboxSummary["sandbox_id"] != "sb-1" {
+		t.Fatalf("thread=%#v", thread)
+	}
+	threadDataSummary, _ := thread["thread_data"].(map[string]any)
+	if threadDataSummary["workspace_path"] != "/tmp/workspace" || threadDataSummary["uploads_path"] != "/tmp/uploads" || threadDataSummary["outputs_path"] != "/tmp/outputs" {
+		t.Fatalf("thread=%#v", thread)
+	}
+	uploadedFilesSummary, _ := thread["uploaded_files"].([]any)
+	if len(uploadedFilesSummary) != 1 {
+		t.Fatalf("thread=%#v", thread)
+	}
+	artifactsSummary, _ := thread["artifacts"].([]any)
+	if len(artifactsSummary) != 1 || artifactsSummary[0] != "/tmp/report.html" {
+		t.Fatalf("thread=%#v", thread)
+	}
+	todosValues, _ := values["todos"].([]any)
+	if len(todosValues) != 1 {
+		t.Fatalf("values=%#v", values)
+	}
+	sandboxValues, _ := values["sandbox"].(map[string]any)
+	if sandboxValues["sandbox_id"] != "sb-1" {
+		t.Fatalf("values=%#v", values)
+	}
+	threadDataValues, _ := values["thread_data"].(map[string]any)
+	if threadDataValues["workspace_path"] != "/tmp/workspace" || threadDataValues["uploads_path"] != "/tmp/uploads" || threadDataValues["outputs_path"] != "/tmp/outputs" {
+		t.Fatalf("values=%#v", values)
+	}
+	uploadedFilesValues, _ := values["uploaded_files"].([]any)
+	if len(uploadedFilesValues) != 1 {
+		t.Fatalf("values=%#v", values)
+	}
+	artifactsValues, _ := values["artifacts"].([]any)
+	if len(artifactsValues) != 1 || artifactsValues[0] != "/tmp/report.html" {
+		t.Fatalf("values=%#v", values)
 	}
 	config, _ := thread["config"].(map[string]any)
 	configurable, _ := config["configurable"].(map[string]any)
@@ -6215,9 +6255,17 @@ func TestThreadUpdateAcceptsValuesPayload(t *testing.T) {
 	if len(todosSummary) != 1 {
 		t.Fatalf("thread=%#v", thread)
 	}
+	todoSummary, _ := todosSummary[0].(map[string]any)
+	if todoSummary["content"] != "ship sqlite" {
+		t.Fatalf("thread=%#v", thread)
+	}
 	values, _ := thread["values"].(map[string]any)
 	if got := values["title"]; got != "After" {
 		t.Fatalf("title=%v want After", got)
+	}
+	todosValues, _ := values["todos"].([]any)
+	if len(todosValues) != 1 {
+		t.Fatalf("values=%#v", values)
 	}
 	config, _ := thread["config"].(map[string]any)
 	configurable, _ := config["configurable"].(map[string]any)

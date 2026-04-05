@@ -361,6 +361,9 @@ func applyThreadValues(session *Session, values map[string]any) {
 	if sandboxState, ok := normalizeStringMap(values["sandbox"]); ok {
 		session.Metadata["sandbox"] = sandboxState
 	}
+	if artifacts := anyStringSlice(values["artifacts"]); len(artifacts) > 0 {
+		session.Metadata["artifacts"] = artifacts
+	}
 	if viewedImages, ok := normalizeViewedImages(firstNonNil(values["viewed_images"], values["viewedImages"])); ok {
 		session.Metadata["viewed_images"] = viewedImages
 	}
@@ -397,6 +400,7 @@ func extractThreadValues(raw map[string]any) map[string]any {
 		"title":          {"title"},
 		"todos":          {"todos"},
 		"sandbox":        {"sandbox"},
+		"artifacts":      {"artifacts"},
 		"viewed_images":  {"viewed_images", "viewedImages"},
 		"uploaded_files": {"uploaded_files", "uploadedFiles"},
 		"thread_data":    {"thread_data", "threadData"},
