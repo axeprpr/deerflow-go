@@ -2209,6 +2209,9 @@ func TestLoadPersistedThreadsAcceptsValuesStateObject(t *testing.T) {
 	if configurable["mode"] != "thinking" {
 		t.Fatalf("configurable=%#v", configurable)
 	}
+	if configurable["reasoning_effort"] != "low" {
+		t.Fatalf("configurable=%#v", configurable)
+	}
 }
 
 func TestLoadPersistedThreadsAcceptsLegacyModelAlias(t *testing.T) {
@@ -2242,6 +2245,9 @@ func TestLoadPersistedThreadsAcceptsLegacyModelAlias(t *testing.T) {
 	}
 	configurable, _ := state.Config["configurable"].(map[string]any)
 	if configurable["model_name"] != "doubao-seed-1.8" {
+		t.Fatalf("configurable=%#v", configurable)
+	}
+	if configurable["reasoning_effort"] != "minimal" {
 		t.Fatalf("configurable=%#v", configurable)
 	}
 }

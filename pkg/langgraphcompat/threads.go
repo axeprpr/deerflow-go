@@ -806,12 +806,10 @@ func (s *Server) threadConfigurable(session *Session) map[string]any {
 		"agent_name":       stringValue(session.Metadata["agent_name"]),
 		"model_name":       stringValue(session.Metadata["model_name"]),
 		"mode":             mode,
+		"reasoning_effort": deriveReasoningEffort(session.Metadata, mode),
 		"is_plan_mode":     false,
 		"thinking_enabled": true,
 		"subagent_enabled": false,
-	}
-	if reasoningEffort := stringValue(session.Metadata["reasoning_effort"]); reasoningEffort != "" {
-		configurable["reasoning_effort"] = reasoningEffort
 	}
 	if value, ok := session.Metadata["thinking_enabled"].(bool); ok {
 		configurable["thinking_enabled"] = value
@@ -934,6 +932,22 @@ func deriveThreadMode(metadata map[string]any) string {
 		return "thinking"
 	}
 	return "flash"
+}
+
+func deriveReasoningEffort(metadata map[string]any, mode string) string {
+	if effort := strings.TrimSpace(stringValue(metadata["reasoning_effort"])); effort != "" {
+		return effort
+	}
+	switch mode {
+	case "ultra":
+		return "high"
+	case "pro":
+		return "medium"
+	case "thinking":
+		return "low"
+	default:
+		return "minimal"
+	}
 }
 
 func (s *Server) workspaceDir(threadID string) string {
