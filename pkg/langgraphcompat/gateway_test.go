@@ -2480,6 +2480,9 @@ func TestLoadPersistedThreadsDerivesInterruptedStatus(t *testing.T) {
 	if len(state.Tasks) != 1 {
 		t.Fatalf("tasks=%#v", state.Tasks)
 	}
+	if len(state.Interrupts) != 1 {
+		t.Fatalf("interrupts=%#v", state.Interrupts)
+	}
 	metadataInterrupts, _ := state.Metadata["interrupts"].([]any)
 	if len(metadataInterrupts) != 1 {
 		t.Fatalf("interrupts=%#v", state.Metadata["interrupts"])

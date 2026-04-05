@@ -76,6 +76,7 @@ type ThreadState struct {
 	Config       map[string]any `json:"config,omitempty"`
 	Next         []string       `json:"next"`
 	Tasks        []any          `json:"tasks"`
+	Interrupts   []any          `json:"interrupts,omitempty"`
 	Metadata     map[string]any `json:"metadata"`
 	CreatedAt    string         `json:"created_at,omitempty"`
 }

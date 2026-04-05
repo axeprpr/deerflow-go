@@ -765,6 +765,7 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 
 	next := stringSliceFromAny(session.Metadata["next"])
 	tasks := anySlice(session.Metadata["tasks"])
+	interrupts := anySlice(session.Metadata["interrupts"])
 
 	return &ThreadState{
 		CheckpointID: firstNonEmpty(stringValue(session.Metadata["checkpoint_id"]), uuid.New().String()),
@@ -772,10 +773,11 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 		Config: map[string]any{
 			"configurable": s.threadConfigurable(session),
 		},
-		Next:      append([]string(nil), next...),
-		Tasks:     append([]any(nil), tasks...),
-		Metadata:  threadMetadata(session),
-		CreatedAt: session.UpdatedAt.Format(time.RFC3339Nano),
+		Next:       append([]string(nil), next...),
+		Tasks:      append([]any(nil), tasks...),
+		Interrupts: append([]any(nil), interrupts...),
+		Metadata:   threadMetadata(session),
+		CreatedAt:  session.UpdatedAt.Format(time.RFC3339Nano),
 	}
 }
 
