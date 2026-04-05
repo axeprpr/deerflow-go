@@ -409,6 +409,12 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 				}
 			}
 		}
+		if status := strings.TrimSpace(stringFromAny(msgMap["status"])); status != "" {
+			if msg.Metadata == nil {
+				msg.Metadata = map[string]string{}
+			}
+			msg.Metadata["message_status"] = status
+		}
 		if len(toolCalls) > 0 {
 			msg.ToolCalls = toolCalls
 		}

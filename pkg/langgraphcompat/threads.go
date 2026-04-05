@@ -617,6 +617,7 @@ func (s *Server) messagesToLangChain(messages []models.Message) []Message {
 		if msg.ToolResult != nil {
 			converted.Name = msg.ToolResult.ToolName
 			converted.ToolCallID = msg.ToolResult.CallID
+			converted.Status = toolMessageStatus(msg)
 			converted.Data = map[string]any{
 				"status":   string(msg.ToolResult.Status),
 				"error":    msg.ToolResult.Error,
@@ -640,7 +641,7 @@ func additionalKwargsFromMessageMetadata(metadata map[string]string) map[string]
 	}
 	out := make(map[string]any)
 	for key, value := range metadata {
-		if strings.HasPrefix(key, "usage_") {
+		if strings.HasPrefix(key, "usage_") || key == "message_status" {
 			continue
 		}
 		out[key] = value
@@ -669,6 +670,29 @@ func usageMetadataFromMessageMetadata(metadata map[string]string) map[string]any
 		return nil
 	}
 	return out
+}
+
+func toolMessageStatus(msg models.Message) string {
+	if msg.Metadata != nil {
+		if status := strings.TrimSpace(msg.Metadata["message_status"]); status != "" {
+			return status
+		}
+	}
+	if msg.ToolResult == nil {
+		return ""
+	}
+	switch msg.ToolResult.Status {
+	case models.CallStatusCompleted:
+		return "success"
+	case models.CallStatusFailed:
+		return "error"
+	case models.CallStatusRunning:
+		return "running"
+	case models.CallStatusPending:
+		return "pending"
+	default:
+		return ""
+	}
 }
 
 func convertToolCalls(calls []models.ToolCall) []ToolCall {

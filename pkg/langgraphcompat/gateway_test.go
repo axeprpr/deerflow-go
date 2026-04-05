@@ -4081,6 +4081,7 @@ func TestConvertToMessagesPreservesToolShape(t *testing.T) {
 			"id":           "tool-1",
 			"type":         "tool",
 			"name":         "present_files",
+			"status":       "success",
 			"tool_call_id": "call-1",
 			"content":      "presented",
 			"data": map[string]any{
@@ -4112,12 +4113,18 @@ func TestConvertToMessagesPreservesToolShape(t *testing.T) {
 	if messages[1].ToolResult.CallID != "call-1" || messages[1].ToolResult.ToolName != "present_files" {
 		t.Fatalf("tool_result=%#v", messages[1].ToolResult)
 	}
+	if messages[1].Metadata["message_status"] != "success" {
+		t.Fatalf("metadata=%#v", messages[1].Metadata)
+	}
 	if got := anyStringSlice(messages[1].ToolResult.Data["filepaths"]); len(got) != 1 || got[0] != "/tmp/report.md" {
 		t.Fatalf("tool_result data=%#v", messages[1].ToolResult.Data)
 	}
 	roundTrip := s.messagesToLangChain(messages)
 	if usage := roundTrip[0].UsageMetadata; usage["input_tokens"] != 10 || usage["output_tokens"] != 5 || usage["total_tokens"] != 15 {
 		t.Fatalf("usage_metadata=%#v", usage)
+	}
+	if roundTrip[1].Status != "success" {
+		t.Fatalf("status=%q", roundTrip[1].Status)
 	}
 }
 
@@ -4154,6 +4161,9 @@ func TestMessagesToLangChainPreservesToolShape(t *testing.T) {
 					"files": []string{"/tmp/report.md"},
 				},
 			},
+			Metadata: map[string]string{
+				"message_status": "success",
+			},
 		},
 	})
 	if len(converted) != 2 {
@@ -4167,6 +4177,12 @@ func TestMessagesToLangChainPreservesToolShape(t *testing.T) {
 	}
 	if converted[1].ToolCallID != "call-1" || converted[1].Name != "present_files" {
 		t.Fatalf("tool message=%#v", converted[1])
+	}
+	if converted[1].Status != "success" {
+		t.Fatalf("status=%q", converted[1].Status)
+	}
+	if _, ok := converted[1].AdditionalKwargs["message_status"]; ok {
+		t.Fatalf("additional_kwargs=%#v", converted[1].AdditionalKwargs)
 	}
 	data, ok := converted[1].Data["data"].(map[string]any)
 	if !ok || len(data) != 1 {

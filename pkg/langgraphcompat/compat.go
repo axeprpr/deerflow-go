@@ -112,6 +112,7 @@ type Message struct {
 	Role             string         `json:"role,omitempty"`
 	Content          string         `json:"content,omitempty"`
 	Name             string         `json:"name,omitempty"`
+	Status           string         `json:"status,omitempty"`
 	Data             map[string]any `json:"data,omitempty"`
 	ToolCallID       string         `json:"tool_call_id,omitempty"`
 	ToolCalls        []ToolCall     `json:"tool_calls,omitempty"`
