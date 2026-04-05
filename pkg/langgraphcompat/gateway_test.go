@@ -9177,6 +9177,24 @@ func TestStreamModeFilterAliases(t *testing.T) {
 	}
 }
 
+func TestStreamModeFilterEventAliases(t *testing.T) {
+	for _, mode := range []string{"events", "debug", "custom"} {
+		filter := newStreamModeFilter([]any{mode})
+		if !filter.allows("metadata") || !filter.allows("tool_call") || !filter.allows("error") {
+			t.Fatalf("%s mode should allow core event stream", mode)
+		}
+		if !filter.allows("task_started") || !filter.allows("clarification_request") {
+			t.Fatalf("%s mode should allow task and clarification events", mode)
+		}
+		if filter.allows("values") || filter.allows("updates") {
+			t.Fatalf("%s mode should not implicitly allow values/updates", mode)
+		}
+		if !filter.allows("end") {
+			t.Fatalf("%s mode should allow end", mode)
+		}
+	}
+}
+
 func TestRecordedRunStreamModeFiltersReplayEvents(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	run := &Run{
