@@ -8634,6 +8634,9 @@ func TestThreadRunStreamModeMessagesTupleFiltersValues(t *testing.T) {
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
 	}
+	if !strings.Contains(text, `"content":"hello from fake llm"`) {
+		t.Fatalf("missing message payload: %s", text)
+	}
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
 	}
@@ -8666,6 +8669,9 @@ func TestThreadRunCamelCaseStreamModeFiltersValues(t *testing.T) {
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
 	}
+	if !strings.Contains(text, `"content":"hello from fake llm"`) {
+		t.Fatalf("missing message payload: %s", text)
+	}
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
 	}
@@ -8695,8 +8701,17 @@ func TestThreadRunStreamAcceptsTopLevelMessages(t *testing.T) {
 	if !strings.Contains(text, "event: metadata") {
 		t.Fatalf("missing metadata event: %s", text)
 	}
+	if !strings.Contains(text, `"thread_id":"thread-stream-top-level"`) {
+		t.Fatalf("missing thread_id in metadata: %s", text)
+	}
+	if !strings.Contains(text, `"run_id":"`) {
+		t.Fatalf("missing run_id in metadata: %s", text)
+	}
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
+	}
+	if !strings.Contains(text, `"content":"hello from fake llm"`) {
+		t.Fatalf("missing message payload: %s", text)
 	}
 	if !strings.Contains(text, "event: end") {
 		t.Fatalf("missing end event: %s", text)
