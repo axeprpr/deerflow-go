@@ -645,6 +645,43 @@ func TestThreadDeleteRemovesRunFiles(t *testing.T) {
 	}
 }
 
+func TestThreadRunsListAndScopedGet(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-list-1",
+		ThreadID:    "thread-list-1",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.saveRun(run)
+
+	listResp, err := http.Get(ts.URL + "/threads/thread-list-1/runs")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	defer listResp.Body.Close()
+	var listData struct {
+		Runs []map[string]any `json:"runs"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&listData); err != nil {
+		t.Fatalf("decode runs: %v", err)
+	}
+	if len(listData.Runs) != 1 || listData.Runs[0]["run_id"] != "run-list-1" {
+		t.Fatalf("unexpected runs payload: %#v", listData.Runs)
+	}
+
+	getResp, err := http.Get(ts.URL + "/threads/thread-list-1/runs/run-list-1")
+	if err != nil {
+		t.Fatalf("get scoped run: %v", err)
+	}
+	defer getResp.Body.Close()
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", getResp.StatusCode)
+	}
+}
+
 func TestSkillInstallFromArchive(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-skill-1"

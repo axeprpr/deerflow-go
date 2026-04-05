@@ -330,6 +330,48 @@ func (s *Server) handleRunGet(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleThreadScopedRunGet(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	runID := r.PathValue("run_id")
+	run := s.getRun(runID)
+	if run == nil || run.ThreadID != threadID {
+		http.Error(w, "run not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"run_id":       run.RunID,
+		"thread_id":    run.ThreadID,
+		"assistant_id": run.AssistantID,
+		"status":       run.Status,
+		"created_at":   run.CreatedAt.Format(time.RFC3339Nano),
+		"updated_at":   run.UpdatedAt.Format(time.RFC3339Nano),
+	})
+}
+
+func (s *Server) handleThreadRunsList(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	s.runsMu.RLock()
+	runs := make([]map[string]any, 0)
+	for _, run := range s.runs {
+		if run.ThreadID != threadID {
+			continue
+		}
+		runs = append(runs, map[string]any{
+			"run_id":       run.RunID,
+			"thread_id":    run.ThreadID,
+			"assistant_id": run.AssistantID,
+			"status":       run.Status,
+			"created_at":   run.CreatedAt.Format(time.RFC3339Nano),
+			"updated_at":   run.UpdatedAt.Format(time.RFC3339Nano),
+		})
+	}
+	s.runsMu.RUnlock()
+	sort.Slice(runs, func(i, j int) bool {
+		return runs[i]["created_at"].(string) > runs[j]["created_at"].(string)
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	status := s.healthStatus(r.Context())
 	code := http.StatusOK

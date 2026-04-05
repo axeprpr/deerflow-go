@@ -34,6 +34,97 @@ func (s *Server) handleThreadRunsStream(w http.ResponseWriter, r *http.Request) 
 	s.handleStreamRequest(w, r, r.PathValue("thread_id"))
 }
 
+func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	if threadID == "" {
+		http.Error(w, "thread ID required", http.StatusBadRequest)
+		return
+	}
+
+	var req RunCreateRequest
+	if r.Body != nil {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			http.Error(w, fmt.Sprintf("invalid request: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	session := s.ensureSession(threadID, nil)
+	if session.PresentFiles != nil {
+		session.PresentFiles.Clear()
+	}
+	s.markThreadStatus(threadID, "busy")
+
+	input := req.Input
+	if input == nil {
+		input = make(map[string]any)
+	}
+	messages, _ := input["messages"].([]any)
+	newMessages := s.convertToMessages(threadID, messages)
+
+	s.sessionsMu.RLock()
+	existingMessages := append([]models.Message(nil), session.Messages...)
+	s.sessionsMu.RUnlock()
+	deerMessages := append(existingMessages, newMessages...)
+
+	runID := uuid.New().String()
+	run := &Run{
+		RunID:       runID,
+		ThreadID:    threadID,
+		AssistantID: req.AssistantID,
+		Status:      "running",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.saveRun(run)
+
+	runCfg := parseRunConfig(req.Config)
+	if runCfg.AgentType != "" {
+		s.setThreadMetadata(threadID, "agent_type", string(runCfg.AgentType))
+	}
+	runAgent := s.newAgent(agent.AgentConfig{
+		PresentFiles:    session.PresentFiles,
+		AgentType:       runCfg.AgentType,
+		Model:           firstNonEmpty(runCfg.ModelName, s.defaultModel),
+		ReasoningEffort: runCfg.ReasoningEffort,
+		Temperature:     runCfg.Temperature,
+		MaxTokens:       runCfg.MaxTokens,
+	})
+
+	ctx := subagent.WithEventSink(r.Context(), func(evt subagent.TaskEvent) {})
+	ctx = clarification.WithThreadID(ctx, threadID)
+	ctx = clarification.WithEventSink(ctx, func(item *clarification.Clarification) {})
+
+	result, err := runAgent.Run(ctx, threadID, deerMessages)
+	if err != nil {
+		run.Status = "error"
+		run.Error = err.Error()
+		run.UpdatedAt = time.Now().UTC()
+		s.saveRun(run)
+		s.markThreadStatus(threadID, "error")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.saveSession(threadID, result.Messages)
+	state := s.getThreadState(threadID)
+	run.Status = "success"
+	run.UpdatedAt = time.Now().UTC()
+	s.saveRun(run)
+	s.markThreadStatus(threadID, "idle")
+
+	values := map[string]any{}
+	if state != nil {
+		for k, v := range state.Values {
+			values[k] = v
+		}
+	}
+	values["run_id"] = runID
+	values["thread_id"] = threadID
+	writeJSON(w, http.StatusOK, values)
+}
+
 func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, routeThreadID string) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
