@@ -2160,7 +2160,7 @@ func TestLoadPersistedThreadsAcceptsValuesStateObject(t *testing.T) {
 	if session == nil {
 		t.Fatalf("sessions=%#v", s.sessions)
 	}
-	if len(session.Messages) != 1 || session.Messages[0].Content != "hello from state" {
+	if len(session.Messages) != 1 || session.Messages[0].ID != "m1" || session.Messages[0].Content != "hello from state" {
 		t.Fatalf("messages=%#v", session.Messages)
 	}
 	if session.Metadata["title"] != "Values Thread" || session.Metadata["assistant_id"] != "assistant-1" || session.Metadata["model_name"] != "qwen/Qwen3.5-9B" {

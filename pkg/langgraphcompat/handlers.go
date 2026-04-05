@@ -375,8 +375,12 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 		}
 
 		msgSeq++
+		msgID := strings.TrimSpace(stringFromAny(msgMap["id"]))
+		if msgID == "" {
+			msgID = fmt.Sprintf("msg_%d", msgSeq)
+		}
 		msg := models.Message{
-			ID:        fmt.Sprintf("msg_%d", msgSeq),
+			ID:        msgID,
 			SessionID: threadID,
 			Role:      s.convertRole(role),
 			Content:   content,
