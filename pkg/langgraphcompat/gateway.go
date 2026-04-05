@@ -1525,6 +1525,25 @@ func (s *Server) loadAgentsFromFiles() map[string]gatewayAgent {
 		if err := json.Unmarshal(data, &agent); err != nil {
 			continue
 		}
+		var raw map[string]any
+		_ = json.Unmarshal(data, &raw)
+		if agent.Name == "" {
+			agent.Name = firstNonEmpty(stringFromAny(raw["name"]), name)
+		}
+		if agent.Description == "" {
+			agent.Description = stringFromAny(raw["description"])
+		}
+		if rawModel, exists := raw["model"]; exists && agent.Model == nil && rawModel != nil {
+			model := stringFromAny(rawModel)
+			agent.Model = &model
+		}
+		if len(agent.ToolGroups) == 0 {
+			if rawToolGroups, exists := raw["tool_groups"]; exists {
+				agent.ToolGroups = stringsFromAny(rawToolGroups)
+			} else if rawToolGroups, exists := raw["toolGroups"]; exists {
+				agent.ToolGroups = stringsFromAny(rawToolGroups)
+			}
+		}
 		agent.Name = name
 		if soul, err := os.ReadFile(filepath.Join(s.agentDir(name), "SOUL.md")); err == nil {
 			agent.Soul = string(soul)

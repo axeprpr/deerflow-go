@@ -1229,6 +1229,34 @@ func TestAgentFilesPersistAndLoad(t *testing.T) {
 	}
 }
 
+func TestLoadAgentsFromFilesAcceptsCamelCaseToolGroups(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{dataRoot: root}
+	dir := s.agentDir("writer")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{"name":"writer","description":"Writer","model":"qwen/Qwen3.5-9B","toolGroups":["web"]}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SOUL.md"), []byte("Write clearly."), 0o644); err != nil {
+		t.Fatalf("write soul: %v", err)
+	}
+
+	loaded := s.loadAgentsFromFiles()
+	got, ok := loaded["writer"]
+	if !ok {
+		t.Fatalf("missing agent: %#v", loaded)
+	}
+	if len(got.ToolGroups) != 1 || got.ToolGroups[0] != "web" {
+		t.Fatalf("tool_groups=%#v", got.ToolGroups)
+	}
+	if got.Soul != "Write clearly." {
+		t.Fatalf("soul=%q", got.Soul)
+	}
+}
+
 func TestLoadMemoryFromFileAcceptsSnakeCaseFields(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}
