@@ -779,11 +779,17 @@ func (s *Server) handleSuggestions(w http.ResponseWriter, r *http.Request) {
 			Role    string `json:"role"`
 			Content string `json:"content"`
 		} `json:"messages"`
-		N int `json:"n"`
+		N          int    `json:"n"`
+		Count      int    `json:"count"`
+		ModelName  string `json:"model_name"`
+		ModelNameX string `json:"modelName"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"suggestions": []string{}})
 		return
+	}
+	if req.N <= 0 {
+		req.N = req.Count
 	}
 	if req.N <= 0 {
 		req.N = 3
