@@ -3297,7 +3297,9 @@ func TestLoadThreadHistoryAcceptsTopLevelConfigurable(t *testing.T) {
 			"createdAt":"2026-01-01T00:00:00Z",
 			"configurable":{
 				"threadId":"thread-history-configurable-top-level",
-				"modelName":"deepseek/deepseek-r1"
+				"modelName":"deepseek/deepseek-r1",
+				"temperature":0.2,
+				"maxTokens":321
 			}
 		}
 	]`
@@ -3312,6 +3314,12 @@ func TestLoadThreadHistoryAcceptsTopLevelConfigurable(t *testing.T) {
 	}
 	configurable, _ := history[0].Config["configurable"].(map[string]any)
 	if configurable["thread_id"] != "thread-history-configurable-top-level" || configurable["model_name"] != "deepseek/deepseek-r1" {
+		t.Fatalf("config=%#v", history[0].Config)
+	}
+	if configurable["temperature"] != 0.2 {
+		t.Fatalf("config=%#v", history[0].Config)
+	}
+	if configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != 321 && configurable["max_tokens"] != int64(321) {
 		t.Fatalf("config=%#v", history[0].Config)
 	}
 }
@@ -3375,7 +3383,9 @@ func TestLoadThreadHistoryAcceptsFlatTopLevelConfig(t *testing.T) {
 			"createdAt":"2026-01-01T00:00:00Z",
 			"threadId":"thread-history-flat-config",
 			"modelName":"deepseek/deepseek-r1",
-			"agentType":"deep_research"
+			"agentType":"deep_research",
+			"temperature":0.2,
+			"maxTokens":321
 		}
 	]`
 	if err := os.WriteFile(filepath.Join(threadDir, "thread_history.json"), []byte(raw), 0o644); err != nil {
@@ -3389,6 +3399,12 @@ func TestLoadThreadHistoryAcceptsFlatTopLevelConfig(t *testing.T) {
 	}
 	configurable, _ := history[0].Config["configurable"].(map[string]any)
 	if configurable["thread_id"] != "thread-history-flat-config" || configurable["model_name"] != "deepseek/deepseek-r1" || configurable["agent_type"] != "deep_research" {
+		t.Fatalf("config=%#v", history[0].Config)
+	}
+	if configurable["temperature"] != 0.2 {
+		t.Fatalf("config=%#v", history[0].Config)
+	}
+	if configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != 321 && configurable["max_tokens"] != int64(321) {
 		t.Fatalf("config=%#v", history[0].Config)
 	}
 }
