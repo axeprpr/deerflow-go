@@ -20,6 +20,7 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
+	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
 type fakeLLMProvider struct{}
@@ -119,6 +120,75 @@ func (fakeErrorLLMProvider) Stream(_ context.Context, _ llm.ChatRequest) (<-chan
 	go func() {
 		defer close(ch)
 		ch <- llm.StreamChunk{Err: fmt.Errorf("boom")}
+	}()
+	return ch, nil
+}
+
+type fakeClarificationLLMProvider struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (*fakeClarificationLLMProvider) Chat(_ context.Context, _ llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, nil
+}
+
+func (p *fakeClarificationLLMProvider) Stream(_ context.Context, _ llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	p.mu.Lock()
+	p.calls++
+	callIndex := p.calls
+	p.mu.Unlock()
+
+	ch := make(chan llm.StreamChunk, 2)
+	go func() {
+		defer close(ch)
+		if callIndex == 1 {
+			ch <- llm.StreamChunk{
+				ToolCalls: []models.ToolCall{
+					{
+						ID:   "clarify-1",
+						Name: "ask_clarification",
+						Arguments: map[string]any{
+							"type":     "text",
+							"question": "Need more detail?",
+							"required": true,
+						},
+						Status: models.CallStatusPending,
+					},
+				},
+			}
+			ch <- llm.StreamChunk{
+				Done: true,
+				Message: &models.Message{
+					ID:        "ai-final-clarify",
+					SessionID: "session",
+					Role:      models.RoleAI,
+					ToolCalls: []models.ToolCall{
+						{
+							ID:   "clarify-1",
+							Name: "ask_clarification",
+							Arguments: map[string]any{
+								"type":     "text",
+								"question": "Need more detail?",
+								"required": true,
+							},
+							Status: models.CallStatusPending,
+						},
+					},
+				},
+			}
+			return
+		}
+		ch <- llm.StreamChunk{Delta: "done"}
+		ch <- llm.StreamChunk{
+			Done: true,
+			Message: &models.Message{
+				ID:        "ai-final-clarification-answer",
+				SessionID: "session",
+				Role:      models.RoleAI,
+				Content:   "done",
+			},
+		}
 	}()
 	return ch, nil
 }
@@ -8845,6 +8915,45 @@ func TestThreadRunStreamEmitsErrorEvent(t *testing.T) {
 	}
 	if !strings.Contains(text, `"retryable":true`) {
 		t.Fatalf("missing retryable flag: %s", text)
+	}
+}
+
+func TestThreadRunStreamEmitsClarificationRequest(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.llmProvider = &fakeClarificationLLMProvider{}
+	s.tools = tools.NewRegistry()
+	if err := s.tools.Register(clarification.AskClarificationTool(s.clarify)); err != nil {
+		t.Fatalf("register clarification tool: %v", err)
+	}
+
+	reqBody := `{"assistant_id":"lead_agent","stream_mode":["events"],"input":{"messages":[{"role":"user","content":"ambiguous request"}]}}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/thread-stream-clarify/runs/stream", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: clarification_request") {
+		t.Fatalf("missing clarification_request event: %s", text)
+	}
+	if !strings.Contains(text, `"thread_id":"thread-stream-clarify"`) {
+		t.Fatalf("missing thread_id in clarification payload: %s", text)
+	}
+	if !strings.Contains(text, `"question":"Need more detail?"`) {
+		t.Fatalf("missing clarification question: %s", text)
+	}
+	if !strings.Contains(text, `"type":"text"`) {
+		t.Fatalf("missing clarification type: %s", text)
 	}
 }
 
