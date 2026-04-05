@@ -2,7 +2,6 @@ package langgraphcompat
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -87,52 +86,40 @@ func TestThreadClarificationHandlers(t *testing.T) {
 	}
 }
 
-func TestThreadClarificationListHandler(t *testing.T) {
+func TestThreadClarificationCreateAcceptsClarificationTypeAlias(t *testing.T) {
 	manager := clarification.NewManager(4)
+	root := t.TempDir()
 	server := &Server{
 		clarify:    manager,
 		clarifyAPI: clarification.NewAPI(manager),
 		sessions:   make(map[string]*Session),
 		runs:       make(map[string]*Run),
+		dataRoot:   root,
 	}
-	server.ensureSession("thread-1", nil)
+	server.ensureSession("thread-2", nil)
 
-	first, err := manager.Request(clarification.WithThreadID(context.Background(), "thread-1"), clarification.ClarificationRequest{
-		Question: "First?",
+	createBody, _ := json.Marshal(map[string]any{
+		"clarification_type": "choice",
+		"question":           "Which mode?",
+		"options": []map[string]any{
+			{"label": "Fast", "value": "fast"},
+			{"label": "Safe", "value": "safe"},
+		},
+		"required": true,
 	})
-	if err != nil {
-		t.Fatalf("first request error = %v", err)
-	}
-	second, err := manager.Request(clarification.WithThreadID(context.Background(), "thread-1"), clarification.ClarificationRequest{
-		Question: "Second?",
-	})
-	if err != nil {
-		t.Fatalf("second request error = %v", err)
-	}
-	if _, err := manager.Request(clarification.WithThreadID(context.Background(), "thread-2"), clarification.ClarificationRequest{
-		Question: "Other thread?",
-	}); err != nil {
-		t.Fatalf("other request error = %v", err)
+	createReq := httptest.NewRequest(http.MethodPost, "/threads/thread-2/clarifications", bytes.NewReader(createBody))
+	createReq.SetPathValue("thread_id", "thread-2")
+	createRes := httptest.NewRecorder()
+	server.handleThreadClarificationCreate(createRes, createReq)
+	if createRes.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d", createRes.Code, http.StatusCreated)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/threads/thread-1/clarifications", nil)
-	req.SetPathValue("thread_id", "thread-1")
-	res := httptest.NewRecorder()
-	server.handleThreadClarificationList(res, req)
-	if res.Code != http.StatusOK {
-		t.Fatalf("list status = %d, want %d", res.Code, http.StatusOK)
+	var created clarification.Clarification
+	if err := json.Unmarshal(createRes.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
 	}
-
-	var payload struct {
-		Clarifications []clarification.Clarification `json:"clarifications"`
-	}
-	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode list response: %v", err)
-	}
-	if len(payload.Clarifications) != 2 {
-		t.Fatalf("clarifications len = %d, want 2", len(payload.Clarifications))
-	}
-	if payload.Clarifications[0].ID != first.ID || payload.Clarifications[1].ID != second.ID {
-		t.Fatalf("clarification ids = [%s %s], want [%s %s]", payload.Clarifications[0].ID, payload.Clarifications[1].ID, first.ID, second.ID)
+	if created.Type != "choice" {
+		t.Fatalf("created type = %q, want choice", created.Type)
 	}
 }

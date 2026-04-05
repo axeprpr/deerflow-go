@@ -46,3 +46,26 @@ func TestAskClarificationTool(t *testing.T) {
 		t.Fatalf("thread_id = %q, want thread-3", item.ThreadID)
 	}
 }
+
+func TestAskClarificationToolAcceptsClarificationTypeAlias(t *testing.T) {
+	manager := NewManager(1)
+	tool := AskClarificationTool(manager)
+
+	result, err := tool.Handler(context.Background(), models.ToolCall{
+		ID:   "call-2",
+		Name: tool.Name,
+		Arguments: map[string]any{
+			"clarification_type": "confirm",
+			"question":           "Continue?",
+		},
+	})
+	if err != nil {
+		t.Fatalf("tool handler error = %v", err)
+	}
+	if result.Status != models.CallStatusCompleted {
+		t.Fatalf("result status = %q", result.Status)
+	}
+	if got, _ := result.Data["type"].(string); got != "confirm" {
+		t.Fatalf("type = %q, want confirm", got)
+	}
+}

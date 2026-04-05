@@ -130,7 +130,11 @@ func formatClarificationMessage(item *Clarification) string {
 
 func parseRequest(args map[string]any) (ClarificationRequest, error) {
 	req := ClarificationRequest{
-		Type:     strings.TrimSpace(stringValue(args["type"])),
+		Type: strings.TrimSpace(firstNonEmptyString(
+			args["type"],
+			args["clarification_type"],
+			args["clarificationType"],
+		)),
 		Question: strings.TrimSpace(stringValue(args["question"])),
 		Default:  strings.TrimSpace(stringValue(args["default"])),
 		Required: boolValue(args["required"]),
@@ -160,6 +164,15 @@ func parseRequest(args map[string]any) (ClarificationRequest, error) {
 func stringValue(v any) string {
 	s, _ := v.(string)
 	return s
+}
+
+func firstNonEmptyString(values ...any) string {
+	for _, value := range values {
+		if text := strings.TrimSpace(stringValue(value)); text != "" {
+			return text
+		}
+	}
+	return ""
 }
 
 func boolValue(v any) bool {

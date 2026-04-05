@@ -20,11 +20,31 @@ func (a *API) HandleCreate(w http.ResponseWriter, r *http.Request, threadID stri
 		return
 	}
 
-	var req ClarificationRequest
+	var raw map[string]any
 	defer r.Body.Close()
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
+	}
+	req := ClarificationRequest{
+		Type:     strings.TrimSpace(firstNonEmpty(raw["type"], raw["clarification_type"], raw["clarificationType"])),
+		Question: strings.TrimSpace(stringValue(raw["question"])),
+		Default:  strings.TrimSpace(stringValue(raw["default"])),
+		Required: boolValue(raw["required"]),
+	}
+	if rawOptions, ok := raw["options"].([]any); ok {
+		req.Options = make([]ClarificationOption, 0, len(rawOptions))
+		for _, rawOption := range rawOptions {
+			optionMap, ok := rawOption.(map[string]any)
+			if !ok {
+				continue
+			}
+			req.Options = append(req.Options, ClarificationOption{
+				ID:    strings.TrimSpace(stringValue(optionMap["id"])),
+				Label: strings.TrimSpace(stringValue(optionMap["label"])),
+				Value: strings.TrimSpace(stringValue(optionMap["value"])),
+			})
+		}
 	}
 
 	item, err := a.Manager.Request(WithThreadID(r.Context(), threadID), req)
@@ -117,4 +137,13 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func firstNonEmpty(values ...any) string {
+	for _, value := range values {
+		if text := strings.TrimSpace(stringValue(value)); text != "" {
+			return text
+		}
+	}
+	return ""
 }
