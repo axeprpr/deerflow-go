@@ -1201,6 +1201,12 @@ func (s *Server) loadPersistedThreads() {
 		if err != nil {
 			continue
 		}
+		var wrapper map[string]json.RawMessage
+		if err := json.Unmarshal(data, &wrapper); err == nil {
+			if nested, ok := wrapper["thread"]; ok && len(nested) > 0 {
+				data = nested
+			}
+		}
 		var persisted persistedSession
 		if err := json.Unmarshal(data, &persisted); err != nil {
 			continue
@@ -1342,6 +1348,12 @@ func (s *Server) loadPersistedRuns() {
 		data, err := os.ReadFile(filepath.Join(root, entry.Name()))
 		if err != nil {
 			continue
+		}
+		var wrapper map[string]json.RawMessage
+		if err := json.Unmarshal(data, &wrapper); err == nil {
+			if nested, ok := wrapper["run"]; ok && len(nested) > 0 {
+				data = nested
+			}
 		}
 		var persisted persistedRun
 		if err := json.Unmarshal(data, &persisted); err != nil {

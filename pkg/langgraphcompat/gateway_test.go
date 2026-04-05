@@ -1776,6 +1776,38 @@ func TestLoadPersistedThreadsNormalizesCamelCaseMetadata(t *testing.T) {
 	}
 }
 
+func TestLoadPersistedThreadsAcceptsWrappedThreadObject(t *testing.T) {
+	root := t.TempDir()
+	threadDir := filepath.Join(root, "threads", "thread-wrapped", "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"thread":{
+			"threadId":"thread-wrapped",
+			"messages":[{"id":"m1","role":"human","content":"hello"}],
+			"metadata":{"title":"Wrapped Thread"},
+			"status":"idle",
+			"createdAt":"2026-01-01T00:00:00Z",
+			"updatedAt":"2026-01-02T00:00:00Z"
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write thread file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, sessions: map[string]*Session{}}
+	s.loadPersistedThreads()
+
+	session := s.sessions["thread-wrapped"]
+	if session == nil {
+		t.Fatalf("sessions=%#v", s.sessions)
+	}
+	if session.Metadata["title"] != "Wrapped Thread" || session.CreatedAt.IsZero() || session.UpdatedAt.IsZero() {
+		t.Fatalf("session=%#v", session)
+	}
+}
+
 func TestLoadPersistedRunsAcceptsCamelCaseFields(t *testing.T) {
 	root := t.TempDir()
 	runDir := filepath.Join(root, "runs")
@@ -1858,6 +1890,39 @@ func TestLoadPersistedRunsNormalizesCamelCaseEventFields(t *testing.T) {
 	}
 	if event.RunID != "run-events-camel" || event.ThreadID != "thread-camel" {
 		t.Fatalf("event=%#v", event)
+	}
+}
+
+func TestLoadPersistedRunsAcceptsWrappedRunObject(t *testing.T) {
+	root := t.TempDir()
+	runDir := filepath.Join(root, "runs")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"run":{
+			"runId":"run-wrapped",
+			"threadId":"thread-wrapped",
+			"assistantId":"lead_agent",
+			"status":"success",
+			"createdAt":"2026-01-01T00:00:00Z",
+			"updatedAt":"2026-01-02T00:00:00Z",
+			"events":[{"id":"evt-1","event":"end","data":{"ok":true},"runId":"run-wrapped","threadId":"thread-wrapped"}]
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(runDir, "run-wrapped.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write run file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, runs: map[string]*Run{}}
+	s.loadPersistedRuns()
+
+	run := s.runs["run-wrapped"]
+	if run == nil {
+		t.Fatalf("runs=%#v", s.runs)
+	}
+	if run.ThreadID != "thread-wrapped" || run.AssistantID != "lead_agent" || len(run.Events) != 1 || run.Events[0].Event != "end" {
+		t.Fatalf("run=%#v", run)
 	}
 }
 
