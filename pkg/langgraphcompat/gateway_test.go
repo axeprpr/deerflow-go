@@ -4739,7 +4739,7 @@ func TestThreadStatePostPersistsCompatFields(t *testing.T) {
 	threadID := "thread-state-post"
 	s.ensureSession(threadID, nil)
 
-	body := `{"values":{"title":"Updated","todos":[{"content":"ship sqlite","status":"in_progress"}],"sandbox":{"sandbox_id":"sb-2"},"viewed_images":{"/tmp/chart.png":{"base64":"xyz","mime_type":"image/png"}}}}`
+	body := `{"metadata":{"mode":"thinking","model_name":"deepseek/deepseek-r1","reasoning_effort":"high","thinking_enabled":false,"is_plan_mode":true,"subagent_enabled":true,"temperature":0.2,"max_tokens":321,"checkpoint_id":"cp-1","parent_checkpoint_id":"cp-parent-1","checkpoint_ns":"ns-1","parent_checkpoint_ns":"ns-parent-1","checkpoint_thread_id":"checkpoint-thread-1","parent_checkpoint_thread_id":"checkpoint-thread-parent-1","next":["lead_agent"],"tasks":[{"id":"task-1","name":"lead_agent"}],"interrupts":[{"value":"Need input"}]},"values":{"title":"Updated","todos":[{"content":"ship sqlite","status":"in_progress"}],"sandbox":{"sandbox_id":"sb-2"},"viewed_images":{"/tmp/chart.png":{"base64":"xyz","mime_type":"image/png"}}}}`
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/"+threadID+"/state", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
@@ -4750,6 +4750,38 @@ func TestThreadStatePostPersistsCompatFields(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	var state ThreadState
+	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	configurable, _ := state.Config["configurable"].(map[string]any)
+	if configurable["mode"] != "thinking" || configurable["model_name"] != "deepseek/deepseek-r1" || configurable["reasoning_effort"] != "high" {
+		t.Fatalf("config=%#v", state.Config)
+	}
+	if configurable["thinking_enabled"] != false || configurable["is_plan_mode"] != true || configurable["subagent_enabled"] != true {
+		t.Fatalf("config=%#v", state.Config)
+	}
+	if configurable["temperature"] != 0.2 {
+		t.Fatalf("config=%#v", state.Config)
+	}
+	if configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != int64(321) && configurable["max_tokens"] != 321 {
+		t.Fatalf("config=%#v", state.Config)
+	}
+	if state.Checkpoint == nil || state.Checkpoint["checkpoint_id"] != "cp-1" || state.Checkpoint["checkpoint_ns"] != "ns-1" || state.Checkpoint["thread_id"] != "checkpoint-thread-1" {
+		t.Fatalf("checkpoint=%#v", state.Checkpoint)
+	}
+	if state.ParentCheckpoint == nil || state.ParentCheckpoint["checkpoint_id"] != "cp-parent-1" || state.ParentCheckpoint["checkpoint_ns"] != "ns-parent-1" || state.ParentCheckpoint["thread_id"] != "checkpoint-thread-parent-1" {
+		t.Fatalf("parent_checkpoint=%#v", state.ParentCheckpoint)
+	}
+	if len(state.Next) != 1 || state.Next[0] != "lead_agent" {
+		t.Fatalf("next=%#v", state.Next)
+	}
+	if len(state.Tasks) != 1 {
+		t.Fatalf("tasks=%#v", state.Tasks)
+	}
+	if len(state.Interrupts) != 1 {
+		t.Fatalf("interrupts=%#v", state.Interrupts)
 	}
 
 	s.sessionsMu.RLock()
