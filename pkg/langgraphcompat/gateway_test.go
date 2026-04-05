@@ -6125,6 +6125,41 @@ func TestThreadStatePatchAcceptsMessages(t *testing.T) {
 	}
 }
 
+func TestThreadStatePostAcceptsTopLevelMessages(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-state-post-top-messages"
+	s.ensureSession(threadID, nil)
+
+	req, _ := http.NewRequest(
+		http.MethodPost,
+		ts.URL+"/threads/"+threadID+"/state",
+		strings.NewReader(`{"messages":[{"id":"m1","type":"human","content":"hello"}]}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post state: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var state ThreadState
+	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
+		t.Fatalf("decode state: %v", err)
+	}
+	messages, _ := state.Values["messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("values=%#v", state.Values)
+	}
+	message, _ := messages[0].(map[string]any)
+	if message["id"] != "m1" || message["content"] != "hello" {
+		t.Fatalf("message=%#v", message)
+	}
+}
+
 func TestThreadStatePatchClearsMessages(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-state-clear-messages"
@@ -6211,6 +6246,42 @@ func TestThreadUpdateClearsMessagesWithNull(t *testing.T) {
 	s.sessionsMu.RUnlock()
 	if session == nil || len(session.Messages) != 0 {
 		t.Fatalf("session=%#v", session)
+	}
+}
+
+func TestThreadUpdateAcceptsTopLevelMessages(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-update-top-messages"
+	s.ensureSession(threadID, nil)
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID,
+		strings.NewReader(`{"messages":[{"id":"m1","type":"human","content":"hello"}]}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("update thread: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var thread map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&thread); err != nil {
+		t.Fatalf("decode thread: %v", err)
+	}
+	values, _ := thread["values"].(map[string]any)
+	messages, _ := values["messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("values=%#v", values)
+	}
+	message, _ := messages[0].(map[string]any)
+	if message["id"] != "m1" || message["content"] != "hello" {
+		t.Fatalf("message=%#v", message)
 	}
 }
 
