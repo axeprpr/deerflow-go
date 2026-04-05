@@ -4744,6 +4744,17 @@ func TestThreadGetIncludesCompatShape(t *testing.T) {
 	if metadata["checkpoint_id"] != "cp-1" || metadata["parent_checkpoint_id"] != "cp-parent-1" {
 		t.Fatalf("metadata=%#v", metadata)
 	}
+	if thread["checkpoint_id"] != "cp-1" || thread["parent_checkpoint_id"] != "cp-parent-1" {
+		t.Fatalf("thread=%#v", thread)
+	}
+	checkpoint, _ := thread["checkpoint"].(map[string]any)
+	if checkpoint["checkpoint_id"] != "cp-1" || checkpoint["checkpoint_ns"] != "ns-1" || checkpoint["thread_id"] != "checkpoint-thread-1" {
+		t.Fatalf("checkpoint=%#v", thread["checkpoint"])
+	}
+	parentCheckpoint, _ := thread["parent_checkpoint"].(map[string]any)
+	if parentCheckpoint["checkpoint_id"] != "cp-parent-1" || parentCheckpoint["checkpoint_ns"] != "ns-parent-1" || parentCheckpoint["thread_id"] != "checkpoint-thread-parent-1" {
+		t.Fatalf("parent_checkpoint=%#v", thread["parent_checkpoint"])
+	}
 }
 
 func TestThreadStatePostPersistsCompatFields(t *testing.T) {
