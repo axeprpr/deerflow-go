@@ -428,6 +428,35 @@ func TestThreadSearchSelectProjectsFields(t *testing.T) {
 	}
 }
 
+func TestThreadSearchDefaultsToFiftyResults(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	for i := 0; i < 12; i++ {
+		s.ensureSession(fmt.Sprintf("thread-search-default-%02d", i), nil)
+	}
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) < 12 {
+		t.Fatalf("len=%d want at least 12", len(threads))
+	}
+}
+
 func TestThreadSearchSelectStillSortsByUnselectedField(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	oldSession := s.ensureSession("thread-search-old", map[string]any{"title": "Old"})

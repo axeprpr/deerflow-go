@@ -132,7 +132,7 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 		req.Limit = req.PageSizeX
 	}
 	if req.Limit <= 0 {
-		req.Limit = 10
+		req.Limit = 50
 	}
 	req.SortBy = firstNonEmpty(req.SortBy, req.SortByX)
 	req.SortOrder = firstNonEmpty(req.SortOrder, req.SortOrderX)
