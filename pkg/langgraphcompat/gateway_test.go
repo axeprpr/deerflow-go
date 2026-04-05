@@ -9225,7 +9225,7 @@ func TestRecordedRunStreamModeFiltersReplayEvents(t *testing.T) {
 		Events: []StreamEvent{
 			{ID: "1", Event: "metadata", Data: map[string]any{"run_id": "run-replay-1", "thread_id": "thread-replay-1", "assistant_id": "lead_agent"}},
 			{ID: "2", Event: "messages-tuple", Data: map[string]any{"type": "ai", "content": "hello"}},
-			{ID: "3", Event: "values", Data: map[string]any{"title": "done", "messages": []any{map[string]any{"id": "ai-1", "type": "ai", "content": "hello"}}, "artifacts": []any{"/tmp/report.md"}, "todos": []any{map[string]any{"content": "ship sqlite", "status": "pending"}}, "sandbox": map[string]any{"sandbox_id": "sb-1"}}},
+			{ID: "3", Event: "values", Data: map[string]any{"title": "done", "messages": []any{map[string]any{"id": "ai-1", "type": "ai", "content": "hello"}}, "artifacts": []any{"/tmp/report.md"}, "todos": []any{map[string]any{"content": "ship sqlite", "status": "pending"}}, "sandbox": map[string]any{"sandbox_id": "sb-1"}, "thread_data": map[string]any{"workspace_path": "/tmp/workspace"}}},
 			{ID: "4", Event: "end", Data: map[string]any{"run_id": "run-replay-1"}},
 		},
 	}
@@ -9265,6 +9265,9 @@ func TestRecordedRunStreamModeFiltersReplayEvents(t *testing.T) {
 	}
 	if !strings.Contains(text, `"sandbox":{"sandbox_id":"sb-1"}`) {
 		t.Fatalf("missing values sandbox payload: %s", text)
+	}
+	if !strings.Contains(text, `"thread_data":{"workspace_path":"/tmp/workspace"}`) {
+		t.Fatalf("missing values thread_data payload: %s", text)
 	}
 	if strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("unexpected messages-tuple event: %s", text)
@@ -10033,7 +10036,7 @@ func TestThreadJoinStreamReplaysValuesPayload(t *testing.T) {
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 		Events: []StreamEvent{
-			{ID: "1", Event: "values", Data: map[string]any{"title": "done", "messages": []any{map[string]any{"id": "ai-1", "type": "ai", "content": "hello"}}, "artifacts": []any{"/tmp/report.md"}, "todos": []any{map[string]any{"content": "ship sqlite", "status": "pending"}}, "sandbox": map[string]any{"sandbox_id": "sb-1"}}},
+			{ID: "1", Event: "values", Data: map[string]any{"title": "done", "messages": []any{map[string]any{"id": "ai-1", "type": "ai", "content": "hello"}}, "artifacts": []any{"/tmp/report.md"}, "todos": []any{map[string]any{"content": "ship sqlite", "status": "pending"}}, "sandbox": map[string]any{"sandbox_id": "sb-1"}, "thread_data": map[string]any{"workspace_path": "/tmp/workspace"}}},
 			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-join-values"}},
 		},
 	}
@@ -10070,6 +10073,9 @@ func TestThreadJoinStreamReplaysValuesPayload(t *testing.T) {
 	}
 	if !strings.Contains(text, `"sandbox":{"sandbox_id":"sb-1"}`) {
 		t.Fatalf("missing values sandbox payload: %s", text)
+	}
+	if !strings.Contains(text, `"thread_data":{"workspace_path":"/tmp/workspace"}`) {
+		t.Fatalf("missing values thread_data payload: %s", text)
 	}
 }
 
