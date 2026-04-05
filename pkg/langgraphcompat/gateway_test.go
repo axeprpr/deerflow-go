@@ -2320,6 +2320,92 @@ func TestThreadJoinStreamModeFiltersReplayEvents(t *testing.T) {
 	}
 }
 
+func TestRecordedRunStreamModeSupportsCommaSeparatedAliases(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-replay-2",
+		ThreadID:    "thread-replay-2",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "task_started", Data: map[string]any{"task_id": "t1"}},
+			{ID: "2", Event: "messages-tuple", Data: map[string]any{"type": "ai", "content": "hello"}},
+			{ID: "3", Event: "values", Data: map[string]any{"title": "done"}},
+			{ID: "4", Event: "end", Data: map[string]any{"run_id": "run-replay-2"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-replay-2/runs/run-replay-2/stream?streamMode=tasks,messages")
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: task_started") {
+		t.Fatalf("missing task_started event: %s", text)
+	}
+	if !strings.Contains(text, "event: messages-tuple") {
+		t.Fatalf("missing messages-tuple event: %s", text)
+	}
+	if strings.Contains(text, "event: values") {
+		t.Fatalf("unexpected values event: %s", text)
+	}
+}
+
+func TestThreadJoinStreamModeSupportsCommaSeparatedAliases(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-join-2",
+		ThreadID:    "thread-join-2",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "task_started", Data: map[string]any{"task_id": "t1"}},
+			{ID: "2", Event: "messages-tuple", Data: map[string]any{"type": "ai", "content": "hello"}},
+			{ID: "3", Event: "values", Data: map[string]any{"title": "done"}},
+			{ID: "4", Event: "end", Data: map[string]any{"run_id": "run-join-2"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-join-2/stream?stream_mode=tasks,messages")
+	if err != nil {
+		t.Fatalf("join stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: task_started") {
+		t.Fatalf("missing task_started event: %s", text)
+	}
+	if !strings.Contains(text, "event: messages-tuple") {
+		t.Fatalf("missing messages-tuple event: %s", text)
+	}
+	if strings.Contains(text, "event: values") {
+		t.Fatalf("unexpected values event: %s", text)
+	}
+}
+
 func TestSkillInstallFromArchive(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-skill-1"
