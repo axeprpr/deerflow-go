@@ -115,6 +115,7 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 	var raw map[string]any
 	var req struct {
 		Limit      int      `json:"limit"`
+		PageSize   int      `json:"page_size"`
 		PageSizeX  int      `json:"pageSize"`
 		Offset     int      `json:"offset"`
 		SortBy     string   `json:"sort_by"`
@@ -132,10 +133,14 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 			_ = json.Unmarshal(body, &req)
 			_, hasLimit := raw["limit"]
 			_, hasPageSize := raw["pageSize"]
-			limitProvided = hasLimit || hasPageSize
+			_, hasPageSizeSnake := raw["page_size"]
+			limitProvided = hasLimit || hasPageSize || hasPageSizeSnake
 		}
 	}
 
+	if req.Limit == 0 {
+		req.Limit = req.PageSize
+	}
 	if req.Limit == 0 {
 		req.Limit = req.PageSizeX
 	}
@@ -536,6 +541,7 @@ func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
 	var raw map[string]any
 	var req struct {
 		Limit     int `json:"limit"`
+		PageSize  int `json:"page_size"`
 		PageSizeX int `json:"pageSize"`
 	}
 	limitProvided := false
@@ -547,15 +553,19 @@ func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
 			_ = json.Unmarshal(body, &req)
 			_, hasLimit := raw["limit"]
 			_, hasPageSize := raw["pageSize"]
-			limitProvided = hasLimit || hasPageSize
+			_, hasPageSizeSnake := raw["page_size"]
+			limitProvided = hasLimit || hasPageSize || hasPageSizeSnake
 		}
+	}
+	if req.Limit == 0 {
+		req.Limit = req.PageSize
 	}
 	if req.Limit == 0 {
 		req.Limit = req.PageSizeX
 	}
 	if !limitProvided && req.Limit == 0 {
 		query := r.URL.Query()
-		if rawLimit := firstNonEmpty(query.Get("limit"), query.Get("pageSize")); rawLimit != "" {
+		if rawLimit := firstNonEmpty(query.Get("limit"), query.Get("pageSize"), query.Get("page_size")); rawLimit != "" {
 			req.Limit, _ = strconv.Atoi(rawLimit)
 			limitProvided = true
 		}

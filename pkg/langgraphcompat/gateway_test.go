@@ -1511,6 +1511,34 @@ func TestThreadSearchAcceptsValueSummarySelectFields(t *testing.T) {
 	}
 }
 
+func TestThreadSearchAcceptsSnakeCasePageSize(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.ensureSession("thread-search-page-size-a", nil)
+	s.ensureSession("thread-search-page-size-b", nil)
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"page_size":1,"sortBy":"threadId","sortOrder":"asc","select":["threadId"]}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) != 1 {
+		t.Fatalf("len=%d threads=%#v", len(threads), threads)
+	}
+}
+
 func TestThreadSearchAcceptsCamelCaseCoreIDSelectFields(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.ensureSession("thread-search-core-id-select", map[string]any{
@@ -5797,6 +5825,47 @@ func TestThreadSearchSupportsStepSort(t *testing.T) {
 	}
 	if threads[0]["step"] != float64(3) && threads[0]["step"] != 3 {
 		t.Fatalf("step=%#v", threads[0]["step"])
+	}
+}
+
+func TestThreadHistoryAcceptsSnakeCasePageSize(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-history-page-size"
+	s.ensureSession(threadID, map[string]any{"title": "Current"})
+	if err := s.appendThreadHistorySnapshot(threadID); err != nil {
+		t.Fatalf("append history: %v", err)
+	}
+	s.sessionsMu.Lock()
+	session := s.sessions[threadID]
+	session.Metadata["title"] = "Latest"
+	session.UpdatedAt = time.Now().UTC()
+	s.sessionsMu.Unlock()
+	if err := s.appendThreadHistorySnapshot(threadID); err != nil {
+		t.Fatalf("append history: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/"+threadID+"/history", strings.NewReader(`{"page_size":1}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("history request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var history []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&history); err != nil {
+		t.Fatalf("decode history: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("len=%d history=%#v", len(history), history)
+	}
+	values, _ := history[0]["values"].(map[string]any)
+	if values["title"] != "Latest" {
+		t.Fatalf("history=%#v", history)
 	}
 }
 
