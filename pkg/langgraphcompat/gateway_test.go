@@ -1414,6 +1414,96 @@ func TestThreadSearchDefaultIncludesRecoveredValueSummaries(t *testing.T) {
 	}
 }
 
+func TestThreadSearchAcceptsValueSummarySelectFields(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	s.ensureSession("thread-search-value-select", map[string]any{
+		"title":   "Selected Summary",
+		"todos":   []any{map[string]any{"content": "ship sqlite", "status": "pending"}},
+		"sandbox": map[string]any{"sandbox_id": "sb-1"},
+		"viewed_images": map[string]any{
+			"/tmp/chart.png": map[string]any{"base64": "xyz", "mime_type": "image/png"},
+		},
+		"artifacts": []any{"/tmp/report.html"},
+		"thread_data": map[string]any{
+			"workspace_path": "/tmp/workspace",
+			"uploads_path":   "/tmp/uploads",
+			"outputs_path":   "/tmp/outputs",
+		},
+		"uploaded_files": []any{
+			map[string]any{"filename": "notes.txt", "path": "/tmp/uploads/notes.txt", "status": "uploaded"},
+		},
+	})
+
+	resp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"limit":10,"select":["threadId","title","todos","sandbox","artifacts","viewedImages","threadData","uploadedFiles"]}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(threads) == 0 {
+		t.Fatal("expected threads")
+	}
+
+	var selected map[string]any
+	for _, thread := range threads {
+		if thread["thread_id"] == "thread-search-value-select" {
+			selected = thread
+			break
+		}
+	}
+	if selected == nil {
+		t.Fatalf("missing projected thread in %#v", threads)
+	}
+	if selected["title"] != "Selected Summary" {
+		t.Fatalf("selected=%#v", selected)
+	}
+	if _, ok := selected["viewedImages"]; ok {
+		t.Fatalf("selected=%#v", selected)
+	}
+	if _, ok := selected["threadData"]; ok {
+		t.Fatalf("selected=%#v", selected)
+	}
+	if _, ok := selected["uploadedFiles"]; ok {
+		t.Fatalf("selected=%#v", selected)
+	}
+	todos, _ := selected["todos"].([]any)
+	if len(todos) != 1 {
+		t.Fatalf("selected=%#v", selected)
+	}
+	sandbox, _ := selected["sandbox"].(map[string]any)
+	if sandbox["sandbox_id"] != "sb-1" {
+		t.Fatalf("selected=%#v", selected)
+	}
+	artifacts, _ := selected["artifacts"].([]any)
+	if len(artifacts) != 1 || artifacts[0] != "/tmp/report.html" {
+		t.Fatalf("selected=%#v", selected)
+	}
+	viewedImages, _ := selected["viewed_images"].(map[string]any)
+	if len(viewedImages) != 1 {
+		t.Fatalf("selected=%#v", selected)
+	}
+	threadData, _ := selected["thread_data"].(map[string]any)
+	if threadData["workspace_path"] != "/tmp/workspace" || threadData["uploads_path"] != "/tmp/uploads" || threadData["outputs_path"] != "/tmp/outputs" {
+		t.Fatalf("selected=%#v", selected)
+	}
+	uploadedFiles, _ := selected["uploaded_files"].([]any)
+	if len(uploadedFiles) != 1 {
+		t.Fatalf("selected=%#v", selected)
+	}
+}
+
 func TestThreadSearchAcceptsCamelCaseCoreIDSelectFields(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.ensureSession("thread-search-core-id-select", map[string]any{

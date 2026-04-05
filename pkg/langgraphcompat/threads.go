@@ -305,6 +305,12 @@ func normalizeThreadFieldName(field string) string {
 		return "subagent_enabled"
 	case "maxTokens":
 		return "max_tokens"
+	case "viewedImages":
+		return "viewed_images"
+	case "threadData":
+		return "thread_data"
+	case "uploadedFiles":
+		return "uploaded_files"
 	case "checkpointId":
 		return "checkpoint_id"
 	case "parentCheckpointId":
