@@ -10414,6 +10414,18 @@ func TestThreadJoinStreamReplaysValuesPayload(t *testing.T) {
 			t.Fatalf("unexpected extra values payload field %s: %s", forbidden, valuesBlock)
 		}
 	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-join-values"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
+	}
 }
 
 func TestThreadJoinStreamReplaysToolCallEvents(t *testing.T) {
