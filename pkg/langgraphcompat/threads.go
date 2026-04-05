@@ -1108,6 +1108,21 @@ func anyStringSlice(v any) []string {
 	}
 }
 
+func anySlice(v any) []any {
+	switch items := v.(type) {
+	case []any:
+		return items
+	case []string:
+		out := make([]any, 0, len(items))
+		for _, item := range items {
+			out = append(out, item)
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
 type persistedSession struct {
 	ThreadID  string           `json:"thread_id"`
 	Messages  []models.Message `json:"messages"`
@@ -1129,6 +1144,22 @@ type persistedRun struct {
 }
 
 const maxThreadHistorySnapshots = 20
+
+func derivePersistedThreadStatus(raw map[string]any, fallback string) string {
+	if status := strings.TrimSpace(fallback); status != "" {
+		return status
+	}
+	if items := anySlice(raw["interrupts"]); len(items) > 0 {
+		return "interrupted"
+	}
+	if items := anySlice(raw["tasks"]); len(items) > 0 {
+		return "busy"
+	}
+	if items := anySlice(raw["next"]); len(items) > 0 {
+		return "busy"
+	}
+	return "idle"
+}
 
 func (s *Server) threadStatePath(threadID string) string {
 	return filepath.Join(s.threadRoot(threadID), "thread.json")
@@ -1272,7 +1303,7 @@ func (s *Server) loadPersistedThreads() {
 			ThreadID:     persisted.ThreadID,
 			Messages:     persisted.Messages,
 			Metadata:     persisted.Metadata,
-			Status:       firstNonEmpty(persisted.Status, "idle"),
+			Status:       derivePersistedThreadStatus(raw, persisted.Status),
 			PresentFiles: tools.NewPresentFileRegistry(),
 			CreatedAt:    persisted.CreatedAt,
 			UpdatedAt:    persisted.UpdatedAt,

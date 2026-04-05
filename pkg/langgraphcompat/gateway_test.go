@@ -2182,6 +2182,65 @@ func TestLoadPersistedThreadsAcceptsValuesStateObject(t *testing.T) {
 	if session.UpdatedAt.IsZero() || !session.UpdatedAt.Equal(session.CreatedAt) {
 		t.Fatalf("updated_at=%v created_at=%v", session.UpdatedAt, session.CreatedAt)
 	}
+	if session.Status != "idle" {
+		t.Fatalf("status=%q", session.Status)
+	}
+}
+
+func TestLoadPersistedThreadsDerivesBusyStatusFromNextTasks(t *testing.T) {
+	root := t.TempDir()
+	threadDir := filepath.Join(root, "threads", "thread-busy-state", "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"values":{"messages":[{"id":"m1","type":"human","content":"hello"}]},
+		"metadata":{"thread_id":"thread-busy-state"},
+		"next":["lead_agent"],
+		"created_at":"2026-01-01T00:00:00Z"
+	}`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write thread file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, sessions: map[string]*Session{}}
+	s.loadPersistedThreads()
+
+	session := s.sessions["thread-busy-state"]
+	if session == nil {
+		t.Fatalf("sessions=%#v", s.sessions)
+	}
+	if session.Status != "busy" {
+		t.Fatalf("status=%q", session.Status)
+	}
+}
+
+func TestLoadPersistedThreadsDerivesInterruptedStatus(t *testing.T) {
+	root := t.TempDir()
+	threadDir := filepath.Join(root, "threads", "thread-interrupted-state", "user-data")
+	if err := os.MkdirAll(threadDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	raw := `{
+		"values":{"messages":[{"id":"m1","type":"human","content":"hello"}]},
+		"metadata":{"thread_id":"thread-interrupted-state"},
+		"interrupts":[{"value":"Need input"}],
+		"created_at":"2026-01-01T00:00:00Z"
+	}`
+	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write thread file: %v", err)
+	}
+
+	s := &Server{dataRoot: root, sessions: map[string]*Session{}}
+	s.loadPersistedThreads()
+
+	session := s.sessions["thread-interrupted-state"]
+	if session == nil {
+		t.Fatalf("sessions=%#v", s.sessions)
+	}
+	if session.Status != "interrupted" {
+		t.Fatalf("status=%q", session.Status)
+	}
 }
 
 func TestLoadPersistedRunsAcceptsCamelCaseFields(t *testing.T) {
