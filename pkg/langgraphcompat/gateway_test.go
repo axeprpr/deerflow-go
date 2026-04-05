@@ -6285,6 +6285,71 @@ func TestThreadUpdateAcceptsTopLevelMessages(t *testing.T) {
 	}
 }
 
+func TestThreadCreateMessageWritesPersistAcrossReload(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	resp, err := http.Post(
+		ts.URL+"/threads",
+		"application/json",
+		strings.NewReader(`{"thread_id":"thread-create-reload-messages","messages":[{"id":"m1","type":"human","content":"hello"}]}`),
+	)
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	loaded := &Server{
+		dataRoot: s.dataRoot,
+		sessions: map[string]*Session{},
+	}
+	loaded.loadPersistedThreads()
+
+	session := loaded.sessions["thread-create-reload-messages"]
+	if session == nil || len(session.Messages) != 1 {
+		t.Fatalf("session=%#v", session)
+	}
+	if session.Messages[0].ID != "m1" || session.Messages[0].Content != "hello" {
+		t.Fatalf("message=%#v", session.Messages[0])
+	}
+}
+
+func TestThreadUpdateMessageWritesPersistAcrossReload(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-update-reload-messages"
+	s.ensureSession(threadID, nil)
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID,
+		strings.NewReader(`{"messages":[{"id":"m1","type":"human","content":"hello"}]}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("update thread: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	loaded := &Server{
+		dataRoot: s.dataRoot,
+		sessions: map[string]*Session{},
+	}
+	loaded.loadPersistedThreads()
+
+	session := loaded.sessions[threadID]
+	if session == nil || len(session.Messages) != 1 {
+		t.Fatalf("session=%#v", session)
+	}
+	if session.Messages[0].ID != "m1" || session.Messages[0].Content != "hello" {
+		t.Fatalf("message=%#v", session.Messages[0])
+	}
+}
+
 func TestThreadHistoryReflectsWrittenMessages(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-history-written-messages"
