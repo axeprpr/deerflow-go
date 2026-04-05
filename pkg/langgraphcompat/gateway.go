@@ -1710,14 +1710,17 @@ func (s *Server) loadMemoryFromFile() (gatewayMemoryResponse, bool) {
 		}
 	}
 	var mem gatewayMemoryResponse
-	if err := json.Unmarshal(data, &mem); err != nil {
-		return gatewayMemoryResponse{}, false
-	}
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return gatewayMemoryResponse{}, false
 	}
 	compat := gatewayMemoryResponseFromMap(raw)
+	if err := json.Unmarshal(data, &mem); err != nil {
+		if compat.Version == "" {
+			return gatewayMemoryResponse{}, false
+		}
+		return compat, true
+	}
 	if mem.Version == "" {
 		mem.Version = compat.Version
 	}
@@ -1825,6 +1828,9 @@ func memorySectionFromMap(raw map[string]any) memorySection {
 }
 
 func memoryFactsFromAny(raw any) []memoryFact {
+	if wrapped := mapFromAny(raw); wrapped != nil {
+		raw = firstNonNil(wrapped["items"], wrapped["facts"])
+	}
 	items, _ := raw.([]any)
 	facts := make([]memoryFact, 0, len(items))
 	for _, item := range items {
