@@ -8828,6 +8828,9 @@ func TestThreadRunStreamEmitsChunkEvent(t *testing.T) {
 	if !strings.Contains(chunkBlock, `"role":"assistant"`) || !strings.Contains(chunkBlock, `"type":"ai"`) {
 		t.Fatalf("missing chunk identity payload: %s", chunkBlock)
 	}
+	if !strings.Contains(chunkBlock, `"thread_id":"thread-stream-chunk"`) || !strings.Contains(chunkBlock, `"run_id":"`) {
+		t.Fatalf("missing live chunk routing payload: %s", chunkBlock)
+	}
 	for _, forbidden := range []string{`"messages":`, `"usage_metadata":`, `"additional_kwargs":`, `"tool_calls":`, `"tool_call_id":`, `"status":`, `"data":{`} {
 		if strings.Contains(chunkBlock, forbidden) {
 			t.Fatalf("unexpected chunk field %s: %s", forbidden, chunkBlock)
