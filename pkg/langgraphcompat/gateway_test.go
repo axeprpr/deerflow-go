@@ -11081,6 +11081,18 @@ func TestRecordedRunStreamReplaysTaskCompletedEvent(t *testing.T) {
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
 	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-replay-task-complete"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
+	}
 }
 
 func TestRecordedRunStreamReplaysTaskFailedEvent(t *testing.T) {
@@ -11128,6 +11140,18 @@ func TestRecordedRunStreamReplaysTaskFailedEvent(t *testing.T) {
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
 	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-replay-task-failed"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
+	}
 }
 
 func TestRecordedRunStreamReplaysTaskRunningEvent(t *testing.T) {
@@ -11174,6 +11198,18 @@ func TestRecordedRunStreamReplaysTaskRunningEvent(t *testing.T) {
 	}
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
+	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-replay-task-running"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
 	}
 }
 
@@ -11286,6 +11322,18 @@ func TestThreadJoinStreamReplaysTaskCompletedEvent(t *testing.T) {
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
 	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-join-task-complete"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
+	}
 }
 
 func TestThreadJoinStreamReplaysTaskFailedEvent(t *testing.T) {
@@ -11333,6 +11381,18 @@ func TestThreadJoinStreamReplaysTaskFailedEvent(t *testing.T) {
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
 	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-join-task-failed"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
+	}
 }
 
 func TestThreadJoinStreamReplaysTaskRunningEvent(t *testing.T) {
@@ -11379,6 +11439,18 @@ func TestThreadJoinStreamReplaysTaskRunningEvent(t *testing.T) {
 	}
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
+	}
+	if !strings.Contains(text, "event: end") {
+		t.Fatalf("missing end event: %s", text)
+	}
+	endBlock := sseEventBlock(t, text, "end")
+	if !strings.Contains(endBlock, `"run_id":"run-join-task-running"`) {
+		t.Fatalf("missing run_id in end payload: %s", endBlock)
+	}
+	for _, forbidden := range []string{`"thread_id":`, `"assistant_id":`, `"metadata":`, `"config":`} {
+		if strings.Contains(endBlock, forbidden) {
+			t.Fatalf("unexpected extra end field %s: %s", forbidden, endBlock)
+		}
 	}
 }
 
