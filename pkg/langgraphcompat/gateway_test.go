@@ -9313,6 +9313,47 @@ func TestThreadJoinStreamReplaysToolCallEvents(t *testing.T) {
 	}
 }
 
+func TestThreadJoinStreamReplaysErrorEvent(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-join-error",
+		ThreadID:    "thread-join-error",
+		AssistantID: "lead_agent",
+		Status:      "error",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "error", Data: map[string]any{"error": "RunError", "name": "RunError", "message": "boom", "suggestion": "retry", "retryable": true}},
+			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-join-error"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-join-error/stream?streamMode=events")
+	if err != nil {
+		t.Fatalf("join stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: error") {
+		t.Fatalf("missing error event: %s", text)
+	}
+	if !strings.Contains(text, `"message":"boom"`) || !strings.Contains(text, `"suggestion":"retry"`) {
+		t.Fatalf("missing error payload: %s", text)
+	}
+	if !strings.Contains(text, `"retryable":true`) {
+		t.Fatalf("missing retryable flag: %s", text)
+	}
+}
+
 func TestRecordedRunStreamModeSupportsUpdates(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	run := &Run{
