@@ -134,6 +134,9 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 	if req.Limit <= 0 {
 		req.Limit = 50
 	}
+	if req.Offset < 0 {
+		req.Offset = 0
+	}
 	req.SortBy = firstNonEmpty(req.SortBy, req.SortByX)
 	req.SortOrder = firstNonEmpty(req.SortOrder, req.SortOrderX)
 	req.SortBy = normalizeThreadFieldName(req.SortBy)
