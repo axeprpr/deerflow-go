@@ -9014,6 +9014,9 @@ func TestRecordedRunStreamModeSupportsCommaSeparatedAliases(t *testing.T) {
 	if !strings.Contains(text, "event: task_started") {
 		t.Fatalf("missing task_started event: %s", text)
 	}
+	if !strings.Contains(text, `"task_id":"t1"`) {
+		t.Fatalf("missing task payload: %s", text)
+	}
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
 	}
@@ -9062,6 +9065,9 @@ func TestThreadJoinStreamModeSupportsCommaSeparatedAliases(t *testing.T) {
 	text := string(body)
 	if !strings.Contains(text, "event: task_started") {
 		t.Fatalf("missing task_started event: %s", text)
+	}
+	if !strings.Contains(text, `"task_id":"t1"`) {
+		t.Fatalf("missing task payload: %s", text)
 	}
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
