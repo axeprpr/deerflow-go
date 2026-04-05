@@ -2786,6 +2786,48 @@ func TestAgentsAndMemoryEndpoints(t *testing.T) {
 	}
 }
 
+func TestAgentsListOmitsSoul(t *testing.T) {
+	_, ts := newCompatTestServer(t)
+
+	createBody := `{"name":"soul-hidden","description":"a","model":"qwen/Qwen3.5-9B","tool_groups":["file"],"soul":"private prompt"}`
+	createResp, err := http.Post(ts.URL+"/api/agents", "application/json", strings.NewReader(createBody))
+	if err != nil {
+		t.Fatalf("create agent request: %v", err)
+	}
+	createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("create agent status=%d", createResp.StatusCode)
+	}
+
+	listResp, err := http.Get(ts.URL + "/api/agents")
+	if err != nil {
+		t.Fatalf("list agents request: %v", err)
+	}
+	defer listResp.Body.Close()
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("list agents status=%d", listResp.StatusCode)
+	}
+
+	var payload struct {
+		Agents []map[string]any `json:"agents"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode agents: %v", err)
+	}
+	if len(payload.Agents) == 0 {
+		t.Fatal("expected agents")
+	}
+	for _, agent := range payload.Agents {
+		if agent["name"] == "soul-hidden" {
+			if _, ok := agent["soul"]; ok {
+				t.Fatalf("expected soul omitted in list payload: %#v", agent)
+			}
+			return
+		}
+	}
+	t.Fatalf("agent not found in payload: %#v", payload.Agents)
+}
+
 func TestUserProfileAcceptsNullContent(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.setUserProfileLocked("existing profile")
