@@ -9295,6 +9295,47 @@ func TestRecordedRunStreamReplaysErrorEvent(t *testing.T) {
 	}
 }
 
+func TestRecordedRunStreamReplaysClarificationRequest(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-replay-clarify",
+		ThreadID:    "thread-replay-clarify",
+		AssistantID: "lead_agent",
+		Status:      "interrupted",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "clarification_request", Data: map[string]any{"id": "clarify-1", "thread_id": "thread-replay-clarify", "type": "text", "question": "Need more detail?", "required": true}},
+			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-replay-clarify"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-replay-clarify/runs/run-replay-clarify/stream?streamMode=events")
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: clarification_request") {
+		t.Fatalf("missing clarification_request event: %s", text)
+	}
+	if !strings.Contains(text, `"thread_id":"thread-replay-clarify"`) {
+		t.Fatalf("missing thread_id in clarification payload: %s", text)
+	}
+	if !strings.Contains(text, `"question":"Need more detail?"`) {
+		t.Fatalf("missing clarification question: %s", text)
+	}
+}
+
 func TestThreadJoinStreamModeFiltersReplayEvents(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	run := &Run{
@@ -9510,6 +9551,47 @@ func TestThreadJoinStreamReplaysErrorEvent(t *testing.T) {
 	}
 	if !strings.Contains(text, `"retryable":true`) {
 		t.Fatalf("missing retryable flag: %s", text)
+	}
+}
+
+func TestThreadJoinStreamReplaysClarificationRequest(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-join-clarify",
+		ThreadID:    "thread-join-clarify",
+		AssistantID: "lead_agent",
+		Status:      "interrupted",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "clarification_request", Data: map[string]any{"id": "clarify-1", "thread_id": "thread-join-clarify", "type": "text", "question": "Need more detail?", "required": true}},
+			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-join-clarify"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-join-clarify/stream?streamMode=events")
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: clarification_request") {
+		t.Fatalf("missing clarification_request event: %s", text)
+	}
+	if !strings.Contains(text, `"thread_id":"thread-join-clarify"`) {
+		t.Fatalf("missing thread_id in clarification payload: %s", text)
+	}
+	if !strings.Contains(text, `"question":"Need more detail?"`) {
+		t.Fatalf("missing clarification question: %s", text)
 	}
 }
 
