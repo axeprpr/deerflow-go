@@ -459,8 +459,8 @@ func TestThreadSearchSelectStillSortsByUnselectedField(t *testing.T) {
 	if threads[0]["thread_id"] != "thread-search-new" {
 		t.Fatalf("first thread=%v want thread-search-new", threads[0]["thread_id"])
 	}
-	if _, ok := threads[0]["updated_at"]; ok {
-		t.Fatalf("unexpected updated_at in projected result: %#v", threads[0])
+	if _, ok := threads[0]["updated_at"]; !ok {
+		t.Fatalf("missing updated_at in projected result: %#v", threads[0])
 	}
 }
 
