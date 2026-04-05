@@ -9325,6 +9325,44 @@ func TestRecordedRunStreamReplaysEndUsagePayload(t *testing.T) {
 	}
 }
 
+func TestRecordedRunStreamReplaysToolMessageTuple(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-replay-tool-message",
+		ThreadID:    "thread-replay-tool-message",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "messages-tuple", Data: map[string]any{"type": "tool", "id": "tool:call-1", "tool_call_id": "call-1", "status": "success", "content": "done"}},
+			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-replay-tool-message"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-replay-tool-message/runs/run-replay-tool-message/stream?streamMode=messages-tuple")
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: messages-tuple") {
+		t.Fatalf("missing messages-tuple event: %s", text)
+	}
+	if !strings.Contains(text, `"tool_call_id":"call-1"`) || !strings.Contains(text, `"status":"success"`) {
+		t.Fatalf("missing tool message tuple payload: %s", text)
+	}
+}
+
 func TestRecordedRunStreamReplaysToolCallEvents(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	run := &Run{
@@ -9659,6 +9697,44 @@ func TestThreadJoinStreamReplaysEndUsagePayload(t *testing.T) {
 	}
 	if !strings.Contains(text, `"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}`) {
 		t.Fatalf("missing usage in end payload: %s", text)
+	}
+}
+
+func TestThreadJoinStreamReplaysToolMessageTuple(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-join-tool-message",
+		ThreadID:    "thread-join-tool-message",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "messages-tuple", Data: map[string]any{"type": "tool", "id": "tool:call-1", "tool_call_id": "call-1", "status": "success", "content": "done"}},
+			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-join-tool-message"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-join-tool-message/stream?streamMode=messages-tuple")
+	if err != nil {
+		t.Fatalf("join stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "event: messages-tuple") {
+		t.Fatalf("missing messages-tuple event: %s", text)
+	}
+	if !strings.Contains(text, `"tool_call_id":"call-1"`) || !strings.Contains(text, `"status":"success"`) {
+		t.Fatalf("missing tool message tuple payload: %s", text)
 	}
 }
 
