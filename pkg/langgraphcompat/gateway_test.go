@@ -1257,6 +1257,27 @@ func TestLoadAgentsFromFilesAcceptsCamelCaseToolGroups(t *testing.T) {
 	}
 }
 
+func TestLoadAgentsFromFilesAcceptsSoulOnlyDirectories(t *testing.T) {
+	root := t.TempDir()
+	s := &Server{dataRoot: root}
+	dir := filepath.Join(s.agentsRoot(), "writer")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SOUL.md"), []byte("Write clearly."), 0o644); err != nil {
+		t.Fatalf("write soul: %v", err)
+	}
+
+	loaded := s.loadAgentsFromFiles()
+	got, ok := loaded["writer"]
+	if !ok {
+		t.Fatalf("missing agent: %#v", loaded)
+	}
+	if got.Name != "writer" || got.Soul != "Write clearly." {
+		t.Fatalf("agent=%#v", got)
+	}
+}
+
 func TestLoadMemoryFromFileAcceptsSnakeCaseFields(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{dataRoot: root}
