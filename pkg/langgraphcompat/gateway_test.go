@@ -9436,6 +9436,41 @@ func TestRecordedRunStreamReplaysAIAdditionalKwargsTuple(t *testing.T) {
 	}
 }
 
+func TestRecordedRunStreamReplaysAIToolCallsTuple(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-replay-ai-tool-calls",
+		ThreadID:    "thread-replay-ai-tool-calls",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "messages-tuple", Data: map[string]any{"type": "ai", "id": "ai-1", "tool_calls": []any{map[string]any{"id": "call-1", "name": "read_file", "args": map[string]any{"path": "/tmp/demo.txt"}}}}},
+			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-replay-ai-tool-calls"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-replay-ai-tool-calls/runs/run-replay-ai-tool-calls/stream?streamMode=messages-tuple")
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"tool_calls":[{`) || !strings.Contains(text, `"id":"call-1"`) || !strings.Contains(text, `"name":"read_file"`) || !strings.Contains(text, `"args":{"path":"/tmp/demo.txt"}`) {
+		t.Fatalf("missing ai tool_calls tuple payload: %s", text)
+	}
+}
+
 func TestRecordedRunStreamReplaysToolCallEvents(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	run := &Run{
@@ -9881,6 +9916,41 @@ func TestThreadJoinStreamReplaysAIAdditionalKwargsTuple(t *testing.T) {
 	text := string(body)
 	if !strings.Contains(text, `"additional_kwargs":{"reasoning_content":"Need to inspect report","stop_reason":"end_turn"}`) {
 		t.Fatalf("missing ai additional_kwargs tuple payload: %s", text)
+	}
+}
+
+func TestThreadJoinStreamReplaysAIToolCallsTuple(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:       "run-join-ai-tool-calls",
+		ThreadID:    "thread-join-ai-tool-calls",
+		AssistantID: "lead_agent",
+		Status:      "success",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "1", Event: "messages-tuple", Data: map[string]any{"type": "ai", "id": "ai-1", "tool_calls": []any{map[string]any{"id": "call-1", "name": "read_file", "args": map[string]any{"path": "/tmp/demo.txt"}}}}},
+			{ID: "2", Event: "end", Data: map[string]any{"run_id": "run-join-ai-tool-calls"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-join-ai-tool-calls/stream?streamMode=messages-tuple")
+	if err != nil {
+		t.Fatalf("join stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"tool_calls":[{`) || !strings.Contains(text, `"id":"call-1"`) || !strings.Contains(text, `"name":"read_file"`) || !strings.Contains(text, `"args":{"path":"/tmp/demo.txt"}`) {
+		t.Fatalf("missing ai tool_calls tuple payload: %s", text)
 	}
 }
 
