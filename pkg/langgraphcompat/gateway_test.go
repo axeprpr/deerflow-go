@@ -1320,7 +1320,12 @@ func TestThreadSearchSelectProjectsExecutionSummaries(t *testing.T) {
 func TestThreadSearchDefaultIncludesRecoveredValueSummaries(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.ensureSession("thread-search-value-summaries", map[string]any{
-		"title":     "Summary Thread",
+		"title":   "Summary Thread",
+		"todos":   []any{map[string]any{"content": "ship sqlite", "status": "pending"}},
+		"sandbox": map[string]any{"sandbox_id": "sb-1"},
+		"viewed_images": map[string]any{
+			"/tmp/chart.png": map[string]any{"base64": "xyz", "mime_type": "image/png"},
+		},
 		"artifacts": []any{"/tmp/report.html"},
 		"thread_data": map[string]any{
 			"workspace_path": "/tmp/workspace",
@@ -1363,6 +1368,33 @@ func TestThreadSearchDefaultIncludesRecoveredValueSummaries(t *testing.T) {
 	}
 	if selected == nil {
 		t.Fatalf("missing projected thread in %#v", threads)
+	}
+	if selected["title"] != "Summary Thread" {
+		t.Fatalf("selected=%#v", selected)
+	}
+	artifactsSummary, _ := selected["artifacts"].([]any)
+	if len(artifactsSummary) != 1 || artifactsSummary[0] != "/tmp/report.html" {
+		t.Fatalf("selected=%#v", selected)
+	}
+	todosSummary, _ := selected["todos"].([]any)
+	if len(todosSummary) != 1 {
+		t.Fatalf("selected=%#v", selected)
+	}
+	sandboxSummary, _ := selected["sandbox"].(map[string]any)
+	if sandboxSummary["sandbox_id"] != "sb-1" {
+		t.Fatalf("selected=%#v", selected)
+	}
+	threadDataSummary, _ := selected["thread_data"].(map[string]any)
+	if threadDataSummary["workspace_path"] != "/tmp/workspace" || threadDataSummary["uploads_path"] != "/tmp/uploads" || threadDataSummary["outputs_path"] != "/tmp/outputs" {
+		t.Fatalf("selected=%#v", selected)
+	}
+	uploadedFilesSummary, _ := selected["uploaded_files"].([]any)
+	if len(uploadedFilesSummary) != 1 {
+		t.Fatalf("selected=%#v", selected)
+	}
+	viewedImagesSummary, _ := selected["viewed_images"].(map[string]any)
+	if len(viewedImagesSummary) != 1 {
+		t.Fatalf("selected=%#v", selected)
 	}
 	values, _ := selected["values"].(map[string]any)
 	if values["title"] != "Summary Thread" {
@@ -5478,6 +5510,12 @@ func TestThreadGetIncludesCompatShape(t *testing.T) {
 		"run_id":                      "run-1",
 		"step":                        7,
 		"title":                       "Compat Thread",
+		"todos":                       []any{map[string]any{"content": "ship sqlite", "status": "pending"}},
+		"sandbox":                     map[string]any{"sandbox_id": "sb-1"},
+		"viewed_images":               map[string]any{"/tmp/chart.png": map[string]any{"base64": "xyz", "mime_type": "image/png"}},
+		"artifacts":                   []any{"/tmp/report.html"},
+		"thread_data":                 map[string]any{"workspace_path": "/tmp/workspace", "uploads_path": "/tmp/uploads", "outputs_path": "/tmp/outputs"},
+		"uploaded_files":              []any{map[string]any{"filename": "notes.txt", "path": "/tmp/uploads/notes.txt", "status": "uploaded"}},
 		"mode":                        "thinking",
 		"model_name":                  "deepseek/deepseek-r1",
 		"reasoning_effort":            "high",
@@ -5528,6 +5566,34 @@ func TestThreadGetIncludesCompatShape(t *testing.T) {
 		t.Fatalf("thread=%#v", thread)
 	}
 	if thread["title"] != "Compat Thread" {
+		t.Fatalf("thread=%#v", thread)
+	}
+	artifacts, _ := thread["artifacts"].([]any)
+	if len(artifacts) != 1 || artifacts[0] != "/tmp/report.html" {
+		t.Fatalf("thread=%#v", thread)
+	}
+	todos, _ := thread["todos"].([]any)
+	if len(todos) != 1 {
+		t.Fatalf("thread=%#v", thread)
+	}
+	sandboxState, _ := thread["sandbox"].(map[string]any)
+	if sandboxState["sandbox_id"] != "sb-1" {
+		t.Fatalf("thread=%#v", thread)
+	}
+	threadData, _ := thread["thread_data"].(map[string]any)
+	if threadData["uploads_path"] != s.uploadsDir(threadID) {
+		t.Fatalf("thread=%#v", thread)
+	}
+	uploadedFiles, _ := thread["uploaded_files"].([]any)
+	if len(uploadedFiles) != 1 {
+		t.Fatalf("thread=%#v", thread)
+	}
+	uploadedFile, _ := uploadedFiles[0].(map[string]any)
+	if uploadedFile["filename"] != "brief.txt" {
+		t.Fatalf("thread=%#v", thread)
+	}
+	viewedImages, _ := thread["viewed_images"].(map[string]any)
+	if len(viewedImages) != 1 {
 		t.Fatalf("thread=%#v", thread)
 	}
 	if thread["mode"] != "thinking" || thread["model_name"] != "deepseek/deepseek-r1" || thread["reasoning_effort"] != "high" {
