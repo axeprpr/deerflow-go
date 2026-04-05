@@ -2142,6 +2142,8 @@ func TestLoadPersistedThreadsAcceptsValuesStateObject(t *testing.T) {
 			"assistant_id":"assistant-1",
 			"model_name":"qwen/Qwen3.5-9B"
 		},
+		"checkpoint_id":"cp-top-level",
+		"parent_checkpoint_id":"cp-parent-top-level",
 		"created_at":"2026-01-01T00:00:00Z"
 	}`
 	if err := os.WriteFile(filepath.Join(threadDir, "thread.json"), []byte(raw), 0o644); err != nil {
@@ -2159,6 +2161,9 @@ func TestLoadPersistedThreadsAcceptsValuesStateObject(t *testing.T) {
 		t.Fatalf("messages=%#v", session.Messages)
 	}
 	if session.Metadata["title"] != "Values Thread" || session.Metadata["assistant_id"] != "assistant-1" || session.Metadata["model_name"] != "qwen/Qwen3.5-9B" {
+		t.Fatalf("metadata=%#v", session.Metadata)
+	}
+	if session.Metadata["checkpoint_id"] != "cp-top-level" || session.Metadata["parent_checkpoint_id"] != "cp-parent-top-level" {
 		t.Fatalf("metadata=%#v", session.Metadata)
 	}
 	if _, ok := session.Metadata["viewed_images"]; !ok {
