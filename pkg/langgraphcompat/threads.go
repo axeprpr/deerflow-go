@@ -284,7 +284,12 @@ func applyThreadMetadata(session *Session, metadata map[string]any) {
 	if session == nil || len(metadata) == 0 {
 		return
 	}
+	normalized := make(map[string]any, len(metadata))
 	for k, v := range metadata {
+		normalized[k] = v
+	}
+	normalized = normalizePersistedThreadMetadata(normalized)
+	for k, v := range normalized {
 		session.Metadata[k] = v
 	}
 }
@@ -1773,6 +1778,11 @@ func normalizePersistedThreadMetadata(metadata map[string]any) map[string]any {
 	if _, ok := metadata["temperature"]; !ok {
 		if value, ok := metadata["Temperature"]; ok {
 			metadata["temperature"] = value
+		}
+	}
+	if _, ok := metadata["max_tokens"]; !ok {
+		if value, ok := metadata["maxTokens"]; ok {
+			metadata["max_tokens"] = value
 		}
 	}
 	return metadata

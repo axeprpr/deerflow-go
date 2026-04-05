@@ -4859,7 +4859,7 @@ func TestThreadStatePostAcceptsMetadata(t *testing.T) {
 	threadID := "thread-state-post-metadata"
 	s.ensureSession(threadID, nil)
 
-	body := `{"metadata":{"assistant_id":"lead_agent","graph_id":"lead_agent"},"values":{"title":"Updated"}}`
+	body := `{"metadata":{"assistantId":"lead_agent","graphId":"lead_agent","modelName":"deepseek/deepseek-r1","reasoningEffort":"high","agentName":"planner","agentType":"research","thinkingEnabled":false,"isPlanMode":true,"subagentEnabled":true,"checkpointId":"cp-1","parentCheckpointId":"cp-parent-1","checkpointNs":"ns-1","parentCheckpointNs":"ns-parent-1","checkpointThreadId":"checkpoint-thread-1","parentCheckpointThreadId":"checkpoint-thread-parent-1","Temperature":0.2,"maxTokens":321},"values":{"title":"Updated"}}`
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/threads/"+threadID+"/state", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
@@ -4879,8 +4879,45 @@ func TestThreadStatePostAcceptsMetadata(t *testing.T) {
 	if state.Metadata["assistant_id"] != "lead_agent" || state.Metadata["graph_id"] != "lead_agent" {
 		t.Fatalf("metadata=%#v", state.Metadata)
 	}
+	if state.Metadata["model_name"] != "deepseek/deepseek-r1" || state.Metadata["reasoning_effort"] != "high" || state.Metadata["agent_name"] != "planner" || state.Metadata["agent_type"] != "research" {
+		t.Fatalf("metadata=%#v", state.Metadata)
+	}
+	if state.Metadata["checkpoint_id"] != "cp-1" || state.Metadata["parent_checkpoint_id"] != "cp-parent-1" || state.Metadata["checkpoint_ns"] != "ns-1" || state.Metadata["parent_checkpoint_ns"] != "ns-parent-1" {
+		t.Fatalf("metadata=%#v", state.Metadata)
+	}
+	if state.Metadata["checkpoint_thread_id"] != "checkpoint-thread-1" || state.Metadata["parent_checkpoint_thread_id"] != "checkpoint-thread-parent-1" {
+		t.Fatalf("metadata=%#v", state.Metadata)
+	}
+	if state.Metadata["thinking_enabled"] != false || state.Metadata["is_plan_mode"] != true || state.Metadata["subagent_enabled"] != true {
+		t.Fatalf("metadata=%#v", state.Metadata)
+	}
+	if state.Metadata["temperature"] != 0.2 {
+		t.Fatalf("metadata=%#v", state.Metadata)
+	}
+	if state.Metadata["max_tokens"] != float64(321) && state.Metadata["max_tokens"] != int64(321) && state.Metadata["max_tokens"] != 321 {
+		t.Fatalf("metadata=%#v", state.Metadata)
+	}
 	if state.Values["title"] != "Updated" {
 		t.Fatalf("title=%v", state.Values["title"])
+	}
+	configurable, _ := state.Config["configurable"].(map[string]any)
+	if configurable["model_name"] != "deepseek/deepseek-r1" || configurable["reasoning_effort"] != "high" || configurable["agent_name"] != "planner" || configurable["agent_type"] != "research" {
+		t.Fatalf("config=%#v", state.Config)
+	}
+	if configurable["thinking_enabled"] != false || configurable["is_plan_mode"] != true || configurable["subagent_enabled"] != true {
+		t.Fatalf("config=%#v", state.Config)
+	}
+	if configurable["temperature"] != 0.2 {
+		t.Fatalf("config=%#v", state.Config)
+	}
+	if configurable["max_tokens"] != float64(321) && configurable["max_tokens"] != int64(321) && configurable["max_tokens"] != 321 {
+		t.Fatalf("config=%#v", state.Config)
+	}
+	if state.Checkpoint == nil || state.Checkpoint["checkpoint_id"] != "cp-1" || state.Checkpoint["checkpoint_ns"] != "ns-1" || state.Checkpoint["thread_id"] != "checkpoint-thread-1" {
+		t.Fatalf("checkpoint=%#v", state.Checkpoint)
+	}
+	if state.ParentCheckpoint == nil || state.ParentCheckpoint["checkpoint_id"] != "cp-parent-1" || state.ParentCheckpoint["checkpoint_ns"] != "ns-parent-1" || state.ParentCheckpoint["thread_id"] != "checkpoint-thread-parent-1" {
+		t.Fatalf("parent_checkpoint=%#v", state.ParentCheckpoint)
 	}
 }
 
@@ -4892,7 +4929,7 @@ func TestThreadStatePatchAcceptsValuesPayload(t *testing.T) {
 	req, _ := http.NewRequest(
 		http.MethodPatch,
 		ts.URL+"/threads/"+threadID+"/state",
-		strings.NewReader(`{"metadata":{"mode":"thinking","model_name":"deepseek/deepseek-r1","reasoning_effort":"high","thinking_enabled":false,"is_plan_mode":true,"subagent_enabled":true,"temperature":0.2,"max_tokens":321,"checkpoint_id":"cp-1","parent_checkpoint_id":"cp-parent-1","checkpoint_ns":"ns-1","parent_checkpoint_ns":"ns-parent-1","checkpoint_thread_id":"checkpoint-thread-1","parent_checkpoint_thread_id":"checkpoint-thread-parent-1","next":["lead_agent"],"tasks":[{"id":"task-1","name":"lead_agent"}],"interrupts":[{"value":"Need input"}]},"values":{"title":"After"}}`),
+		strings.NewReader(`{"metadata":{"mode":"thinking","modelName":"deepseek/deepseek-r1","reasoningEffort":"high","thinkingEnabled":false,"isPlanMode":true,"subagentEnabled":true,"Temperature":0.2,"maxTokens":321,"checkpointId":"cp-1","parentCheckpointId":"cp-parent-1","checkpointNs":"ns-1","parentCheckpointNs":"ns-parent-1","checkpointThreadId":"checkpoint-thread-1","parentCheckpointThreadId":"checkpoint-thread-parent-1","next":["lead_agent"],"tasks":[{"id":"task-1","name":"lead_agent"}],"interrupts":[{"value":"Need input"}]},"values":{"title":"After"}}`),
 	)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
