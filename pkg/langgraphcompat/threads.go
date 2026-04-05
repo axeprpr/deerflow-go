@@ -71,10 +71,9 @@ func (s *Server) handleThreadUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.sessionsMu.Lock()
-	defer s.sessionsMu.Unlock()
-
 	session, exists := s.sessions[threadID]
 	if !exists {
+		s.sessionsMu.Unlock()
 		http.Error(w, "thread not found", http.StatusNotFound)
 		return
 	}
@@ -84,7 +83,11 @@ func (s *Server) handleThreadUpdate(w http.ResponseWriter, r *http.Request) {
 			session.Metadata[k] = v
 		}
 	}
+	if values, ok := req["values"].(map[string]any); ok {
+		applyThreadValues(session, values)
+	}
 	session.UpdatedAt = time.Now().UTC()
+	s.sessionsMu.Unlock()
 	if err := s.persistSessionFile(session); err != nil {
 		http.Error(w, "failed to persist thread", http.StatusInternalServerError)
 		return
@@ -218,6 +221,24 @@ func normalizeThreadFieldName(field string) string {
 	}
 }
 
+func applyThreadValues(session *Session, values map[string]any) {
+	if session == nil || len(values) == 0 {
+		return
+	}
+	if title, ok := values["title"].(string); ok {
+		session.Metadata["title"] = title
+	}
+	if todos, ok := normalizeTodos(values["todos"]); ok {
+		session.Metadata["todos"] = todos
+	}
+	if sandboxState, ok := normalizeStringMap(values["sandbox"]); ok {
+		session.Metadata["sandbox"] = sandboxState
+	}
+	if viewedImages, ok := normalizeViewedImages(firstNonNil(values["viewed_images"], values["viewedImages"])); ok {
+		session.Metadata["viewed_images"] = viewedImages
+	}
+}
+
 func (s *Server) handleThreadFiles(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
@@ -283,18 +304,7 @@ func (s *Server) handleThreadStatePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if title, ok := req.Values["title"].(string); ok {
-		session.Metadata["title"] = title
-	}
-	if todos, ok := normalizeTodos(req.Values["todos"]); ok {
-		session.Metadata["todos"] = todos
-	}
-	if sandboxState, ok := normalizeStringMap(req.Values["sandbox"]); ok {
-		session.Metadata["sandbox"] = sandboxState
-	}
-	if viewedImages, ok := normalizeViewedImages(firstNonNil(req.Values["viewed_images"], req.Values["viewedImages"])); ok {
-		session.Metadata["viewed_images"] = viewedImages
-	}
+	applyThreadValues(session, req.Values)
 	session.UpdatedAt = time.Now().UTC()
 	s.sessionsMu.Unlock()
 	if err := s.persistSessionFile(session); err != nil {
@@ -330,18 +340,7 @@ func (s *Server) handleThreadStatePatch(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "thread not found", http.StatusNotFound)
 		return
 	}
-	if title, ok := req.Values["title"].(string); ok {
-		session.Metadata["title"] = title
-	}
-	if todos, ok := normalizeTodos(req.Values["todos"]); ok {
-		session.Metadata["todos"] = todos
-	}
-	if sandboxState, ok := normalizeStringMap(req.Values["sandbox"]); ok {
-		session.Metadata["sandbox"] = sandboxState
-	}
-	if viewedImages, ok := normalizeViewedImages(firstNonNil(req.Values["viewed_images"], req.Values["viewedImages"])); ok {
-		session.Metadata["viewed_images"] = viewedImages
-	}
+	applyThreadValues(session, req.Values)
 	for k, v := range req.Metadata {
 		session.Metadata[k] = v
 	}
@@ -740,8 +739,16 @@ func todosFromMetadata(raw any) []map[string]any {
 }
 
 func normalizeTodos(raw any) ([]map[string]any, bool) {
-	items, ok := raw.([]any)
-	if !ok {
+	var items []any
+	switch typed := raw.(type) {
+	case []any:
+		items = typed
+	case []map[string]any:
+		items = make([]any, 0, len(typed))
+		for _, item := range typed {
+			items = append(items, item)
+		}
+	default:
 		return nil, false
 	}
 	todos := make([]map[string]any, 0, len(items))

@@ -1448,6 +1448,40 @@ func TestThreadStatePatchAcceptsValuesPayload(t *testing.T) {
 	}
 }
 
+func TestThreadUpdateAcceptsValuesPayload(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-update-values"
+	s.ensureSession(threadID, map[string]any{"title": "Before"})
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID,
+		strings.NewReader(`{"values":{"title":"After","todos":[{"content":"ship sqlite","status":"completed"}]}}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("update request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+
+	state := s.getThreadState(threadID)
+	if state == nil {
+		t.Fatal("state missing")
+	}
+	if got := state.Values["title"]; got != "After" {
+		t.Fatalf("title=%v want After", got)
+	}
+	todos, ok := state.Values["todos"].([]map[string]any)
+	if !ok || len(todos) != 1 {
+		t.Fatalf("todos=%#v", state.Values["todos"])
+	}
+}
+
 func TestThreadStatePatchAcceptsCamelCaseViewedImages(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-patch-viewed-images"
