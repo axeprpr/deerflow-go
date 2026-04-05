@@ -9402,6 +9402,9 @@ func TestRecordedRunStreamReplaysAIUsageTuple(t *testing.T) {
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
 	}
+	if !strings.Contains(text, `"id":"ai-1"`) {
+		t.Fatalf("missing ai message id in tuple payload: %s", text)
+	}
 	if !strings.Contains(text, `"usage_metadata":{"input_tokens":10,"output_tokens":5,"total_tokens":15}`) {
 		t.Fatalf("missing ai usage tuple payload: %s", text)
 	}
@@ -9439,6 +9442,9 @@ func TestRecordedRunStreamReplaysAIAdditionalKwargsTuple(t *testing.T) {
 	text := string(body)
 	if !strings.Contains(text, `"additional_kwargs":{"reasoning_content":"Need to inspect report","stop_reason":"end_turn"}`) {
 		t.Fatalf("missing ai additional_kwargs tuple payload: %s", text)
+	}
+	if !strings.Contains(text, `"id":"ai-1"`) {
+		t.Fatalf("missing ai message id in tuple payload: %s", text)
 	}
 }
 
@@ -9891,6 +9897,9 @@ func TestThreadJoinStreamReplaysAIUsageTuple(t *testing.T) {
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
 	}
+	if !strings.Contains(text, `"id":"ai-1"`) {
+		t.Fatalf("missing ai message id in tuple payload: %s", text)
+	}
 	if !strings.Contains(text, `"usage_metadata":{"input_tokens":10,"output_tokens":5,"total_tokens":15}`) {
 		t.Fatalf("missing ai usage tuple payload: %s", text)
 	}
@@ -9928,6 +9937,9 @@ func TestThreadJoinStreamReplaysAIAdditionalKwargsTuple(t *testing.T) {
 	text := string(body)
 	if !strings.Contains(text, `"additional_kwargs":{"reasoning_content":"Need to inspect report","stop_reason":"end_turn"}`) {
 		t.Fatalf("missing ai additional_kwargs tuple payload: %s", text)
+	}
+	if !strings.Contains(text, `"id":"ai-1"`) {
+		t.Fatalf("missing ai message id in tuple payload: %s", text)
 	}
 }
 
