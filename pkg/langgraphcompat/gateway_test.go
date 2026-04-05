@@ -10698,11 +10698,17 @@ func TestRecordedRunStreamModeSupportsCommaSeparatedAliases(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	taskBlock := sseEventBlock(t, text, "task_started")
 	if !strings.Contains(text, "event: task_started") {
 		t.Fatalf("missing task_started event: %s", text)
 	}
 	if !strings.Contains(text, `"task_id":"t1"`) {
 		t.Fatalf("missing task payload: %s", text)
+	}
+	for _, forbidden := range []string{`"message":`, `"result":`, `"error":`, `"description":`} {
+		if strings.Contains(taskBlock, forbidden) {
+			t.Fatalf("unexpected task_started field %s: %s", forbidden, taskBlock)
+		}
 	}
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
@@ -10891,11 +10897,17 @@ func TestThreadJoinStreamModeSupportsCommaSeparatedAliases(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	taskBlock := sseEventBlock(t, text, "task_started")
 	if !strings.Contains(text, "event: task_started") {
 		t.Fatalf("missing task_started event: %s", text)
 	}
 	if !strings.Contains(text, `"task_id":"t1"`) {
 		t.Fatalf("missing task payload: %s", text)
+	}
+	for _, forbidden := range []string{`"message":`, `"result":`, `"error":`, `"description":`} {
+		if strings.Contains(taskBlock, forbidden) {
+			t.Fatalf("unexpected task_started field %s: %s", forbidden, taskBlock)
+		}
 	}
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
