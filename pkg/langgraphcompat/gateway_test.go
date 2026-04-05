@@ -9051,6 +9051,7 @@ func TestThreadRunStreamAcceptsTopLevelMessages(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	metadataBlock := sseEventBlock(t, text, "metadata")
 	if !strings.Contains(text, "event: metadata") {
 		t.Fatalf("missing metadata event: %s", text)
 	}
@@ -9065,6 +9066,11 @@ func TestThreadRunStreamAcceptsTopLevelMessages(t *testing.T) {
 	}
 	if strings.Contains(text, `"status":`) {
 		t.Fatalf("unexpected status in metadata payload: %s", text)
+	}
+	for _, forbidden := range []string{`"messages":`, `"values":`, `"config":`, `"metadata":`, `"checkpoint":`, `"parent_checkpoint":`} {
+		if strings.Contains(metadataBlock, forbidden) {
+			t.Fatalf("unexpected metadata field %s: %s", forbidden, metadataBlock)
+		}
 	}
 	if !strings.Contains(text, "event: messages-tuple") {
 		t.Fatalf("missing messages-tuple event: %s", text)
@@ -9457,6 +9463,7 @@ func TestRecordedRunStreamReplaysMetadataPayload(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	metadataBlock := sseEventBlock(t, text, "metadata")
 	if !strings.Contains(text, "event: metadata") {
 		t.Fatalf("missing metadata event: %s", text)
 	}
@@ -9468,6 +9475,11 @@ func TestRecordedRunStreamReplaysMetadataPayload(t *testing.T) {
 	}
 	if strings.Contains(text, `"status":`) {
 		t.Fatalf("unexpected status in metadata payload: %s", text)
+	}
+	for _, forbidden := range []string{`"messages":`, `"values":`, `"config":`, `"metadata":`, `"checkpoint":`, `"parent_checkpoint":`} {
+		if strings.Contains(metadataBlock, forbidden) {
+			t.Fatalf("unexpected metadata field %s: %s", forbidden, metadataBlock)
+		}
 	}
 }
 
@@ -10040,6 +10052,7 @@ func TestThreadJoinStreamReplaysMetadataPayload(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	metadataBlock := sseEventBlock(t, text, "metadata")
 	if !strings.Contains(text, "event: metadata") {
 		t.Fatalf("missing metadata event: %s", text)
 	}
@@ -10051,6 +10064,11 @@ func TestThreadJoinStreamReplaysMetadataPayload(t *testing.T) {
 	}
 	if strings.Contains(text, `"status":`) {
 		t.Fatalf("unexpected status in metadata payload: %s", text)
+	}
+	for _, forbidden := range []string{`"messages":`, `"values":`, `"config":`, `"metadata":`, `"checkpoint":`, `"parent_checkpoint":`} {
+		if strings.Contains(metadataBlock, forbidden) {
+			t.Fatalf("unexpected metadata field %s: %s", forbidden, metadataBlock)
+		}
 	}
 }
 
