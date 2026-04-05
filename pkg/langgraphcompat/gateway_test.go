@@ -207,6 +207,23 @@ func sseEventBlock(t *testing.T, text string, event string) string {
 	return block
 }
 
+func sseEventBlocks(text string, event string) []string {
+	marker := "event: " + event + "\n"
+	if !strings.Contains(text, marker) {
+		return nil
+	}
+	parts := strings.Split(text, marker)
+	blocks := make([]string, 0, len(parts)-1)
+	for _, part := range parts[1:] {
+		block := marker + part
+		if next := strings.Index(block, "\n\nid: "); next >= 0 {
+			block = block[:next]
+		}
+		blocks = append(blocks, block)
+	}
+	return blocks
+}
+
 func writeGatewaySkill(t *testing.T, root, category, name, frontmatter string) {
 	t.Helper()
 	skillDir := filepath.Join(root, "skills", category, name)
@@ -8927,6 +8944,17 @@ func TestThreadRunStreamModeMessagesTupleFiltersValues(t *testing.T) {
 	if !strings.Contains(text, `"content":"hello from fake llm"`) {
 		t.Fatalf("missing message payload: %s", text)
 	}
+	tupleBlocks := sseEventBlocks(text, "messages-tuple")
+	if len(tupleBlocks) == 0 {
+		t.Fatalf("missing tuple blocks: %s", text)
+	}
+	for _, block := range tupleBlocks {
+		for _, forbidden := range []string{`"metadata":`, `"config":`, `"next":`, `"tasks":`, `"interrupts":`, `"checkpoint":`, `"parent_checkpoint":`, `"thread_id":`, `"assistant_id":`, `"run_id":`} {
+			if strings.Contains(block, forbidden) {
+				t.Fatalf("unexpected live tuple field %s: %s", forbidden, block)
+			}
+		}
+	}
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
 	}
@@ -8967,6 +8995,17 @@ func TestThreadRunCamelCaseStreamModeFiltersValues(t *testing.T) {
 	}
 	if !strings.Contains(text, `"content":"hello from fake llm"`) {
 		t.Fatalf("missing message payload: %s", text)
+	}
+	tupleBlocks := sseEventBlocks(text, "messages-tuple")
+	if len(tupleBlocks) == 0 {
+		t.Fatalf("missing tuple blocks: %s", text)
+	}
+	for _, block := range tupleBlocks {
+		for _, forbidden := range []string{`"metadata":`, `"config":`, `"next":`, `"tasks":`, `"interrupts":`, `"checkpoint":`, `"parent_checkpoint":`, `"thread_id":`, `"assistant_id":`, `"run_id":`} {
+			if strings.Contains(block, forbidden) {
+				t.Fatalf("unexpected live tuple field %s: %s", forbidden, block)
+			}
+		}
 	}
 	if strings.Contains(text, "event: values") {
 		t.Fatalf("unexpected values event: %s", text)
