@@ -6310,6 +6310,126 @@ func TestThreadHistoryReflectsClearedMessages(t *testing.T) {
 	}
 }
 
+func TestThreadSearchReflectsWrittenMessages(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-search-written-messages"
+	s.ensureSession(threadID, nil)
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID+"/state",
+		strings.NewReader(`{"values":{"messages":[{"id":"m1","type":"human","content":"hello"}]}}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("patch state: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	searchResp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"limit":10,"select":["threadId","values"]}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer searchResp.Body.Close()
+	if searchResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(searchResp.Body)
+		t.Fatalf("status=%d body=%s", searchResp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(searchResp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	var selected map[string]any
+	for _, thread := range threads {
+		if thread["thread_id"] == threadID {
+			selected = thread
+			break
+		}
+	}
+	if selected == nil {
+		t.Fatalf("missing projected thread in %#v", threads)
+	}
+	values, _ := selected["values"].(map[string]any)
+	messages, _ := values["messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("values=%#v", values)
+	}
+	message, _ := messages[0].(map[string]any)
+	if message["id"] != "m1" || message["content"] != "hello" {
+		t.Fatalf("message=%#v", message)
+	}
+}
+
+func TestThreadSearchReflectsClearedMessages(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-search-cleared-messages"
+	session := s.ensureSession(threadID, nil)
+	session.Messages = []models.Message{{
+		ID:        "m1",
+		SessionID: threadID,
+		Role:      models.RoleHuman,
+		Content:   "hello",
+	}}
+
+	req, _ := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/threads/"+threadID+"/state",
+		strings.NewReader(`{"values":{"messages":[]}}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("patch state: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	searchResp, err := http.Post(
+		ts.URL+"/threads/search",
+		"application/json",
+		strings.NewReader(`{"limit":10,"select":["threadId","values"]}`),
+	)
+	if err != nil {
+		t.Fatalf("search request: %v", err)
+	}
+	defer searchResp.Body.Close()
+	if searchResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(searchResp.Body)
+		t.Fatalf("status=%d body=%s", searchResp.StatusCode, string(b))
+	}
+
+	var threads []map[string]any
+	if err := json.NewDecoder(searchResp.Body).Decode(&threads); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	var selected map[string]any
+	for _, thread := range threads {
+		if thread["thread_id"] == threadID {
+			selected = thread
+			break
+		}
+	}
+	if selected == nil {
+		t.Fatalf("missing projected thread in %#v", threads)
+	}
+	values, _ := selected["values"].(map[string]any)
+	messages, _ := values["messages"].([]any)
+	if len(messages) != 0 {
+		t.Fatalf("values=%#v", values)
+	}
+}
+
 func TestThreadStateMessageWritesPersistAcrossReload(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-reload-messages"
