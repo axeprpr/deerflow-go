@@ -1412,6 +1412,55 @@ func TestLoadGatewayStateUsesModelMapKeyWhenNameMissing(t *testing.T) {
 	}
 }
 
+func TestLoadGatewayStateAcceptsArrayCollections(t *testing.T) {
+	root := t.TempDir()
+	skillsRoot := filepath.Join(root, "skills", "public", "demo-skill")
+	if err := os.MkdirAll(skillsRoot, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	content := `---
+name: demo-skill
+description: Demo skill
+category: public
+license: MIT
+---
+# Demo
+`
+	if err := os.WriteFile(filepath.Join(skillsRoot, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+	raw := `{
+		"models":[{"id":"flash","displayName":"Flash"}],
+		"skills":[{"name":"demo-skill","description":"Demo","category":"public","license":"MIT","enabled":true}],
+		"agents":[{"name":"writer","description":"Writer","toolGroups":["web"]}]
+	}`
+	if err := os.WriteFile(filepath.Join(root, "gateway_state.json"), []byte(raw), 0o644); err != nil {
+		t.Fatalf("write gateway_state.json: %v", err)
+	}
+
+	loaded := &Server{
+		dataRoot: root,
+		models:   map[string]gatewayModel{},
+		agents:   map[string]gatewayAgent{},
+	}
+	if err := loaded.loadGatewayState(); err != nil {
+		t.Fatalf("loadGatewayState: %v", err)
+	}
+
+	model, ok := loaded.findModelLocked("flash")
+	if !ok || model.DisplayName != "Flash" {
+		t.Fatalf("models=%#v", loaded.getModelsLocked())
+	}
+	skill, ok := loaded.getSkillsLocked()["demo-skill"]
+	if !ok || !skill.Enabled {
+		t.Fatalf("skills=%#v", loaded.getSkillsLocked())
+	}
+	agent, ok := loaded.getAgentsLocked()["writer"]
+	if !ok || len(agent.ToolGroups) != 1 || agent.ToolGroups[0] != "web" {
+		t.Fatalf("agents=%#v", loaded.getAgentsLocked())
+	}
+}
+
 func TestGatewayModelsFromEnvUsesModelIDWhenNameMissing(t *testing.T) {
 	t.Setenv("DEERFLOW_MODELS", `[{"id":"flash","displayName":"Flash"}]`)
 	models := defaultGatewayModels("")

@@ -1251,6 +1251,18 @@ func (s *Server) loadGatewayState() error {
 		if len(models) > 0 {
 			state.Models = models
 		}
+	} else if items, ok := raw["models"].([]any); ok {
+		models := make(map[string]gatewayModel, len(items))
+		for _, item := range items {
+			model, ok := normalizeGatewayModel(gatewayModelFromMap(mapFromAny(item)))
+			if !ok {
+				continue
+			}
+			models[model.Name] = model
+		}
+		if len(models) > 0 {
+			state.Models = models
+		}
 	}
 	if skillsRaw := mapFromAny(raw["skills"]); skillsRaw != nil {
 		skills := make(map[string]gatewaySkill, len(skillsRaw))
@@ -1274,6 +1286,28 @@ func (s *Server) loadGatewayState() error {
 		if len(skills) > 0 {
 			state.Skills = skills
 		}
+	} else if items, ok := raw["skills"].([]any); ok {
+		skills := make(map[string]gatewaySkill, len(items))
+		for _, item := range items {
+			skillMap := mapFromAny(item)
+			if skillMap == nil {
+				continue
+			}
+			name := strings.TrimSpace(stringFromAny(skillMap["name"]))
+			if name == "" {
+				continue
+			}
+			skills[name] = gatewaySkill{
+				Name:        name,
+				Description: stringFromAny(skillMap["description"]),
+				Category:    stringFromAny(skillMap["category"]),
+				License:     stringFromAny(skillMap["license"]),
+				Enabled:     boolValue(skillMap["enabled"]),
+			}
+		}
+		if len(skills) > 0 {
+			state.Skills = skills
+		}
 	}
 	if mcpRaw := mapFromAny(firstNonNil(raw["mcp_config"], raw["mcpConfig"])); mcpRaw != nil {
 		state.MCPConfig = gatewayMCPConfigFromMap(mcpRaw)
@@ -1287,6 +1321,40 @@ func (s *Server) loadGatewayState() error {
 			}
 			agent := gatewayAgent{
 				Name:        firstNonEmpty(stringFromAny(agentMap["name"]), name),
+				Description: stringFromAny(agentMap["description"]),
+				Soul:        stringFromAny(agentMap["soul"]),
+			}
+			if rawModel, exists := agentMap["model"]; exists {
+				if rawModel == nil {
+					agent.Model = nil
+				} else {
+					model := stringFromAny(rawModel)
+					agent.Model = &model
+				}
+			}
+			if rawToolGroups, exists := agentMap["tool_groups"]; exists {
+				agent.ToolGroups = stringsFromAny(rawToolGroups)
+			} else if rawToolGroups, exists := agentMap["toolGroups"]; exists {
+				agent.ToolGroups = stringsFromAny(rawToolGroups)
+			}
+			agents[name] = agent
+		}
+		if len(agents) > 0 {
+			state.Agents = agents
+		}
+	} else if items, ok := raw["agents"].([]any); ok {
+		agents := make(map[string]gatewayAgent, len(items))
+		for _, item := range items {
+			agentMap := mapFromAny(item)
+			if agentMap == nil {
+				continue
+			}
+			name := strings.TrimSpace(stringFromAny(agentMap["name"]))
+			if name == "" {
+				continue
+			}
+			agent := gatewayAgent{
+				Name:        name,
 				Description: stringFromAny(agentMap["description"]),
 				Soul:        stringFromAny(agentMap["soul"]),
 			}
