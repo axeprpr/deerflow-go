@@ -8758,6 +8758,7 @@ func TestThreadRunStreamEmitsChunkEvent(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	chunkBlock := sseEventBlock(t, text, "chunk")
 	if !strings.Contains(text, "event: chunk") {
 		t.Fatalf("missing chunk event: %s", text)
 	}
@@ -8766,6 +8767,14 @@ func TestThreadRunStreamEmitsChunkEvent(t *testing.T) {
 	}
 	if !strings.Contains(text, `"content":"hello from fake llm"`) {
 		t.Fatalf("missing chunk content payload: %s", text)
+	}
+	if !strings.Contains(chunkBlock, `"role":"assistant"`) || !strings.Contains(chunkBlock, `"type":"ai"`) {
+		t.Fatalf("missing chunk identity payload: %s", chunkBlock)
+	}
+	for _, forbidden := range []string{`"messages":`, `"usage_metadata":`, `"additional_kwargs":`, `"tool_calls":`, `"tool_call_id":`, `"status":`, `"data":{`} {
+		if strings.Contains(chunkBlock, forbidden) {
+			t.Fatalf("unexpected chunk field %s: %s", forbidden, chunkBlock)
+		}
 	}
 }
 
@@ -9704,6 +9713,7 @@ func TestRecordedRunStreamReplaysChunkEvent(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	chunkBlock := sseEventBlock(t, text, "chunk")
 	if !strings.Contains(text, "event: chunk") {
 		t.Fatalf("missing chunk event: %s", text)
 	}
@@ -9712,6 +9722,14 @@ func TestRecordedRunStreamReplaysChunkEvent(t *testing.T) {
 	}
 	if !strings.Contains(text, `"content":"hello from replay"`) {
 		t.Fatalf("missing chunk content payload: %s", text)
+	}
+	if !strings.Contains(chunkBlock, `"type":"ai"`) {
+		t.Fatalf("missing replay chunk type payload: %s", chunkBlock)
+	}
+	for _, forbidden := range []string{`"messages":`, `"usage_metadata":`, `"additional_kwargs":`, `"tool_calls":`, `"tool_call_id":`, `"status":`, `"data":{`, `"role":`, `"thread_id":`, `"run_id":`} {
+		if strings.Contains(chunkBlock, forbidden) {
+			t.Fatalf("unexpected replay chunk field %s: %s", forbidden, chunkBlock)
+		}
 	}
 }
 
@@ -10297,6 +10315,7 @@ func TestThreadJoinStreamReplaysChunkEvent(t *testing.T) {
 		t.Fatalf("read body: %v", err)
 	}
 	text := string(body)
+	chunkBlock := sseEventBlock(t, text, "chunk")
 	if !strings.Contains(text, "event: chunk") {
 		t.Fatalf("missing chunk event: %s", text)
 	}
@@ -10305,6 +10324,14 @@ func TestThreadJoinStreamReplaysChunkEvent(t *testing.T) {
 	}
 	if !strings.Contains(text, `"content":"hello from join"`) {
 		t.Fatalf("missing chunk content payload: %s", text)
+	}
+	if !strings.Contains(chunkBlock, `"type":"ai"`) {
+		t.Fatalf("missing join chunk type payload: %s", chunkBlock)
+	}
+	for _, forbidden := range []string{`"messages":`, `"usage_metadata":`, `"additional_kwargs":`, `"tool_calls":`, `"tool_call_id":`, `"status":`, `"data":{`, `"role":`, `"thread_id":`, `"run_id":`} {
+		if strings.Contains(chunkBlock, forbidden) {
+			t.Fatalf("unexpected join chunk field %s: %s", forbidden, chunkBlock)
+		}
 	}
 }
 
