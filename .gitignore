@@ -2,6 +2,9 @@ gateway
 bin/
 *.exe
 
+# Local Codex configuration may contain credentials.
+.codex/
+
 # Compiled binaries
 langgraph
 # Thread session data (runtime)

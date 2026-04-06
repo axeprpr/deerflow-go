@@ -1,4 +1,0 @@
-model = "Qwen/Qwen3.5-9B"
-openai_api_base = "https://api.siliconflow.cn/v1"
-openai_api_key = "sk-jhbssaazdxvliteyqvdqfhvmexkteuicymuuieujsdwicxwi"
-sandbox_permissions = ["disk-full-read-access", "disk-full-write-access", "web-search"]

@@ -140,10 +140,7 @@ func invokeACPAgentCommand(ctx context.Context, cfg ACPAgentConfig, prompt, thre
 }
 
 func ACPWorkspaceDir(threadID string) (string, error) {
-	root := strings.TrimSpace(os.Getenv("DEERFLOW_DATA_ROOT"))
-	if root == "" {
-		root = filepath.Join(os.TempDir(), "deerflow-go-data")
-	}
+	root := DataRootFromEnv()
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return "", err
@@ -216,10 +213,7 @@ func threadDataRootFromThreadID(threadID string) string {
 	if threadID == "" {
 		return ""
 	}
-	root := strings.TrimSpace(os.Getenv("DEERFLOW_DATA_ROOT"))
-	if root == "" {
-		root = filepath.Join(os.TempDir(), "deerflow-go-data")
-	}
+	root := DataRootFromEnv()
 	return filepath.Join(root, "threads", threadID, "user-data")
 }
 

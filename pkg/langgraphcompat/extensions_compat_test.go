@@ -29,6 +29,30 @@ func TestResolveGatewayExtensionsConfigPathFallsBackToLegacyMCPConfig(t *testing
 	}
 }
 
+func TestResolveGatewayExtensionsConfigPathSupportsLegacyEnvName(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "custom-extensions.json")
+	if err := os.WriteFile(configPath, []byte(`{"mcpServers":{},"skills":{}}`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("DEER_FLOW_EXTENSIONS_CONFIG_PATH", configPath)
+
+	if got := resolveGatewayExtensionsConfigPath(); got != configPath {
+		t.Fatalf("path=%q want=%q", got, configPath)
+	}
+}
+
+func TestResolveGatewayExtensionsConfigPathPrefersExistingEnvName(t *testing.T) {
+	dir := t.TempDir()
+	existingPath := filepath.Join(dir, "existing-extensions.json")
+	legacyPath := filepath.Join(dir, "legacy-extensions.json")
+	t.Setenv("DEERFLOW_EXTENSIONS_CONFIG_PATH", existingPath)
+	t.Setenv("DEER_FLOW_EXTENSIONS_CONFIG_PATH", legacyPath)
+
+	if got := resolveGatewayExtensionsConfigPath(); got != existingPath {
+		t.Fatalf("path=%q want=%q", got, existingPath)
+	}
+}
+
 func TestLoadGatewayExtensionsConfigResolvesEnvPlaceholders(t *testing.T) {
 	projectRoot := t.TempDir()
 	configPath := filepath.Join(projectRoot, "extensions_config.json")

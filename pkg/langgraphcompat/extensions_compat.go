@@ -21,8 +21,10 @@ type gatewayExtensionsConfig struct {
 var gatewayEnvPlaceholderRE = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(:-([^}]*))?\}|\$([A-Za-z_][A-Za-z0-9_]*)`)
 
 func resolveGatewayExtensionsConfigPath() string {
-	if raw := strings.TrimSpace(os.Getenv("DEERFLOW_EXTENSIONS_CONFIG_PATH")); raw != "" {
-		return filepath.Clean(raw)
+	for _, key := range []string{"DEERFLOW_EXTENSIONS_CONFIG_PATH", "DEER_FLOW_EXTENSIONS_CONFIG_PATH"} {
+		if raw := strings.TrimSpace(os.Getenv(key)); raw != "" {
+			return filepath.Clean(raw)
+		}
 	}
 
 	cwd, err := os.Getwd()

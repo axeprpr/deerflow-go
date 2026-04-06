@@ -67,10 +67,7 @@ func skillRoots() []string {
 		}
 	}
 
-	dataRoot := strings.TrimSpace(os.Getenv("DEERFLOW_DATA_ROOT"))
-	if dataRoot == "" {
-		dataRoot = filepath.Join(os.TempDir(), "deerflow-go-data")
-	}
+	dataRoot := DataRootFromEnv()
 	roots = append(roots, filepath.Join(dataRoot, "skills"))
 
 	seen := make(map[string]struct{}, len(roots))

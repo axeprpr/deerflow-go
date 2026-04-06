@@ -18,6 +18,11 @@ func (s *Server) compatRoot() string {
 	if root := strings.TrimSpace(os.Getenv(compatRootEnv)); root != "" {
 		return root
 	}
+	for _, key := range []string{"DEERFLOW_DATA_ROOT", "DEER_FLOW_HOME"} {
+		if root := strings.TrimSpace(os.Getenv(key)); root != "" {
+			return root
+		}
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return strings.TrimSpace(s.dataRoot)

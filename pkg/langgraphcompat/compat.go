@@ -203,10 +203,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		}
 	}
 
-	dataRoot := strings.TrimSpace(os.Getenv("DEERFLOW_DATA_ROOT"))
-	if dataRoot == "" {
-		dataRoot = filepath.Join(os.TempDir(), "deerflow-go-data")
-	}
+	dataRoot := tools.DataRootFromEnv()
 	dataRootAbs, err := filepath.Abs(dataRoot)
 	if err != nil {
 		return nil, err

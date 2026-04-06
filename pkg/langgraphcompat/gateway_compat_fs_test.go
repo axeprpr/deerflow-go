@@ -192,10 +192,45 @@ func TestRefreshGatewayCompatFilesClearsRemovedCompatState(t *testing.T) {
 
 func TestCompatRootDefaultsToModuleRoot(t *testing.T) {
 	t.Setenv(compatRootEnv, "")
+	t.Setenv("DEER_FLOW_HOME", "")
+	t.Setenv("DEERFLOW_DATA_ROOT", "")
 	s := &Server{dataRoot: t.TempDir()}
 
 	root := s.compatRoot()
 	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
 		t.Fatalf("compat root %q missing go.mod: %v", root, err)
+	}
+}
+
+func TestCompatRootSupportsLegacyHomeEnv(t *testing.T) {
+	t.Setenv(compatRootEnv, "")
+	t.Setenv("DEER_FLOW_HOME", "/tmp/deer-flow-home")
+	t.Setenv("DEERFLOW_DATA_ROOT", "")
+	s := &Server{dataRoot: t.TempDir()}
+
+	if got := s.compatRoot(); got != "/tmp/deer-flow-home" {
+		t.Fatalf("compatRoot()=%q want=%q", got, "/tmp/deer-flow-home")
+	}
+}
+
+func TestCompatRootPrefersDedicatedDataRootOverLegacyHomeEnv(t *testing.T) {
+	t.Setenv(compatRootEnv, "")
+	t.Setenv("DEER_FLOW_HOME", "/tmp/deer-flow-home")
+	t.Setenv("DEERFLOW_DATA_ROOT", "/tmp/deerflow-data-root")
+	s := &Server{dataRoot: t.TempDir()}
+
+	if got := s.compatRoot(); got != "/tmp/deerflow-data-root" {
+		t.Fatalf("compatRoot()=%q want=%q", got, "/tmp/deerflow-data-root")
+	}
+}
+
+func TestCompatRootEnvOverridesLegacyHomeEnv(t *testing.T) {
+	t.Setenv(compatRootEnv, "/tmp/compat-root")
+	t.Setenv("DEER_FLOW_HOME", "/tmp/deer-flow-home")
+	t.Setenv("DEERFLOW_DATA_ROOT", "/tmp/deerflow-data-root")
+	s := &Server{dataRoot: t.TempDir()}
+
+	if got := s.compatRoot(); got != "/tmp/compat-root" {
+		t.Fatalf("compatRoot()=%q want=%q", got, "/tmp/compat-root")
 	}
 }

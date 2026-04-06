@@ -23,11 +23,22 @@ func loadACPAgentsFromEnv() map[string]tools.ACPAgentConfig {
 		return nil
 	}
 
-	var cfg map[string]tools.ACPAgentConfig
-	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+	var rawCfg map[string]map[string]any
+	if err := json.Unmarshal([]byte(raw), &rawCfg); err != nil {
 		return nil
 	}
-	return normalizeACPAgentConfigs(cfg)
+	normalized := make(map[string]tools.ACPAgentConfig, len(rawCfg))
+	for name, item := range rawCfg {
+		cfg := tools.ACPAgentConfig{
+			Description: stringFromAny(item["description"]),
+			Command:     stringFromAny(item["command"]),
+			Args:        stringsFromAny(item["args"]),
+			Env:         stringMapFromAny(item["env"]),
+			Model:       stringFromAny(firstNonNil(item["model"], item["modelName"], item["model_name"])),
+		}
+		normalized[name] = cfg
+	}
+	return normalizeACPAgentConfigs(normalized)
 }
 
 func loadACPAgentsFromConfig() map[string]tools.ACPAgentConfig {
