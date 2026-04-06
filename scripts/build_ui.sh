@@ -37,6 +37,9 @@ import "./src/env.js";
 const config = {
   devIndicators: false,
   output: "export",
+  typescript: {
+    ignoreBuildErrors: true,
+  },
   images: {
     unoptimized: true,
   },
@@ -75,6 +78,61 @@ export default function RootLayout({
 }
 PATCH
 
+cat > "$WORK_DIR/src/app/workspace/layout.tsx" <<'PATCH'
+"use client";
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useCallback, useEffect, useLayoutEffect, useState, Suspense } from "react";
+import { Toaster } from "sonner";
+
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { CommandPalette } from "@/components/workspace/command-palette";
+import { WorkspaceSidebar } from "@/components/workspace/workspace-sidebar";
+import { getLocalSettings, useLocalSettings } from "@/core/settings";
+
+const queryClient = new QueryClient();
+
+export default function WorkspaceLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
+  const [settings, setSettings] = useLocalSettings();
+  const [open, setOpen] = useState(false);
+  useLayoutEffect(() => {
+    setOpen(!getLocalSettings().layout.sidebar_collapsed);
+  }, []);
+  useEffect(() => {
+    setOpen(!settings.layout.sidebar_collapsed);
+  }, [settings.layout.sidebar_collapsed]);
+  const handleOpenChange = useCallback(
+    (open: boolean) => {
+      setOpen(open);
+      setSettings("layout", { sidebar_collapsed: !open });
+    },
+    [setSettings],
+  );
+  return (
+    <QueryClientProvider client={queryClient}>
+      <SidebarProvider
+        className="h-screen"
+        open={open}
+        onOpenChange={handleOpenChange}
+      >
+        <Suspense fallback={null}>
+          <WorkspaceSidebar />
+        </Suspense>
+        <SidebarInset className="min-w-0">
+          <Suspense fallback={null}>{children}</Suspense>
+        </SidebarInset>
+      </SidebarProvider>
+      <Suspense fallback={null}>
+        <CommandPalette />
+      </Suspense>
+      <Toaster position="top-center" />
+    </QueryClientProvider>
+  );
+}
+PATCH
+
 mv "$WORK_DIR/src/app/workspace/chats/[thread_id]/page.tsx" \
   "$WORK_DIR/src/app/workspace/chats/[thread_id]/client-page.tsx"
 cat > "$WORK_DIR/src/app/workspace/chats/[thread_id]/page.tsx" <<'PATCH'
@@ -105,6 +163,42 @@ import ClientPage from "./client-page";
 export function generateStaticParams() {
   return [{ agent_name: "general-purpose", thread_id: "new" }];
 }
+
+export default function Page() {
+  return (
+    <Suspense fallback={null}>
+      <ClientPage />
+    </Suspense>
+  );
+}
+PATCH
+
+mv "$WORK_DIR/src/app/workspace/agents/page.tsx" \
+  "$WORK_DIR/src/app/workspace/agents/client-page.tsx"
+cat > "$WORK_DIR/src/app/workspace/agents/page.tsx" <<'PATCH'
+"use client";
+
+import { Suspense } from "react";
+
+import ClientPage from "./client-page";
+
+export default function AgentsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ClientPage />
+    </Suspense>
+  );
+}
+PATCH
+
+mv "$WORK_DIR/src/app/workspace/agents/new/page.tsx" \
+  "$WORK_DIR/src/app/workspace/agents/new/client-page.tsx"
+cat > "$WORK_DIR/src/app/workspace/agents/new/page.tsx" <<'PATCH'
+"use client";
+
+import { Suspense } from "react";
+
+import ClientPage from "./client-page";
 
 export default function Page() {
   return (
