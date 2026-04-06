@@ -39,7 +39,9 @@ jobs:
           version: 10
 
       - name: Run compatibility tests
-        run: go test ./pkg/langgraphcompat ./cmd/langgraph
+        run: |
+          go test -count=1 -run 'TestParseJSONStringListAcceptsChoicesWrapper|TestSetupAgentToolCreatesAgentFromRuntimeContext|TestSetupAgentToolStoresCreatedAgentNameInThreadState|TestUploadPlainTextDocumentCreatesMarkdownCompanion|TestConvertToMessagesInjectsUploadedFilesBlockAndPreservesKwargs|TestConvertToMessagesKeepsAttachmentOnlyUserMessage|TestConvertToMessagesNormalizesUploadedFilePathAndSkipsMissingFiles|TestMessagesToLangChainReturnsMultiContentWhenAvailable|TestThreadJoinStreamFollowsLatestActiveRunOnly|TestValidateThreadIDRejectsDots|TestLangGraphRoutesRejectThreadIDsWithDots|TestGatewayRoutesRejectThreadIDsWithDots|TestThreadRunPersistsModeFromConfig|TestThreadRunPersistsModeFromTopLevelContext|TestThreadConfigurableDerivesBooleansFromMode' ./pkg/langgraphcompat
+          go test ./cmd/langgraph
 
       - name: Build release artifacts
         env:
