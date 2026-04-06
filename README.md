@@ -164,6 +164,83 @@ Optional full stack with adjacent frontend checkout:
 docker compose up -d --build api db ui
 ```
 
+For ephemeral mode, leave `DATABASE_URL` unset and the server runs in memory only.
+
+### 4. Connect Frontend
+
+Set `NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://localhost:8080` in your deerflow-ui `.env.local`
+
+## Embedded UI
+
+`cmd/langgraph` can serve an embedded `deerflow-ui` bundle directly from the Go binary.
+
+- Recommended layout: `third_party/deerflow-ui/frontend`
+- Build embedded assets: `make build-ui`
+- Build binary with embedded UI: `make build-release`
+- Override source path: `make build-release UI_DIR=/abs/path/to/deerflow-ui/frontend`
+
+When embedded assets are present, the binary serves the UI at `/` and the LangGraph-compatible API at `/api/langgraph`.
+
+## Release
+
+Build local release archives:
+
+```bash
+make release
+```
+
+Artifacts are written to `dist/`:
+
+- `deerflow-go_<version>_linux_amd64.tar.gz`
+- `deerflow-go_<version>_windows_amd64.zip`
+- `checksums.txt`
+
+GitHub Actions release automation is defined in:
+
+- `.github/workflows/release.yml`
+
+It supports:
+
+- manual runs via `workflow_dispatch`
+- tag-triggered builds for tags like `v0.1.0`
+
+On tag builds, the workflow also uploads the archives to the GitHub Release.
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/runs/stream` | POST | Stream run execution |
+| `/threads` | GET/POST | List/create threads |
+| `/threads/{id}` | GET/PUT/DELETE | Thread CRUD |
+| `/threads/{id}/history` | GET | Get message history |
+| `/threads/{id}/files` | GET | Get presented files |
+| `/threads/{id}/state` | GET/PATCH | Thread state |
+| `/threads/{id}/clarifications` | GET/POST | Clarification |
+| `/health` | GET | Health check |
+
+## Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SILICONFLOW_API_KEY` | LLM API key | Required |
+| `OPENAI_API_KEY` | OpenAI-compatible provider API key | Optional |
+| `OPENAI_API_BASE_URL` | OpenAI-compatible provider base URL | Optional |
+| `ANTHROPIC_API_KEY` | Anthropic gateway API key | Optional |
+| `DEFAULT_LLM_MODEL` | Default model | `qwen/Qwen3.5-9B` |
+| `DEERFLOW_MODELS` | Optional model catalog for `/api/models`; accepts comma-separated names or JSON array | Optional |
+| `DEERFLOW_SKILLS_DIRS` | Additional skill roots, comma-separated | Optional |
+| `DEERFLOW_MCP_CONFIG` | Optional JSON for `/api/mcp/config` | Optional |
+| `DEERFLOW_MEMORY_CONFIG` | Optional JSON for `/api/memory/config` | Optional |
+| `DEERFLOW_MEMORY_PATH` | Override memory storage path | Optional |
+| `DEERFLOW_CHANNELS_CONFIG` | Optional JSON for `/api/channels` | Optional |
+| `DATABASE_URL` | Database URL (`sqlite:///...` or `postgres://...`) | Optional |
+| `POSTGRES_URL` | Legacy Postgres connection fallback | Optional |
+| `PORT` | Server port | `8080` |
+| `LOG_LEVEL` | Log level | `info` |
+
+Examples:
+
 Health check:
 
 ```bash
