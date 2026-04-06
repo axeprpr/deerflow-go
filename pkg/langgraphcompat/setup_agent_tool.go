@@ -2,18 +2,13 @@ package langgraphcompat
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
-	"gopkg.in/yaml.v3"
 )
 
 func (s *Server) setupAgentTool() models.Tool {
@@ -82,7 +77,7 @@ func (s *Server) handleSetupAgentTool(ctx context.Context, call models.ToolCall)
 	agents[agentName] = createdAgent
 	s.uiStateMu.Unlock()
 
-	if err := s.persistAgentFiles(createdAgent); err != nil {
+	if err := s.persistAgentFiles(agentName, createdAgent); err != nil {
 		s.uiStateMu.Lock()
 		delete(s.getAgentsLocked(), agentName)
 		s.uiStateMu.Unlock()
@@ -126,65 +121,6 @@ func setupAgentNameFromContext(ctx context.Context, explicitName string) (string
 		return name, nil
 	}
 	return "", fmt.Errorf("agent name is required in runtime context")
-}
-
-func (s *Server) persistAgentFiles(agent gatewayAgent) error {
-	dir := s.agentDir(agent.Name)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "SOUL.md"), []byte(agent.Soul), 0o644); err != nil {
-		return err
-	}
-
-	payload := map[string]any{
-		"name":        agent.Name,
-		"description": agent.Description,
-		"tool_groups": agent.ToolGroups,
-	}
-	if agent.Model != nil {
-		payload["model"] = *agent.Model
-	}
-	data, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "agent.json"), data, 0o644); err != nil {
-		return err
-	}
-
-	yamlData, err := yaml.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, "config.yaml"), yamlData, 0o644)
-}
-
-func (s *Server) deleteAgentFiles(name string) error {
-	if strings.TrimSpace(name) == "" {
-		return nil
-	}
-	for _, root := range s.agentsRoots() {
-		if err := os.RemoveAll(filepath.Join(root, name)); err != nil {
-			return err
-		}
-	}
-	if deleter, ok := s.memoryStore.(interface {
-		Delete(context.Context, string) error
-	}); ok {
-		sessionID := deriveMemorySessionID("", name)
-		if err := deleter.Delete(context.Background(), sessionID); err != nil && !errors.Is(err, memory.ErrNotFound) {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *Server) agentDir(name string) string {
-	if dir, ok := s.existingAgentDir(name); ok {
-		return dir
-	}
-	return filepath.Join(s.primaryAgentsRoot(), name)
 }
 
 func failedToolResult(call models.ToolCall, err error) models.ToolResult {

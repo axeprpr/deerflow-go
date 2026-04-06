@@ -49,6 +49,11 @@ func (s *Server) handleEmbeddedUI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) embeddedUIFS() (fs.FS, bool) {
+	if s != nil && s.frontendFS != nil {
+		if fileExists(s.frontendFS, "index.html") {
+			return s.frontendFS, true
+		}
+	}
 	uiFS, err := webui.FS()
 	if err != nil {
 		return nil, false

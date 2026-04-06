@@ -66,8 +66,8 @@ func normalizeGatewayMCPOAuthConfig(cfg gatewayMCPOAuthConfig) gatewayMCPOAuthCo
 	if strings.TrimSpace(cfg.DefaultTokenType) == "" {
 		cfg.DefaultTokenType = "Bearer"
 	}
-	if cfg.RefreshSkewSeconds < 0 {
-		cfg.RefreshSkewSeconds = 0
+	if cfg.RefreshSkewSecond < 0 {
+		cfg.RefreshSkewSecond = 0
 	}
 	if len(cfg.ExtraTokenParams) > 0 {
 		expanded := make(map[string]string, len(cfg.ExtraTokenParams))
@@ -91,7 +91,7 @@ func (p *gatewayMCPOAuthProvider) HeaderValue(ctx context.Context) (string, erro
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.token != "" && time.Now().UTC().Add(time.Duration(p.cfg.RefreshSkewSeconds)*time.Second).Before(p.expiresAt) {
+	if p.token != "" && time.Now().UTC().Add(time.Duration(p.cfg.RefreshSkewSecond)*time.Second).Before(p.expiresAt) {
 		return p.tokenType + " " + p.token, nil
 	}
 

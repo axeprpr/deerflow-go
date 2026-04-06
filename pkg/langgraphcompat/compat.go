@@ -3,6 +3,7 @@ package langgraphcompat
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/checkpoint"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
+	"github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/sandbox"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
@@ -31,6 +33,8 @@ type Server struct {
 	llmProvider  llm.LLMProvider
 	tools        *tools.Registry
 	sandbox      *sandbox.Sandbox
+	sandboxName  string
+	sandboxRoot  string
 	subagents    *subagent.Pool
 	clarify      *clarification.Manager
 	clarifyAPI   *clarification.API
@@ -42,6 +46,7 @@ type Server struct {
 	sessionsMu   sync.RWMutex
 	runs         map[string]*Run
 	runsMu       sync.RWMutex
+	runStreams   map[string]map[uint64]chan StreamEvent
 	dataRoot     string
 	uiStateMu    sync.RWMutex
 	models       map[string]gatewayModel
@@ -51,6 +56,17 @@ type Server struct {
 	userProfile  string
 	memory       gatewayMemoryResponse
 	memoryConfig gatewayMemoryConfig
+	memoryStore  memory.Storage
+	frontendFS   fs.FS
+	channelMu    sync.Mutex
+	channelService *gatewayChannelService
+	channelConfig  gatewayChannelsConfig
+	compatFSManaged bool
+	mcpMu          sync.Mutex
+	mcpConnector   gatewayMCPConnector
+	mcpClients     map[string]gatewayMCPClient
+	mcpToolNames   map[string]struct{}
+	mcpDeferredTools []models.Tool
 	channels     gatewayChannelsStatus
 }
 
@@ -61,13 +77,22 @@ type HealthStatus struct {
 }
 
 type Session struct {
+	CheckpointID string
 	ThreadID     string
 	Messages     []models.Message
+	Todos        []Todo
+	Values       map[string]any
 	Metadata     map[string]any
+	Configurable map[string]any
 	Status       string
 	PresentFiles *tools.PresentFileRegistry
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+type Todo struct {
+	Content string `json:"content,omitempty"`
+	Status  string `json:"status,omitempty"`
 }
 
 type ThreadState struct {
@@ -114,7 +139,7 @@ type Message struct {
 	Type             string         `json:"type"`
 	ID               string         `json:"id"`
 	Role             string         `json:"role,omitempty"`
-	Content          string         `json:"content,omitempty"`
+	Content          any            `json:"content,omitempty"`
 	Name             string         `json:"name,omitempty"`
 	Status           string         `json:"status,omitempty"`
 	Data             map[string]any `json:"data,omitempty"`
@@ -141,7 +166,15 @@ type StreamEvent struct {
 	ThreadID string
 }
 
-func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) {
+type ServerOption func(*Server)
+
+func WithFrontendFS(frontend fs.FS) ServerOption {
+	return func(s *Server) {
+		s.frontendFS = frontend
+	}
+}
+
+func NewServer(addr string, dbURL string, defaultModel string, options ...ServerOption) (*Server, error) {
 	logger := log.Default()
 	ctx := context.Background()
 
@@ -156,13 +189,8 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		registry.Register(tool)
 	}
 	registry.Register(clarification.AskClarificationTool(clarifyManager))
-	var sb *sandbox.Sandbox
-	sb, err := sandbox.New("langgraph", filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox"))
-	if err != nil {
-		logger.Printf("Warning: failed to create sandbox: %v", err)
-	}
-
-	subagentPool := agent.NewSubagentPool(provider, registry, sb, 2, 2*time.Minute)
+	sandboxRoot := filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
+	subagentPool := agent.NewSubagentPool(provider, registry, nil, 2, 2*time.Minute)
 	registry.Register(tools.TaskTool(subagentPool))
 
 	// Create checkpoint store
@@ -191,7 +219,9 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		logger:       logger,
 		llmProvider:  provider,
 		tools:        registry,
-		sandbox:      sb,
+		sandbox:      nil,
+		sandboxName:  "langgraph",
+		sandboxRoot:  sandboxRoot,
 		subagents:    subagentPool,
 		clarify:      clarifyManager,
 		clarifyAPI:   clarification.NewAPI(clarifyManager),
@@ -201,6 +231,7 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		startedAt:    time.Now().UTC(),
 		sessions:     make(map[string]*Session),
 		runs:         make(map[string]*Run),
+		runStreams:   make(map[string]map[uint64]chan StreamEvent),
 		dataRoot:     dataRootAbs,
 		models:       defaultGatewayModels(defaultModel),
 		skills:       nil,
@@ -208,9 +239,15 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 		agents:       map[string]gatewayAgent{},
 		memory:       defaultGatewayMemory(),
 		memoryConfig: defaultGatewayMemoryConfig(dataRootAbs),
+		channelConfig: gatewayChannelsConfig{},
 		channels:     defaultGatewayChannelsStatus(),
 	}
 	s.skills = s.discoverGatewaySkills(nil)
+	for _, option := range options {
+		if option != nil {
+			option(s)
+		}
+	}
 	if err := s.loadGatewayState(); err != nil {
 		logger.Printf("Warning: failed to load gateway state: %v", err)
 	}
@@ -231,7 +268,9 @@ func NewServer(addr string, dbURL string, defaultModel string) (*Server, error) 
 func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
 	sandboxRef := cfg.Sandbox
 	if sandboxRef == nil {
-		sandboxRef = s.sandbox
+		if sb, err := s.getOrCreateSandbox(); err == nil {
+			sandboxRef = sb
+		}
 	}
 	return agent.New(agent.AgentConfig{
 		LLMProvider:     s.llmProvider,
@@ -247,6 +286,29 @@ func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
 		Sandbox:         sandboxRef,
 		RequestTimeout:  cfg.RequestTimeout,
 	})
+}
+
+func (s *Server) getOrCreateSandbox() (*sandbox.Sandbox, error) {
+	if s == nil {
+		return nil, errors.New("server is nil")
+	}
+	if s.sandbox != nil {
+		return s.sandbox, nil
+	}
+	root := s.sandboxRoot
+	if strings.TrimSpace(root) == "" {
+		root = filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
+	}
+	name := s.sandboxName
+	if strings.TrimSpace(name) == "" {
+		name = "langgraph"
+	}
+	sb, err := sandbox.New(name, root)
+	if err != nil {
+		return nil, err
+	}
+	s.sandbox = sb
+	return sb, nil
 }
 
 func (s *Server) registerRoutes(mux *http.ServeMux) {
@@ -300,6 +362,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.store != nil {
 		s.store.Close()
 	}
+	s.closeGatewayMCPClients()
+	s.stopGatewayChannels()
 	if s.sandbox != nil {
 		if err := s.sandbox.Close(); err != nil && shutdownErr == nil {
 			shutdownErr = err

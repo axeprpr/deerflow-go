@@ -139,7 +139,7 @@ func TestForwardAgentEventEmitsLangChainToolEndEvent(t *testing.T) {
 	}
 	s.saveRun(run)
 
-	s.forwardAgentEvent(nil, nil, run, agent.AgentEvent{
+	s.forwardAgentEvent(nil, nil, run, newStreamModeFilter(nil), agent.AgentEvent{
 		Type:      agent.AgentEventToolCallEnd,
 		MessageID: "msg-tool-1",
 		ToolEvent: &agent.ToolCallEvent{
@@ -215,7 +215,7 @@ func TestForwardAgentEventEmitsCreatedAgentNameUpdateAfterSetupAgent(t *testing.
 	}
 	s.saveRun(run)
 
-	s.forwardAgentEvent(nil, nil, run, agent.AgentEvent{
+	s.forwardAgentEvent(nil, nil, run, newStreamModeFilter(nil), agent.AgentEvent{
 		Type:      agent.AgentEventToolCallEnd,
 		MessageID: "msg-tool-bootstrap",
 		ToolEvent: &agent.ToolCallEvent{
@@ -279,7 +279,7 @@ func TestForwardAgentEventDoesNotEmitCreatedAgentNameUpdateAfterFailedSetupAgent
 	}
 	s.saveRun(run)
 
-	s.forwardAgentEvent(nil, nil, run, agent.AgentEvent{
+	s.forwardAgentEvent(nil, nil, run, newStreamModeFilter(nil), agent.AgentEvent{
 		Type:      agent.AgentEventToolCallEnd,
 		MessageID: "msg-tool-bootstrap-failed",
 		ToolEvent: &agent.ToolCallEvent{
@@ -335,7 +335,7 @@ func TestForwardAgentEventEmitsLangChainToolStartEvent(t *testing.T) {
 	}
 	s.saveRun(run)
 
-	s.forwardAgentEvent(nil, nil, run, agent.AgentEvent{
+	s.forwardAgentEvent(nil, nil, run, newStreamModeFilter(nil), agent.AgentEvent{
 		Type:      agent.AgentEventToolCallStart,
 		MessageID: "msg-tool-2",
 		ToolEvent: &agent.ToolCallEvent{
@@ -401,7 +401,7 @@ func TestForwardTaskEventIncludesStructuredMessageMetadata(t *testing.T) {
 	}
 	s.saveRun(run)
 
-	s.forwardTaskEvent(nil, nil, run, subagent.TaskEvent{
+	s.forwardTaskEvent(nil, nil, run, newStreamModeFilter(nil), subagent.TaskEvent{
 		Type:          "task_running",
 		TaskID:        "task-1",
 		RequestID:     "subreq-1",
@@ -467,7 +467,7 @@ func TestForwardAgentEventEmitsFinalAssistantMessageTupleWithUsage(t *testing.T)
 	}
 	s.saveRun(run)
 
-	s.forwardAgentEvent(nil, nil, run, agent.AgentEvent{
+	s.forwardAgentEvent(nil, nil, run, newStreamModeFilter(nil), agent.AgentEvent{
 		Type:      agent.AgentEventEnd,
 		MessageID: "msg-ai-final",
 		Text:      "Final answer",
@@ -523,7 +523,7 @@ func TestForwardAgentEventEmitsNormalizedFinalAssistantText(t *testing.T) {
 	}
 	s.saveRun(run)
 
-	s.forwardAgentEvent(nil, nil, run, agent.AgentEvent{
+	s.forwardAgentEvent(nil, nil, run, newStreamModeFilter(nil), agent.AgentEvent{
 		Type:      agent.AgentEventEnd,
 		MessageID: "msg-ai-think",
 		Text:      "Visible answer",
@@ -566,7 +566,7 @@ func TestForwardAgentEventRewritesFinalAssistantArtifactLinks(t *testing.T) {
 	}
 	s.saveRun(run)
 
-	s.forwardAgentEvent(nil, nil, run, agent.AgentEvent{
+	s.forwardAgentEvent(nil, nil, run, newStreamModeFilter(nil), agent.AgentEvent{
 		Type:      agent.AgentEventEnd,
 		MessageID: "msg-ai-artifact-links",
 		Text:      "Open [artifact](/mnt/user-data/outputs/final report.md)",
@@ -609,7 +609,7 @@ func TestForwardAgentEventPreservesFinalAssistantAdditionalKwargs(t *testing.T) 
 	}
 	s.saveRun(run)
 
-	s.forwardAgentEvent(nil, nil, run, agent.AgentEvent{
+	s.forwardAgentEvent(nil, nil, run, newStreamModeFilter(nil), agent.AgentEvent{
 		Type:      agent.AgentEventEnd,
 		MessageID: "msg-ai-think-meta",
 		Text:      "Visible answer",
@@ -658,7 +658,7 @@ func TestForwardAgentEventEmitsReasoningOnlyAssistantMessage(t *testing.T) {
 	}
 	s.saveRun(run)
 
-	s.forwardAgentEvent(nil, nil, run, agent.AgentEvent{
+	s.forwardAgentEvent(nil, nil, run, newStreamModeFilter(nil), agent.AgentEvent{
 		Type:      agent.AgentEventEnd,
 		MessageID: "msg-ai-think-only",
 		Metadata: map[string]string{
@@ -759,7 +759,7 @@ func TestForwardAgentEventEmitsArtifactUpdatesWhenPresentToolCompletes(t *testin
 	}
 
 	rec := httptest.NewRecorder()
-	s.forwardAgentEvent(rec, rec, run, agent.AgentEvent{
+	s.forwardAgentEvent(rec, rec, run, newStreamModeFilter(nil), agent.AgentEvent{
 		Type:      agent.AgentEventToolCallEnd,
 		MessageID: "tool-msg-artifacts",
 		ToolEvent: &agent.ToolCallEvent{
@@ -807,7 +807,7 @@ func TestForwardAgentEventEmitsArtifactUpdatesWhenWriteFileCompletes(t *testing.
 	}
 
 	rec := httptest.NewRecorder()
-	s.forwardAgentEvent(rec, rec, run, agent.AgentEvent{
+	s.forwardAgentEvent(rec, rec, run, newStreamModeFilter(nil), agent.AgentEvent{
 		Type:      agent.AgentEventToolCallEnd,
 		MessageID: "tool-msg-write-file-artifacts",
 		ToolEvent: &agent.ToolCallEvent{
@@ -855,7 +855,7 @@ func TestForwardAgentEventEmitsArtifactUpdatesWhenBashCompletes(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	s.forwardAgentEvent(rec, rec, run, agent.AgentEvent{
+	s.forwardAgentEvent(rec, rec, run, newStreamModeFilter(nil), agent.AgentEvent{
 		Type:      agent.AgentEventToolCallEnd,
 		MessageID: "tool-msg-bash-artifacts",
 		ToolEvent: &agent.ToolCallEvent{

@@ -3,6 +3,7 @@ package langgraphcompat
 import (
 	"archive/zip"
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode"
+
+	pkgmemory "github.com/axeprpr/deerflow-go/pkg/memory"
 )
 
 type gatewayModel struct {
@@ -507,6 +510,13 @@ func (s *Server) handleAgentDelete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to delete agent files"})
 		return
 	}
+	if s.memoryStore != nil {
+		if deleter, ok := any(s.memoryStore).(interface {
+			Delete(context.Context, string) error
+		}); ok {
+			_ = deleter.Delete(r.Context(), deriveMemorySessionID("", name))
+		}
+	}
 	if err := s.persistGatewayState(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
 		return
@@ -573,6 +583,36 @@ func (s *Server) memoryFactsWithSourceThreads(facts []memoryFact) []memoryFact {
 		enriched = append(enriched, clone)
 	}
 	return enriched
+}
+
+func gatewayMemoryResponseFromDocument(doc pkgmemory.Document) gatewayMemoryResponse {
+	updatedAt := doc.UpdatedAt.UTC().Format(time.RFC3339)
+	facts := make([]memoryFact, 0, len(doc.Facts))
+	for _, fact := range doc.Facts {
+		facts = append(facts, memoryFact{
+			ID:         fact.ID,
+			Content:    fact.Content,
+			Category:   fact.Category,
+			Confidence: fact.Confidence,
+			CreatedAt:  fact.CreatedAt.UTC().Format(time.RFC3339),
+			Source:     fact.Source,
+		})
+	}
+	return gatewayMemoryResponse{
+		Version:     "1",
+		LastUpdated: updatedAt,
+		User: memoryUser{
+			WorkContext:     memorySection{Summary: doc.User.WorkContext, UpdatedAt: updatedAt},
+			PersonalContext: memorySection{Summary: doc.User.PersonalContext, UpdatedAt: updatedAt},
+			TopOfMind:       memorySection{Summary: doc.User.TopOfMind, UpdatedAt: updatedAt},
+		},
+		History: memoryHistory{
+			RecentMonths:       memorySection{Summary: doc.History.RecentMonths, UpdatedAt: updatedAt},
+			EarlierContext:     memorySection{Summary: doc.History.EarlierContext, UpdatedAt: updatedAt},
+			LongTermBackground: memorySection{Summary: doc.History.LongTermBackground, UpdatedAt: updatedAt},
+		},
+		Facts: facts,
+	}
 }
 
 func (s *Server) handleMemoryReload(w http.ResponseWriter, r *http.Request) {
@@ -666,6 +706,10 @@ func (s *Server) handleGatewayThreadDelete(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "thread_id is required"})
 		return
 	}
+	if err := validateThreadID(threadID); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": err.Error()})
+		return
+	}
 	if err := os.RemoveAll(s.threadRoot(threadID)); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to delete local thread data"})
 		return
@@ -680,6 +724,10 @@ func (s *Server) handleUploadsCreate(w http.ResponseWriter, r *http.Request) {
 	threadID := strings.TrimSpace(r.PathValue("thread_id"))
 	if threadID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "thread_id is required"})
+		return
+	}
+	if err := validateThreadID(threadID); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": err.Error()})
 		return
 	}
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
@@ -902,20 +950,39 @@ func (s *Server) saveUploadedFile(threadID, uploadDir string, fh *multipart.File
 	if err != nil {
 		return nil, err
 	}
-	return s.uploadInfo(threadID, dstPath, name, n, nowUnix()), nil
+	mdPath, err := generateUploadMarkdownCompanion(dstPath)
+	if err != nil {
+		return nil, err
+	}
+	info := s.uploadInfo(threadID, dstPath, name, n, nowUnix())
+	if strings.TrimSpace(mdPath) != "" {
+		mdName := filepath.Base(mdPath)
+		info["markdown_file"] = mdName
+		info["markdown_path"] = "/mnt/user-data/uploads/" + mdName
+	}
+	return info, nil
 }
 
 func (s *Server) uploadInfo(threadID, fullPath, name string, size int64, modified int64) map[string]any {
 	virtualPath := "/mnt/user-data/uploads/" + name
-	return map[string]any{
+	info := map[string]any{
 		"filename":     name,
 		"size":         size,
-		"path":         fullPath,
+		"path":         virtualPath,
+		"source_path":  fullPath,
 		"virtual_path": virtualPath,
 		"artifact_url": "/api/threads/" + threadID + "/artifacts" + virtualPath,
-		"extension":    strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), "."),
+		"extension":    strings.ToLower(filepath.Ext(name)),
 		"modified":     modified,
 	}
+	mdName := strings.TrimSuffix(name, filepath.Ext(name)) + ".md"
+	if mdName != name {
+		if infoStat, err := os.Stat(filepath.Join(filepath.Dir(fullPath), mdName)); err == nil && !infoStat.IsDir() {
+			info["markdown_file"] = mdName
+			info["markdown_path"] = "/mnt/user-data/uploads/" + mdName
+		}
+	}
+	return info
 }
 
 func (s *Server) artifactAllowed(threadID, absPath string) bool {
@@ -1228,15 +1295,18 @@ func (s *Server) gatewayStatePath() string {
 }
 
 func (s *Server) agentsRoot() string {
-	return filepath.Join(s.dataRoot, "agents")
+	return s.primaryAgentsRoot()
 }
 
 func (s *Server) agentDir(name string) string {
+	if dir, ok := s.existingAgentDir(name); ok {
+		return dir
+	}
 	return filepath.Join(s.agentsRoot(), name)
 }
 
 func (s *Server) userProfilePath() string {
-	return filepath.Join(s.dataRoot, "USER.md")
+	return s.primaryUserProfilePath()
 }
 
 func (s *Server) memoryPath() string {

@@ -235,7 +235,16 @@ func writeGatewaySkill(t *testing.T, root, category, name, frontmatter string) {
 	}
 }
 
-func newCompatTestServer(t *testing.T) (*Server, *httptest.Server) {
+type compatTestServer struct {
+	*httptest.Server
+	handler http.Handler
+}
+
+func (s *compatTestServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.handler.ServeHTTP(w, r)
+}
+
+func newCompatTestServer(t *testing.T) (*Server, *compatTestServer) {
 	t.Helper()
 	root := t.TempDir()
 	writeGatewaySkill(t, root, "public", "deep-research", "---\nname: deep-research\ndescription: Research and summarize a topic with structured outputs.\ncategory: public\nlicense: MIT\n---\n")
@@ -257,7 +266,7 @@ func newCompatTestServer(t *testing.T) (*Server, *httptest.Server) {
 	s.registerRoutes(mux)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	return s, ts
+	return s, &compatTestServer{Server: ts, handler: mux}
 }
 
 func TestAPILangGraphPrefixCreateThread(t *testing.T) {

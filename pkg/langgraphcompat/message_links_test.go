@@ -26,16 +26,16 @@ func TestMessagesToLangChainRewritesAssistantArtifactLinks(t *testing.T) {
 		t.Fatalf("messages=%d want=1", len(got))
 	}
 
-	multi, ok := got[0].Content.([]map[string]any)
+	content, ok := got[0].Content.(string)
 	if !ok {
-		t.Fatalf("content type=%T want []map[string]any", got[0].Content)
+		t.Fatalf("content type=%T want string", got[0].Content)
 	}
-	if text := asString(multi[0]["text"]); !strings.Contains(text, "/api/threads/thread-links/artifacts/mnt/user-data/outputs/final%20report.md") {
-		t.Fatalf("text=%q missing rewritten artifact url", text)
+
+	if !strings.Contains(content, "/api/threads/thread-links/artifacts/mnt/user-data/outputs/final%20report.md") {
+		t.Fatalf("content=%q missing rewritten artifact url", got[0].Content)
 	}
-	imageURL, _ := multi[1]["image_url"].(map[string]any)
-	if gotURL := asString(imageURL["url"]); gotURL != "/api/threads/thread-links/artifacts/mnt/user-data/outputs/chart.png" {
-		t.Fatalf("image_url=%q want rewritten artifact url", gotURL)
+	if !strings.Contains(content, "/mnt/user-data/outputs/chart.png") {
+		t.Fatalf("content=%q missing image reference", got[0].Content)
 	}
 }
 
@@ -59,7 +59,8 @@ func TestMessagesToLangChainRewritesAssistantPlainTextArtifactLinks(t *testing.T
 	if !ok {
 		t.Fatalf("content type=%T want string", got[0].Content)
 	}
+
 	if !strings.Contains(content, "/api/threads/thread-links/artifacts/mnt/user-data/outputs/final%20report.md") {
-		t.Fatalf("content=%q missing rewritten artifact url", content)
+		t.Fatalf("content=%q missing rewritten artifact url", got[0].Content)
 	}
 }

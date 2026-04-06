@@ -1,10 +1,14 @@
 package langgraphcompat
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +39,8 @@ type streamModeFilter struct {
 	allowAll bool
 	allowed  map[string]struct{}
 }
+
+const maxUploadedImageParts = 4
 
 func (s *Server) handleRunsStream(w http.ResponseWriter, r *http.Request) {
 	s.handleStreamRequest(w, r, "")
@@ -292,7 +298,11 @@ func (s *Server) handleThreadRunStream(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
-	run := s.getLatestRunForThread(threadID)
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	run := s.getLatestActiveRunForThread(threadID)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -306,12 +316,40 @@ func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if run == nil {
+		s.sessionsMu.RLock()
+		_, exists := s.sessions[threadID]
+		s.sessionsMu.RUnlock()
+		if !exists {
+			http.Error(w, "thread not found", http.StatusNotFound)
+			return
+		}
 		fmt.Fprint(w, ": no active run\n\n")
 		flusher.Flush()
 		return
 	}
 
 	filter := newStreamModeFilter(streamModeFromQuery(r))
+	s.runsMu.Lock()
+	if s.runStreams == nil {
+		s.runStreams = make(map[string]map[uint64]chan StreamEvent)
+	}
+	if s.runStreams[run.RunID] == nil {
+		s.runStreams[run.RunID] = map[uint64]chan StreamEvent{}
+	}
+	subID := uint64(len(s.runStreams[run.RunID]) + 1)
+	sub := make(chan StreamEvent, 16)
+	s.runStreams[run.RunID][subID] = sub
+	s.runsMu.Unlock()
+	defer func() {
+		s.runsMu.Lock()
+		if subscribers := s.runStreams[run.RunID]; subscribers != nil {
+			delete(subscribers, subID)
+			if len(subscribers) == 0 {
+				delete(s.runStreams, run.RunID)
+			}
+		}
+		s.runsMu.Unlock()
+	}()
 	for _, event := range run.Events {
 		if !filter.allows(event.Event) {
 			continue
@@ -319,6 +357,18 @@ func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) 
 		s.sendSSEEvent(w, flusher, event)
 	}
 	flusher.Flush()
+	for {
+		event, ok := <-sub
+		if !ok {
+			return
+		}
+		if filter.allows(event.Event) {
+			s.sendSSEEvent(w, flusher, event)
+		}
+		if event.Event == "end" {
+			return
+		}
+	}
 }
 
 func (s *Server) streamRecordedRun(w http.ResponseWriter, r *http.Request, threadID string, runID string) {
@@ -353,9 +403,10 @@ func (s *Server) streamRecordedRun(w http.ResponseWriter, r *http.Request, threa
 	}
 }
 
-func (s *Server) convertToMessages(threadID string, input []any) []models.Message {
+func (s *Server) convertToMessages(threadID string, input []any, includeUploadedImages ...bool) []models.Message {
 	messages := make([]models.Message, 0, len(input))
 	msgSeq := uint64(time.Now().UnixNano())
+	visionEnabled := len(includeUploadedImages) > 0 && includeUploadedImages[0]
 
 	for _, m := range input {
 		msgMap, ok := m.(map[string]any)
@@ -390,6 +441,25 @@ func (s *Server) convertToMessages(threadID string, input []any) []models.Messag
 		}
 		if metadata := parseLangGraphMessageMetadata(msgMap["additional_kwargs"]); len(metadata) > 0 {
 			msg.Metadata = metadata
+		}
+		if rawAdditionalKwargs, ok := msgMap["additional_kwargs"].(map[string]any); ok && len(rawAdditionalKwargs) > 0 {
+			if encoded, err := json.Marshal(rawAdditionalKwargs); err == nil {
+				if msg.Metadata == nil {
+					msg.Metadata = map[string]string{}
+				}
+				msg.Metadata["additional_kwargs"] = string(encoded)
+			}
+		}
+		if msg.Role == models.RoleHuman {
+			multi := buildMultiContent(content, msgMap["content"], s.uploadedImageParts(threadID, msgMap, visionEnabled))
+			if len(multi) > 0 {
+				if msg.Metadata == nil {
+					msg.Metadata = map[string]string{}
+				}
+				if encoded, err := json.Marshal(multi); err == nil {
+					msg.Metadata["multi_content"] = string(encoded)
+				}
+			}
 		}
 		if metadata := parseLangGraphMessageMetadata(msgMap["response_metadata"]); len(metadata) > 0 {
 			if msg.Metadata == nil {
@@ -436,11 +506,13 @@ func parseLangGraphMessageMetadata(raw any) map[string]string {
 	}
 	out := make(map[string]string)
 	for key, value := range data {
-		text := strings.TrimSpace(stringFromAny(value))
-		if text == "" {
+		if text := strings.TrimSpace(stringFromAny(value)); text != "" {
+			out[key] = text
 			continue
 		}
-		out[key] = text
+		if encoded, err := json.Marshal(value); err == nil && string(encoded) != "null" {
+			out[key] = string(encoded)
+		}
 	}
 	if len(out) == 0 {
 		return nil
@@ -527,7 +599,7 @@ func parseLangGraphToolResult(msg map[string]any) *models.ToolResult {
 }
 
 func (s *Server) injectUploadedFilesContext(threadID string, message map[string]any, content string) string {
-	newFiles := extractMessageFiles(message)
+	newFiles := s.extractMessageFiles(threadID, message)
 	historical := s.uploadedFilesState(threadID)
 	if len(newFiles) == 0 && len(historical) == 0 {
 		return content
@@ -574,7 +646,101 @@ func (s *Server) injectUploadedFilesContext(threadID string, message map[string]
 	return filesMessage + "\n\n" + content
 }
 
-func extractMessageFiles(message map[string]any) []map[string]any {
+func buildMultiContent(content string, rawContent any, uploadedImageParts []map[string]any) []map[string]any {
+	multi := []map[string]any{{"type": "text", "text": content}}
+	items, _ := rawContent.([]any)
+	originalTextParts := make([]string, 0, len(items))
+	for _, item := range items {
+		part, _ := item.(map[string]any)
+		if part == nil {
+			continue
+		}
+		switch asString(part["type"]) {
+		case "image_url":
+			multi = append(multi, part)
+		case "text":
+			if text := strings.TrimSpace(asString(part["text"])); text != "" {
+				originalTextParts = append(originalTextParts, text)
+			}
+		default:
+			continue
+		}
+	}
+	if len(originalTextParts) > 0 {
+		originalText := strings.Join(originalTextParts, "\n")
+		if strings.TrimSpace(originalText) != "" && strings.TrimSpace(originalText) != strings.TrimSpace(content) {
+			multi = append([]map[string]any{
+				multi[0],
+				map[string]any{"type": "text", "text": originalText},
+			}, multi[1:]...)
+		}
+	}
+	if len(uploadedImageParts) > 0 {
+		multi = append(multi, uploadedImageParts...)
+	}
+	return multi
+}
+
+func (s *Server) uploadedImageParts(threadID string, message map[string]any, enabled bool) []map[string]any {
+	if !enabled {
+		return nil
+	}
+	files := s.extractMessageFiles(threadID, message)
+	if len(files) == 0 {
+		files = s.uploadedFilesState(threadID)
+	}
+	parts := make([]map[string]any, 0, len(files))
+	for _, file := range files {
+		if len(parts) >= maxUploadedImageParts {
+			break
+		}
+		name := asString(file["filename"])
+		if !isUploadedImageFile(name) {
+			continue
+		}
+		path := asString(file["path"])
+		if path == "" {
+			path = filepath.Join(s.uploadsDir(threadID), name)
+		}
+		if !strings.HasPrefix(path, s.uploadsDir(threadID)) {
+			path = filepath.Join(s.uploadsDir(threadID), filepath.Base(path))
+		}
+		part, ok := imageURLPartFromFile(path)
+		if !ok {
+			continue
+		}
+		parts = append(parts, part)
+	}
+	return parts
+}
+
+func isUploadedImageFile(name string) bool {
+	switch strings.ToLower(filepath.Ext(strings.TrimSpace(name))) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
+		return true
+	default:
+		return false
+	}
+}
+
+func imageURLPartFromFile(path string) (map[string]any, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	mimeType := mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
+	if strings.TrimSpace(mimeType) == "" {
+		mimeType = "application/octet-stream"
+	}
+	return map[string]any{
+		"type": "image_url",
+		"image_url": map[string]any{
+			"url": "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data),
+		},
+	}, true
+}
+
+func (s *Server) extractMessageFiles(threadID string, message map[string]any) []map[string]any {
 	additionalKwargs, _ := message["additional_kwargs"].(map[string]any)
 	if len(additionalKwargs) == 0 {
 		return nil
@@ -593,12 +759,34 @@ func extractMessageFiles(message map[string]any) []map[string]any {
 		if filename == "" {
 			continue
 		}
-		path := firstNonEmpty(stringFromAny(item["path"]), "/mnt/user-data/uploads/"+filename)
-		files = append(files, map[string]any{
+		virtualPath := "/mnt/user-data/uploads/" + filename
+		sourcePath := filepath.Join(s.uploadsDir(threadID), filename)
+		if stat, err := os.Stat(sourcePath); err == nil && !stat.IsDir() {
+			if toInt64(item["size"]) <= 0 {
+				item["size"] = stat.Size()
+			}
+		} else {
+			continue
+		}
+		path := firstNonEmpty(
+			stringFromAny(item["virtual_path"]),
+			virtualPath,
+		)
+		file := map[string]any{
 			"filename": filename,
 			"size":     toInt64(item["size"]),
 			"path":     path,
-		})
+		}
+		if markdownPath := strings.TrimSpace(stringFromAny(firstNonNil(item["markdown_path"], item["markdownPath"]))); markdownPath != "" {
+			file["markdown_path"] = markdownPath
+		} else if markdownFile := strings.TrimSpace(stringFromAny(firstNonNil(item["markdown_file"], item["markdownFile"]))); markdownFile != "" {
+			file["markdown_path"] = "/mnt/user-data/uploads/" + markdownFile
+		} else if mdName := strings.TrimSuffix(filename, filepath.Ext(filename)) + ".md"; mdName != filename {
+			if stat, err := os.Stat(filepath.Join(s.uploadsDir(threadID), mdName)); err == nil && !stat.IsDir() {
+				file["markdown_path"] = "/mnt/user-data/uploads/" + mdName
+			}
+		}
+		files = append(files, file)
 	}
 	return files
 }
@@ -612,11 +800,15 @@ func formatUploadedFileBullet(file map[string]any) []string {
 	if sizeValue >= 1024 {
 		sizeLabel = fmt.Sprintf("%.1f MB", sizeValue/1024)
 	}
-	return []string{
+	lines := []string{
 		fmt.Sprintf("- %s (%s)", filename, sizeLabel),
 		fmt.Sprintf("  Path: %s", path),
-		"",
 	}
+	if markdownPath := strings.TrimSpace(asString(file["markdown_path"])); markdownPath != "" {
+		lines = append(lines, fmt.Sprintf("  Markdown copy: %s", markdownPath))
+	}
+	lines = append(lines, "")
+	return lines
 }
 
 func extractMessageContent(raw any) string {

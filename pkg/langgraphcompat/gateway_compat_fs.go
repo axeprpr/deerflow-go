@@ -14,10 +14,6 @@ func (s *Server) agentsDir() string {
 	return s.primaryAgentsRoot()
 }
 
-func (s *Server) userProfilePath() string {
-	return s.primaryUserProfilePath()
-}
-
 func (s *Server) compatRoot() string {
 	if root := strings.TrimSpace(os.Getenv(compatRootEnv)); root != "" {
 		return root

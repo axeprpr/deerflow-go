@@ -49,6 +49,10 @@ func (s *Server) handleThreadCreate(w http.ResponseWriter, r *http.Request) {
 	if threadID == "" {
 		threadID = uuid.New().String()
 	}
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	metadata, _ := req["metadata"].(map[string]any)
 
 	session := s.ensureSession(threadID, metadata)
@@ -781,6 +785,9 @@ func (s *Server) messagesToLangChain(messages []models.Message) []Message {
 			Role:    role,
 			Content: msg.Content,
 		}
+		if multi := decodeMultiContent(msg.Metadata); len(multi) > 0 {
+			converted.Content = multi
+		}
 		if usageMetadata := usageMetadataFromMessageMetadata(msg.Metadata); len(usageMetadata) > 0 {
 			converted.UsageMetadata = usageMetadata
 		}
@@ -815,9 +822,12 @@ func additionalKwargsFromMessageMetadata(metadata map[string]string) map[string]
 	if len(metadata) == 0 {
 		return nil
 	}
+	if decoded := decodeAdditionalKwargs(metadata); len(decoded) > 0 {
+		return decoded
+	}
 	out := make(map[string]any)
 	for key, value := range metadata {
-		if strings.HasPrefix(key, "usage_") || key == "message_status" {
+		if strings.HasPrefix(key, "usage_") || key == "message_status" || key == "multi_content" {
 			continue
 		}
 		out[key] = value
@@ -1001,7 +1011,11 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 }
 
 func (s *Server) threadValues(session *Session) map[string]any {
-	values := map[string]any{
+	values := copyMetadataMap(session.Values)
+	if values == nil {
+		values = map[string]any{}
+	}
+	for key, value := range map[string]any{
 		"title":          stringValue(session.Metadata["title"]),
 		"artifacts":      sessionArtifactPaths(session),
 		"messages":       s.messagesToLangChain(session.Messages),
@@ -1010,6 +1024,8 @@ func (s *Server) threadValues(session *Session) map[string]any {
 		"thread_data":    s.restoredThreadDataState(session),
 		"uploaded_files": s.messageUploadedFilesState(session),
 		"viewed_images":  viewedImagesFromMetadata(session.Metadata["viewed_images"]),
+	} {
+		values[key] = value
 	}
 	return values
 }
@@ -1210,8 +1226,27 @@ func (s *Server) uploadedFilesState(threadID string) []map[string]any {
 		return []map[string]any{}
 	}
 	files := make([]map[string]any, 0, len(entries))
+	companionFiles := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.EqualFold(filepath.Ext(name), ".md") {
+			base := strings.TrimSuffix(name, filepath.Ext(name))
+			for _, ext := range []string{".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".csv", ".tsv", ".json", ".txt", ".log", ".ini", ".cfg", ".conf", ".env", ".toml", ".xml", ".html", ".htm", ".xhtml", ".yaml", ".yml"} {
+				if _, err := os.Stat(filepath.Join(s.uploadsDir(threadID), base+ext)); err == nil {
+					companionFiles[name] = struct{}{}
+					break
+				}
+			}
+		}
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if _, ok := companionFiles[entry.Name()]; ok {
 			continue
 		}
 		info, err := entry.Info()
@@ -1451,6 +1486,12 @@ func (s *Server) appendRunEvent(runID string, event StreamEvent) {
 		run.UpdatedAt = time.Now().UTC()
 		_ = s.persistRunFile(run)
 	}
+	for _, subscriber := range s.runStreams[runID] {
+		select {
+		case subscriber <- event:
+		default:
+		}
+	}
 }
 
 func (s *Server) nextRunEventIndex(runID string) int {
@@ -1601,7 +1642,7 @@ func anySlice(v any) []any {
 	}
 }
 
-type persistedSession struct {
+type persistedThreadSession struct {
 	ThreadID  string           `json:"thread_id"`
 	Messages  []models.Message `json:"messages"`
 	Metadata  map[string]any   `json:"metadata"`
@@ -1610,7 +1651,7 @@ type persistedSession struct {
 	UpdatedAt time.Time        `json:"updated_at"`
 }
 
-type persistedRun struct {
+type persistedThreadRun struct {
 	RunID       string        `json:"run_id"`
 	ThreadID    string        `json:"thread_id"`
 	AssistantID string        `json:"assistant_id"`
@@ -1658,7 +1699,7 @@ func (s *Server) persistSessionFile(session *Session) error {
 	if err := os.MkdirAll(s.threadRoot(session.ThreadID), 0o755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(persistedSession{
+	data, err := json.MarshalIndent(persistedThreadSession{
 		ThreadID:  session.ThreadID,
 		Messages:  session.Messages,
 		Metadata:  session.Metadata,
@@ -1680,7 +1721,7 @@ func (s *Server) persistRunFile(run *Run) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(persistedRun{
+	data, err := json.MarshalIndent(persistedThreadRun{
 		RunID:       run.RunID,
 		ThreadID:    run.ThreadID,
 		AssistantID: run.AssistantID,
@@ -1721,7 +1762,7 @@ func (s *Server) loadPersistedThreads() {
 				data = nested
 			}
 		}
-		var persisted persistedSession
+		var persisted persistedThreadSession
 		if err := json.Unmarshal(data, &persisted); err != nil {
 			continue
 		}
@@ -2056,7 +2097,7 @@ func (s *Server) loadPersistedRuns() {
 				data = nested
 			}
 		}
-		var persisted persistedRun
+		var persisted persistedThreadRun
 		if err := json.Unmarshal(data, &persisted); err != nil {
 			continue
 		}
