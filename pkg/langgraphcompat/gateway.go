@@ -21,6 +21,7 @@ import (
 	"unicode"
 
 	pkgmemory "github.com/axeprpr/deerflow-go/pkg/memory"
+	"gopkg.in/yaml.v3"
 )
 
 type gatewayModel struct {
@@ -343,6 +344,7 @@ func (s *Server) handleMCPConfigPut(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAgentsList(w http.ResponseWriter, r *http.Request) {
+	s.refreshGatewayCompatFilesIfManaged()
 	s.uiStateMu.RLock()
 	agents := make([]gatewayAgent, 0, len(s.getAgentsLocked()))
 	for _, a := range s.getAgentsLocked() {
@@ -525,6 +527,7 @@ func (s *Server) handleAgentDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUserProfileGet(w http.ResponseWriter, r *http.Request) {
+	s.refreshGatewayCompatFilesIfManaged()
 	s.uiStateMu.RLock()
 	content := s.getUserProfileLocked()
 	s.uiStateMu.RUnlock()
@@ -545,6 +548,10 @@ func (s *Server) handleUserProfilePut(w http.ResponseWriter, r *http.Request) {
 	s.uiStateMu.Lock()
 	s.setUserProfileLocked(content)
 	s.uiStateMu.Unlock()
+	if err := os.MkdirAll(filepath.Dir(s.userProfilePath()), 0o755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist user profile"})
+		return
+	}
 	if err := os.WriteFile(s.userProfilePath(), []byte(content), 0o644); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist user profile"})
 		return
@@ -1725,41 +1732,11 @@ func (s *Server) loadAgentsFromFiles() map[string]gatewayAgent {
 		if !ok {
 			continue
 		}
-		configPath := filepath.Join(s.agentDir(name), "config.json")
-		data, err := os.ReadFile(configPath)
 		agent := gatewayAgent{Name: name}
-		if err == nil {
-			var wrapper map[string]json.RawMessage
-			if err := json.Unmarshal(data, &wrapper); err == nil {
-				if nested, ok := wrapper["agent"]; ok && len(nested) > 0 {
-					data = nested
-				} else if nested, ok := wrapper["config"]; ok && len(nested) > 0 {
-					data = nested
-				} else if nested, ok := wrapper["data"]; ok && len(nested) > 0 {
-					data = nested
-				}
-			}
-			if err := json.Unmarshal(data, &agent); err == nil {
-				var raw map[string]any
-				_ = json.Unmarshal(data, &raw)
-				if agent.Name == "" {
-					agent.Name = firstNonEmpty(stringFromAny(raw["name"]), name)
-				}
-				if agent.Description == "" {
-					agent.Description = stringFromAny(raw["description"])
-				}
-				if rawModel := firstNonNil(raw["model"], raw["model_name"], raw["modelName"]); agent.Model == nil && rawModel != nil {
-					model := stringFromAny(rawModel)
-					agent.Model = &model
-				}
-				if len(agent.ToolGroups) == 0 {
-					if rawToolGroups, exists := raw["tool_groups"]; exists {
-						agent.ToolGroups = stringsFromAny(rawToolGroups)
-					} else if rawToolGroups, exists := raw["toolGroups"]; exists {
-						agent.ToolGroups = stringsFromAny(rawToolGroups)
-					}
-				}
-			}
+		if loaded, ok := s.loadAgentConfigFile(name, "config.json"); ok {
+			agent = loaded
+		} else if loaded, ok := s.loadAgentConfigFile(name, "config.yaml"); ok {
+			agent = loaded
 		}
 		agent.Name = name
 		if soul, err := os.ReadFile(filepath.Join(s.agentDir(name), "SOUL.md")); err == nil {
@@ -1771,6 +1748,72 @@ func (s *Server) loadAgentsFromFiles() map[string]gatewayAgent {
 		agents[name] = agent
 	}
 	return agents
+}
+
+func (s *Server) loadAgentConfigFile(name, filename string) (gatewayAgent, bool) {
+	data, err := os.ReadFile(filepath.Join(s.agentDir(name), filename))
+	if err != nil {
+		return gatewayAgent{}, false
+	}
+	if strings.HasSuffix(filename, ".yaml") || strings.HasSuffix(filename, ".yml") {
+		return parseGatewayAgentYAML(data, name)
+	}
+	return parseGatewayAgentJSON(data, name)
+}
+
+func parseGatewayAgentJSON(data []byte, fallbackName string) (gatewayAgent, bool) {
+	var wrapper map[string]json.RawMessage
+	if err := json.Unmarshal(data, &wrapper); err == nil {
+		if nested, ok := wrapper["agent"]; ok && len(nested) > 0 {
+			data = nested
+		} else if nested, ok := wrapper["config"]; ok && len(nested) > 0 {
+			data = nested
+		} else if nested, ok := wrapper["data"]; ok && len(nested) > 0 {
+			data = nested
+		}
+	}
+	agent := gatewayAgent{Name: fallbackName}
+	if err := json.Unmarshal(data, &agent); err != nil {
+		return gatewayAgent{}, false
+	}
+	var raw map[string]any
+	_ = json.Unmarshal(data, &raw)
+	if agent.Name == "" {
+		agent.Name = firstNonEmpty(stringFromAny(raw["name"]), fallbackName)
+	}
+	if agent.Description == "" {
+		agent.Description = stringFromAny(raw["description"])
+	}
+	if rawModel := firstNonNil(raw["model"], raw["model_name"], raw["modelName"]); agent.Model == nil && rawModel != nil {
+		model := stringFromAny(rawModel)
+		agent.Model = &model
+	}
+	if len(agent.ToolGroups) == 0 {
+		if rawToolGroups, exists := raw["tool_groups"]; exists {
+			agent.ToolGroups = stringsFromAny(rawToolGroups)
+		} else if rawToolGroups, exists := raw["toolGroups"]; exists {
+			agent.ToolGroups = stringsFromAny(rawToolGroups)
+		}
+	}
+	return agent, true
+}
+
+func parseGatewayAgentYAML(data []byte, fallbackName string) (gatewayAgent, bool) {
+	var raw struct {
+		Name        string   `yaml:"name"`
+		Description string   `yaml:"description"`
+		Model       *string  `yaml:"model"`
+		ToolGroups  []string `yaml:"tool_groups"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return gatewayAgent{}, false
+	}
+	return gatewayAgent{
+		Name:        firstNonEmpty(strings.TrimSpace(raw.Name), fallbackName),
+		Description: strings.TrimSpace(raw.Description),
+		Model:       raw.Model,
+		ToolGroups:  append([]string(nil), raw.ToolGroups...),
+	}, true
 }
 
 func (s *Server) persistAgentFiles(name string, agent gatewayAgent) error {
@@ -1789,6 +1832,28 @@ func (s *Server) persistAgentFiles(name string, agent gatewayAgent) error {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), data, 0o644); err != nil {
+		return err
+	}
+	if data, err = yaml.Marshal(struct {
+		Name        string   `yaml:"name"`
+		Description string   `yaml:"description,omitempty"`
+		Model       *string  `yaml:"model,omitempty"`
+		ToolGroups  []string `yaml:"tool_groups,omitempty"`
+	}{
+		Name:        name,
+		Description: agent.Description,
+		Model:       agent.Model,
+		ToolGroups:  agent.ToolGroups,
+	}); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), data, 0o644); err != nil {
+		return err
+	}
+	if data, err = json.MarshalIndent(agent, "", "  "); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agent.json"), data, 0o644); err != nil {
 		return err
 	}
 	return os.WriteFile(filepath.Join(dir, "SOUL.md"), []byte(agent.Soul), 0o644)

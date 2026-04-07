@@ -54,6 +54,36 @@ func TestLoadGatewayCompatFilesLoadsAgentsAndUserProfileFromDisk(t *testing.T) {
 	}
 }
 
+func TestLoadGatewayCompatFilesLoadsJSONAgentConfigFromDisk(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	agentDir := s.agentDir("json-bot")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatalf("mkdir agent dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "config.json"), []byte(`{"description":"Loaded from JSON.","model":"gpt-5","toolGroups":["file"]}`), 0o644); err != nil {
+		t.Fatalf("write config.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(agentDir, "SOUL.md"), []byte("# JSON Bot\n\nUse files."), 0o644); err != nil {
+		t.Fatalf("write SOUL.md: %v", err)
+	}
+
+	if err := s.loadGatewayCompatFiles(); err != nil {
+		t.Fatalf("loadGatewayCompatFiles: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/agents/json-bot", nil, nil)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("get agent status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	body := resp.Body.String()
+	for _, want := range []string{`"name":"json-bot"`, "Loaded from JSON.", `"tool_groups":["file"]`, "Use files."} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("agent body missing %q: %s", want, body)
+		}
+	}
+}
+
 func TestUserProfilePutPersistsUSERMD(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 

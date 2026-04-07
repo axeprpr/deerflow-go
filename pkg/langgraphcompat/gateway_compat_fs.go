@@ -4,8 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 const compatRootEnv = "DEERFLOW_COMPAT_ROOT"
@@ -142,6 +140,18 @@ func (s *Server) refreshGatewayCompatFiles() {
 	s.syncGatewayCompatFilesLocked()
 }
 
+func (s *Server) refreshGatewayCompatFilesIfManaged() {
+	if s == nil {
+		return
+	}
+	s.uiStateMu.RLock()
+	managed := s.compatFSManaged
+	s.uiStateMu.RUnlock()
+	if managed {
+		s.refreshGatewayCompatFiles()
+	}
+}
+
 func (s *Server) syncGatewayCompatFilesLocked() {
 	if agents, ok := s.loadAgentsFromDiskLocked(); ok {
 		s.setAgentsLocked(agents)
@@ -190,20 +200,14 @@ func (s *Server) loadAgentFromDisk(dir string, fallbackName string) (gatewayAgen
 		return gatewayAgent{}, false
 	}
 
-	configPath := filepath.Join(dir, "config.yaml")
-	data, err := os.ReadFile(configPath)
-	if err != nil {
+	agent, ok := loadAgentConfigFromDir(dir, normalized)
+	if !ok {
 		return gatewayAgent{}, false
 	}
-
-	var raw struct {
-		Name        string   `yaml:"name"`
-		Description string   `yaml:"description"`
-		Model       *string  `yaml:"model"`
-		ToolGroups  []string `yaml:"tool_groups"`
-	}
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return gatewayAgent{}, false
+	if candidate, ok := normalizeAgentName(agent.Name); ok {
+		agent.Name = candidate
+	} else {
+		agent.Name = normalized
 	}
 
 	soul, err := os.ReadFile(filepath.Join(dir, "SOUL.md"))
@@ -211,19 +215,18 @@ func (s *Server) loadAgentFromDisk(dir string, fallbackName string) (gatewayAgen
 		return gatewayAgent{}, false
 	}
 
-	loadedName := normalized
-	if candidate, ok := normalizeAgentName(raw.Name); ok {
-		loadedName = candidate
-	}
-
-	agent := gatewayAgent{
-		Name:        loadedName,
-		Description: strings.TrimSpace(raw.Description),
-		Model:       raw.Model,
-		ToolGroups:  append([]string(nil), raw.ToolGroups...),
-		Soul:        strings.TrimSpace(string(soul)),
-	}
+	agent.Soul = strings.TrimSpace(string(soul))
 	return agent, true
+}
+
+func loadAgentConfigFromDir(dir string, fallbackName string) (gatewayAgent, bool) {
+	if data, err := os.ReadFile(filepath.Join(dir, "config.yaml")); err == nil {
+		return parseGatewayAgentYAML(data, fallbackName)
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, "config.json")); err == nil {
+		return parseGatewayAgentJSON(data, fallbackName)
+	}
+	return gatewayAgent{}, false
 }
 
 func (s *Server) loadUserProfileFromDiskLocked() (string, bool) {

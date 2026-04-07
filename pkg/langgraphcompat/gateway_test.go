@@ -247,6 +247,7 @@ func (s *compatTestServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func newCompatTestServer(t *testing.T) (*Server, *compatTestServer) {
 	t.Helper()
 	root := t.TempDir()
+	t.Setenv(compatRootEnv, filepath.Join(root, "compat"))
 	writeGatewaySkill(t, root, "public", "deep-research", "---\nname: deep-research\ndescription: Research and summarize a topic with structured outputs.\ncategory: public\nlicense: MIT\n---\n")
 	s := &Server{
 		sessions:  make(map[string]*Session),
@@ -267,6 +268,17 @@ func newCompatTestServer(t *testing.T) (*Server, *compatTestServer) {
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 	return s, &compatTestServer{Server: ts, handler: mux}
+}
+
+func newFileCompatTestServer(t *testing.T) *Server {
+	t.Helper()
+	root := t.TempDir()
+	compatRoot := filepath.Join(root, "compat")
+	if err := os.MkdirAll(compatRoot, 0o755); err != nil {
+		t.Fatalf("mkdir compat root: %v", err)
+	}
+	t.Setenv(compatRootEnv, compatRoot)
+	return &Server{dataRoot: root}
 }
 
 func TestAPILangGraphPrefixCreateThread(t *testing.T) {
@@ -2460,8 +2472,7 @@ func TestGatewayMCPConfigFromEnvHonorsExplicitZeroRefreshSkew(t *testing.T) {
 }
 
 func TestAgentFilesPersistAndLoad(t *testing.T) {
-	root := t.TempDir()
-	s := &Server{dataRoot: root}
+	s := newFileCompatTestServer(t)
 	model := "qwen/Qwen3.5-9B"
 	agent := gatewayAgent{
 		Name:        "researcher",
@@ -2484,8 +2495,7 @@ func TestAgentFilesPersistAndLoad(t *testing.T) {
 }
 
 func TestLoadAgentsFromFilesAcceptsCamelCaseToolGroups(t *testing.T) {
-	root := t.TempDir()
-	s := &Server{dataRoot: root}
+	s := newFileCompatTestServer(t)
 	dir := s.agentDir("writer")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -2512,8 +2522,7 @@ func TestLoadAgentsFromFilesAcceptsCamelCaseToolGroups(t *testing.T) {
 }
 
 func TestLoadAgentsFromFilesAcceptsSoulOnlyDirectories(t *testing.T) {
-	root := t.TempDir()
-	s := &Server{dataRoot: root}
+	s := newFileCompatTestServer(t)
 	dir := filepath.Join(s.agentsRoot(), "writer")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -2533,8 +2542,7 @@ func TestLoadAgentsFromFilesAcceptsSoulOnlyDirectories(t *testing.T) {
 }
 
 func TestLoadAgentsFromFilesAcceptsModelNameAliases(t *testing.T) {
-	root := t.TempDir()
-	s := &Server{dataRoot: root}
+	s := newFileCompatTestServer(t)
 	dir := filepath.Join(s.agentsRoot(), "writer")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -2552,8 +2560,7 @@ func TestLoadAgentsFromFilesAcceptsModelNameAliases(t *testing.T) {
 }
 
 func TestLoadAgentsFromFilesAcceptsWrappedAgentObject(t *testing.T) {
-	root := t.TempDir()
-	s := &Server{dataRoot: root}
+	s := newFileCompatTestServer(t)
 	dir := filepath.Join(s.agentsRoot(), "writer")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -2581,8 +2588,7 @@ func TestLoadAgentsFromFilesAcceptsWrappedAgentObject(t *testing.T) {
 }
 
 func TestLoadAgentsFromFilesAcceptsWrappedConfigObject(t *testing.T) {
-	root := t.TempDir()
-	s := &Server{dataRoot: root}
+	s := newFileCompatTestServer(t)
 	dir := filepath.Join(s.agentsRoot(), "writer")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -2610,8 +2616,7 @@ func TestLoadAgentsFromFilesAcceptsWrappedConfigObject(t *testing.T) {
 }
 
 func TestLoadAgentsFromFilesAcceptsDataWrapper(t *testing.T) {
-	root := t.TempDir()
-	s := &Server{dataRoot: root}
+	s := newFileCompatTestServer(t)
 	dir := filepath.Join(s.agentsRoot(), "writer")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -2639,8 +2644,7 @@ func TestLoadAgentsFromFilesAcceptsDataWrapper(t *testing.T) {
 }
 
 func TestLoadUserProfileFromFileAcceptsJSONContent(t *testing.T) {
-	root := t.TempDir()
-	s := &Server{dataRoot: root}
+	s := newFileCompatTestServer(t)
 	raw := `{"content":"Legacy profile from JSON"}`
 	if err := os.WriteFile(s.userProfilePath(), []byte(raw), 0o644); err != nil {
 		t.Fatalf("write user profile: %v", err)
@@ -2656,8 +2660,7 @@ func TestLoadUserProfileFromFileAcceptsJSONContent(t *testing.T) {
 }
 
 func TestLoadUserProfileFromFileAcceptsJSONNullContent(t *testing.T) {
-	root := t.TempDir()
-	s := &Server{dataRoot: root}
+	s := newFileCompatTestServer(t)
 	raw := `{"content":null}`
 	if err := os.WriteFile(s.userProfilePath(), []byte(raw), 0o644); err != nil {
 		t.Fatalf("write user profile: %v", err)
@@ -2673,8 +2676,7 @@ func TestLoadUserProfileFromFileAcceptsJSONNullContent(t *testing.T) {
 }
 
 func TestLoadUserProfileFromFileAcceptsJSONString(t *testing.T) {
-	root := t.TempDir()
-	s := &Server{dataRoot: root}
+	s := newFileCompatTestServer(t)
 	raw := `"Legacy profile from string JSON"`
 	if err := os.WriteFile(s.userProfilePath(), []byte(raw), 0o644); err != nil {
 		t.Fatalf("write user profile: %v", err)
@@ -2690,8 +2692,7 @@ func TestLoadUserProfileFromFileAcceptsJSONString(t *testing.T) {
 }
 
 func TestLoadUserProfileFromFileAcceptsDataWrapper(t *testing.T) {
-	root := t.TempDir()
-	s := &Server{dataRoot: root}
+	s := newFileCompatTestServer(t)
 	raw := `{"data":{"content":"Legacy profile from wrapped JSON"}}`
 	if err := os.WriteFile(s.userProfilePath(), []byte(raw), 0o644); err != nil {
 		t.Fatalf("write user profile: %v", err)
@@ -2707,8 +2708,7 @@ func TestLoadUserProfileFromFileAcceptsDataWrapper(t *testing.T) {
 }
 
 func TestLoadUserProfileFromFileAcceptsWrappedJSONString(t *testing.T) {
-	root := t.TempDir()
-	s := &Server{dataRoot: root}
+	s := newFileCompatTestServer(t)
 	raw := `{"data":"Legacy profile from wrapped string JSON"}`
 	if err := os.WriteFile(s.userProfilePath(), []byte(raw), 0o644); err != nil {
 		t.Fatalf("write user profile: %v", err)
@@ -5013,8 +5013,7 @@ func TestLoadThreadHistoryAcceptsDataWrapper(t *testing.T) {
 }
 
 func TestUserProfileFileLoad(t *testing.T) {
-	root := t.TempDir()
-	s := &Server{dataRoot: root}
+	s := newFileCompatTestServer(t)
 	if err := os.WriteFile(s.userProfilePath(), []byte("user profile"), 0o644); err != nil {
 		t.Fatalf("write user profile: %v", err)
 	}
