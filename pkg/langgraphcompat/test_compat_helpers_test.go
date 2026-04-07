@@ -4,12 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
@@ -61,60 +56,5 @@ func (s *Server) sessionFiles(session *Session) []tools.PresentFile {
 	if s == nil || session == nil {
 		return nil
 	}
-	files := make([]tools.PresentFile, 0)
-	if session.PresentFiles != nil {
-		files = append(files, session.PresentFiles.List()...)
-	}
-	addDiskFiles := func(root, virtualPrefix string) {
-		entries, err := listPresentFiles(root, virtualPrefix)
-		if err != nil {
-			return
-		}
-		files = append(files, entries...)
-	}
-	addDiskFiles(s.uploadsDir(session.ThreadID), "/mnt/user-data/uploads")
-	addDiskFiles(s.workspaceDir(session.ThreadID), "/mnt/user-data/workspace")
-	addDiskFiles(s.outputsDir(session.ThreadID), "/mnt/user-data/outputs")
-	return sortPresentFiles(files)
-}
-
-func listPresentFiles(root, virtualPrefix string) ([]tools.PresentFile, error) {
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return nil, err
-	}
-	files := make([]tools.PresentFile, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		files = append(files, tools.PresentFile{
-			Path:       strings.TrimRight(virtualPrefix, "/") + "/" + entry.Name(),
-			SourcePath: filepath.Join(root, entry.Name()),
-			CreatedAt:  info.ModTime(),
-		})
-	}
-	return files, nil
-}
-
-func sortPresentFiles(files []tools.PresentFile) []tools.PresentFile {
-	sort.Slice(files, func(i, j int) bool {
-		ti := files[i].CreatedAt
-		tj := files[j].CreatedAt
-		if ti.Equal(tj) {
-			return files[i].Path < files[j].Path
-		}
-		if ti.IsZero() {
-			ti = time.Time{}
-		}
-		if tj.IsZero() {
-			tj = time.Time{}
-		}
-		return ti.After(tj)
-	})
-	return files
+	return s.collectSessionFiles(session)
 }

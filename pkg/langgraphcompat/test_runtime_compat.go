@@ -45,6 +45,9 @@ func stripTransientUploadImageURLs(metadata map[string]string) map[string]string
 	if len(metadata) == 0 {
 		return metadata
 	}
+	if !hasTransientUploadImageContext(metadata) {
+		return metadata
+	}
 	multi := decodeMultiContent(metadata)
 	if len(multi) == 0 {
 		return metadata
@@ -71,6 +74,27 @@ func stripTransientUploadImageURLs(metadata map[string]string) map[string]string
 		cloned["multi_content"] = string(encoded)
 	}
 	return cloned
+}
+
+func hasTransientUploadImageContext(metadata map[string]string) bool {
+	if len(metadata) == 0 {
+		return false
+	}
+	if kwargs := decodeAdditionalKwargs(metadata); len(kwargs) > 0 {
+		if files, ok := kwargs["files"].([]any); ok && len(files) > 0 {
+			return true
+		}
+	}
+	for _, item := range decodeMultiContent(metadata) {
+		if asString(item["type"]) != "text" {
+			continue
+		}
+		text := asString(item["text"])
+		if strings.Contains(text, "<uploaded_files>") || strings.Contains(text, "/mnt/user-data/uploads/") {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeMultiContent(metadata map[string]string) []map[string]any {

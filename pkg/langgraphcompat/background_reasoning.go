@@ -1,11 +1,25 @@
 package langgraphcompat
 
-import "strings"
+import (
+	"os"
+	"strings"
+)
 
 func (s *Server) backgroundReasoningEffort(modelName string) string {
 	resolved := resolveTitleModel(modelName, s.defaultModel)
 	if resolved == "" {
 		return ""
+	}
+
+	if configured := gatewayModelsFromEnv(os.Getenv("DEERFLOW_MODELS_JSON")); len(configured) > 0 {
+		for _, model := range configured {
+			if model.Name == resolved || model.Model == resolved || model.ID == resolved {
+				if model.SupportsReasoningEffort {
+					return "minimal"
+				}
+				return ""
+			}
+		}
 	}
 
 	s.uiStateMu.RLock()

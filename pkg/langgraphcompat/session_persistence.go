@@ -78,6 +78,9 @@ func (s *Server) loadPersistedSessions() error {
 func (s *Server) readPersistedSession(threadID string) (*Session, error) {
 	data, err := os.ReadFile(s.sessionStatePath(threadID))
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return s.readCompatPersistedThread(threadID)
+		}
 		return nil, err
 	}
 
@@ -122,11 +125,64 @@ func (s *Server) readPersistedSession(threadID string) (*Session, error) {
 	}, nil
 }
 
+func (s *Server) readCompatPersistedThread(threadID string) (*Session, error) {
+	data, err := os.ReadFile(s.threadStatePath(threadID))
+	if err != nil {
+		return nil, err
+	}
+	var stored persistedThreadSession
+	if err := json.Unmarshal(data, &stored); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(stored.ThreadID) == "" {
+		stored.ThreadID = threadID
+	}
+	if stored.Metadata == nil {
+		stored.Metadata = map[string]any{}
+	}
+	if stored.Status == "" {
+		stored.Status = "idle"
+	}
+	if stored.CreatedAt.IsZero() {
+		stored.CreatedAt = time.Now().UTC()
+	}
+	if stored.UpdatedAt.IsZero() {
+		stored.UpdatedAt = stored.CreatedAt
+	}
+	checkpointID := strings.TrimSpace(stringValue(stored.Metadata["checkpoint_id"]))
+	if checkpointID == "" {
+		checkpointID = s.latestPersistedCheckpoint(threadID)
+	}
+	return &Session{
+		CheckpointID: checkpointID,
+		ThreadID:     stored.ThreadID,
+		Messages:     append([]models.Message(nil), stored.Messages...),
+		Values:       map[string]any{},
+		Metadata:     copyMetadataMap(stored.Metadata),
+		Configurable: defaultThreadConfig(stored.ThreadID),
+		Status:       stored.Status,
+		PresentFiles: tools.NewPresentFileRegistry(),
+		CreatedAt:    stored.CreatedAt,
+		UpdatedAt:    stored.UpdatedAt,
+	}, nil
+}
+
 func (s *Server) persistSessionSnapshot(session *Session) error {
 	if session == nil || strings.TrimSpace(session.ThreadID) == "" {
 		return nil
 	}
-	session.CheckpointID = uuid.New().String()
+	checkpointID := strings.TrimSpace(stringValue(session.Metadata["checkpoint_id"]))
+	if checkpointID == "" {
+		checkpointID = uuid.New().String()
+	}
+	session.CheckpointID = checkpointID
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
+	}
+	session.Metadata["checkpoint_id"] = session.CheckpointID
+	if _, ok := session.Metadata["checkpoint_thread_id"]; !ok {
+		session.Metadata["checkpoint_thread_id"] = session.ThreadID
+	}
 	s.syncSessionCheckpoint(session.ThreadID, session.CheckpointID, session.UpdatedAt)
 
 	path := s.sessionStatePath(session.ThreadID)

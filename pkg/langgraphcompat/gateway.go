@@ -215,10 +215,9 @@ func (s *Server) handleModelGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSkillsList(w http.ResponseWriter, r *http.Request) {
-	s.uiStateMu.RLock()
-	defer s.uiStateMu.RUnlock()
-	skills := make([]gatewaySkill, 0, len(s.getSkillsLocked()))
-	for _, skill := range s.getSkillsLocked() {
+	current := s.currentGatewaySkills()
+	skills := make([]gatewaySkill, 0, len(current))
+	for _, skill := range current {
 		skills = append(skills, skill)
 	}
 	sort.Slice(skills, func(i, j int) bool {
@@ -316,7 +315,7 @@ func (s *Server) handleSkillInstall(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMCPConfigGet(w http.ResponseWriter, r *http.Request) {
 	s.uiStateMu.RLock()
 	defer s.uiStateMu.RUnlock()
-	writeJSON(w, http.StatusOK, s.mcpConfig)
+	writeJSON(w, http.StatusOK, mergeGatewayMCPConfig(defaultGatewayMCPConfig(), s.mcpConfig))
 }
 
 func (s *Server) handleMCPConfigPut(w http.ResponseWriter, r *http.Request) {
@@ -326,12 +325,7 @@ func (s *Server) handleMCPConfigPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req := gatewayMCPConfigFromMap(raw)
-	if req.MCPServers == nil {
-		req.MCPServers = map[string]gatewayMCPServerConfig{}
-	}
-	for name, server := range req.MCPServers {
-		req.MCPServers[name] = normalizeGatewayMCPServer(server)
-	}
+	req = mergeGatewayMCPConfig(defaultGatewayMCPConfig(), req)
 
 	s.uiStateMu.Lock()
 	s.mcpConfig = req
@@ -689,21 +683,15 @@ func (s *Server) handleMemoryStatusGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleChannelsGet(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.channels)
+	writeJSON(w, http.StatusOK, s.gatewayChannelStatus())
 }
 
 func (s *Server) handleChannelRestart(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.PathValue("name"))
-	if _, ok := s.channels.Channels[name]; ok {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"success": true,
-			"message": fmt.Sprintf("Channel %s restart requested", name),
-		})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success": false,
-		"message": fmt.Sprintf("Channel %s is not running in deerflow-go", name),
+	status, success, message := s.restartGatewayChannel(name)
+	writeJSON(w, status, map[string]any{
+		"success": success,
+		"message": message,
 	})
 }
 
@@ -778,39 +766,7 @@ func (s *Server) handleUploadsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uploadDir := s.uploadsDir(threadID)
-	entries, err := os.ReadDir(uploadDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			writeJSON(w, http.StatusOK, map[string]any{"files": []any{}, "count": 0})
-			return
-		}
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to list uploads"})
-		return
-	}
-
-	files := make([]map[string]any, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		fullPath := filepath.Join(uploadDir, name)
-		stat, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		files = append(files, s.uploadInfo(threadID, fullPath, name, stat.Size(), stat.ModTime().Unix()))
-	}
-
-	sort.Slice(files, func(i, j int) bool {
-		li := toInt64(files[i]["modified"])
-		lj := toInt64(files[j]["modified"])
-		if li == lj {
-			return asString(files[i]["filename"]) < asString(files[j]["filename"])
-		}
-		return li > lj
-	})
+	files := s.uploadedFilesState(threadID)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"files": files,
@@ -856,6 +812,14 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.EqualFold(filepath.Ext(absPath), ".skill") && !strings.EqualFold(r.URL.Query().Get("download"), "true") {
+		preview, err := readSkillArchivePreview(absPath)
+		if err == nil && strings.TrimSpace(preview) != "" {
+			w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+			_, _ = io.WriteString(w, preview)
+			return
+		}
+	}
 	if strings.EqualFold(r.URL.Query().Get("download"), "true") {
 		w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(absPath)+`"`)
 	}
@@ -1006,12 +970,12 @@ func (s *Server) artifactAllowed(threadID, absPath string) bool {
 		return false
 	}
 	for _, file := range session.PresentFiles.List() {
-		if filepath.Clean(file.Path) == absPath {
+		if filepath.Clean(file.SourcePath) == absPath || filepath.Clean(s.resolveArtifactPath(threadID, file.Path)) == absPath {
 			return true
 		}
 	}
-	for _, path := range sessionArtifactPaths(session) {
-		if filepath.Clean(path) == absPath {
+	for _, path := range s.sessionArtifactPaths(session) {
+		if filepath.Clean(s.resolveArtifactPath(threadID, path)) == absPath {
 			return true
 		}
 	}
@@ -1052,8 +1016,9 @@ func sanitizeFilename(name string) string {
 
 func compactSubject(text string) string {
 	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
-	if len(text) > 48 {
-		return text[:48]
+	runes := []rune(text)
+	if len(runes) > 48 {
+		return string(runes[:48])
 	}
 	return text
 }
@@ -1087,6 +1052,9 @@ func (s *Server) resolveSkillArchivePath(threadID, path string) (string, error) 
 	if threadID == "" || path == "" {
 		return "", errors.New("thread_id and path are required")
 	}
+	if idx := strings.Index(path, "/artifacts/mnt/user-data/"); idx >= 0 {
+		path = "/" + strings.TrimPrefix(path[idx+len("/artifacts/"):], "/")
+	}
 	if strings.HasPrefix(path, "/mnt/user-data/") {
 		suffix := strings.TrimPrefix(path, "/mnt/user-data/")
 		return filepath.Join(s.threadRoot(threadID), filepath.FromSlash(suffix)), nil
@@ -1117,7 +1085,7 @@ func (s *Server) installSkillArchive(archivePath string) (gatewaySkill, error) {
 
 	var written int64
 	for _, f := range zipReader.File {
-		if strings.Contains(f.Name, "..") || strings.HasPrefix(f.Name, "/") || strings.HasPrefix(f.Name, "\\") {
+		if strings.Contains(f.Name, "..") || strings.HasPrefix(f.Name, "/") || strings.HasPrefix(f.Name, "\\") || isWindowsAbsoluteArchivePath(f.Name) {
 			return gatewaySkill{}, errors.New("archive contains unsafe path")
 		}
 		target := filepath.Join(tempDir, filepath.FromSlash(f.Name))
@@ -1198,25 +1166,55 @@ func (s *Server) installSkillArchive(archivePath string) (gatewaySkill, error) {
 }
 
 func resolveArchiveSkillRoot(tempDir string) (string, error) {
-	entries, err := os.ReadDir(tempDir)
+	roots := make([]string, 0, 1)
+	walkGatewaySkillFiles(tempDir, func(path string) bool {
+		roots = append(roots, filepath.Clean(filepath.Dir(path)))
+		return false
+	})
+	switch len(roots) {
+	case 0:
+		return "", errors.New("invalid skill archive: missing SKILL.md")
+	case 1:
+		return roots[0], nil
+	default:
+		return "", errors.New("invalid skill archive: expected exactly one SKILL.md")
+	}
+}
+
+func readSkillArchivePreview(archivePath string) (string, error) {
+	zipReader, err := zip.OpenReader(archivePath)
 	if err != nil {
 		return "", err
 	}
-	filtered := make([]os.DirEntry, 0, len(entries))
-	for _, e := range entries {
-		name := e.Name()
-		if strings.HasPrefix(name, ".") || name == "__MACOSX" {
+	defer zipReader.Close()
+
+	type skillEntry struct {
+		name string
+		body string
+	}
+	candidates := make([]skillEntry, 0)
+	for _, f := range zipReader.File {
+		if f.FileInfo().IsDir() || !strings.EqualFold(filepath.Base(f.Name), "SKILL.md") {
 			continue
 		}
-		filtered = append(filtered, e)
+		rc, err := f.Open()
+		if err != nil {
+			return "", err
+		}
+		data, readErr := io.ReadAll(rc)
+		rc.Close()
+		if readErr != nil {
+			return "", readErr
+		}
+		candidates = append(candidates, skillEntry{name: f.Name, body: string(data)})
 	}
-	if len(filtered) == 0 {
-		return "", errors.New("skill archive is empty")
+	if len(candidates) == 0 {
+		return "", errors.New("invalid skill archive: missing SKILL.md")
 	}
-	if len(filtered) == 1 && filtered[0].IsDir() {
-		return filepath.Join(tempDir, filtered[0].Name()), nil
-	}
-	return tempDir, nil
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].name < candidates[j].name
+	})
+	return candidates[0].body, nil
 }
 
 func parseSkillFrontmatter(content string) map[string]string {
@@ -1536,13 +1534,24 @@ func (s *Server) loadGatewayState() error {
 		s.setMemoryLocked(state.Memory)
 	}
 	if agents := s.loadAgentsFromFiles(); len(agents) > 0 {
-		s.setAgentsLocked(agents)
+		existing := s.getAgentsLocked()
+		for name, agent := range agents {
+			if _, ok := existing[name]; ok {
+				continue
+			}
+			existing[name] = agent
+		}
+		s.setAgentsLocked(existing)
 	}
 	if content, ok := s.loadUserProfileFromFile(); ok {
-		s.setUserProfileLocked(content)
+		if strings.TrimSpace(s.getUserProfileLocked()) == "" {
+			s.setUserProfileLocked(content)
+		}
 	}
 	if mem, ok := s.loadMemoryFromFile(); ok {
-		s.setMemoryLocked(mem)
+		if s.getMemoryLocked().Version == "" {
+			s.setMemoryLocked(mem)
+		}
 	}
 	return nil
 }
@@ -1594,12 +1603,26 @@ func defaultGatewayMCPConfig() gatewayMCPConfig {
 	}
 	return gatewayMCPConfig{
 		MCPServers: map[string]gatewayMCPServerConfig{
+			"github": {
+				Enabled:     false,
+				Type:        "stdio",
+				Command:     "npx",
+				Args:        []string{"-y", "@modelcontextprotocol/server-github"},
+				Description: "GitHub tools",
+			},
 			"filesystem": {
 				Enabled:     false,
 				Type:        "stdio",
 				Command:     "npx",
 				Args:        []string{"-y", "@modelcontextprotocol/server-filesystem"},
 				Description: "File system access",
+			},
+			"postgres": {
+				Enabled:     false,
+				Type:        "stdio",
+				Command:     "npx",
+				Args:        []string{"-y", "@modelcontextprotocol/server-postgres"},
+				Description: "PostgreSQL database access",
 			},
 		},
 	}
@@ -2142,13 +2165,15 @@ func readGatewaySkill(skillDir string, enabledOverride map[string]bool) (gateway
 
 func (s *Server) gatewaySkillRoots() []string {
 	roots := []string{
-		filepath.Join(s.dataRoot, "skills", "public"),
-		filepath.Join(s.dataRoot, "skills", "custom"),
-		filepath.Join(s.dataRoot, "skills"),
-		filepath.Join("third_party", "deerflow-ui", "skills", "public"),
-		filepath.Join("skills", "public"),
-		filepath.Join("skills", "custom"),
+		filepath.Join("third_party", "deerflow-ui", "skills"),
+		filepath.Join("..", "deerflow-ui", "skills"),
+		"skills",
 	}
+	if configuredRoot, ok := gatewayConfiguredSkillsRoot(); ok {
+		roots = append(roots, configuredRoot)
+	}
+	roots = append(roots, executableRelativeSkillRoots(gatewayExecutablePath)...)
+	roots = append(roots, filepath.Join(s.dataRoot, "skills"))
 	if raw := strings.TrimSpace(os.Getenv("DEERFLOW_SKILLS_DIRS")); raw != "" {
 		for _, part := range strings.Split(raw, ",") {
 			part = strings.TrimSpace(part)
@@ -2179,27 +2204,20 @@ func (s *Server) gatewaySkillRoots() []string {
 
 func (s *Server) discoverGatewaySkills(enabledOverride map[string]bool) map[string]gatewaySkill {
 	skills := map[string]gatewaySkill{}
-	for _, root := range s.gatewaySkillRoots() {
-		entries, err := os.ReadDir(root)
-		if err != nil {
+	for _, discovered := range discoverGatewaySkills(s.gatewaySkillRoots()) {
+		skill := discovered
+		if enabledOverride != nil {
+			if value, ok := enabledOverride[skill.Name]; ok {
+				skill.Enabled = value
+			}
+		}
+		if existing, ok := skills[skill.Name]; ok {
+			if existing.Category == skillCategoryPublic && skill.Category == skillCategoryCustom {
+				skills[skill.Name] = skill
+			}
 			continue
 		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			skill, ok := readGatewaySkill(filepath.Join(root, entry.Name()), enabledOverride)
-			if !ok {
-				continue
-			}
-			if existing, ok := skills[skill.Name]; ok {
-				if existing.Category == "public" && skill.Category == "custom" {
-					skills[skill.Name] = skill
-				}
-				continue
-			}
-			skills[skill.Name] = skill
-		}
+		skills[skill.Name] = skill
 	}
 	if len(skills) == 0 {
 		skills["deep-research"] = gatewaySkill{
@@ -2211,6 +2229,28 @@ func (s *Server) discoverGatewaySkills(enabledOverride map[string]bool) map[stri
 		}
 	}
 	return skills
+}
+
+func mergeGatewayMCPConfig(base, override gatewayMCPConfig) gatewayMCPConfig {
+	merged := gatewayMCPConfig{MCPServers: map[string]gatewayMCPServerConfig{}}
+	for name, server := range base.MCPServers {
+		merged.MCPServers[name] = normalizeGatewayMCPServer(server)
+	}
+	for name, server := range override.MCPServers {
+		merged.MCPServers[name] = normalizeGatewayMCPServer(server)
+	}
+	return merged
+}
+
+func isWindowsAbsoluteArchivePath(path string) bool {
+	if len(path) < 3 || path[1] != ':' {
+		return false
+	}
+	drive := path[0]
+	if (drive < 'A' || drive > 'Z') && (drive < 'a' || drive > 'z') {
+		return false
+	}
+	return path[2] == '\\' || path[2] == '/'
 }
 
 func nullableString(v string) any {

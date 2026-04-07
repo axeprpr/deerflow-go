@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,6 +23,10 @@ func (s *Server) handleThreadGet(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
 		http.Error(w, "thread ID required", http.StatusBadRequest)
+		return
+	}
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), threadIDStatusCode(r))
 		return
 	}
 
@@ -50,13 +56,15 @@ func (s *Server) handleThreadCreate(w http.ResponseWriter, r *http.Request) {
 		threadID = uuid.New().String()
 	}
 	if err := validateThreadID(threadID); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, err.Error(), threadIDStatusCode(r))
 		return
 	}
 	metadata, _ := req["metadata"].(map[string]any)
 
 	session := s.ensureSession(threadID, metadata)
 	s.applyThreadValues(session, extractThreadValues(req))
+	applyThreadConfigurable(session, req)
+	applyThreadStatus(session, req)
 	_ = s.persistSessionFile(session)
 	_ = s.appendThreadHistorySnapshot(threadID)
 	writeJSON(w, http.StatusCreated, s.threadResponse(session))
@@ -66,6 +74,10 @@ func (s *Server) handleThreadUpdate(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
 		http.Error(w, "thread ID required", http.StatusBadRequest)
+		return
+	}
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), threadIDStatusCode(r))
 		return
 	}
 
@@ -88,6 +100,8 @@ func (s *Server) handleThreadUpdate(w http.ResponseWriter, r *http.Request) {
 		applyThreadMetadata(session, metadata)
 	}
 	s.applyThreadValues(session, extractThreadValues(req))
+	applyThreadConfigurable(session, req)
+	applyThreadStatus(session, req)
 	session.UpdatedAt = time.Now().UTC()
 	s.sessionsMu.Unlock()
 	if err := s.persistSessionFile(session); err != nil {
@@ -105,6 +119,10 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "thread ID required", http.StatusBadRequest)
 		return
 	}
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), threadIDStatusCode(r))
+		return
+	}
 
 	s.sessionsMu.Lock()
 	delete(s.sessions, threadID)
@@ -118,15 +136,19 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 	var raw map[string]any
 	var req struct {
-		Limit      int      `json:"limit"`
-		PageSize   int      `json:"page_size"`
-		PageSizeX  int      `json:"pageSize"`
-		Offset     int      `json:"offset"`
-		SortBy     string   `json:"sort_by"`
-		SortByX    string   `json:"sortBy"`
-		SortOrder  string   `json:"sort_order"`
-		SortOrderX string   `json:"sortOrder"`
-		Select     []string `json:"select"`
+		Query      string         `json:"query"`
+		Status     string         `json:"status"`
+		Limit      int            `json:"limit"`
+		PageSize   int            `json:"page_size"`
+		PageSizeX  int            `json:"pageSize"`
+		Offset     int            `json:"offset"`
+		SortBy     string         `json:"sort_by"`
+		SortByX    string         `json:"sortBy"`
+		SortOrder  string         `json:"sort_order"`
+		SortOrderX string         `json:"sortOrder"`
+		Select     []string       `json:"select"`
+		Metadata   map[string]any `json:"metadata"`
+		Values     map[string]any `json:"values"`
 	}
 	limitProvided := false
 	if r.Body != nil {
@@ -141,6 +163,10 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 			limitProvided = hasLimit || hasPageSize || hasPageSizeSnake
 		}
 	}
+	queryValues := r.URL.Query()
+	if req.Query == "" {
+		req.Query = strings.TrimSpace(queryValues.Get("query"))
+	}
 
 	if req.Limit == 0 {
 		req.Limit = req.PageSize
@@ -148,17 +174,40 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 	if req.Limit == 0 {
 		req.Limit = req.PageSizeX
 	}
+	if req.Limit == 0 {
+		if rawLimit := firstNonEmpty(queryValues.Get("limit"), queryValues.Get("pageSize"), queryValues.Get("page_size")); rawLimit != "" {
+			req.Limit, _ = strconv.Atoi(rawLimit)
+			limitProvided = true
+		}
+	}
 	if req.Limit < 0 {
 		req.Limit = 0
 	}
 	if !limitProvided && req.Limit == 0 {
 		req.Limit = 50
 	}
+	if req.Offset == 0 {
+		if rawOffset := strings.TrimSpace(queryValues.Get("offset")); rawOffset != "" {
+			req.Offset, _ = strconv.Atoi(rawOffset)
+		}
+	}
 	if req.Offset < 0 {
 		req.Offset = 0
 	}
 	req.SortBy = firstNonEmpty(req.SortBy, req.SortByX)
 	req.SortOrder = firstNonEmpty(req.SortOrder, req.SortOrderX)
+	req.SortBy = firstNonEmpty(req.SortBy, queryValues.Get("sortBy"), queryValues.Get("sort_by"))
+	req.SortOrder = firstNonEmpty(req.SortOrder, queryValues.Get("sortOrder"), queryValues.Get("sort_order"))
+	if len(req.Select) == 0 {
+		if rawSelect := strings.TrimSpace(queryValues.Get("select")); rawSelect != "" {
+			for _, item := range strings.Split(rawSelect, ",") {
+				item = strings.TrimSpace(item)
+				if item != "" {
+					req.Select = append(req.Select, item)
+				}
+			}
+		}
+	}
 	req.SortBy = normalizeThreadFieldName(req.SortBy)
 	if req.SortBy == "" {
 		req.SortBy = "updated_at"
@@ -170,70 +219,16 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 	s.sessionsMu.RLock()
 	threads := make([]map[string]any, 0, len(s.sessions))
 	for _, session := range s.sessions {
-		threads = append(threads, s.threadResponse(session))
+		thread := s.threadResponse(session)
+		if !s.threadMatchesSearch(session, thread, req.Query, req.Status, req.Metadata, req.Values) {
+			continue
+		}
+		threads = append(threads, thread)
 	}
 	s.sessionsMu.RUnlock()
 
 	sort.Slice(threads, func(i, j int) bool {
-		left := threads[i]
-		right := threads[j]
-		var less bool
-		switch req.SortBy {
-		case "created_at":
-			less = left["created_at"].(string) < right["created_at"].(string)
-		case "step":
-			less = numberFromAny(left["step"]) < numberFromAny(right["step"])
-		case "title":
-			less = asString(left["title"]) < asString(right["title"])
-		case "status":
-			less = asString(left["status"]) < asString(right["status"])
-		case "assistant_id":
-			less = asString(left["metadata"].(map[string]any)["assistant_id"]) < asString(right["metadata"].(map[string]any)["assistant_id"])
-		case "graph_id":
-			less = asString(left["metadata"].(map[string]any)["graph_id"]) < asString(right["metadata"].(map[string]any)["graph_id"])
-		case "run_id":
-			less = asString(left["metadata"].(map[string]any)["run_id"]) < asString(right["metadata"].(map[string]any)["run_id"])
-		case "agent_name":
-			less = asString(left["agent_name"]) < asString(right["agent_name"])
-		case "agent_type":
-			less = asString(left["agent_type"]) < asString(right["agent_type"])
-		case "model_name":
-			less = asString(left["model_name"]) < asString(right["model_name"])
-		case "mode":
-			less = asString(left["mode"]) < asString(right["mode"])
-		case "reasoning_effort":
-			less = asString(left["reasoning_effort"]) < asString(right["reasoning_effort"])
-		case "thinking_enabled":
-			less = boolRank(left["thinking_enabled"]) < boolRank(right["thinking_enabled"])
-		case "is_plan_mode":
-			less = boolRank(left["is_plan_mode"]) < boolRank(right["is_plan_mode"])
-		case "subagent_enabled":
-			less = boolRank(left["subagent_enabled"]) < boolRank(right["subagent_enabled"])
-		case "temperature":
-			less = numberFromAny(left["temperature"]) < numberFromAny(right["temperature"])
-		case "max_tokens":
-			less = numberFromAny(left["max_tokens"]) < numberFromAny(right["max_tokens"])
-		case "checkpoint_id":
-			less = asString(left["checkpoint_id"]) < asString(right["checkpoint_id"])
-		case "parent_checkpoint_id":
-			less = asString(left["parent_checkpoint_id"]) < asString(right["parent_checkpoint_id"])
-		case "checkpoint_ns":
-			less = asString(left["checkpoint_ns"]) < asString(right["checkpoint_ns"])
-		case "parent_checkpoint_ns":
-			less = asString(left["parent_checkpoint_ns"]) < asString(right["parent_checkpoint_ns"])
-		case "checkpoint_thread_id":
-			less = asString(left["checkpoint_thread_id"]) < asString(right["checkpoint_thread_id"])
-		case "parent_checkpoint_thread_id":
-			less = asString(left["parent_checkpoint_thread_id"]) < asString(right["parent_checkpoint_thread_id"])
-		case "thread_id":
-			less = left["thread_id"].(string) < right["thread_id"].(string)
-		default:
-			less = left["updated_at"].(string) < right["updated_at"].(string)
-		}
-		if strings.EqualFold(req.SortOrder, "asc") {
-			return less
-		}
-		return !less
+		return compareThreadMaps(threads[i], threads[j], req.SortBy, req.SortOrder) < 0
 	})
 
 	start := req.Offset
@@ -352,9 +347,312 @@ func numberFromAny(v any) float64 {
 	return value
 }
 
+func threadIDStatusCode(r *http.Request) int {
+	if r != nil && strings.HasPrefix(strings.TrimSpace(r.URL.Path), "/api/") {
+		return http.StatusUnprocessableEntity
+	}
+	return http.StatusBadRequest
+}
+
+func applyThreadStatus(session *Session, raw map[string]any) {
+	if session == nil || len(raw) == 0 {
+		return
+	}
+	status := strings.TrimSpace(stringFromAny(raw["status"]))
+	if status == "" {
+		return
+	}
+	session.Status = status
+}
+
+func applyThreadConfigurable(session *Session, raw map[string]any) {
+	if session == nil || len(raw) == 0 {
+		return
+	}
+	config := normalizeThreadConfig(mapFromAny(raw["config"]))
+	if len(config) == 0 {
+		if configurable := mapFromAny(raw["configurable"]); len(configurable) > 0 {
+			config = normalizeThreadConfig(map[string]any{"configurable": configurable})
+		}
+	}
+	configurable := mapFromAny(config["configurable"])
+	if len(configurable) == 0 {
+		return
+	}
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
+	}
+	if session.Configurable == nil {
+		session.Configurable = defaultThreadConfig(session.ThreadID)
+	}
+	for _, key := range []string{"thread_id", "agent_type", "agent_name", "model_name", "mode", "reasoning_effort", "thinking_enabled", "is_plan_mode", "subagent_enabled", "temperature", "max_tokens"} {
+		if value, ok := configurable[key]; ok {
+			session.Metadata[key] = value
+			session.Configurable[key] = value
+		}
+	}
+	if _, ok := session.Configurable["thread_id"]; !ok {
+		session.Configurable["thread_id"] = session.ThreadID
+	}
+}
+
+func (s *Server) threadMatchesSearch(session *Session, thread map[string]any, query, status string, metadataFilter, valuesFilter map[string]any) bool {
+	if status != "" && !strings.EqualFold(strings.TrimSpace(asString(thread["status"])), strings.TrimSpace(status)) {
+		return false
+	}
+	if len(metadataFilter) > 0 && !mapContainsFilter(mapFromAny(thread["metadata"]), metadataFilter) {
+		return false
+	}
+	if len(valuesFilter) > 0 && !mapContainsFilter(mapFromAny(thread["values"]), valuesFilter) {
+		return false
+	}
+	return s.threadMatchesQuery(session, thread, query)
+}
+
+func (s *Server) threadMatchesQuery(session *Session, thread map[string]any, query string) bool {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return true
+	}
+	candidates := make([]string, 0, 32)
+	appendSearchStrings(&candidates, thread)
+	if session != nil {
+		appendSearchStrings(&candidates, todosToAny(session.Todos))
+		for _, msg := range session.Messages {
+			appendSearchStrings(&candidates, msg.Content)
+			appendSearchStrings(&candidates, msg.Metadata)
+			for _, call := range msg.ToolCalls {
+				appendSearchStrings(&candidates, call.Name, call.Arguments)
+			}
+			if msg.ToolResult != nil {
+				appendSearchStrings(&candidates, msg.ToolResult.ToolName, msg.ToolResult.Content, msg.ToolResult.Error, msg.ToolResult.Data)
+			}
+		}
+	}
+	for _, value := range candidates {
+		if strings.Contains(strings.ToLower(value), query) {
+			return true
+		}
+	}
+	return s.threadDiskMatchesQuery(asString(thread["thread_id"]), query)
+}
+
+func normalizeUploadedFilesValue(raw any) []map[string]any {
+	switch typed := raw.(type) {
+	case []map[string]any:
+		out := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, item)
+		}
+		return out
+	case []any:
+		return uploadedFilesFromMetadata(typed)
+	default:
+		return nil
+	}
+}
+
+func appendSearchStrings(dst *[]string, values ...any) {
+	for _, value := range values {
+		switch typed := value.(type) {
+		case string:
+			text := strings.TrimSpace(typed)
+			if text != "" {
+				*dst = append(*dst, text)
+			}
+		case map[string]any:
+			for _, nested := range typed {
+				appendSearchStrings(dst, nested)
+			}
+		case []map[string]any:
+			for _, nested := range typed {
+				appendSearchStrings(dst, nested)
+			}
+		case []any:
+			for _, nested := range typed {
+				appendSearchStrings(dst, nested)
+			}
+		default:
+			if value == nil {
+				continue
+			}
+			if encoded, err := json.Marshal(value); err == nil && string(encoded) != "null" {
+				*dst = append(*dst, string(encoded))
+			}
+		}
+	}
+}
+
+func mapContainsFilter(actual map[string]any, expected map[string]any) bool {
+	for key, want := range expected {
+		got, ok := actual[key]
+		if !ok {
+			return false
+		}
+		wantMap, wantIsMap := want.(map[string]any)
+		gotMap, gotIsMap := got.(map[string]any)
+		if wantIsMap {
+			if !gotIsMap || !mapContainsFilter(gotMap, wantMap) {
+				return false
+			}
+			continue
+		}
+		if !valuesEqualForSearch(got, want) {
+			return false
+		}
+	}
+	return true
+}
+
+func valuesEqualForSearch(actual, expected any) bool {
+	switch want := expected.(type) {
+	case string:
+		return strings.EqualFold(strings.TrimSpace(asString(actual)), strings.TrimSpace(want))
+	case bool:
+		value, ok := actual.(bool)
+		return ok && value == want
+	default:
+		return strings.TrimSpace(asString(actual)) == strings.TrimSpace(asString(expected))
+	}
+}
+
+func (s *Server) threadDiskMatchesQuery(threadID, query string) bool {
+	for _, root := range []string{s.workspaceDir(threadID), s.uploadsDir(threadID), s.outputsDir(threadID)} {
+		if threadPathMatchesQuery(root, query) {
+			return true
+		}
+	}
+	return false
+}
+
+func threadPathMatchesQuery(root, query string) bool {
+	matched := false
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if strings.Contains(strings.ToLower(path), query) {
+			matched = true
+			return io.EOF
+		}
+		if info == nil || info.IsDir() || info.Size() > 1<<20 {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		if strings.Contains(strings.ToLower(string(data)), query) {
+			matched = true
+			return io.EOF
+		}
+		return nil
+	})
+	return matched
+}
+
+func compareThreadMaps(left, right map[string]any, sortBy, sortOrder string) int {
+	primary := compareThreadField(left, right, sortBy)
+	if primary == 0 && sortBy != "created_at" {
+		primary = compareThreadField(left, right, "created_at")
+	}
+	if primary == 0 && sortBy != "thread_id" {
+		primary = compareThreadField(left, right, "thread_id")
+	}
+	if strings.EqualFold(sortOrder, "desc") {
+		primary = -primary
+	}
+	return primary
+}
+
+func compareThreadField(left, right map[string]any, sortBy string) int {
+	switch sortBy {
+	case "created_at":
+		return compareStrings(asString(left["created_at"]), asString(right["created_at"]))
+	case "updated_at", "":
+		return compareStrings(asString(left["updated_at"]), asString(right["updated_at"]))
+	case "step":
+		return compareFloats(numberFromAny(left["step"]), numberFromAny(right["step"]))
+	case "title":
+		return compareStrings(asString(left["title"]), asString(right["title"]))
+	case "status":
+		return compareStrings(asString(left["status"]), asString(right["status"]))
+	case "assistant_id":
+		return compareStrings(asString(mapFromAny(left["metadata"])["assistant_id"]), asString(mapFromAny(right["metadata"])["assistant_id"]))
+	case "graph_id":
+		return compareStrings(asString(mapFromAny(left["metadata"])["graph_id"]), asString(mapFromAny(right["metadata"])["graph_id"]))
+	case "run_id":
+		return compareStrings(asString(mapFromAny(left["metadata"])["run_id"]), asString(mapFromAny(right["metadata"])["run_id"]))
+	case "agent_name":
+		return compareStrings(asString(left["agent_name"]), asString(right["agent_name"]))
+	case "agent_type":
+		return compareStrings(asString(left["agent_type"]), asString(right["agent_type"]))
+	case "model_name":
+		return compareStrings(asString(left["model_name"]), asString(right["model_name"]))
+	case "mode":
+		return compareStrings(asString(left["mode"]), asString(right["mode"]))
+	case "reasoning_effort":
+		return compareStrings(asString(left["reasoning_effort"]), asString(right["reasoning_effort"]))
+	case "thinking_enabled":
+		return compareFloats(float64(boolRank(left["thinking_enabled"])), float64(boolRank(right["thinking_enabled"])))
+	case "is_plan_mode":
+		return compareFloats(float64(boolRank(left["is_plan_mode"])), float64(boolRank(right["is_plan_mode"])))
+	case "subagent_enabled":
+		return compareFloats(float64(boolRank(left["subagent_enabled"])), float64(boolRank(right["subagent_enabled"])))
+	case "temperature":
+		return compareFloats(numberFromAny(left["temperature"]), numberFromAny(right["temperature"]))
+	case "max_tokens":
+		return compareFloats(numberFromAny(left["max_tokens"]), numberFromAny(right["max_tokens"]))
+	case "checkpoint_id":
+		return compareStrings(asString(left["checkpoint_id"]), asString(right["checkpoint_id"]))
+	case "parent_checkpoint_id":
+		return compareStrings(asString(left["parent_checkpoint_id"]), asString(right["parent_checkpoint_id"]))
+	case "checkpoint_ns":
+		return compareStrings(asString(left["checkpoint_ns"]), asString(right["checkpoint_ns"]))
+	case "parent_checkpoint_ns":
+		return compareStrings(asString(left["parent_checkpoint_ns"]), asString(right["parent_checkpoint_ns"]))
+	case "checkpoint_thread_id":
+		return compareStrings(asString(left["checkpoint_thread_id"]), asString(right["checkpoint_thread_id"]))
+	case "parent_checkpoint_thread_id":
+		return compareStrings(asString(left["parent_checkpoint_thread_id"]), asString(right["parent_checkpoint_thread_id"]))
+	case "thread_id":
+		return compareStrings(asString(left["thread_id"]), asString(right["thread_id"]))
+	default:
+		return compareStrings(asString(left["updated_at"]), asString(right["updated_at"]))
+	}
+}
+
+func compareStrings(left, right string) int {
+	switch {
+	case left < right:
+		return -1
+	case left > right:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func compareFloats(left, right float64) int {
+	switch {
+	case left < right:
+		return -1
+	case left > right:
+		return 1
+	default:
+		return 0
+	}
+}
+
 func (s *Server) applyThreadValues(session *Session, values map[string]any) {
 	if session == nil || len(values) == 0 {
 		return
+	}
+	if session.Values == nil {
+		session.Values = map[string]any{}
+	}
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
 	}
 	if hasAnyKey(values, "messages") {
 		if rawMessages, ok := values["messages"].([]any); ok {
@@ -366,49 +664,79 @@ func (s *Server) applyThreadValues(session *Session, values map[string]any) {
 	if hasAnyKey(values, "title") {
 		if title, ok := values["title"].(string); ok {
 			title = strings.TrimSpace(title)
+			session.Values["title"] = title
 			if title == "" {
 				delete(session.Metadata, "title")
 			} else {
 				session.Metadata["title"] = title
 			}
 		} else if values["title"] == nil {
+			session.Values["title"] = ""
 			delete(session.Metadata, "title")
 		}
 	}
 	if hasAnyKey(values, "todos") {
-		if todos, ok := normalizeTodos(values["todos"]); ok && len(todos) > 0 {
-			session.Metadata["todos"] = todos
+		if todos, ok := normalizeTodos(values["todos"]); ok {
+			session.Values["todos"] = todos
+			if len(todos) > 0 {
+				session.Metadata["todos"] = todos
+			} else {
+				delete(session.Metadata, "todos")
+			}
 		} else {
+			session.Values["todos"] = []map[string]any{}
 			delete(session.Metadata, "todos")
 		}
 	}
 	if hasAnyKey(values, "sandbox") {
-		if sandboxState, ok := normalizeStringMap(values["sandbox"]); ok && len(sandboxState) > 0 {
-			session.Metadata["sandbox"] = sandboxState
+		if sandboxState, ok := normalizeStringMap(values["sandbox"]); ok {
+			session.Values["sandbox"] = sandboxState
+			if len(sandboxState) > 0 {
+				session.Metadata["sandbox"] = sandboxState
+			} else {
+				delete(session.Metadata, "sandbox")
+			}
 		} else {
+			session.Values["sandbox"] = map[string]any{}
 			delete(session.Metadata, "sandbox")
 		}
 	}
 	if hasAnyKey(values, "artifacts") {
-		if artifacts := anyStringSlice(values["artifacts"]); len(artifacts) > 0 {
+		artifacts := anyStringSlice(values["artifacts"])
+		session.Values["artifacts"] = artifacts
+		if len(artifacts) > 0 {
 			session.Metadata["artifacts"] = artifacts
 		} else {
 			delete(session.Metadata, "artifacts")
 		}
 	}
 	if hasAnyKey(values, "viewed_images", "viewedImages") {
-		if viewedImages, ok := normalizeViewedImages(firstNonNil(values["viewed_images"], values["viewedImages"])); ok && len(viewedImages) > 0 {
-			session.Metadata["viewed_images"] = viewedImages
+		if viewedImages, ok := normalizeViewedImages(firstNonNil(values["viewed_images"], values["viewedImages"])); ok {
+			session.Values["viewed_images"] = viewedImages
+			if len(viewedImages) > 0 {
+				session.Metadata["viewed_images"] = viewedImages
+			} else {
+				delete(session.Metadata, "viewed_images")
+			}
 		} else {
+			session.Values["viewed_images"] = map[string]any{}
 			delete(session.Metadata, "viewed_images")
 		}
 	}
 	if hasAnyKey(values, "uploaded_files", "uploadedFiles") {
-		if uploadedFiles, ok := firstNonNil(values["uploaded_files"], values["uploadedFiles"]).([]any); ok && len(uploadedFiles) > 0 {
-			session.Metadata["uploaded_files"] = uploadedFiles
-		} else if uploadedFiles, ok := firstNonNil(values["uploaded_files"], values["uploadedFiles"]).([]map[string]any); ok && len(uploadedFiles) > 0 {
-			session.Metadata["uploaded_files"] = uploadedFiles
+		if uploadedFiles := normalizeUploadedFilesValue(firstNonNil(values["uploaded_files"], values["uploadedFiles"])); uploadedFiles != nil {
+			session.Values["uploaded_files"] = uploadedFiles
+			if len(uploadedFiles) > 0 {
+				items := make([]any, 0, len(uploadedFiles))
+				for _, file := range uploadedFiles {
+					items = append(items, file)
+				}
+				session.Metadata["uploaded_files"] = items
+			} else {
+				delete(session.Metadata, "uploaded_files")
+			}
 		} else {
+			session.Values["uploaded_files"] = []map[string]any{}
 			delete(session.Metadata, "uploaded_files")
 		}
 	}
@@ -417,6 +745,14 @@ func (s *Server) applyThreadValues(session *Session, values map[string]any) {
 			session.Metadata["thread_data"] = threadData
 		} else {
 			delete(session.Metadata, "thread_data")
+		}
+	}
+	for key, value := range values {
+		switch key {
+		case "messages", "title", "todos", "sandbox", "artifacts", "viewed_images", "viewedImages", "uploaded_files", "uploadedFiles", "thread_data", "threadData":
+			continue
+		default:
+			session.Values[key] = value
 		}
 	}
 }
@@ -483,6 +819,10 @@ func (s *Server) handleThreadFiles(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "thread ID required", http.StatusBadRequest)
 		return
 	}
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), threadIDStatusCode(r))
+		return
+	}
 
 	s.sessionsMu.RLock()
 	session, exists := s.sessions[threadID]
@@ -492,10 +832,7 @@ func (s *Server) handleThreadFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	files := []tools.PresentFile{}
-	if session.PresentFiles != nil {
-		files = session.PresentFiles.List()
-	}
+	files := s.collectSessionFiles(session)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"files": files,
@@ -506,6 +843,10 @@ func (s *Server) handleThreadStateGet(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
 		http.Error(w, "thread ID required", http.StatusBadRequest)
+		return
+	}
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), threadIDStatusCode(r))
 		return
 	}
 
@@ -524,6 +865,10 @@ func (s *Server) handleThreadStatePost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "thread ID required", http.StatusBadRequest)
 		return
 	}
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), threadIDStatusCode(r))
+		return
+	}
 
 	var req map[string]any
 	defer r.Body.Close()
@@ -543,8 +888,17 @@ func (s *Server) handleThreadStatePost(w http.ResponseWriter, r *http.Request) {
 	s.applyThreadValues(session, extractThreadValues(req))
 	metadata, _ := req["metadata"].(map[string]any)
 	applyThreadMetadata(session, metadata)
+	applyThreadConfigurable(session, req)
+	applyThreadStatus(session, req)
+	if !threadStateRequestProvidesCheckpoint(req) {
+		clearSessionCheckpoint(session)
+	}
 	session.UpdatedAt = time.Now().UTC()
 	s.sessionsMu.Unlock()
+	if err := s.persistSessionSnapshot(session); err != nil {
+		http.Error(w, "failed to persist thread state", http.StatusInternalServerError)
+		return
+	}
 	if err := s.persistSessionFile(session); err != nil {
 		http.Error(w, "failed to persist thread state", http.StatusInternalServerError)
 		return
@@ -560,6 +914,10 @@ func (s *Server) handleThreadStatePatch(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "thread ID required", http.StatusBadRequest)
 		return
 	}
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), threadIDStatusCode(r))
+		return
+	}
 
 	var req map[string]any
 	defer r.Body.Close()
@@ -578,8 +936,17 @@ func (s *Server) handleThreadStatePatch(w http.ResponseWriter, r *http.Request) 
 	s.applyThreadValues(session, extractThreadValues(req))
 	metadata, _ := req["metadata"].(map[string]any)
 	applyThreadMetadata(session, metadata)
+	applyThreadConfigurable(session, req)
+	applyThreadStatus(session, req)
+	if !threadStateRequestProvidesCheckpoint(req) {
+		clearSessionCheckpoint(session)
+	}
 	session.UpdatedAt = time.Now().UTC()
 	s.sessionsMu.Unlock()
+	if err := s.persistSessionSnapshot(session); err != nil {
+		http.Error(w, "failed to persist thread state", http.StatusInternalServerError)
+		return
+	}
 	if err := s.persistSessionFile(session); err != nil {
 		http.Error(w, "failed to persist thread state", http.StatusInternalServerError)
 		return
@@ -593,6 +960,10 @@ func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
 		http.Error(w, "thread ID required", http.StatusBadRequest)
+		return
+	}
+	if err := validateThreadID(threadID); err != nil {
+		http.Error(w, err.Error(), threadIDStatusCode(r))
 		return
 	}
 
@@ -783,10 +1154,12 @@ func (s *Server) messagesToLangChain(messages []models.Message) []Message {
 			Type:    msgType,
 			ID:      msg.ID,
 			Role:    role,
-			Content: msg.Content,
+			Content: rewriteAssistantArtifactLinks(msg.SessionID, msg.Content, msg.Role),
 		}
-		if multi := decodeMultiContent(msg.Metadata); len(multi) > 0 {
-			converted.Content = multi
+		if msg.Role == models.RoleHuman {
+			if multi := decodeMultiContent(msg.Metadata); len(multi) > 0 {
+				converted.Content = multi
+			}
 		}
 		if usageMetadata := usageMetadataFromMessageMetadata(msg.Metadata); len(usageMetadata) > 0 {
 			converted.UsageMetadata = usageMetadata
@@ -949,7 +1322,7 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 		"subagent_enabled":            configurable["subagent_enabled"],
 		"temperature":                 configurable["temperature"],
 		"max_tokens":                  configurable["max_tokens"],
-		"checkpoint_id":               stringValue(session.Metadata["checkpoint_id"]),
+		"checkpoint_id":               firstNonEmpty(stringValue(session.Metadata["checkpoint_id"]), session.CheckpointID),
 		"parent_checkpoint_id":        stringValue(session.Metadata["parent_checkpoint_id"]),
 		"checkpoint_ns":               stringValue(session.Metadata["checkpoint_ns"]),
 		"parent_checkpoint_ns":        stringValue(session.Metadata["parent_checkpoint_ns"]),
@@ -994,7 +1367,7 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 	parentCheckpoint := checkpointObjectFromMetadata(session.Metadata, "parent_")
 
 	return &ThreadState{
-		CheckpointID:       stringValue(session.Metadata["checkpoint_id"]),
+		CheckpointID:       firstNonEmpty(stringValue(session.Metadata["checkpoint_id"]), session.CheckpointID),
 		ParentCheckpointID: stringValue(session.Metadata["parent_checkpoint_id"]),
 		Checkpoint:         checkpoint,
 		ParentCheckpoint:   parentCheckpoint,
@@ -1015,27 +1388,61 @@ func (s *Server) threadValues(session *Session) map[string]any {
 	if values == nil {
 		values = map[string]any{}
 	}
+	agentName := strings.TrimSpace(stringValue(session.Metadata["agent_name"]))
+	if agentName == "" {
+		agentName = strings.TrimSpace(stringValue(values["created_agent_name"]))
+	}
+	threadKind := "chat"
+	routePath := "/workspace/chats/" + session.ThreadID
+	if agentName != "" {
+		threadKind = "agent"
+		routePath = "/workspace/agents/" + agentName + "/chats/" + session.ThreadID
+	}
 	for key, value := range map[string]any{
 		"title":          stringValue(session.Metadata["title"]),
-		"artifacts":      sessionArtifactPaths(session),
-		"messages":       s.messagesToLangChain(session.Messages),
-		"todos":          todosFromMetadata(session.Metadata["todos"]),
-		"sandbox":        mapFromMetadata(session.Metadata["sandbox"]),
-		"thread_data":    s.restoredThreadDataState(session),
+		"artifacts":      s.sessionArtifactPaths(session),
 		"uploaded_files": s.messageUploadedFilesState(session),
 		"viewed_images":  viewedImagesFromMetadata(session.Metadata["viewed_images"]),
+		"agent_name":     agentName,
+		"thread_kind":    threadKind,
+		"route_path":     routePath,
 	} {
-		values[key] = value
+		if _, exists := values[key]; !exists {
+			values[key] = value
+		}
 	}
+	if _, exists := values["todos"]; !exists {
+		todos := todosFromMetadata(session.Metadata["todos"])
+		if len(session.Todos) > 0 {
+			todos = todosToAny(session.Todos)
+		}
+		values["todos"] = todos
+	}
+	if _, exists := values["sandbox"]; !exists {
+		sandboxState := mapFromMetadata(session.Metadata["sandbox"])
+		if len(sandboxState) == 0 {
+			sandboxState = map[string]any{"sandbox_id": "local"}
+		}
+		values["sandbox"] = sandboxState
+	}
+	values["thread_data"] = s.restoredThreadDataState(session)
+	values["messages"] = s.messagesToLangChain(session.Messages)
 	return values
 }
 
 func (s *Server) threadConfigurable(session *Session) map[string]any {
-	mode := deriveThreadMode(session.Metadata)
+	configurable := defaultThreadConfig(session.ThreadID)
+	for key, value := range copyMetadataMap(session.Configurable) {
+		configurable[key] = value
+	}
+	mode := strings.TrimSpace(stringValue(configurable["mode"]))
+	if mode == "" {
+		mode = deriveThreadMode(session.Metadata)
+	}
 	thinkingEnabled := mode != "flash"
 	isPlanMode := mode == "pro" || mode == "ultra"
 	subagentEnabled := mode == "ultra"
-	configurable := map[string]any{
+	for key, value := range map[string]any{
 		"thread_id":        session.ThreadID,
 		"agent_type":       stringValue(session.Metadata["agent_type"]),
 		"agent_name":       stringValue(session.Metadata["agent_name"]),
@@ -1045,21 +1452,41 @@ func (s *Server) threadConfigurable(session *Session) map[string]any {
 		"is_plan_mode":     isPlanMode,
 		"thinking_enabled": thinkingEnabled,
 		"subagent_enabled": subagentEnabled,
+	} {
+		if _, exists := configurable[key]; !exists || configurable[key] == "" {
+			configurable[key] = value
+		}
 	}
 	if value, ok := float64FromAny(session.Metadata["temperature"]); ok {
-		configurable["temperature"] = value
+		if _, exists := configurable["temperature"]; !exists {
+			configurable["temperature"] = value
+		}
 	}
 	if value := toInt64(session.Metadata["max_tokens"]); value > 0 {
-		configurable["max_tokens"] = value
+		if _, exists := configurable["max_tokens"]; !exists {
+			configurable["max_tokens"] = value
+		}
 	}
 	if value, ok := session.Metadata["thinking_enabled"].(bool); ok {
-		configurable["thinking_enabled"] = value
+		if session.Configurable == nil {
+			configurable["thinking_enabled"] = value
+		} else if _, exists := session.Configurable["thinking_enabled"]; !exists {
+			configurable["thinking_enabled"] = value
+		}
 	}
 	if value, ok := session.Metadata["is_plan_mode"].(bool); ok {
-		configurable["is_plan_mode"] = value
+		if session.Configurable == nil {
+			configurable["is_plan_mode"] = value
+		} else if _, exists := session.Configurable["is_plan_mode"]; !exists {
+			configurable["is_plan_mode"] = value
+		}
 	}
 	if value, ok := session.Metadata["subagent_enabled"].(bool); ok {
-		configurable["subagent_enabled"] = value
+		if session.Configurable == nil {
+			configurable["subagent_enabled"] = value
+		} else if _, exists := session.Configurable["subagent_enabled"]; !exists {
+			configurable["subagent_enabled"] = value
+		}
 	}
 	return configurable
 }
@@ -1421,6 +1848,12 @@ func (s *Server) ensureSession(threadID string, metadata map[string]any) *Sessio
 		if metadata != nil {
 			applyThreadMetadata(session, metadata)
 		}
+		if session.Values == nil {
+			session.Values = map[string]any{}
+		}
+		if session.Configurable == nil {
+			session.Configurable = defaultThreadConfig(threadID)
+		}
 		return session
 	}
 
@@ -1431,11 +1864,24 @@ func (s *Server) ensureSession(threadID string, metadata map[string]any) *Sessio
 	if _, exists := metadata["thread_id"]; !exists {
 		metadata["thread_id"] = threadID
 	}
+	checkpointID := firstNonEmpty(stringValue(metadata["checkpoint_id"]), stringValue(metadata["checkpointId"]))
+	if checkpointID == "" && len(metadata) > 1 {
+		checkpointID = uuid.New().String()
+	}
+	if checkpointID != "" {
+		metadata["checkpoint_id"] = checkpointID
+		if _, exists := metadata["checkpoint_thread_id"]; !exists {
+			metadata["checkpoint_thread_id"] = threadID
+		}
+	}
 	now := time.Now().UTC()
 	session := &Session{
+		CheckpointID: checkpointID,
 		ThreadID:     threadID,
 		Messages:     []models.Message{},
+		Values:       map[string]any{},
 		Metadata:     metadata,
+		Configurable: defaultThreadConfig(threadID),
 		Status:       "idle",
 		PresentFiles: tools.NewPresentFileRegistry(),
 		CreatedAt:    now,
@@ -1444,6 +1890,49 @@ func (s *Server) ensureSession(threadID string, metadata map[string]any) *Sessio
 	s.sessions[threadID] = session
 	_ = s.persistSessionFile(session)
 	return session
+}
+
+func threadStateRequestProvidesCheckpoint(req map[string]any) bool {
+	metadata, _ := req["metadata"].(map[string]any)
+	if len(metadata) == 0 {
+		return false
+	}
+	for _, key := range []string{
+		"checkpoint_id",
+		"checkpointId",
+		"parent_checkpoint_id",
+		"parentCheckpointId",
+		"checkpoint_ns",
+		"checkpointNs",
+		"parent_checkpoint_ns",
+		"parentCheckpointNs",
+		"checkpoint_thread_id",
+		"checkpointThreadId",
+		"parent_checkpoint_thread_id",
+		"parentCheckpointThreadId",
+		"checkpoint",
+		"checkpointObject",
+		"parent_checkpoint",
+		"parentCheckpoint",
+	} {
+		if _, ok := metadata[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func clearSessionCheckpoint(session *Session) {
+	if session == nil {
+		return
+	}
+	session.CheckpointID = ""
+	if session.Metadata == nil {
+		return
+	}
+	delete(session.Metadata, "checkpoint_id")
+	delete(session.Metadata, "checkpoint_ns")
+	delete(session.Metadata, "checkpoint_thread_id")
 }
 
 func (s *Server) markThreadStatus(threadID string, status string) {
@@ -1538,18 +2027,24 @@ func stringValue(v any) string {
 	return s
 }
 
+func (s *Server) sessionArtifactPaths(session *Session) []string {
+	files := s.collectArtifactFiles(session)
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		paths = append(paths, file.Path)
+	}
+	return paths
+}
+
 func sessionArtifactPaths(session *Session) []string {
 	if session == nil {
-		return []string{}
+		return nil
 	}
-
 	seen := make(map[string]struct{})
 	paths := make([]string, 0)
 	if session.PresentFiles != nil {
 		for _, file := range session.PresentFiles.List() {
-			if addArtifactPath(&paths, seen, file.Path) {
-				continue
-			}
+			addArtifactPath(&paths, seen, file.Path)
 		}
 	}
 	for _, message := range session.Messages {
@@ -1576,6 +2071,54 @@ func addArtifactPath(paths *[]string, seen map[string]struct{}, path string) boo
 	return true
 }
 
+var artifactMarkdownLinkPattern = regexp.MustCompile(`(?m)(\[[^\]]*?\])\((/mnt/user-data/(?:uploads|outputs|workspace)/[^)\n]*?\.[A-Za-z0-9]+)\)`)
+var artifactBarePathPattern = regexp.MustCompile(`(?m)(^|[\s>:"'` + "`" + `])(/mnt/user-data/(?:uploads|outputs|workspace)/[^)\]\n]*?\.[A-Za-z0-9]+)`)
+
+func rewriteAssistantArtifactLinks(threadID string, content any, role models.Role) any {
+	if role != models.RoleAI {
+		return content
+	}
+	text, ok := content.(string)
+	if !ok || strings.TrimSpace(text) == "" {
+		return content
+	}
+	return rewriteArtifactLinksInText(threadID, text)
+}
+
+func rewriteArtifactLinksInText(threadID, text string) string {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" || strings.TrimSpace(text) == "" {
+		return text
+	}
+	rewritten := artifactMarkdownLinkPattern.ReplaceAllStringFunc(text, func(match string) string {
+		parts := artifactMarkdownLinkPattern.FindStringSubmatch(match)
+		if len(parts) != 3 || strings.HasPrefix(parts[1], "![") {
+			return match
+		}
+		return parts[1] + "(" + artifactURLForThread(threadID, parts[2]) + ")"
+	})
+	return artifactBarePathPattern.ReplaceAllStringFunc(rewritten, func(match string) string {
+		parts := artifactBarePathPattern.FindStringSubmatch(match)
+		if len(parts) != 3 {
+			return match
+		}
+		return parts[1] + artifactURLForThread(threadID, parts[2])
+	})
+}
+
+func artifactURLForThread(threadID, virtualPath string) string {
+	virtualPath = strings.TrimSpace(virtualPath)
+	if virtualPath == "" {
+		return virtualPath
+	}
+	trimmed := strings.TrimPrefix(virtualPath, "/")
+	segments := strings.Split(trimmed, "/")
+	for i, segment := range segments {
+		segments[i] = url.PathEscape(segment)
+	}
+	return "/api/threads/" + strings.TrimSpace(threadID) + "/artifacts/" + strings.Join(segments, "/")
+}
+
 func messageArtifactPaths(message models.Message) []string {
 	paths := make([]string, 0)
 	for _, call := range message.ToolCalls {
@@ -1599,6 +2142,177 @@ func messageArtifactPaths(message models.Message) []string {
 		}
 	}
 	return paths
+}
+
+func (s *Server) collectSessionFiles(session *Session) []tools.PresentFile {
+	if session == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	files := make([]tools.PresentFile, 0)
+	add := func(file tools.PresentFile) {
+		file = s.normalizePresentFile(session.ThreadID, file)
+		if file.ID == "" || file.Path == "" || !presentFileExists(file) {
+			return
+		}
+		if _, ok := seen[file.Path]; ok {
+			return
+		}
+		seen[file.Path] = struct{}{}
+		files = append(files, file)
+	}
+	if session.PresentFiles != nil {
+		for _, file := range session.PresentFiles.List() {
+			add(file)
+		}
+	}
+	for _, root := range []struct {
+		dir          string
+		virtual      string
+		markdownOnly bool
+	}{
+		{dir: s.uploadsDir(session.ThreadID), virtual: "/mnt/user-data/uploads", markdownOnly: false},
+		{dir: s.workspaceDir(session.ThreadID), virtual: "/mnt/user-data/workspace", markdownOnly: false},
+		{dir: s.outputsDir(session.ThreadID), virtual: "/mnt/user-data/outputs", markdownOnly: false},
+	} {
+		for _, file := range collectPresentFiles(root.dir, root.virtual, root.markdownOnly) {
+			add(file)
+		}
+	}
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].CreatedAt.Equal(files[j].CreatedAt) {
+			return files[i].Path < files[j].Path
+		}
+		return files[i].CreatedAt.After(files[j].CreatedAt)
+	})
+	return files
+}
+
+func (s *Server) collectArtifactFiles(session *Session) []tools.PresentFile {
+	if session == nil {
+		return nil
+	}
+	files := make([]tools.PresentFile, 0)
+	seen := make(map[string]struct{})
+	addExisting := func(file tools.PresentFile) {
+		file = s.normalizePresentFile(session.ThreadID, file)
+		if file.ID == "" || file.Path == "" || !presentFileExists(file) {
+			return
+		}
+		if _, ok := seen[file.Path]; ok {
+			return
+		}
+		seen[file.Path] = struct{}{}
+		files = append(files, file)
+	}
+	addKnownPath := func(path string) {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return
+		}
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		files = append(files, tools.PresentFile{
+			ID:          autodiscoveredPresentFileID(path),
+			Path:        path,
+			VirtualPath: path,
+			ArtifactURL: artifactURLForThread(session.ThreadID, path),
+			Extension:   strings.ToLower(filepath.Ext(path)),
+		})
+	}
+	if session.PresentFiles != nil {
+		for _, file := range session.PresentFiles.List() {
+			addExisting(file)
+		}
+	}
+	for _, message := range session.Messages {
+		for _, path := range messageArtifactPaths(message) {
+			addKnownPath(path)
+		}
+	}
+	for _, path := range anyStringSlice(session.Metadata["artifacts"]) {
+		addKnownPath(path)
+	}
+	autoFiles := make([]tools.PresentFile, 0)
+	for _, file := range collectPresentFiles(s.outputsDir(session.ThreadID), "/mnt/user-data/outputs", false) {
+		file = s.normalizePresentFile(session.ThreadID, file)
+		if file.ID == "" || file.Path == "" || !presentFileExists(file) {
+			continue
+		}
+		if _, ok := seen[file.Path]; ok {
+			continue
+		}
+		autoFiles = append(autoFiles, file)
+	}
+	for _, file := range collectPresentFiles(s.uploadsDir(session.ThreadID), "/mnt/user-data/uploads", true) {
+		file = s.normalizePresentFile(session.ThreadID, file)
+		if file.ID == "" || file.Path == "" || !presentFileExists(file) {
+			continue
+		}
+		if _, ok := seen[file.Path]; ok {
+			continue
+		}
+		autoFiles = append(autoFiles, file)
+	}
+	sort.Slice(autoFiles, func(i, j int) bool {
+		if autoFiles[i].CreatedAt.Equal(autoFiles[j].CreatedAt) {
+			return autoFiles[i].Path < autoFiles[j].Path
+		}
+		return autoFiles[i].CreatedAt.After(autoFiles[j].CreatedAt)
+	})
+	files = append(files, autoFiles...)
+	return files
+}
+
+func collectPresentFiles(root, virtualPrefix string, markdownOnly bool) []tools.PresentFile {
+	entries := collectArtifactFiles(root, virtualPrefix)
+	files := make([]tools.PresentFile, 0, len(entries))
+	for _, file := range entries {
+		if markdownOnly && !strings.EqualFold(filepath.Ext(file.Path), ".md") {
+			continue
+		}
+		files = append(files, file)
+	}
+	return files
+}
+
+func (s *Server) normalizePresentFile(threadID string, file tools.PresentFile) tools.PresentFile {
+	file.Path = strings.TrimSpace(file.Path)
+	if file.Path == "" {
+		return tools.PresentFile{}
+	}
+	if strings.TrimSpace(file.SourcePath) == "" {
+		file.SourcePath = s.resolveArtifactPath(threadID, file.Path)
+	}
+	if file.ID == "" {
+		file.ID = autodiscoveredPresentFileID(file.Path)
+	}
+	if info, err := os.Stat(file.SourcePath); err == nil {
+		if file.CreatedAt.IsZero() {
+			file.CreatedAt = info.ModTime().UTC()
+		}
+		if file.Size == 0 {
+			file.Size = info.Size()
+		}
+	}
+	if file.MimeType == "" {
+		file.MimeType = detectArtifactMimeType(file.SourcePath)
+	}
+	file.VirtualPath = file.Path
+	file.ArtifactURL = artifactURLForThread(threadID, file.Path)
+	file.Extension = strings.ToLower(filepath.Ext(file.Path))
+	return file
+}
+
+func presentFileExists(file tools.PresentFile) bool {
+	path := strings.TrimSpace(file.SourcePath)
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 func anyStringSlice(v any) []string {
@@ -2231,7 +2945,10 @@ func normalizeThreadValues(raw map[string]any) map[string]any {
 	if len(raw) == 0 {
 		return nil
 	}
-	out := map[string]any{}
+	out := make(map[string]any, len(raw))
+	for key, value := range raw {
+		out[key] = value
+	}
 	for canonicalKey, aliases := range map[string][]string{
 		"title":          {"title"},
 		"todos":          {"todos"},
@@ -2248,9 +2965,6 @@ func normalizeThreadValues(raw map[string]any) map[string]any {
 				break
 			}
 		}
-	}
-	if len(out) == 0 {
-		return nil
 	}
 	return out
 }

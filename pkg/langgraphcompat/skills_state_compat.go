@@ -1,7 +1,6 @@
 package langgraphcompat
 
 import (
-	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -37,12 +36,8 @@ func inferSkillCategory(name string) string {
 	if name == "" {
 		return skillCategoryCustom
 	}
-	if defaults := defaultGatewaySkills(); len(defaults) > 0 {
-		for _, skill := range defaults {
-			if skill.Name == name {
-				return resolveSkillCategory(skill.Category, skillCategoryPublic)
-			}
-		}
+	if category := bundledGatewaySkillCategory(name); category != "" {
+		return category
 	}
 	return skillCategoryCustom
 }
@@ -152,28 +147,22 @@ func findGatewaySkill(skills map[string]gatewaySkill, name, category string) (ga
 }
 
 func defaultGatewaySkills() map[string]gatewaySkill {
-	roots := append([]string(nil), executableRelativeSkillRoots(gatewayExecutablePath)...)
-	roots = append(roots,
-		filepath.Join("third_party", "deerflow-ui", "skills", "public"),
-		filepath.Join("skills", "public"),
-		filepath.Join("skills", "custom"),
-	)
-	seen := make(map[string]struct{}, len(roots))
-	deduped := make([]string, 0, len(roots))
-	for _, root := range roots {
-		root = strings.TrimSpace(root)
-		if root == "" {
-			continue
-		}
-		abs, err := filepath.Abs(root)
-		if err != nil {
-			continue
-		}
-		if _, ok := seen[abs]; ok {
-			continue
-		}
-		seen[abs] = struct{}{}
-		deduped = append(deduped, abs)
+	return map[string]gatewaySkill{
+		skillCategoryPublic + ":deep-research": {
+			Name:        "deep-research",
+			Description: "Research and summarize a topic with structured outputs.",
+			Category:    skillCategoryPublic,
+			License:     "MIT",
+			Enabled:     true,
+		},
 	}
-	return discoverGatewaySkills(deduped)
+}
+
+func bundledGatewaySkillCategory(name string) string {
+	switch sanitizeSkillName(name) {
+	case "deep-research":
+		return skillCategoryPublic
+	default:
+		return ""
+	}
 }

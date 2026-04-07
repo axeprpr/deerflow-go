@@ -302,8 +302,10 @@ func (s *Server) getOrCreateSandbox() (*sandbox.Sandbox, error) {
 
 func (s *Server) registerRoutes(mux *http.ServeMux) {
 	s.registerLangGraphRoutes(mux, "")
+	s.registerLangGraphRoutes(mux, "/api")
 	s.registerLangGraphRoutes(mux, "/api/langgraph")
 	s.registerGatewayRoutes(mux)
+	s.registerDocsRoutes(mux)
 
 	// Health check
 	mux.HandleFunc("GET /health", s.handleHealth)
@@ -314,15 +316,20 @@ func (s *Server) registerLangGraphRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("GET "+prefix+"/runs/{run_id}", s.handleRunGet)
 	mux.HandleFunc("GET "+prefix+"/runs/{run_id}/stream", s.handleRunStream)
 
+	mux.HandleFunc("GET "+prefix+"/threads", s.handleThreadSearch)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}", s.handleThreadGet)
 	mux.HandleFunc("POST "+prefix+"/threads", s.handleThreadCreate)
 	mux.HandleFunc("PATCH "+prefix+"/threads/{thread_id}", s.handleThreadUpdate)
-	mux.HandleFunc("DELETE "+prefix+"/threads/{thread_id}", s.handleThreadDelete)
+	mux.HandleFunc("PUT "+prefix+"/threads/{thread_id}", s.handleThreadUpdate)
+	if prefix != "/api" {
+		mux.HandleFunc("DELETE "+prefix+"/threads/{thread_id}", s.handleThreadDelete)
+	}
 	mux.HandleFunc("POST "+prefix+"/threads/search", s.handleThreadSearch)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/files", s.handleThreadFiles)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/state", s.handleThreadStateGet)
 	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/state", s.handleThreadStatePost)
 	mux.HandleFunc("PATCH "+prefix+"/threads/{thread_id}/state", s.handleThreadStatePatch)
+	mux.HandleFunc("PUT "+prefix+"/threads/{thread_id}/state", s.handleThreadStatePost)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/history", s.handleThreadHistory)
 	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/history", s.handleThreadHistory)
 	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/runs", s.handleThreadRunsCreate)

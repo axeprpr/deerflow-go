@@ -1,6 +1,7 @@
 package langgraphcompat
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -41,6 +42,8 @@ type streamModeFilter struct {
 }
 
 const maxUploadedImageParts = 4
+
+const defaultRunReconnectGrace = 5 * time.Second
 
 func (s *Server) handleRunsStream(w http.ResponseWriter, r *http.Request) {
 	s.handleStreamRequest(w, r, "")
@@ -236,7 +239,13 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		MaxTokens:       runCfg.MaxTokens,
 	})
 
-	ctx := subagent.WithEventSink(r.Context(), func(evt subagent.TaskEvent) {
+	runCtx, cancelRun := context.WithCancel(context.WithoutCancel(r.Context()))
+	defer cancelRun()
+	runDone := make(chan struct{})
+	defer close(runDone)
+	go s.cancelDetachedRunOnClientDisconnect(r.Context(), runID, runDone, cancelRun)
+
+	ctx := subagent.WithEventSink(runCtx, func(evt subagent.TaskEvent) {
 		s.forwardTaskEvent(w, flusher, run, filter, evt)
 	})
 	ctx = clarification.WithThreadID(ctx, threadID)
@@ -315,20 +324,39 @@ func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	s.sessionsMu.RLock()
+	_, exists := s.sessions[threadID]
+	s.sessionsMu.RUnlock()
 	if run == nil {
-		s.sessionsMu.RLock()
-		_, exists := s.sessions[threadID]
-		s.sessionsMu.RUnlock()
 		if !exists {
+			run = s.getLatestRunForThread(threadID)
+		}
+		if run == nil && !exists {
 			http.Error(w, "thread not found", http.StatusNotFound)
 			return
 		}
-		fmt.Fprint(w, ": no active run\n\n")
-		flusher.Flush()
-		return
+		if run == nil {
+			fmt.Fprint(w, ": no active run\n\n")
+			flusher.Flush()
+			return
+		}
 	}
 
 	filter := newStreamModeFilter(streamModeFromQuery(r))
+	replayedEnd := false
+	for _, event := range run.Events {
+		if !filter.allows(event.Event) {
+			continue
+		}
+		s.sendSSEEvent(w, flusher, event)
+		if event.Event == "end" {
+			replayedEnd = true
+		}
+	}
+	flusher.Flush()
+	if replayedEnd || run.Status != "running" {
+		return
+	}
 	s.runsMu.Lock()
 	if s.runStreams == nil {
 		s.runStreams = make(map[string]map[uint64]chan StreamEvent)
@@ -350,13 +378,6 @@ func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) 
 		}
 		s.runsMu.Unlock()
 	}()
-	for _, event := range run.Events {
-		if !filter.allows(event.Event) {
-			continue
-		}
-		s.sendSSEEvent(w, flusher, event)
-	}
-	flusher.Flush()
 	for {
 		event, ok := <-sub
 		if !ok {
@@ -647,8 +668,15 @@ func (s *Server) injectUploadedFilesContext(threadID string, message map[string]
 }
 
 func buildMultiContent(content string, rawContent any, uploadedImageParts []map[string]any) []map[string]any {
-	multi := []map[string]any{{"type": "text", "text": content}}
 	items, _ := rawContent.([]any)
+	if len(items) == 0 && len(uploadedImageParts) == 0 {
+		originalContent := strings.TrimSpace(extractMessageContent(rawContent))
+		if strings.TrimSpace(content) == "" || strings.TrimSpace(content) == originalContent {
+			return nil
+		}
+		return []map[string]any{{"type": "text", "text": content}}
+	}
+	multi := []map[string]any{{"type": "text", "text": content}}
 	originalTextParts := make([]string, 0, len(items))
 	for _, item := range items {
 		part, _ := item.(map[string]any)
@@ -761,23 +789,30 @@ func (s *Server) extractMessageFiles(threadID string, message map[string]any) []
 		}
 		virtualPath := "/mnt/user-data/uploads/" + filename
 		sourcePath := filepath.Join(s.uploadsDir(threadID), filename)
-		if stat, err := os.Stat(sourcePath); err == nil && !stat.IsDir() {
+		stat, err := os.Stat(sourcePath)
+		explicitPath := firstNonEmpty(stringFromAny(item["virtual_path"]), stringFromAny(item["path"]))
+		path := virtualPath
+		if err == nil && !stat.IsDir() {
 			if toInt64(item["size"]) <= 0 {
 				item["size"] = stat.Size()
 			}
+		} else if strings.HasPrefix(explicitPath, "/mnt/user-data/uploads/") {
+			path = explicitPath
 		} else {
 			continue
 		}
-		path := firstNonEmpty(
-			stringFromAny(item["virtual_path"]),
-			virtualPath,
-		)
+		if err == nil && !stat.IsDir() && toInt64(item["size"]) <= 0 {
+			item["size"] = stat.Size()
+		}
 		file := map[string]any{
 			"filename": filename,
 			"size":     toInt64(item["size"]),
 			"path":     path,
 		}
 		if markdownPath := strings.TrimSpace(stringFromAny(firstNonNil(item["markdown_path"], item["markdownPath"]))); markdownPath != "" {
+			if !strings.HasPrefix(markdownPath, "/mnt/user-data/uploads/") {
+				markdownPath = "/mnt/user-data/uploads/" + filepath.Base(markdownPath)
+			}
 			file["markdown_path"] = markdownPath
 		} else if markdownFile := strings.TrimSpace(stringFromAny(firstNonNil(item["markdown_file"], item["markdownFile"]))); markdownFile != "" {
 			file["markdown_path"] = "/mnt/user-data/uploads/" + markdownFile
@@ -850,6 +885,9 @@ func (s *Server) convertRole(langchainRole string) models.Role {
 }
 
 func (s *Server) sendSSEEvent(w http.ResponseWriter, flusher http.Flusher, event StreamEvent) {
+	if w == nil || flusher == nil {
+		return
+	}
 	jsonData, err := json.Marshal(event.Data)
 	if err != nil {
 		return
@@ -913,6 +951,38 @@ func (s *Server) saveSession(threadID string, messages []models.Message) {
 	_ = s.appendThreadHistorySnapshot(threadID)
 }
 
+func compactToolAliasPayload(run *Run, eventName string, toolEvent *agent.ToolCallEvent, includeRuntimeIDs bool) map[string]any {
+	payload := map[string]any{
+		"event": eventName,
+		"name":  toolEvent.Name,
+		"data":  toolEvent,
+	}
+	if includeRuntimeIDs && run != nil {
+		payload["run_id"] = run.RunID
+		payload["thread_id"] = run.ThreadID
+	}
+	return payload
+}
+
+func toolUpdatesPayload(state *ThreadState, extra map[string]any) map[string]any {
+	agentUpdate := map[string]any{}
+	if state != nil {
+		if state.Values != nil {
+			agentUpdate["artifacts"] = state.Values["artifacts"]
+			if messages, ok := state.Values["messages"]; ok {
+				agentUpdate["messages"] = messages
+			}
+			if title, ok := state.Values["title"]; ok {
+				agentUpdate["title"] = title
+			}
+		}
+	}
+	for key, value := range extra {
+		agentUpdate[key] = value
+	}
+	return map[string]any{"agent": agentUpdate}
+}
+
 func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, run *Run, filter streamModeFilter, evt agent.AgentEvent) {
 	switch evt.Type {
 	case agent.AgentEventChunk:
@@ -940,16 +1010,14 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 			return
 		}
 		s.recordAndSendEventFiltered(w, flusher, run, filter, "tool_call_start", evt.ToolEvent)
+		s.recordAndSendEventFiltered(w, flusher, run, filter, "events", compactToolAliasPayload(run, "on_tool_start", evt.ToolEvent, true))
 	case agent.AgentEventToolCallEnd:
 		if evt.ToolEvent == nil {
 			return
 		}
 		s.recordAndSendEventFiltered(w, flusher, run, filter, "tool_call_end", evt.ToolEvent)
-		s.recordAndSendEventFiltered(w, flusher, run, filter, "on_tool_end", map[string]any{
-			"event": "on_tool_end",
-			"name":  evt.ToolEvent.Name,
-			"data":  evt.ToolEvent,
-		})
+		s.recordAndSendEventFiltered(w, flusher, run, filter, "events", compactToolAliasPayload(run, "on_tool_end", evt.ToolEvent, true))
+		s.recordAndSendEventFiltered(w, flusher, run, filter, "on_tool_end", compactToolAliasPayload(nil, "on_tool_end", evt.ToolEvent, false))
 		s.recordAndSendEventFiltered(w, flusher, run, filter, "messages-tuple", Message{
 			Type:       "tool",
 			ID:         toolMessageID(evt.ToolEvent.ID),
@@ -964,6 +1032,37 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 				"error":          evt.ToolEvent.Error,
 			},
 		})
+		state := s.getThreadState(run.ThreadID)
+		toolName := strings.TrimSpace(strings.ToLower(resolvedToolNameForArtifacts(evt)))
+		if toolName == "setup_agent" && evt.Result != nil && evt.Result.Status == models.CallStatusCompleted {
+			if state != nil {
+				if createdAgent := stringFromAny(state.Values["created_agent_name"]); createdAgent != "" {
+					s.recordAndSendEventFiltered(w, flusher, run, filter, "updates", toolUpdatesPayload(state, map[string]any{
+						"created_agent_name": createdAgent,
+					}))
+				}
+			}
+		}
+		if toolName == "present_files" || toolName == "present_file" || toolMayAffectArtifacts(toolName) {
+			s.recordAndSendEventFiltered(w, flusher, run, filter, "updates", toolUpdatesPayload(state, nil))
+		}
+	case agent.AgentEventEnd:
+		msg := Message{
+			Type:    "ai",
+			ID:      evt.MessageID,
+			Role:    "assistant",
+			Content: rewriteArtifactLinksInText(run.ThreadID, evt.Text),
+		}
+		if msg.Content == nil {
+			msg.Content = ""
+		}
+		if evt.Usage != nil {
+			msg.UsageMetadata = usageMetadataMap(evt.Usage)
+		}
+		if additionalKwargs := additionalKwargsFromMessageMetadata(evt.Metadata); len(additionalKwargs) > 0 {
+			msg.AdditionalKwargs = additionalKwargs
+		}
+		s.recordAndSendEventFiltered(w, flusher, run, filter, "messages-tuple", msg)
 	case agent.AgentEventError:
 		errData := map[string]any{
 			"error":   "RunError",
@@ -995,14 +1094,69 @@ func (s *Server) emitFinalMessagesTuple(w http.ResponseWriter, flusher http.Flus
 
 func (s *Server) forwardTaskEvent(w http.ResponseWriter, flusher http.Flusher, run *Run, filter streamModeFilter, evt subagent.TaskEvent) {
 	data := map[string]any{
-		"type":        evt.Type,
-		"task_id":     evt.TaskID,
-		"description": evt.Description,
-		"message":     evt.Message,
-		"result":      evt.Result,
-		"error":       evt.Error,
+		"type":           evt.Type,
+		"task_id":        evt.TaskID,
+		"request_id":     evt.RequestID,
+		"description":    evt.Description,
+		"message":        evt.Message,
+		"message_index":  evt.MessageIndex,
+		"total_messages": evt.TotalMessages,
+		"result":         evt.Result,
+		"error":          evt.Error,
 	}
 	s.recordAndSendEventFiltered(w, flusher, run, filter, evt.Type, data)
+}
+
+func runReconnectGrace() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("DEERFLOW_RUN_RECONNECT_GRACE"))
+	if raw == "" {
+		return defaultRunReconnectGrace
+	}
+	grace, err := time.ParseDuration(raw)
+	if err != nil || grace <= 0 {
+		return defaultRunReconnectGrace
+	}
+	return grace
+}
+
+func (s *Server) cancelDetachedRunOnClientDisconnect(clientCtx context.Context, runID string, runDone <-chan struct{}, cancel context.CancelFunc) {
+	if clientCtx == nil || cancel == nil {
+		return
+	}
+	select {
+	case <-runDone:
+		return
+	case <-clientCtx.Done():
+	}
+
+	timer := time.NewTimer(runReconnectGrace())
+	defer timer.Stop()
+
+	select {
+	case <-runDone:
+		return
+	case <-timer.C:
+	}
+
+	if s.runHasJoinSubscribers(runID) {
+		return
+	}
+	if run := s.getRun(runID); run == nil {
+		return
+	} else {
+		switch strings.ToLower(strings.TrimSpace(run.Status)) {
+		case "", "running", "queued", "busy":
+		default:
+			return
+		}
+	}
+	cancel()
+}
+
+func (s *Server) runHasJoinSubscribers(runID string) bool {
+	s.runsMu.RLock()
+	defer s.runsMu.RUnlock()
+	return len(s.runStreams[runID]) > 0
 }
 
 func newStreamModeFilter(raw any) streamModeFilter {

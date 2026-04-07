@@ -78,14 +78,41 @@ func executableRelativeSkillRoots(resolveExe func() (string, error)) []string {
 func discoverGatewaySkills(roots []string) map[string]gatewaySkill {
 	discovered := map[string]gatewaySkill{}
 	for _, root := range roots {
-		for _, category := range []string{skillCategoryPublic, skillCategoryCustom} {
-			categoryRoot := filepath.Join(root, category)
-			for key, skill := range scanGatewaySkillCategory(categoryRoot, category) {
+		for _, candidate := range gatewaySkillCategoryRoots(root) {
+			for key, skill := range scanGatewaySkillCategory(candidate.Path, candidate.Category) {
 				discovered[key] = skill
 			}
 		}
 	}
 	return discovered
+}
+
+type gatewaySkillScanRoot struct {
+	Path     string
+	Category string
+}
+
+func gatewaySkillCategoryRoots(root string) []gatewaySkillScanRoot {
+	root = filepath.Clean(strings.TrimSpace(root))
+	if root == "" {
+		return nil
+	}
+	if category := normalizeSkillCategory(filepath.Base(root)); category != "" {
+		return []gatewaySkillScanRoot{{
+			Path:     root,
+			Category: category,
+		}}
+	}
+	return []gatewaySkillScanRoot{
+		{
+			Path:     filepath.Join(root, skillCategoryPublic),
+			Category: skillCategoryPublic,
+		},
+		{
+			Path:     filepath.Join(root, skillCategoryCustom),
+			Category: skillCategoryCustom,
+		},
+	}
 }
 
 func scanGatewaySkillCategory(root, category string) map[string]gatewaySkill {
@@ -110,7 +137,7 @@ func (s *Server) loadGatewaySkillBody(name, category string) (string, bool) {
 	bodies := map[string]string{}
 	for _, candidateCategory := range preferredSkillCategories(category) {
 		for _, root := range s.gatewaySkillRoots() {
-			content, ok := loadGatewaySkillBodyFromCategory(filepath.Join(root, candidateCategory), normalizedName)
+			content, ok := loadGatewaySkillBodyFromCategory(resolveGatewaySkillCategoryRoot(root, candidateCategory), normalizedName)
 			if ok {
 				bodies[candidateCategory] = content
 			}
@@ -136,6 +163,17 @@ func preferredSkillCategories(category string) []string {
 		return []string{normalized}
 	}
 	return []string{skillCategoryCustom, skillCategoryPublic}
+}
+
+func resolveGatewaySkillCategoryRoot(root, category string) string {
+	root = filepath.Clean(strings.TrimSpace(root))
+	if root == "" {
+		return ""
+	}
+	if normalizeSkillCategory(filepath.Base(root)) == category {
+		return root
+	}
+	return filepath.Join(root, category)
 }
 
 func loadGatewaySkillBodyFromCategory(root, skillName string) (string, bool) {
