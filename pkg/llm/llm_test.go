@@ -242,3 +242,45 @@ func TestNormalizeAssistantMessage_UsesThinkContentWhenVisibleAnswerWouldBeEmpty
 		t.Fatal("expected HasReasoningContent to detect reasoning-only message")
 	}
 }
+
+func TestToEinoToolCalls_NormalizesAndSkipsInvalidCalls(t *testing.T) {
+	calls := []models.ToolCall{
+		{
+			Name:      "write_file",
+			Arguments: map[string]any{"path": "index.html"},
+			Status:    models.CallStatusPending,
+		},
+		{
+			ID:     "",
+			Name:   "",
+			Status: models.CallStatusPending,
+		},
+	}
+
+	got := toEinoToolCalls(calls)
+	if len(got) != 1 {
+		t.Fatalf("len(toEinoToolCalls()) = %d, want 1", len(got))
+	}
+	if got[0].ID == "" {
+		t.Fatal("normalized tool call id should not be empty")
+	}
+	if got[0].Function.Name != "write_file" {
+		t.Fatalf("tool name = %q, want write_file", got[0].Function.Name)
+	}
+}
+
+func TestToEinoMessage_SkipsInvalidToolMessages(t *testing.T) {
+	msg := models.Message{
+		ID:        "tool_1",
+		SessionID: "session_1",
+		Role:      models.RoleTool,
+		ToolResult: &models.ToolResult{
+			Status: models.CallStatusFailed,
+			Error:  "bad tool result",
+		},
+	}
+
+	if got := toEinoMessage(msg); got != nil {
+		t.Fatal("toEinoMessage() should skip invalid tool messages")
+	}
+}

@@ -157,7 +157,9 @@ func (p *EinoProvider) prepareRequest(req ChatRequest) ([]*einoSchema.Message, [
 		})
 	}
 	for _, msg := range req.Messages {
-		msgs = append(msgs, toEinoMessage(msg))
+		if einoMsg := toEinoMessage(msg); einoMsg != nil {
+			msgs = append(msgs, einoMsg)
+		}
 	}
 
 	opts := make([]einoModel.Option, 0, 4)
@@ -240,19 +242,29 @@ func toEinoMessage(msg models.Message) *einoSchema.Message {
 	case models.RoleTool:
 		out.Role = einoSchema.Tool
 		if msg.ToolResult != nil {
-			out.ToolCallID = msg.ToolResult.CallID
-			out.ToolName = msg.ToolResult.ToolName
+			normalized, ok := models.NormalizeToolResult(*msg.ToolResult)
+			if !ok {
+				return nil
+			}
+			out.ToolCallID = normalized.CallID
+			out.ToolName = normalized.ToolName
 			if out.Content == "" {
-				if msg.ToolResult.Error != "" {
-					out.Content = msg.ToolResult.Error
+				if normalized.Error != "" {
+					out.Content = normalized.Error
 				} else {
-					out.Content = msg.ToolResult.Content
+					out.Content = normalized.Content
 				}
 			}
 		}
 	default:
 		out.Role = einoSchema.Assistant
 		out.ToolCalls = toEinoToolCalls(msg.ToolCalls)
+	}
+	if out.Role == einoSchema.Assistant && strings.TrimSpace(out.Content) == "" && len(out.ToolCalls) == 0 {
+		return nil
+	}
+	if out.Role == einoSchema.Tool && msg.ToolResult == nil {
+		return nil
 	}
 
 	return out
@@ -348,12 +360,16 @@ func fromEinoMessage(msg *einoSchema.Message) models.Message {
 func toEinoToolCalls(calls []models.ToolCall) []einoSchema.ToolCall {
 	out := make([]einoSchema.ToolCall, 0, len(calls))
 	for _, call := range calls {
-		raw, _ := json.Marshal(call.Arguments)
+		normalized, ok := models.NormalizeToolCall(call)
+		if !ok {
+			continue
+		}
+		raw, _ := json.Marshal(normalized.Arguments)
 		out = append(out, einoSchema.ToolCall{
-			ID:   call.ID,
+			ID:   normalized.ID,
 			Type: "function",
 			Function: einoSchema.FunctionCall{
-				Name:      call.Name,
+				Name:      normalized.Name,
 				Arguments: string(raw),
 			},
 		})
@@ -368,12 +384,16 @@ func fromEinoToolCalls(calls []einoSchema.ToolCall) []models.ToolCall {
 		if strings.TrimSpace(call.Function.Arguments) != "" {
 			_ = json.Unmarshal([]byte(call.Function.Arguments), &args)
 		}
-		out = append(out, models.ToolCall{
+		normalized, ok := models.NormalizeToolCall(models.ToolCall{
 			ID:        call.ID,
 			Name:      call.Function.Name,
 			Arguments: args,
 			Status:    models.CallStatusPending,
 		})
+		if !ok {
+			continue
+		}
+		out = append(out, normalized)
 	}
 	return out
 }

@@ -569,7 +569,7 @@ func TestPatchDanglingToolCallsInsertsMissingToolResults(t *testing.T) {
 	if patched[2].ToolResult.Status != models.CallStatusFailed {
 		t.Fatalf("status=%q want failed", patched[2].ToolResult.Status)
 	}
-	if patched[2].Content != "[Tool call was interrupted and did not return a result.]" {
+	if !strings.Contains(patched[2].Content, "[Tool call was interrupted and did not return a result.]") {
 		t.Fatalf("content=%q", patched[2].Content)
 	}
 }
@@ -651,6 +651,58 @@ func TestAgentRunPatchesDanglingToolCallsBeforeModelInvocation(t *testing.T) {
 	}
 	if result.FinalOutput != "Recovered after patch." {
 		t.Fatalf("FinalOutput=%q", result.FinalOutput)
+	}
+}
+
+func TestAgentRunNormalizesMalformedToolHistory(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name: "write_file",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path": map[string]any{"type": "string"},
+			},
+			"required": []string{"path"},
+		},
+		Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) {
+			return models.ToolResult{}, nil
+		},
+	}); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	provider := &toolHistoryProvider{t: t}
+	runAgent := New(AgentConfig{
+		LLMProvider: provider,
+		Tools:       registry,
+		MaxTurns:    2,
+	})
+
+	result, err := runAgent.Run(context.Background(), "session_1", []models.Message{
+		{ID: "m1", SessionID: "session_1", Role: models.RoleHuman, Content: "帮我生成一个小鱼游泳的页面"},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got := result.FinalOutput; got != "done" {
+		t.Fatalf("FinalOutput = %q, want done", got)
+	}
+	if provider.calls != 2 {
+		t.Fatalf("provider calls = %d, want 2", provider.calls)
+	}
+}
+
+func TestToolMessageContentFormatsError(t *testing.T) {
+	content := toolMessageContent(models.ToolResult{
+		ToolName: "write_file",
+		Error:    `missing required argument "path"`,
+	})
+	if !strings.Contains(content, "write_file") {
+		t.Fatalf("formatted tool error = %q, want tool name", content)
+	}
+	if !strings.Contains(content, "Continue with available context") {
+		t.Fatalf("formatted tool error = %q, want continuation hint", content)
 	}
 }
 
@@ -1238,4 +1290,87 @@ func toolNames(items []models.Tool) []string {
 		names = append(names, tool.Name)
 	}
 	return names
+}
+
+type toolHistoryProvider struct {
+	t     *testing.T
+	calls int
+}
+
+func (p *toolHistoryProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, nil
+}
+
+func (p *toolHistoryProvider) Stream(_ context.Context, req llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	p.calls++
+	ch := make(chan llm.StreamChunk, 1)
+
+	go func() {
+		defer close(ch)
+		switch p.calls {
+		case 1:
+			ch <- llm.StreamChunk{
+				Done: true,
+				Message: &models.Message{
+					ToolCalls: []models.ToolCall{
+						{
+							ID:        "call_valid",
+							Name:      "write_file",
+							Arguments: map[string]any{"content": "<html></html>"},
+							Status:    models.CallStatusPending,
+						},
+						{
+							ID:     "",
+							Name:   "",
+							Status: models.CallStatusPending,
+						},
+					},
+				},
+			}
+		case 2:
+			if len(req.Messages) != 3 {
+				p.t.Errorf("second request messages = %d, want 3", len(req.Messages))
+			}
+			if len(req.Messages) >= 2 {
+				assistant := req.Messages[1]
+				if len(assistant.ToolCalls) != 1 {
+					p.t.Errorf("assistant tool calls = %d, want 1", len(assistant.ToolCalls))
+				}
+				if len(assistant.ToolCalls) == 1 {
+					call := assistant.ToolCalls[0]
+					if call.ID != "call_valid" {
+						p.t.Errorf("assistant tool call id = %q, want call_valid", call.ID)
+					}
+					if call.Name != "write_file" {
+						p.t.Errorf("assistant tool call name = %q, want write_file", call.Name)
+					}
+				}
+			}
+			if len(req.Messages) >= 3 {
+				toolMsg := req.Messages[2]
+				if toolMsg.ToolResult == nil {
+					p.t.Fatalf("tool result missing from history")
+				}
+				if toolMsg.ToolResult.CallID != "call_valid" {
+					p.t.Errorf("tool result call id = %q, want call_valid", toolMsg.ToolResult.CallID)
+				}
+				if toolMsg.ToolResult.ToolName != "write_file" {
+					p.t.Errorf("tool result tool name = %q, want write_file", toolMsg.ToolResult.ToolName)
+				}
+				if !strings.Contains(toolMsg.ToolResult.Error, `missing required argument "path"`) {
+					p.t.Errorf("tool result error = %q, want missing path", toolMsg.ToolResult.Error)
+				}
+			}
+			ch <- llm.StreamChunk{
+				Done: true,
+				Message: &models.Message{
+					Content: "done",
+				},
+			}
+		default:
+			p.t.Fatalf("unexpected stream call %d", p.calls)
+		}
+	}()
+
+	return ch, nil
 }

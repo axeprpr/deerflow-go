@@ -150,12 +150,12 @@ func TestMessage_Validate(t *testing.T) {
 
 func TestMessage_JSON(t *testing.T) {
 	msg := Message{
-		ID:         "msg_123",
-		SessionID:  "sess_456",
-		Role:       RoleHuman,
-		Content:    "Test content",
-		Metadata:   map[string]string{"key": "value"},
-		CreatedAt:  time.Now(),
+		ID:        "msg_123",
+		SessionID: "sess_456",
+		Role:      RoleHuman,
+		Content:   "Test content",
+		Metadata:  map[string]string{"key": "value"},
+		CreatedAt: time.Now(),
 	}
 
 	data, err := json.Marshal(msg)
@@ -189,10 +189,10 @@ func TestToolCall_Validate(t *testing.T) {
 		{
 			name: "valid tool call",
 			call: ToolCall{
-				ID:       "call_123",
-				Name:     "test",
+				ID:        "call_123",
+				Name:      "test",
 				Arguments: map[string]any{"key": "value"},
-				Status:   CallStatusPending,
+				Status:    CallStatusPending,
 			},
 			wantErr: false,
 		},
@@ -243,6 +243,44 @@ func TestToolCall_Validate(t *testing.T) {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestNormalizeToolCall(t *testing.T) {
+	call, ok := NormalizeToolCall(ToolCall{
+		Name:      "write_file",
+		Arguments: map[string]any{"path": "index.html"},
+	})
+	if !ok {
+		t.Fatal("NormalizeToolCall() = false, want true")
+	}
+	if call.ID == "" {
+		t.Fatal("NormalizeToolCall() should synthesize an id")
+	}
+	if call.Status != CallStatusPending {
+		t.Fatalf("NormalizeToolCall() status = %q, want pending", call.Status)
+	}
+
+	if _, ok := NormalizeToolCall(ToolCall{}); ok {
+		t.Fatal("NormalizeToolCall() should reject nameless calls")
+	}
+}
+
+func TestNormalizeToolResult(t *testing.T) {
+	result, ok := NormalizeToolResult(ToolResult{
+		CallID:   "call_1",
+		ToolName: "write_file",
+		Error:    "failed",
+	})
+	if !ok {
+		t.Fatal("NormalizeToolResult() = false, want true")
+	}
+	if result.Status != CallStatusFailed {
+		t.Fatalf("NormalizeToolResult() status = %q, want failed", result.Status)
+	}
+
+	if _, ok := NormalizeToolResult(ToolResult{ToolName: "write_file"}); ok {
+		t.Fatal("NormalizeToolResult() should reject empty call id")
 	}
 }
 
@@ -318,11 +356,11 @@ func TestToolResult_Validate(t *testing.T) {
 		{
 			name: "negative duration",
 			result: ToolResult{
-				CallID:    "call_123",
-				ToolName:  "test",
-				Status:    CallStatusCompleted,
-				Content:   "ok",
-				Duration:  -1,
+				CallID:   "call_123",
+				ToolName: "test",
+				Status:   CallStatusCompleted,
+				Content:  "ok",
+				Duration: -1,
 			},
 			wantErr: true,
 		},

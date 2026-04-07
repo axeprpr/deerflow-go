@@ -238,6 +238,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			accumulateUsage(usage, streamUsage)
 		}
 		toolCalls = truncateTaskToolCalls(toolCalls, a.maxConcurrentSubagents)
+		toolCalls = normalizeToolCalls(toolCalls)
 
 		assistantMetadata := map[string]string{"stop_reason": stopReason}
 		if streamUsage != nil {
@@ -803,10 +804,17 @@ func hashToolCalls(calls []models.ToolCall) string {
 	}
 	normalized := make([]normalizedToolCall, 0, len(calls))
 	for _, call := range calls {
+		call, ok := models.NormalizeToolCall(call)
+		if !ok {
+			continue
+		}
 		normalized = append(normalized, normalizedToolCall{
 			Name: call.Name,
 			Args: call.Arguments,
 		})
+	}
+	if len(normalized) == 0 {
+		return ""
 	}
 	sort.Slice(normalized, func(i, j int) bool {
 		if normalized[i].Name != normalized[j].Name {
@@ -1032,23 +1040,27 @@ func mergeToolCalls(existing, incoming []models.ToolCall) []models.ToolCall {
 
 	indexByID := make(map[string]int, len(existing))
 	for i, call := range existing {
-		indexByID[call.ID] = i
+		if callID := strings.TrimSpace(call.ID); callID != "" {
+			indexByID[callID] = i
+		}
 	}
 
 	for _, call := range incoming {
-		if idx, ok := indexByID[call.ID]; ok {
-			if existing[idx].Name == "" {
-				existing[idx].Name = call.Name
+		if callID := strings.TrimSpace(call.ID); callID != "" {
+			if idx, ok := indexByID[callID]; ok {
+				if existing[idx].Name == "" {
+					existing[idx].Name = call.Name
+				}
+				if len(call.Arguments) > 0 {
+					existing[idx].Arguments = call.Arguments
+				}
+				if call.Status != "" {
+					existing[idx].Status = call.Status
+				}
+				continue
 			}
-			if len(call.Arguments) > 0 {
-				existing[idx].Arguments = call.Arguments
-			}
-			if call.Status != "" {
-				existing[idx].Status = call.Status
-			}
-			continue
+			indexByID[callID] = len(existing)
 		}
-		indexByID[call.ID] = len(existing)
 		existing = append(existing, call)
 	}
 
@@ -1065,9 +1077,8 @@ func patchDanglingToolCalls(messages []models.Message) []models.Message {
 		if msg.Role != models.RoleTool || msg.ToolResult == nil {
 			continue
 		}
-		callID := strings.TrimSpace(msg.ToolResult.CallID)
-		if callID != "" {
-			existingResults[callID] = struct{}{}
+		if result, ok := models.NormalizeToolResult(*msg.ToolResult); ok {
+			existingResults[result.CallID] = struct{}{}
 		}
 	}
 
@@ -1076,6 +1087,13 @@ func patchDanglingToolCalls(messages []models.Message) []models.Message {
 	needsPatch := false
 
 	for _, msg := range messages {
+		if msg.Role == models.RoleAI && len(msg.ToolCalls) > 0 {
+			normalized := normalizeToolCalls(msg.ToolCalls)
+			if len(normalized) != len(msg.ToolCalls) {
+				needsPatch = true
+			}
+			msg.ToolCalls = normalized
+		}
 		patched = append(patched, msg)
 		if msg.Role != models.RoleAI || len(msg.ToolCalls) == 0 {
 			continue
@@ -1137,9 +1155,38 @@ func cloneUsage(src *Usage) *Usage {
 
 func toolMessageContent(result models.ToolResult) string {
 	if result.Error != "" {
-		return result.Error
+		detail := strings.TrimSpace(result.Error)
+		if len(detail) > 500 {
+			detail = detail[:497] + "..."
+		}
+		toolName := strings.TrimSpace(result.ToolName)
+		if toolName == "" {
+			toolName = "unknown_tool"
+		}
+		return fmt.Sprintf("Error: Tool '%s' failed: %s. Continue with available context, or choose an alternative tool.", toolName, detail)
 	}
 	return result.Content
+}
+
+func normalizeToolCalls(calls []models.ToolCall) []models.ToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+
+	out := make([]models.ToolCall, 0, len(calls))
+	seen := make(map[string]struct{}, len(calls))
+	for _, call := range calls {
+		normalized, ok := models.NormalizeToolCall(call)
+		if !ok {
+			continue
+		}
+		if _, exists := seen[normalized.ID]; exists {
+			continue
+		}
+		seen[normalized.ID] = struct{}{}
+		out = append(out, normalized)
+	}
+	return out
 }
 
 func preserveToolFailureResult(call models.ToolCall, result models.ToolResult, err error) models.ToolResult {
