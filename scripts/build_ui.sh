@@ -153,6 +153,8 @@ export default function Page() {
 }
 PATCH
 
+perl -0pi -e 's/<Header \/>/<Header locale="en-US" \/>/' "$WORK_DIR/src/app/page.tsx"
+
 mv "$WORK_DIR/src/app/workspace/agents/[agent_name]/chats/[thread_id]/page.tsx" \
   "$WORK_DIR/src/app/workspace/agents/[agent_name]/chats/[thread_id]/client-page.tsx"
 cat > "$WORK_DIR/src/app/workspace/agents/[agent_name]/chats/[thread_id]/page.tsx" <<'PATCH'
@@ -208,6 +210,40 @@ export default function Page() {
   );
 }
 PATCH
+
+rm -rf "$WORK_DIR/src/app/[lang]"
+
+for lang in en zh; do
+  mkdir -p "$WORK_DIR/src/app/$lang/docs"
+  cat > "$WORK_DIR/src/app/$lang/docs/page.tsx" <<'PATCH'
+import Link from "next/link";
+
+export default function DocsPage() {
+  return (
+    <main className="mx-auto flex min-h-screen max-w-3xl flex-col justify-center gap-4 px-8">
+      <h1 className="text-3xl font-semibold">DeerFlow Docs</h1>
+      <p className="text-muted-foreground">
+        The embedded Go build serves the DeerFlow workspace UI. Full upstream
+        docs are available in the DeerFlow repository.
+      </p>
+      <div className="flex gap-4">
+        <Link className="underline" href="/workspace">
+          Open workspace
+        </Link>
+        <a
+          className="underline"
+          href="https://github.com/bytedance/deer-flow/tree/main/frontend/src/content"
+          rel="noopener noreferrer"
+          target="_blank"
+        >
+          View upstream docs
+        </a>
+      </div>
+    </main>
+  );
+}
+PATCH
+done
 
 if command -v pnpm >/dev/null 2>&1; then
   PNPM_BIN=(pnpm)

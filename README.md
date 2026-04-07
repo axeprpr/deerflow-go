@@ -123,7 +123,11 @@ DEFAULT_LLM_MODEL=qwen/Qwen3.5-9B
 docker compose up -d --build api db
 ```
 
-If you also have `../deerflow-ui/frontend`, you can start the optional UI service too:
+Initialize the upstream DeerFlow UI submodule before starting the optional UI service:
+
+```bash
+git submodule update --init --recursive third_party/deerflow-ui
+```
 
 ```bash
 docker compose up -d --build api db ui
@@ -149,7 +153,7 @@ Current `docker-compose.yml` ships with:
 
 - `api`: Go API server on `:8080`
 - `db`: PostgreSQL 16 for checkpoints and memory
-- `ui`: optional DeerFlow UI dev container mounted from `../deerflow-ui/frontend`
+- `ui`: optional upstream DeerFlow UI dev container mounted from `third_party/deerflow-ui/frontend`
 
 Minimum deployment:
 
@@ -158,9 +162,10 @@ cp .env.example .env
 docker compose up -d --build api db
 ```
 
-Optional full stack with adjacent frontend checkout:
+Optional full stack with the UI submodule:
 
 ```bash
+git submodule update --init --recursive third_party/deerflow-ui
 docker compose up -d --build api db ui
 ```
 
