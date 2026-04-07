@@ -11,7 +11,5 @@ langgraph
 pkg/langgraphcompat/threads/
 .tmp/
 dist/
-internal/webui/dist/*
-!internal/webui/dist/placeholder.txt
 
 pkg/langgraphcompat/threads/

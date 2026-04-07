@@ -11,8 +11,6 @@ BIN_DIR="$REPO_ROOT/bin"
 
 mkdir -p "$DIST_DIR" "$BIN_DIR"
 
-DEERFLOW_UI_DIR="${DEERFLOW_UI_DIR:-${UI_DIR:-}}" "$REPO_ROOT/scripts/build_ui.sh"
-
 build_target() {
   local goos="$1"
   local goarch="$2"

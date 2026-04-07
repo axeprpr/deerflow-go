@@ -3,7 +3,6 @@ package langgraphcompat
 import (
 	"context"
 	"errors"
-	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -28,46 +27,45 @@ import (
 // Implements the endpoints expected by @langchain/langgraph-sdk
 
 type Server struct {
-	httpServer   *http.Server
-	logger       *log.Logger
-	llmProvider  llm.LLMProvider
-	tools        *tools.Registry
-	sandbox      *sandbox.Sandbox
-	sandboxName  string
-	sandboxRoot  string
-	subagents    *subagent.Pool
-	clarify      *clarification.Manager
-	clarifyAPI   *clarification.API
-	defaultModel string
-	maxTurns     int
-	store        checkpoint.Store
-	startedAt    time.Time
-	sessions     map[string]*Session
-	sessionsMu   sync.RWMutex
-	runs         map[string]*Run
-	runsMu       sync.RWMutex
-	runStreams   map[string]map[uint64]chan StreamEvent
-	dataRoot     string
-	uiStateMu    sync.RWMutex
-	models       map[string]gatewayModel
-	skills       map[string]gatewaySkill
-	mcpConfig    gatewayMCPConfig
-	agents       map[string]gatewayAgent
-	userProfile  string
-	memory       gatewayMemoryResponse
-	memoryConfig gatewayMemoryConfig
-	memoryStore  memory.Storage
-	frontendFS   fs.FS
-	channelMu    sync.Mutex
-	channelService *gatewayChannelService
-	channelConfig  gatewayChannelsConfig
-	compatFSManaged bool
-	mcpMu          sync.Mutex
-	mcpConnector   gatewayMCPConnector
-	mcpClients     map[string]gatewayMCPClient
-	mcpToolNames   map[string]struct{}
+	httpServer       *http.Server
+	logger           *log.Logger
+	llmProvider      llm.LLMProvider
+	tools            *tools.Registry
+	sandbox          *sandbox.Sandbox
+	sandboxName      string
+	sandboxRoot      string
+	subagents        *subagent.Pool
+	clarify          *clarification.Manager
+	clarifyAPI       *clarification.API
+	defaultModel     string
+	maxTurns         int
+	store            checkpoint.Store
+	startedAt        time.Time
+	sessions         map[string]*Session
+	sessionsMu       sync.RWMutex
+	runs             map[string]*Run
+	runsMu           sync.RWMutex
+	runStreams       map[string]map[uint64]chan StreamEvent
+	dataRoot         string
+	uiStateMu        sync.RWMutex
+	models           map[string]gatewayModel
+	skills           map[string]gatewaySkill
+	mcpConfig        gatewayMCPConfig
+	agents           map[string]gatewayAgent
+	userProfile      string
+	memory           gatewayMemoryResponse
+	memoryConfig     gatewayMemoryConfig
+	memoryStore      memory.Storage
+	channelMu        sync.Mutex
+	channelService   *gatewayChannelService
+	channelConfig    gatewayChannelsConfig
+	compatFSManaged  bool
+	mcpMu            sync.Mutex
+	mcpConnector     gatewayMCPConnector
+	mcpClients       map[string]gatewayMCPClient
+	mcpToolNames     map[string]struct{}
 	mcpDeferredTools []models.Tool
-	channels     gatewayChannelsStatus
+	channels         gatewayChannelsStatus
 }
 
 type HealthStatus struct {
@@ -168,12 +166,6 @@ type StreamEvent struct {
 
 type ServerOption func(*Server)
 
-func WithFrontendFS(frontend fs.FS) ServerOption {
-	return func(s *Server) {
-		s.frontendFS = frontend
-	}
-}
-
 func NewServer(addr string, dbURL string, defaultModel string, options ...ServerOption) (*Server, error) {
 	logger := log.Default()
 	ctx := context.Background()
@@ -213,31 +205,31 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	}
 
 	s := &Server{
-		logger:       logger,
-		llmProvider:  provider,
-		tools:        registry,
-		sandbox:      nil,
-		sandboxName:  "langgraph",
-		sandboxRoot:  sandboxRoot,
-		subagents:    subagentPool,
-		clarify:      clarifyManager,
-		clarifyAPI:   clarification.NewAPI(clarifyManager),
-		defaultModel: defaultModel,
-		maxTurns:     8,
-		store:        store,
-		startedAt:    time.Now().UTC(),
-		sessions:     make(map[string]*Session),
-		runs:         make(map[string]*Run),
-		runStreams:   make(map[string]map[uint64]chan StreamEvent),
-		dataRoot:     dataRootAbs,
-		models:       defaultGatewayModels(defaultModel),
-		skills:       nil,
-		mcpConfig:    defaultGatewayMCPConfig(),
-		agents:       map[string]gatewayAgent{},
-		memory:       defaultGatewayMemory(),
-		memoryConfig: defaultGatewayMemoryConfig(dataRootAbs),
+		logger:        logger,
+		llmProvider:   provider,
+		tools:         registry,
+		sandbox:       nil,
+		sandboxName:   "langgraph",
+		sandboxRoot:   sandboxRoot,
+		subagents:     subagentPool,
+		clarify:       clarifyManager,
+		clarifyAPI:    clarification.NewAPI(clarifyManager),
+		defaultModel:  defaultModel,
+		maxTurns:      8,
+		store:         store,
+		startedAt:     time.Now().UTC(),
+		sessions:      make(map[string]*Session),
+		runs:          make(map[string]*Run),
+		runStreams:    make(map[string]map[uint64]chan StreamEvent),
+		dataRoot:      dataRootAbs,
+		models:        defaultGatewayModels(defaultModel),
+		skills:        nil,
+		mcpConfig:     defaultGatewayMCPConfig(),
+		agents:        map[string]gatewayAgent{},
+		memory:        defaultGatewayMemory(),
+		memoryConfig:  defaultGatewayMemoryConfig(dataRootAbs),
 		channelConfig: gatewayChannelsConfig{},
-		channels:     defaultGatewayChannelsStatus(),
+		channels:      defaultGatewayChannelsStatus(),
 	}
 	s.skills = s.discoverGatewaySkills(nil)
 	for _, option := range options {
@@ -256,7 +248,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 
 	s.httpServer = &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: wrapCORS(mux),
 	}
 
 	return s, nil
@@ -315,7 +307,6 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	// Health check
 	mux.HandleFunc("GET /health", s.handleHealth)
-	mux.HandleFunc("/", s.handleEmbeddedUI)
 }
 
 func (s *Server) registerLangGraphRoutes(mux *http.ServeMux, prefix string) {

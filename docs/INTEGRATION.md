@@ -19,7 +19,7 @@ This path gets a local server running in about five minutes.
 
 ### 1. Prerequisites
 
-- Go 1.23+
+- Go 1.25+
 - A SiliconFlow API key
 - Optional: SQLite for single-file local persistence or PostgreSQL 16+ for external persistence
 
@@ -54,26 +54,18 @@ make build
 make run
 ```
 
-For a single self-contained binary with the frontend embedded:
-
-```bash
-# Recommended: add deerflow-ui as a git submodule under third_party/deerflow-ui
-make build-release
-```
-
-You can also point at an existing checkout:
-
-```bash
-make build-release UI_DIR=/abs/path/to/deerflow-ui/frontend
-```
-
 Or run directly:
 
 ```bash
 go run ./cmd/langgraph --addr :8080
 ```
 
-The server listens on `http://localhost:8080` by default.
+The API server listens on `http://localhost:8080` by default. Run `deerflow-ui` separately and configure it with:
+
+```bash
+NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://localhost:8080
+NEXT_PUBLIC_BACKEND_BASE_URL=http://localhost:8080
+```
 
 ### 4. Verify health
 
@@ -144,18 +136,22 @@ export PORT=8080
 export LOG_LEVEL=info
 ```
 
-## Embedded Frontend
+## Frontend Deployment
 
-`cmd/langgraph` can serve a statically exported `deerflow-ui` bundle from the same Go binary.
+`cmd/langgraph` is API-only. Use the upstream DeerFlow Next.js frontend as a separate service so Next.js runtime features remain available.
 
-- Preferred source location: `third_party/deerflow-ui/frontend`
-- Build assets only: `make build-ui`
-- Build API + UI binary: `make build-release`
-- Runtime URL layout:
-  - UI: `/`
-  - API: `/api/langgraph`
+For local Compose-based development:
 
-If the embedded asset bundle is absent, `cmd/langgraph` continues to run as API-only.
+```bash
+git submodule update --init --recursive third_party/deerflow-ui
+docker compose up -d --build api ui
+```
+
+Runtime URL layout:
+
+- UI: `http://localhost:3000`
+- API: `http://localhost:8080`
+- LangGraph-compatible prefixed API: `http://localhost:8080/api/langgraph`
 
 ## API Reference
 
@@ -899,17 +895,14 @@ Additional supported run configuration fields:
 
 ### Local UI configuration
 
-Set the frontend API base URL:
+Set the frontend API base URLs:
 
 ```bash
 export NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://localhost:8080
+export NEXT_PUBLIC_BACKEND_BASE_URL=http://localhost:8080
 ```
 
-If the UI runs in Docker Compose, use the internal service name:
-
-```bash
-export NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://api:8080
-```
+The provided Compose file sets these browser-facing URLs for the optional `ui` service.
 
 ### Expected compatibility points
 
@@ -945,7 +938,7 @@ docker run --rm -p 8080:8080 --env-file .env deerflow-go
 
 ### Docker Compose
 
-Bring up the API, PostgreSQL, and UI:
+Bring up the API and optional UI:
 
 ```bash
 docker compose up --build
@@ -954,7 +947,7 @@ docker compose up --build
 Notes:
 
 - `SILICONFLOW_API_KEY` must be present in your shell or `.env`
-- PostgreSQL data is stored in the `postgres_data` volume
+- API state uses SQLite in the `deerflow_data` volume by default
 - The UI service depends on a local checkout of `deerflow-ui`
 
 ### Kubernetes

@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"embed"
 	"flag"
-	"io/fs"
 	"log"
 	"os"
 	"os/signal"
@@ -13,9 +11,6 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/langgraphcompat"
 )
-
-//go:embed frontend/*
-var frontendFS embed.FS
 
 var (
 	version   = "dev"
@@ -64,12 +59,7 @@ func main() {
 		logger.Printf("  Log Level: %s", level)
 	}
 
-	embeddedFrontend, err := fs.Sub(frontendFS, "frontend")
-	if err != nil {
-		log.Fatalf("Failed to prepare embedded frontend: %v", err)
-	}
-
-	server, err := langgraphcompat.NewServer(*addr, *dbURL, *model, langgraphcompat.WithFrontendFS(embeddedFrontend))
+	server, err := langgraphcompat.NewServer(*addr, *dbURL, *model)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}

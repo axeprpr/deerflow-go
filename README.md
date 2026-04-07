@@ -1,6 +1,6 @@
 # deerflow-go
 
-[![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go&logoColor=white)](./go.mod)
+[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](./go.mod)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Build Status](https://github.com/axeprpr/deerflow-go/actions/workflows/ci.yml/badge.svg)](https://github.com/axeprpr/deerflow-go/actions/workflows/ci.yml)
 
@@ -120,17 +120,17 @@ DEFAULT_LLM_MODEL=qwen/Qwen3.5-9B
 ### 2. Start with Docker
 
 ```bash
-docker compose up -d --build api db
+docker compose up -d --build api
 ```
 
-Initialize the upstream DeerFlow UI submodule before starting the optional UI service:
+Initialize the upstream DeerFlow UI submodule before starting the optional Next.js UI service:
 
 ```bash
 git submodule update --init --recursive third_party/deerflow-ui
 ```
 
 ```bash
-docker compose up -d --build api db ui
+docker compose up -d --build api ui
 ```
 
 ### 3. Verify health
@@ -147,48 +147,45 @@ Expected response:
 
 ## Deployment Guide
 
-### Docker single-command deployment
+### Docker deployment
 
 Current `docker-compose.yml` ships with:
 
 - `api`: Go API server on `:8080`
-- `db`: PostgreSQL 16 for checkpoints and memory
-- `ui`: optional upstream DeerFlow UI dev container mounted from `third_party/deerflow-ui/frontend`
+- `ui`: optional upstream DeerFlow Next.js UI dev container mounted from `third_party/deerflow-ui/frontend`
 
 Minimum deployment:
 
 ```bash
 cp .env.example .env
-docker compose up -d --build api db
+docker compose up -d --build api
 ```
 
 Optional full stack with the UI submodule:
 
 ```bash
 git submodule update --init --recursive third_party/deerflow-ui
-docker compose up -d --build api db ui
+docker compose up -d --build api ui
 ```
 
-For ephemeral mode, leave `DATABASE_URL` unset and the server runs in memory only.
+By default the Compose API service uses SQLite at `/data/deerflow.db` backed by the `deerflow_data` volume. For ephemeral mode, leave `DATABASE_URL` unset when running the server directly.
 
 ### 4. Connect Frontend
 
-Set `NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://localhost:8080` in your deerflow-ui `.env.local`
+Set these variables in your `deerflow-ui` `.env.local` when running the frontend outside Compose:
 
-## Embedded UI
+```bash
+NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://localhost:8080
+NEXT_PUBLIC_BACKEND_BASE_URL=http://localhost:8080
+```
 
-`cmd/langgraph` can serve an embedded `deerflow-ui` bundle directly from the Go binary.
+## Frontend Deployment
 
-- Recommended layout: `third_party/deerflow-ui/frontend`
-- Build embedded assets: `make build-ui`
-- Build binary with embedded UI: `make build-release`
-- Override source path: `make build-release UI_DIR=/abs/path/to/deerflow-ui/frontend`
-
-When embedded assets are present, the binary serves the UI at `/` and the LangGraph-compatible API at `/api/langgraph`.
+The Go binary is API-only. Run the upstream DeerFlow Next.js frontend as a separate process or container and point it at the Go API. This keeps Next.js runtime features available and matches the original DeerFlow-style deployment model.
 
 ## Release
 
-Build local release archives:
+Build local API server release archives:
 
 ```bash
 make release
@@ -310,7 +307,7 @@ NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://localhost:8080
 NEXT_PUBLIC_BACKEND_BASE_URL=http://localhost:8080
 ```
 
-In the provided Compose file, the optional `ui` service already points to `http://api:8080` internally.
+In the provided Compose file, the optional `ui` service already points the browser-facing API URLs at `http://localhost:8080`.
 
 ## API Documentation
 

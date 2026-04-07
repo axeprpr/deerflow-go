@@ -1,13 +1,11 @@
 package langgraphcompat
 
 import (
-	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
-	"testing/fstest"
-	"net/http"
-	"net/http/httptest"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 )
@@ -59,14 +57,10 @@ func TestNewAgentLazilyInitializesSandbox(t *testing.T) {
 	}
 }
 
-func TestNewServerServesEmbeddedFrontendAtRoot(t *testing.T) {
+func TestNewServerDoesNotServeFrontendAtRoot(t *testing.T) {
 	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
 
-	frontend := fstest.MapFS{
-		"index.html": &fstest.MapFile{Data: []byte("<html><body>stub frontend</body></html>")},
-	}
-
-	s, err := NewServer(":0", "", "test-model", WithFrontendFS(frontend))
+	s, err := NewServer(":0", "", "test-model")
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)
 	}
@@ -75,15 +69,29 @@ func TestNewServerServesEmbeddedFrontendAtRoot(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.httpServer.Handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("root status = %d, want %d", rec.Code, http.StatusOK)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("root status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestNewServerAllowsFrontendCORSPreflight(t *testing.T) {
+	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
+
+	s, err := NewServer(":0", "", "test-model")
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
 	}
 
-	body, err := io.ReadAll(rec.Body)
-	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
+	req := httptest.NewRequest(http.MethodOptions, "http://example.com/api/models", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	rec := httptest.NewRecorder()
+	s.httpServer.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("preflight status = %d, want %d", rec.Code, http.StatusNoContent)
 	}
-	if string(body) != "<html><body>stub frontend</body></html>" {
-		t.Fatalf("root body = %q", string(body))
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:3000" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want localhost UI origin", got)
 	}
 }

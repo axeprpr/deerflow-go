@@ -28,16 +28,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
       - name: Run compatibility tests
         run: |
           go test -count=1 -run 'TestParseJSONStringListAcceptsChoicesWrapper|TestSetupAgentToolCreatesAgentFromRuntimeContext|TestSetupAgentToolStoresCreatedAgentNameInThreadState|TestUploadPlainTextDocumentCreatesMarkdownCompanion|TestConvertToMessagesInjectsUploadedFilesBlockAndPreservesKwargs|TestConvertToMessagesKeepsAttachmentOnlyUserMessage|TestConvertToMessagesNormalizesUploadedFilePathAndSkipsMissingFiles|TestMessagesToLangChainReturnsMultiContentWhenAvailable|TestThreadJoinStreamFollowsLatestActiveRunOnly|TestValidateThreadIDRejectsDots|TestLangGraphRoutesRejectThreadIDsWithDots|TestGatewayRoutesRejectThreadIDsWithDots|TestThreadRunPersistsModeFromConfig|TestThreadRunPersistsModeFromTopLevelContext|TestThreadConfigurableDerivesBooleansFromMode' ./pkg/langgraphcompat

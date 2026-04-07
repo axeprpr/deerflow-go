@@ -1,1 +1,0 @@
-embedded ui assets are generated at build time
