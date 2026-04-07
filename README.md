@@ -179,6 +179,13 @@ NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://localhost:8080
 NEXT_PUBLIC_BACKEND_BASE_URL=http://localhost:8080
 ```
 
+If the Go API is exposed through frpc on public port `22230`, use the browser-accessible public address instead:
+
+```bash
+NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://<public-host>:22230
+NEXT_PUBLIC_BACKEND_BASE_URL=http://<public-host>:22230
+```
+
 ## Frontend Deployment
 
 The Go binary is API-only. Run the upstream DeerFlow Next.js frontend as a separate process or container and point it at the Go API. This keeps Next.js runtime features available and matches the original DeerFlow-style deployment model.

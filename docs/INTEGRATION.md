@@ -902,6 +902,13 @@ export NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://localhost:8080
 export NEXT_PUBLIC_BACKEND_BASE_URL=http://localhost:8080
 ```
 
+For an frpc deployment where the Go API is published on public port `22230`, use the public browser-facing URL:
+
+```bash
+export NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://<public-host>:22230
+export NEXT_PUBLIC_BACKEND_BASE_URL=http://<public-host>:22230
+```
+
 The provided Compose file sets these browser-facing URLs for the optional `ui` service.
 
 ### Expected compatibility points
