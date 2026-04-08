@@ -5,16 +5,20 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment:
       SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:?SILICONFLOW_API_KEY is required}
-      DATABASE_URL: ${DATABASE_URL:-sqlite:///data/deerflow.db}
+      POSTGRES_URL: postgres://postgres:password@db:5432/deerflow?sslmode=disable
       DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:-qwen/Qwen3.5-9B}
       PORT: 8080
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-https://api.siliconflow.cn/v1}
     ports:
-      - "8080:8080"
-    volumes:
-      - deerflow_data:/data
+      - "${API_PORT:-8080}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 10s
@@ -23,23 +27,41 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: deerflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d deerflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
   ui:
     image: node:20-alpine
     working_dir: /app
-    command: sh -c "npm install -g pnpm && pnpm install && pnpm dev --hostname 0.0.0.0 --port 3000"
+    command: sh -c "npm install -g pnpm && pnpm install && pnpm build && pnpm start --hostname 0.0.0.0 --port 3000"
     environment:
-      NEXT_PUBLIC_LANGGRAPH_BASE_URL: ${NEXT_PUBLIC_LANGGRAPH_BASE_URL:-http://localhost:8080}
-      NEXT_PUBLIC_BACKEND_BASE_URL: ${NEXT_PUBLIC_BACKEND_BASE_URL:-http://localhost:8080}
+      NODE_ENV: production
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-change-me}
+      NEXT_PUBLIC_LANGGRAPH_BASE_URL: ${NEXT_PUBLIC_LANGGRAPH_BASE_URL:-http://api:8080}
+      NEXT_PUBLIC_BACKEND_BASE_URL: ${NEXT_PUBLIC_BACKEND_BASE_URL:-http://api:8080}
       HOSTNAME: 0.0.0.0
       PORT: 3000
     ports:
-      - "3000:3000"
+      - "${UI_PORT:-3000}:3000"
     volumes:
-      - ./third_party/deerflow-ui/frontend:/app
+      - ${DEERFLOW_UI_FRONTEND_PATH:-./third_party/deerflow-ui/frontend}:/app
     depends_on:
       api:
         condition: service_healthy
     restart: unless-stopped
 
 volumes:
-  deerflow_data:
+  postgres_data:
