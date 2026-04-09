@@ -56,15 +56,16 @@ type BashOutput struct {
 func BashTool() models.Tool {
 	return models.Tool{
 		Name:        "bash",
-		Description: "Execute shell commands. Returns stdout, stderr, and exit code as JSON.",
+		Description: "Execute a bash command in a Linux environment.\n\n- Use `python` to run Python code.\n- Prefer a thread-local virtual environment in `/mnt/user-data/workspace/.venv`.\n- Use `python -m pip` inside the virtual environment to install Python packages.",
 		Groups:      []string{"builtin"},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"command": map[string]any{"type": "string", "description": "Shell command to execute"},
+				"description": map[string]any{"type": "string", "description": "Explain why you are running this command in short words. ALWAYS PROVIDE THIS PARAMETER FIRST."},
+				"command": map[string]any{"type": "string", "description": "The bash command to execute. Always use absolute paths for files and directories."},
 				"timeout": map[string]any{"type": "number", "description": "Timeout in seconds (default 60)"},
 			},
-			"required": []any{"command"},
+			"required": []any{"description", "command"},
 		},
 		Handler: BashHandler,
 	}

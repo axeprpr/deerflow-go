@@ -27,23 +27,33 @@ func (a *API) HandleCreate(w http.ResponseWriter, r *http.Request, threadID stri
 		return
 	}
 	req := ClarificationRequest{
-		Type:     strings.TrimSpace(firstNonEmpty(raw["type"], raw["clarification_type"], raw["clarificationType"])),
-		Question: strings.TrimSpace(stringValue(raw["question"])),
-		Default:  strings.TrimSpace(stringValue(raw["default"])),
-		Required: boolValue(raw["required"]),
+		Type:              strings.TrimSpace(stringValue(raw["type"])),
+		ClarificationType: strings.TrimSpace(firstNonEmpty(raw["clarification_type"], raw["clarificationType"], raw["type"])),
+		Context:           strings.TrimSpace(stringValue(raw["context"])),
+		Question:          strings.TrimSpace(stringValue(raw["question"])),
+		Default:           strings.TrimSpace(stringValue(raw["default"])),
+		Required:          boolValue(raw["required"]),
 	}
 	if rawOptions, ok := raw["options"].([]any); ok {
 		req.Options = make([]ClarificationOption, 0, len(rawOptions))
 		for _, rawOption := range rawOptions {
-			optionMap, ok := rawOption.(map[string]any)
-			if !ok {
-				continue
+			switch option := rawOption.(type) {
+			case string:
+				option = strings.TrimSpace(option)
+				if option == "" {
+					continue
+				}
+				req.Options = append(req.Options, ClarificationOption{
+					Label: option,
+					Value: option,
+				})
+			case map[string]any:
+				req.Options = append(req.Options, ClarificationOption{
+					ID:    strings.TrimSpace(stringValue(option["id"])),
+					Label: strings.TrimSpace(stringValue(option["label"])),
+					Value: strings.TrimSpace(stringValue(option["value"])),
+				})
 			}
-			req.Options = append(req.Options, ClarificationOption{
-				ID:    strings.TrimSpace(stringValue(optionMap["id"])),
-				Label: strings.TrimSpace(stringValue(optionMap["label"])),
-				Value: strings.TrimSpace(stringValue(optionMap["value"])),
-			})
 		}
 	}
 

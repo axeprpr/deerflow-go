@@ -176,10 +176,10 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	// Create tool registry with built-in tools
 	registry := tools.NewRegistry()
 	clarifyManager := clarification.NewManager(32)
-	registry.Register(builtin.BashTool())
 	for _, tool := range builtin.FileTools() {
 		registry.Register(tool)
 	}
+	registry.Register(builtin.BashTool())
 	registry.Register(clarification.AskClarificationTool(clarifyManager))
 	sandboxRoot := filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
 	subagentPool := agent.NewSubagentPool(provider, registry, nil, 2, 2*time.Minute)

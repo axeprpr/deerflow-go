@@ -26,6 +26,10 @@ type EinoProvider struct {
 	base     einoModel.ToolCallingChatModel
 }
 
+func (p *EinoProvider) PrefersStructuredToolCalls() bool {
+	return p != nil
+}
+
 func NewEinoProvider(name string) (*EinoProvider, error) {
 	provider := strings.ToLower(strings.TrimSpace(name))
 	if provider == "" {
@@ -136,9 +140,11 @@ func (p *EinoProvider) Stream(ctx context.Context, req ChatRequest) (<-chan Stre
 			return
 		}
 
+		streamedToolCalls := collectStreamToolCalls(chunks)
+
 		send(StreamChunk{
 			Model:   req.Model,
-			Message: ptr(fromEinoMessage(finalMsg)),
+			Message: ptr(finalStreamMessage(finalMsg, streamedToolCalls)),
 			Usage:   ptr(fromEinoUsage(finalMsg.ResponseMeta)),
 			Stop:    finishReason(finalMsg.ResponseMeta),
 			Done:    true,
@@ -357,6 +363,14 @@ func fromEinoMessage(msg *einoSchema.Message) models.Message {
 	return NormalizeAssistantMessage(out)
 }
 
+func finalStreamMessage(msg *einoSchema.Message, streamedToolCalls []models.ToolCall) models.Message {
+	out := fromEinoMessage(msg)
+	if len(streamedToolCalls) > 0 {
+		out.ToolCalls = append([]models.ToolCall(nil), streamedToolCalls...)
+	}
+	return NormalizeAssistantMessage(out)
+}
+
 func toEinoToolCalls(calls []models.ToolCall) []einoSchema.ToolCall {
 	out := make([]einoSchema.ToolCall, 0, len(calls))
 	for _, call := range calls {
@@ -397,6 +411,82 @@ func fromEinoToolCalls(calls []einoSchema.ToolCall) []models.ToolCall {
 	}
 	return out
 }
+
+type streamToolCallAccumulator struct {
+	id   string
+	name string
+	args strings.Builder
+}
+
+func collectStreamToolCalls(chunks []*einoSchema.Message) []models.ToolCall {
+	if len(chunks) == 0 {
+		return nil
+	}
+
+	accumulators := make(map[string]*streamToolCallAccumulator)
+	order := make([]string, 0)
+	for _, msg := range chunks {
+		if msg == nil || len(msg.ToolCalls) == 0 {
+			continue
+		}
+		for i, call := range msg.ToolCalls {
+			id := strings.TrimSpace(call.ID)
+			key := id
+			if key == "" {
+				key = fmt.Sprintf("index:%d:%s", i, strings.TrimSpace(call.Function.Name))
+			}
+
+			acc, ok := accumulators[key]
+			if !ok {
+				acc = &streamToolCallAccumulator{id: id}
+				accumulators[key] = acc
+				order = append(order, key)
+			}
+			if name := strings.TrimSpace(call.Function.Name); name != "" {
+				acc.name = name
+			}
+			if id != "" {
+				acc.id = id
+			}
+			if raw := call.Function.Arguments; raw != "" {
+				acc.args.WriteString(raw)
+			}
+		}
+	}
+
+	out := make([]models.ToolCall, 0, len(order))
+	for _, key := range order {
+		acc := accumulators[key]
+		if acc == nil {
+			continue
+		}
+		args := decodeToolArguments(acc.args.String())
+		normalized, ok := models.NormalizeToolCall(models.ToolCall{
+			ID:        acc.id,
+			Name:      acc.name,
+			Arguments: args,
+			Status:    models.CallStatusPending,
+		})
+		if !ok {
+			continue
+		}
+		out = append(out, normalized)
+	}
+	return out
+}
+
+func decodeToolArguments(raw string) map[string]any {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var args map[string]any
+	if err := json.Unmarshal([]byte(raw), &args); err != nil {
+		return nil
+	}
+	return args
+}
+
 
 func toEinoToolInfos(tools []models.Tool) []*einoSchema.ToolInfo {
 	out := make([]*einoSchema.ToolInfo, 0, len(tools))

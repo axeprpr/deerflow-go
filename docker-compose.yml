@@ -44,20 +44,29 @@ services:
     restart: unless-stopped
 
   ui:
-    image: node:20-alpine
-    working_dir: /app
-    command: sh -c "npm install -g pnpm && pnpm install && pnpm build && pnpm start --hostname 0.0.0.0 --port 3000"
+    image: deerflow-ui:${UI_IMAGE_TAG:-local}
+    build:
+      context: ./third_party/deerflow-ui
+      dockerfile: frontend/Dockerfile
+      target: prod
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-}
+        DEER_FLOW_INTERNAL_LANGGRAPH_BASE_URL: ${DEER_FLOW_INTERNAL_LANGGRAPH_BASE_URL:-http://api:8080}
+        DEER_FLOW_INTERNAL_GATEWAY_BASE_URL: ${DEER_FLOW_INTERNAL_GATEWAY_BASE_URL:-http://api:8080}
+        NEXT_PUBLIC_LANGGRAPH_BASE_URL: ${NEXT_PUBLIC_LANGGRAPH_BASE_URL:-}
+        NEXT_PUBLIC_BACKEND_BASE_URL: ${NEXT_PUBLIC_BACKEND_BASE_URL:-}
+        BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-change-me}
     environment:
       NODE_ENV: production
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-change-me}
-      NEXT_PUBLIC_LANGGRAPH_BASE_URL: ${NEXT_PUBLIC_LANGGRAPH_BASE_URL:-http://api:8080}
-      NEXT_PUBLIC_BACKEND_BASE_URL: ${NEXT_PUBLIC_BACKEND_BASE_URL:-http://api:8080}
+      DEER_FLOW_INTERNAL_LANGGRAPH_BASE_URL: ${DEER_FLOW_INTERNAL_LANGGRAPH_BASE_URL:-http://api:8080}
+      DEER_FLOW_INTERNAL_GATEWAY_BASE_URL: ${DEER_FLOW_INTERNAL_GATEWAY_BASE_URL:-http://api:8080}
+      NEXT_PUBLIC_LANGGRAPH_BASE_URL: ${NEXT_PUBLIC_LANGGRAPH_BASE_URL:-}
+      NEXT_PUBLIC_BACKEND_BASE_URL: ${NEXT_PUBLIC_BACKEND_BASE_URL:-}
       HOSTNAME: 0.0.0.0
       PORT: 3000
     ports:
       - "${UI_PORT:-3000}:3000"
-    volumes:
-      - ${DEERFLOW_UI_FRONTEND_PATH:-./third_party/deerflow-ui/frontend}:/app
     depends_on:
       api:
         condition: service_healthy

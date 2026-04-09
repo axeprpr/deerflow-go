@@ -17,6 +17,7 @@ RUN apk --no-cache add ca-certificates curl
 
 WORKDIR /app
 COPY --from=builder /deerflow ./deerflow
+COPY --from=builder /app/skills ./skills
 
 EXPOSE 8080
 

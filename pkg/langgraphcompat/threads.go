@@ -1958,6 +1958,18 @@ func (s *Server) setThreadMetadata(threadID string, key string, value any) {
 	}
 }
 
+func (s *Server) deleteThreadMetadata(threadID string, key string) {
+	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+	if session, exists := s.sessions[threadID]; exists {
+		if session.Metadata != nil {
+			delete(session.Metadata, key)
+		}
+		session.UpdatedAt = time.Now().UTC()
+		_ = s.persistSessionFile(session)
+	}
+}
+
 func (s *Server) saveRun(run *Run) {
 	s.runsMu.Lock()
 	defer s.runsMu.Unlock()
@@ -2122,6 +2134,9 @@ func artifactURLForThread(threadID, virtualPath string) string {
 func messageArtifactPaths(message models.Message) []string {
 	paths := make([]string, 0)
 	for _, call := range message.ToolCalls {
+		if call.Status != models.CallStatusCompleted {
+			continue
+		}
 		switch call.Name {
 		case "present_file":
 			if path, _ := call.Arguments["path"].(string); strings.TrimSpace(path) != "" {
@@ -2132,6 +2147,9 @@ func messageArtifactPaths(message models.Message) []string {
 		}
 	}
 	if message.ToolResult != nil {
+		if message.ToolResult.Status != models.CallStatusCompleted {
+			return paths
+		}
 		switch message.ToolResult.ToolName {
 		case "present_file":
 			if path, _ := message.ToolResult.Data["path"].(string); strings.TrimSpace(path) != "" {

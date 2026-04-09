@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/models"
+	"github.com/axeprpr/deerflow-go/pkg/tools/builtin"
+	einoSchema "github.com/cloudwego/eino/schema"
 )
 
 func TestChatRequest_Validate(t *testing.T) {
@@ -104,6 +108,69 @@ func TestNewProvider(t *testing.T) {
 	provider = NewProvider("nonexistent")
 	if provider == nil {
 		t.Error("NewProvider should return unavailable provider for invalid names")
+	}
+}
+
+func TestEinoProviderPrefersStructuredToolCalls(t *testing.T) {
+	provider := &EinoProvider{}
+	if !provider.PrefersStructuredToolCalls() {
+		t.Fatal("EinoProvider should prefer structured tool calls")
+	}
+}
+
+func TestToEinoToolInfosPreservesClarificationRequiredFields(t *testing.T) {
+	tool := clarification.AskClarificationTool(nil)
+	infos := toEinoToolInfos([]models.Tool{tool})
+	if len(infos) != 1 {
+		t.Fatalf("tool infos len=%d want 1", len(infos))
+	}
+	if infos[0].Name != "ask_clarification" {
+		t.Fatalf("tool name=%q want ask_clarification", infos[0].Name)
+	}
+	if infos[0].ParamsOneOf == nil {
+		t.Fatal("params oneof should not be nil")
+	}
+
+	params := jsonSchemaToParams(tool.InputSchema)
+	question, ok := params["question"]
+	if !ok || !question.Required {
+		t.Fatalf("question required=%v want true", ok && question.Required)
+	}
+	clarificationType, ok := params["clarification_type"]
+	if !ok || !clarificationType.Required {
+		t.Fatalf("clarification_type required=%v want true", ok && clarificationType.Required)
+	}
+	if clarificationType.Type != einoSchema.String {
+		t.Fatalf("clarification_type type=%v want string", clarificationType.Type)
+	}
+	if _, ok := params["type"]; ok {
+		t.Fatal("legacy type alias should not be exposed to the model schema")
+	}
+	if _, ok := params["default"]; ok {
+		t.Fatal("default should not be exposed to the model schema")
+	}
+	if _, ok := params["required"]; ok {
+		t.Fatal("required flag should not be exposed to the model schema")
+	}
+	if !strings.Contains(infos[0].Desc, "When to use ask_clarification:") {
+		t.Fatal("clarification description should include upstream usage guidance")
+	}
+	if !strings.Contains(infos[0].Desc, "Best practices:") {
+		t.Fatal("clarification description should include upstream best practices")
+	}
+}
+
+func TestToEinoToolInfosPreservesBashDescriptionGuidance(t *testing.T) {
+	tool := builtin.BashTool()
+	infos := toEinoToolInfos([]models.Tool{tool})
+	if len(infos) != 1 {
+		t.Fatalf("tool infos len=%d want 1", len(infos))
+	}
+	if !strings.Contains(infos[0].Desc, "Use `python` to run Python code.") {
+		t.Fatal("bash description should include python guidance")
+	}
+	if !strings.Contains(infos[0].Desc, "/mnt/user-data/workspace/.venv") {
+		t.Fatal("bash description should include workspace venv guidance")
 	}
 }
 
@@ -282,5 +349,72 @@ func TestToEinoMessage_SkipsInvalidToolMessages(t *testing.T) {
 
 	if got := toEinoMessage(msg); got != nil {
 		t.Fatal("toEinoMessage() should skip invalid tool messages")
+	}
+}
+
+func TestCollectStreamToolCalls_ReassemblesArgumentsAcrossChunks(t *testing.T) {
+	merged := collectStreamToolCalls([]*einoSchema.Message{
+		{
+			ToolCalls: []einoSchema.ToolCall{{
+				ID:   "call-1",
+				Type: "function",
+				Function: einoSchema.FunctionCall{
+					Name:      "read_file",
+					Arguments: `{"description":"Load skill",`,
+				},
+			}},
+		},
+		{
+			ToolCalls: []einoSchema.ToolCall{{
+				ID:   "call-1",
+				Type: "function",
+				Function: einoSchema.FunctionCall{
+					Name:      "read_file",
+					Arguments: `"path":"/mnt/skills/public/frontend-design/SKILL.md"}`,
+				},
+			}},
+		},
+	})
+
+	if len(merged) != 1 {
+		t.Fatalf("tool calls=%d want 1", len(merged))
+	}
+	if merged[0].Name != "read_file" {
+		t.Fatalf("tool name=%q want read_file", merged[0].Name)
+	}
+	if got, _ := merged[0].Arguments["description"].(string); got != "Load skill" {
+		t.Fatalf("description=%q want Load skill", got)
+	}
+	if got, _ := merged[0].Arguments["path"].(string); got != "/mnt/skills/public/frontend-design/SKILL.md" {
+		t.Fatalf("path=%q", got)
+	}
+}
+
+func TestFinalStreamMessage_PrefersReassembledToolArguments(t *testing.T) {
+	msg := &einoSchema.Message{
+		Role:    einoSchema.Assistant,
+		Content: "",
+		ToolCalls: []einoSchema.ToolCall{{
+			ID:   "call-1",
+			Type: "function",
+			Function: einoSchema.FunctionCall{
+				Name:      "read_file",
+				Arguments: "",
+			},
+		}},
+	}
+
+	out := finalStreamMessage(msg, []models.ToolCall{{
+		ID:        "call-1",
+		Name:      "read_file",
+		Arguments: map[string]any{"path": "/mnt/skills/public/frontend-design/SKILL.md"},
+		Status:    models.CallStatusPending,
+	}})
+
+	if len(out.ToolCalls) != 1 {
+		t.Fatalf("tool calls=%d want 1", len(out.ToolCalls))
+	}
+	if got, _ := out.ToolCalls[0].Arguments["path"].(string); got != "/mnt/skills/public/frontend-design/SKILL.md" {
+		t.Fatalf("path=%q", got)
 	}
 }

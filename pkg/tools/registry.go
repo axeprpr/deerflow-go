@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -31,6 +30,7 @@ var toolCallSeq uint64
 type Registry struct {
 	mu    sync.RWMutex
 	tools map[string]models.Tool
+	order []string
 }
 
 func NewRegistry() *Registry {
@@ -47,6 +47,7 @@ func (r *Registry) Register(tool models.Tool) error {
 		return fmt.Errorf("tool %q already registered", tool.Name)
 	}
 	r.tools[tool.Name] = tool
+	r.order = append(r.order, tool.Name)
 	return nil
 }
 
@@ -64,6 +65,13 @@ func (r *Registry) Unregister(name string) bool {
 		return false
 	}
 	delete(r.tools, name)
+	for i, registered := range r.order {
+		if registered != name {
+			continue
+		}
+		r.order = append(r.order[:i], r.order[i+1:]...)
+		break
+	}
 	return true
 }
 
@@ -88,15 +96,13 @@ func (r *Registry) List() []models.Tool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	names := make([]string, 0, len(r.tools))
-	for name := range r.tools {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	out := make([]models.Tool, 0, len(names))
-	for _, name := range names {
-		out = append(out, r.tools[name])
+	out := make([]models.Tool, 0, len(r.order))
+	for _, name := range r.order {
+		tool, ok := r.tools[name]
+		if !ok {
+			continue
+		}
+		out = append(out, tool)
 	}
 	return out
 }
@@ -222,7 +228,7 @@ func (r *Registry) Call(ctx context.Context, name string, args map[string]interf
 		return "", fmt.Errorf("tool %q not found", strings.TrimSpace(name))
 	}
 	if err := validateArgs(tool.InputSchema, args); err != nil {
-		return "", err
+		return "", enrichToolValidationError(name, err)
 	}
 
 	call := models.ToolCall{
@@ -258,6 +264,7 @@ func (r *Registry) executeWithSandbox(ctx context.Context, call models.ToolCall,
 		return models.ToolResult{}, fmt.Errorf("tool %q not found", call.Name)
 	}
 	if err := validateArgs(tool.InputSchema, call.Arguments); err != nil {
+		err = enrichToolValidationError(call.Name, err)
 		return models.ToolResult{
 			CallID:      call.ID,
 			ToolName:    call.Name,
@@ -364,6 +371,31 @@ func FormatToolExecutionError(toolName string, err error) string {
 	)
 }
 
+func enrichToolValidationError(toolName string, err error) error {
+	if err == nil {
+		return nil
+	}
+	detail := strings.TrimSpace(err.Error())
+	if detail == "" {
+		return err
+	}
+
+	switch strings.TrimSpace(toolName) {
+	case "write_file":
+		return fmt.Errorf("%s. For write_file, provide `description`, `path`, and `content` in that order. Use `/mnt/user-data/workspace/...` for temporary files or `/mnt/user-data/outputs/index.html` for a final web page", detail)
+	case "str_replace":
+		return fmt.Errorf("%s. For str_replace, provide `description`, `path`, `old_str`, and `new_str` in that order, and use an absolute virtual path such as `/mnt/user-data/workspace/app.js`", detail)
+	case "read_file":
+		return fmt.Errorf("%s. For read_file, provide `description` and `path`, using an absolute virtual path such as `/mnt/user-data/uploads/input.txt` or `/mnt/user-data/workspace/draft.txt`", detail)
+	case "ls":
+		return fmt.Errorf("%s. For ls, provide `description` and a directory `path` such as `/mnt/user-data/uploads` or `/mnt/user-data/workspace`", detail)
+	case "bash":
+		return fmt.Errorf("%s. For bash, provide `description` first and `command` second", detail)
+	default:
+		return err
+	}
+}
+
 func errTypeName(err error) string {
 	if err == nil {
 		return "error"
@@ -398,9 +430,14 @@ func (r *Registry) Restrict(allowed []string) *Registry {
 	restricted := NewRegistry()
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	for name, tool := range r.tools {
+	for _, name := range r.order {
+		tool, ok := r.tools[name]
+		if !ok {
+			continue
+		}
 		if _, ok := allow[name]; ok {
 			restricted.tools[name] = tool
+			restricted.order = append(restricted.order, name)
 		}
 	}
 	return restricted
@@ -428,6 +465,7 @@ func validateArgs(schema map[string]any, args map[string]any) error {
 			}
 		}
 	}
+	missing := make([]string, 0, len(required))
 	for _, raw := range required {
 		name, _ := raw.(string)
 		name = strings.TrimSpace(name)
@@ -436,8 +474,18 @@ func validateArgs(schema map[string]any, args map[string]any) error {
 		}
 		value, ok := args[name]
 		if !ok || value == nil {
-			return fmt.Errorf("missing required argument %q", name)
+			missing = append(missing, name)
 		}
+	}
+	if len(missing) == 1 {
+		return fmt.Errorf("missing required argument %q", missing[0])
+	}
+	if len(missing) > 1 {
+		quoted := make([]string, 0, len(missing))
+		for _, name := range missing {
+			quoted = append(quoted, fmt.Sprintf("%q", name))
+		}
+		return fmt.Errorf("missing required arguments %s", strings.Join(quoted, ", "))
 	}
 
 	properties, _ := schema["properties"].(map[string]any)

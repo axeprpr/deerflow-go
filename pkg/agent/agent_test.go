@@ -15,6 +15,7 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
+	"github.com/axeprpr/deerflow-go/pkg/tools/builtin"
 )
 
 func TestAgentConfig_Defaults(t *testing.T) {
@@ -153,6 +154,229 @@ func TestAgent_BuildSystemPrompt(t *testing.T) {
 	}
 	if prompt == "custom system prompt" {
 		t.Error("BuildSystemPrompt should include runtime instructions in addition to the base prompt")
+	}
+}
+
+func TestAgent_BuildSystemPromptDoesNotInjectCustomToolSummary(t *testing.T) {
+	registry := tools.NewRegistry()
+	noop := func(context.Context, models.ToolCall) (models.ToolResult, error) { return models.ToolResult{}, nil }
+	if err := registry.Register(models.Tool{Name: "write_file", Description: "write", Handler: noop}); err != nil {
+		t.Fatalf("register write_file: %v", err)
+	}
+	if err := registry.Register(models.Tool{Name: "present_files", Description: "present", Handler: noop}); err != nil {
+		t.Fatalf("register present_files: %v", err)
+	}
+
+	agent := New(AgentConfig{
+		SystemPrompt: "custom system prompt",
+		Tools:        registry,
+	})
+
+	prompt := agent.BuildSystemPrompt(context.Background(), "test_session")
+	if strings.Contains(prompt, "<file_workflow>") {
+		t.Fatalf("prompt unexpectedly included custom file workflow guidance: %q", prompt)
+	}
+	if strings.Contains(prompt, "Available Tools:") {
+		t.Fatalf("prompt unexpectedly included tool summary: %q", prompt)
+	}
+}
+
+func TestAgent_RetriesAfterRecoverableToolValidationFailure(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(builtin.WriteFileTool()); err != nil {
+		t.Fatalf("register write_file: %v", err)
+	}
+
+	provider := &scriptedStreamProvider{
+		t: t,
+		steps: []streamStep{
+			{
+				content: "creating page",
+				toolCalls: []models.ToolCall{{
+					ID:        "call_missing_args",
+					Name:      "write_file",
+					Arguments: map[string]any{},
+					Status:    models.CallStatusPending,
+				}},
+			},
+			{},
+			{
+				content: "done",
+				check: func(t *testing.T, req llm.ChatRequest) {
+					if len(req.Messages) < 3 {
+						t.Fatalf("third request messages = %d, want at least 3", len(req.Messages))
+					}
+					last := req.Messages[len(req.Messages)-1]
+					if last.Role != models.RoleHuman {
+						t.Fatalf("last retry prompt role = %q, want human", last.Role)
+					}
+					if !strings.Contains(last.Content, "/mnt/user-data/outputs/index.html") {
+						t.Fatalf("retry prompt = %q, want write_file guidance", last.Content)
+					}
+				},
+			},
+		},
+	}
+
+	agent := New(AgentConfig{
+		LLMProvider: provider,
+		Tools:       registry,
+		MaxTurns:    4,
+	})
+
+	result, err := agent.Run(context.Background(), "session-retry-tool-validation", []models.Message{{
+		ID:        "msg-1",
+		SessionID: "session-retry-tool-validation",
+		Role:      models.RoleHuman,
+		Content:   "帮我生成一个小鱼游泳的页面",
+	}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "done" {
+		t.Fatalf("final output = %q, want done", result.FinalOutput)
+	}
+}
+
+func TestAgent_RunUsesStructuredChatForToolTurns(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name:        "echo_tool",
+		Description: "echo content",
+		InputSchema: map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "string"}}, "required": []any{"value"}},
+		Handler: func(_ context.Context, call models.ToolCall) (models.ToolResult, error) {
+			return models.ToolResult{
+				CallID:   call.ID,
+				ToolName: call.Name,
+				Status:   models.CallStatusCompleted,
+				Content:  call.Arguments["value"].(string),
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register echo_tool: %v", err)
+	}
+
+	type structuredToolProvider struct {
+		calls int
+	}
+	var provider structuredToolProvider
+	providerChat := func(req llm.ChatRequest) llm.ChatResponse {
+		provider.calls++
+		switch provider.calls {
+		case 1:
+			return llm.ChatResponse{
+				Message: models.Message{
+					Role:    models.RoleAI,
+					Content: "先调用工具。",
+					ToolCalls: []models.ToolCall{{
+						ID:        "call-1",
+						Name:      "echo_tool",
+						Arguments: map[string]any{"value": "ok"},
+						Status:    models.CallStatusPending,
+					}},
+				},
+				Stop: "tool_calls",
+			}
+		case 2:
+			if len(req.Messages) < 3 {
+				t.Fatalf("second chat request messages=%d want>=3", len(req.Messages))
+			}
+			if req.Messages[2].ToolResult == nil || req.Messages[2].ToolResult.Content != "ok" {
+				t.Fatalf("tool result history=%#v", req.Messages[2].ToolResult)
+			}
+			return llm.ChatResponse{
+				Message: models.Message{
+					Role:    models.RoleAI,
+					Content: "done",
+				},
+				Stop: "stop",
+			}
+		default:
+			t.Fatalf("unexpected Chat call %d", provider.calls)
+			return llm.ChatResponse{}
+		}
+	}
+
+	agent := New(AgentConfig{
+		LLMProvider: chatOnlyProvider{t: t, chat: providerChat},
+		Tools:       registry,
+		MaxTurns:    4,
+	})
+
+	result, err := agent.Run(context.Background(), "session_structured_chat", []models.Message{{
+		ID:        "m1",
+		SessionID: "session_structured_chat",
+		Role:      models.RoleHuman,
+		Content:   "run tool",
+	}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "done" {
+		t.Fatalf("final output=%q want done", result.FinalOutput)
+	}
+}
+
+func TestAgent_RunKeepsStreamingToolTurnsForNonStructuredProviders(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name:        "echo_tool",
+		Description: "echo content",
+		InputSchema: map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "string"}}, "required": []any{"value"}},
+		Handler: func(_ context.Context, call models.ToolCall) (models.ToolResult, error) {
+			return models.ToolResult{
+				CallID:   call.ID,
+				ToolName: call.Name,
+				Status:   models.CallStatusCompleted,
+				Content:  call.Arguments["value"].(string),
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register echo_tool: %v", err)
+	}
+
+	provider := &streamOnlyToolProvider{t: t}
+	agent := New(AgentConfig{
+		LLMProvider: provider,
+		Tools:       registry,
+		MaxTurns:    4,
+	})
+
+	result, err := agent.Run(context.Background(), "session_stream_only", []models.Message{{
+		ID:        "m1",
+		SessionID: "session_stream_only",
+		Role:      models.RoleHuman,
+		Content:   "run tool",
+	}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "done" {
+		t.Fatalf("final output=%q want done", result.FinalOutput)
+	}
+	if provider.streamCalls != 2 {
+		t.Fatalf("stream calls=%d want 2", provider.streamCalls)
+	}
+}
+
+func TestAgent_RunUsesStreamingForNonToolTurnsEvenWithStructuredProviders(t *testing.T) {
+	provider := structuredNoToolProvider{t: t}
+	agent := New(AgentConfig{
+		LLMProvider: provider,
+		MaxTurns:    2,
+	})
+
+	result, err := agent.Run(context.Background(), "session_no_tools_stream", []models.Message{{
+		ID:        "m1",
+		SessionID: "session_no_tools_stream",
+		Role:      models.RoleHuman,
+		Content:   "just answer",
+	}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "done" {
+		t.Fatalf("final output=%q want done", result.FinalOutput)
 	}
 }
 
@@ -706,6 +930,27 @@ func TestToolMessageContentFormatsError(t *testing.T) {
 	}
 }
 
+func TestRecoverableToolRetryPromptHandlesClarification(t *testing.T) {
+	prompt := recoverableToolRetryPrompt([]models.Message{{
+		ID:        "tool-1",
+		SessionID: "session-1",
+		Role:      models.RoleTool,
+		Content:   "Error",
+		ToolResult: &models.ToolResult{
+			CallID:   "call-1",
+			ToolName: "ask_clarification",
+			Status:   models.CallStatusFailed,
+			Error:    `missing required argument "question"`,
+		},
+	}})
+	if !strings.Contains(prompt, "ask_clarification") {
+		t.Fatalf("prompt=%q want ask_clarification guidance", prompt)
+	}
+	if !strings.Contains(prompt, "`question`") {
+		t.Fatalf("prompt=%q want required question guidance", prompt)
+	}
+}
+
 func TestAgentRunActivatesDeferredToolsViaToolSearch(t *testing.T) {
 	var deferredExecutions atomic.Int32
 	provider := &scriptedStreamProvider{
@@ -923,7 +1168,7 @@ func TestAgentRunStopsAfterClarificationRequest(t *testing.T) {
 	if last.Role != models.RoleTool || last.ToolResult == nil {
 		t.Fatalf("last message=%#v", last)
 	}
-	if last.Content != "Which mode?\n1. Fast\n2. Safe" {
+	if last.Content != "❓ Which mode?" {
 		t.Fatalf("tool message content=%q", last.Content)
 	}
 }
@@ -1227,6 +1472,279 @@ func TestRunPreservesReasoningOnlyAssistantMessages(t *testing.T) {
 }
 
 type timeoutProvider struct{}
+
+type chatOnlyProvider struct {
+	t    *testing.T
+	chat func(llm.ChatRequest) llm.ChatResponse
+}
+
+func (p chatOnlyProvider) PrefersStructuredToolCalls() bool { return true }
+
+func (p chatOnlyProvider) Chat(_ context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	return p.chat(req), nil
+}
+
+func (p chatOnlyProvider) Stream(context.Context, llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	if p.t != nil {
+		p.t.Fatal("Stream() should not be used for tool turns")
+	}
+	ch := make(chan llm.StreamChunk)
+	close(ch)
+	return ch, nil
+}
+
+type streamOnlyToolProvider struct {
+	t           *testing.T
+	streamCalls int
+}
+
+func (p *streamOnlyToolProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
+	if p.t != nil {
+		p.t.Fatal("Chat() should not be used for non-structured providers")
+	}
+	return llm.ChatResponse{}, nil
+}
+
+func (p *streamOnlyToolProvider) Stream(_ context.Context, req llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	p.streamCalls++
+	ch := make(chan llm.StreamChunk, 1)
+	go func() {
+		defer close(ch)
+		switch p.streamCalls {
+		case 1:
+			ch <- llm.StreamChunk{
+				Message: &models.Message{
+					Role:    models.RoleAI,
+					Content: "先调用工具。",
+					ToolCalls: []models.ToolCall{{
+						ID:        "call-1",
+						Name:      "echo_tool",
+						Arguments: map[string]any{"value": "ok"},
+						Status:    models.CallStatusPending,
+					}},
+				},
+				ToolCalls: []models.ToolCall{{
+					ID:        "call-1",
+					Name:      "echo_tool",
+					Arguments: map[string]any{"value": "ok"},
+					Status:    models.CallStatusPending,
+				}},
+				Stop: "tool_calls",
+				Done: true,
+			}
+		case 2:
+			if len(req.Messages) < 3 {
+				p.t.Fatalf("second stream request messages=%d want>=3", len(req.Messages))
+			}
+			if req.Messages[2].ToolResult == nil || req.Messages[2].ToolResult.Content != "ok" {
+				p.t.Fatalf("tool result history=%#v", req.Messages[2].ToolResult)
+			}
+			ch <- llm.StreamChunk{
+				Message: &models.Message{
+					Role:    models.RoleAI,
+					Content: "done",
+				},
+				Stop: "stop",
+				Done: true,
+			}
+		default:
+			p.t.Fatalf("unexpected Stream call %d", p.streamCalls)
+		}
+	}()
+	return ch, nil
+}
+
+type structuredNoToolProvider struct {
+	t *testing.T
+}
+
+func (p structuredNoToolProvider) PrefersStructuredToolCalls() bool { return true }
+
+func (p structuredNoToolProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
+	if p.t != nil {
+		p.t.Fatal("Chat() should not be used when no tools are available")
+	}
+	return llm.ChatResponse{}, nil
+}
+
+func TestAgentRunRewritesSkillAliasToolCallsToReadFile(t *testing.T) {
+	registry := tools.NewRegistry()
+	var gotCall models.ToolCall
+	if err := registry.Register(models.Tool{
+		Name: "read_file",
+		Handler: func(_ context.Context, call models.ToolCall) (models.ToolResult, error) {
+			gotCall = call
+			return models.ToolResult{
+				CallID:   call.ID,
+				ToolName: call.Name,
+				Content:  "# Frontend Skill",
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register read_file: %v", err)
+	}
+
+	var chatCalls int
+	provider := chatOnlyProvider{t: t, chat: func(req llm.ChatRequest) llm.ChatResponse {
+		chatCalls++
+		switch chatCalls {
+		case 1:
+			return llm.ChatResponse{
+				Model: "test-model",
+				Message: models.Message{
+					Role: models.RoleAI,
+					ToolCalls: []models.ToolCall{{
+						ID:   "call-1",
+						Name: "frontend-design",
+						Arguments: map[string]any{
+							"description": "Load the frontend skill",
+						},
+					}},
+				},
+				Stop: "tool_calls",
+			}
+		case 2:
+			if len(req.Messages) < 3 {
+				t.Fatalf("second chat request messages=%d want>=3", len(req.Messages))
+			}
+			if req.Messages[2].ToolResult == nil || req.Messages[2].ToolResult.ToolName != "read_file" {
+				t.Fatalf("tool result history=%#v", req.Messages[2].ToolResult)
+			}
+			return llm.ChatResponse{
+				Model: "test-model",
+				Message: models.Message{
+					Role:    models.RoleAI,
+					Content: "done",
+				},
+				Stop: "stop",
+			}
+		default:
+			t.Fatalf("unexpected Chat call %d", chatCalls)
+			return llm.ChatResponse{}
+		}
+	}}
+
+	agent := New(AgentConfig{
+		LLMProvider:  provider,
+		Tools:        registry,
+		SystemPrompt: "test",
+		MaxTurns:     4,
+	})
+	ctx := tools.WithRuntimeContext(context.Background(), map[string]any{
+		"skill_paths": map[string]any{
+			"frontend-design": "/mnt/skills/public/frontend-design/SKILL.md",
+		},
+	})
+	result, err := agent.Run(ctx, "session-1", []models.Message{{
+		ID:        "msg-1",
+		SessionID: "session-1",
+		Role:      models.RoleHuman,
+		Content:   "build a page",
+	}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if gotCall.Name != "read_file" {
+		t.Fatalf("tool name=%q want read_file", gotCall.Name)
+	}
+	if got, _ := gotCall.Arguments["path"].(string); got != "/mnt/skills/public/frontend-design/SKILL.md" {
+		t.Fatalf("tool path=%q", got)
+	}
+	if got, _ := gotCall.Arguments["description"].(string); got != "Load the frontend skill" {
+		t.Fatalf("tool description=%q", got)
+	}
+	if len(result.Messages) == 0 {
+		t.Fatal("result messages should not be empty")
+	}
+}
+
+func TestAgentRunStopsAfterSuccessfulPresentFile(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name: "present_file",
+		Handler: func(_ context.Context, call models.ToolCall) (models.ToolResult, error) {
+			return models.ToolResult{
+				CallID:   call.ID,
+				ToolName: call.Name,
+				Status:   models.CallStatusCompleted,
+				Content:  "Registered file /mnt/user-data/outputs/result.html",
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register present_file: %v", err)
+	}
+
+	var chatCalls int
+	provider := chatOnlyProvider{t: t, chat: func(req llm.ChatRequest) llm.ChatResponse {
+		chatCalls++
+		switch chatCalls {
+		case 1:
+			return llm.ChatResponse{
+				Model: "test-model",
+				Message: models.Message{
+					Role: models.RoleAI,
+					ToolCalls: []models.ToolCall{{
+						ID:   "call-1",
+						Name: "present_file",
+						Arguments: map[string]any{
+							"description": "Final page",
+							"path":        "/mnt/user-data/outputs/result.html",
+						},
+					}},
+				},
+				Stop: "tool_calls",
+			}
+		default:
+			t.Fatalf("unexpected Chat call %d", chatCalls)
+			return llm.ChatResponse{}
+		}
+	}}
+
+	agent := New(AgentConfig{
+		LLMProvider:  provider,
+		Tools:        registry,
+		SystemPrompt: "test",
+		MaxTurns:     4,
+	})
+	result, err := agent.Run(context.Background(), "session-present-stop", []models.Message{{
+		ID:        "msg-1",
+		SessionID: "session-present-stop",
+		Role:      models.RoleHuman,
+		Content:   "present it",
+	}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if chatCalls != 1 {
+		t.Fatalf("chat calls=%d want 1", chatCalls)
+	}
+	if len(result.Messages) < 2 {
+		t.Fatalf("messages=%d want at least 2", len(result.Messages))
+	}
+	last := result.Messages[len(result.Messages)-1]
+	if last.Role != models.RoleTool || last.ToolResult == nil || last.ToolResult.ToolName != "present_file" {
+		t.Fatalf("last message=%#v", last)
+	}
+}
+
+func (p structuredNoToolProvider) Stream(_ context.Context, req llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	if len(req.Tools) != 0 {
+		p.t.Fatalf("tools len=%d want 0", len(req.Tools))
+	}
+	ch := make(chan llm.StreamChunk, 1)
+	go func() {
+		defer close(ch)
+		ch <- llm.StreamChunk{
+			Message: &models.Message{
+				Role:    models.RoleAI,
+				Content: "done",
+			},
+			Stop: "stop",
+			Done: true,
+		}
+	}()
+	return ch, nil
+}
 
 func (timeoutProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
 	return llm.ChatResponse{}, nil

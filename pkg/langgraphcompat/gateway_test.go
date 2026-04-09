@@ -8769,6 +8769,63 @@ func TestThreadArtifactsRecoveredFromMessageHistory(t *testing.T) {
 	}
 }
 
+func TestThreadArtifactsSkipFailedPresentHistory(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	session := s.ensureSession("thread-artifacts-failed", map[string]any{"title": "Artifacts"})
+	session.Messages = []models.Message{
+		{
+			ID:        "ai-failed",
+			SessionID: "thread-artifacts-failed",
+			Role:      models.RoleAI,
+			ToolCalls: []models.ToolCall{
+				{
+					ID:        "call-failed",
+					Name:      "present_files",
+					Arguments: map[string]any{"filepaths": []any{"/mnt/user-data/workspace/index.html"}},
+				},
+			},
+		},
+		{
+			ID:        "tool-failed",
+			SessionID: "thread-artifacts-failed",
+			Role:      models.RoleTool,
+			ToolResult: &models.ToolResult{
+				CallID:   "call-failed",
+				ToolName: "present_file",
+				Status:   models.CallStatusFailed,
+				Data: map[string]any{
+					"path": "/mnt/user-data/workspace/index.html",
+				},
+			},
+		},
+		{
+			ID:        "tool-success",
+			SessionID: "thread-artifacts-failed",
+			Role:      models.RoleTool,
+			ToolResult: &models.ToolResult{
+				CallID:   "call-ok",
+				ToolName: "present_file",
+				Status:   models.CallStatusCompleted,
+				Data: map[string]any{
+					"path": "/mnt/user-data/outputs/index.html",
+				},
+			},
+		},
+	}
+
+	state := s.getThreadState("thread-artifacts-failed")
+	if state == nil {
+		t.Fatal("state missing")
+	}
+	artifacts, ok := state.Values["artifacts"].([]string)
+	if !ok {
+		t.Fatalf("artifacts=%#v", state.Values["artifacts"])
+	}
+	if len(artifacts) != 1 || artifacts[0] != "/mnt/user-data/outputs/index.html" {
+		t.Fatalf("artifacts=%#v", artifacts)
+	}
+}
+
 func TestArtifactGetAllowsRecoveredMessageHistoryPaths(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	threadID := "thread-artifact-history-read"
@@ -9355,6 +9412,17 @@ func TestThreadRunStreamEmitsClarificationRequest(t *testing.T) {
 	}
 	if !strings.Contains(text, `"id":"`) || !strings.Contains(text, `"required":true`) {
 		t.Fatalf("missing clarification identity payload: %s", text)
+	}
+	state := s.getThreadState("thread-stream-clarify")
+	if state == nil {
+		t.Fatal("state=nil")
+	}
+	if len(state.Interrupts) != 1 {
+		t.Fatalf("interrupts=%#v", state.Interrupts)
+	}
+	session := s.sessions["thread-stream-clarify"]
+	if session == nil || session.Status != "interrupted" {
+		t.Fatalf("session=%#v", session)
 	}
 	for _, forbidden := range []string{`"run_id":`, `"assistant_id":`, `"messages":`, `"usage_metadata":`, `"tool_calls":`, `"tool_call_id":`, `"retryable":`} {
 		if strings.Contains(clarifyBlock, forbidden) {

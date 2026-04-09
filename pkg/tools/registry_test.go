@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -109,16 +110,19 @@ func TestRegistry_Unregister(t *testing.T) {
 func TestRegistry_List(t *testing.T) {
 	r := NewRegistry()
 
-	r.Register(models.Tool{Name: "tool1", Description: "First", Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+	r.Register(models.Tool{Name: "tool2", Description: "Second", Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
 		return models.ToolResult{}, nil
 	}})
-	r.Register(models.Tool{Name: "tool2", Description: "Second", Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+	r.Register(models.Tool{Name: "tool1", Description: "First", Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
 		return models.ToolResult{}, nil
 	}})
 
 	tools := r.List()
 	if len(tools) != 2 {
 		t.Errorf("Expected 2 tools, got %d", len(tools))
+	}
+	if tools[0].Name != "tool2" || tools[1].Name != "tool1" {
+		t.Fatalf("List() order=%v want [tool2 tool1]", []string{tools[0].Name, tools[1].Name})
 	}
 }
 
@@ -172,10 +176,16 @@ func TestRegistry_Call(t *testing.T) {
 func TestRegistry_Restrict(t *testing.T) {
 	r := NewRegistry()
 
+	r.Register(models.Tool{Name: "first", Description: "First", Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+		return models.ToolResult{}, nil
+	}})
 	r.Register(models.Tool{Name: "allowed", Description: "Allowed", Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
 		return models.ToolResult{}, nil
 	}})
 	r.Register(models.Tool{Name: "denied", Description: "Denied", Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+		return models.ToolResult{}, nil
+	}})
+	r.Register(models.Tool{Name: "last", Description: "Last", Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
 		return models.ToolResult{}, nil
 	}})
 
@@ -191,6 +201,10 @@ func TestRegistry_Restrict(t *testing.T) {
 	tool = restricted.Get("denied")
 	if tool != nil {
 		t.Error("Denied tool should not be present")
+	}
+	list := restricted.List()
+	if len(list) != 1 || list[0].Name != "allowed" {
+		t.Fatalf("restricted order=%v want [allowed]", list)
 	}
 }
 
@@ -339,6 +353,38 @@ func TestValidateArgs(t *testing.T) {
 				t.Errorf("validateArgs() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidateArgsReportsAllMissingRequiredArguments(t *testing.T) {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path":    map[string]any{"type": "string"},
+			"content": map[string]any{"type": "string"},
+		},
+		"required": []any{"path", "content"},
+	}
+
+	err := validateArgs(schema, map[string]any{})
+	if err == nil {
+		t.Fatal("validateArgs() error = nil, want missing required arguments")
+	}
+	if !strings.Contains(err.Error(), `"path"`) || !strings.Contains(err.Error(), `"content"`) {
+		t.Fatalf("validateArgs() error = %q, want both required arguments", err.Error())
+	}
+}
+
+func TestEnrichToolValidationErrorWriteFile(t *testing.T) {
+	err := enrichToolValidationError("write_file", fmt.Errorf("missing required arguments %q, %q", "path", "content"))
+	if err == nil {
+		t.Fatal("enrichToolValidationError() error = nil")
+	}
+	if !strings.Contains(err.Error(), "/mnt/user-data/outputs/index.html") {
+		t.Fatalf("error = %q, want write_file path guidance", err.Error())
+	}
+	if !strings.Contains(err.Error(), "`path`") || !strings.Contains(err.Error(), "`content`") {
+		t.Fatalf("error = %q, want explicit required argument names", err.Error())
 	}
 }
 

@@ -33,27 +33,23 @@ func (m *Manager) Request(ctx context.Context, req ClarificationRequest) (*Clari
 		return nil, fmt.Errorf("clarification manager is nil")
 	}
 
-	question := strings.TrimSpace(req.Question)
-	if question == "" {
-		return nil, fmt.Errorf("question is required")
-	}
-
-	kind := normalizeType(req.Type, req.Options)
+	kind := normalizeType(firstNonEmptyClarificationType(req.ClarificationType, req.Type), req.Options)
+	clarificationType := normalizeClarificationType(firstNonEmptyClarificationType(req.ClarificationType, req.Type), kind, req.Options)
 	options := normalizeOptions(req.Options)
-	if kind == "choice" && len(options) == 0 {
-		return nil, fmt.Errorf("options are required for choice clarifications")
-	}
+	question := fallbackQuestion(strings.TrimSpace(req.Question), clarificationType, strings.TrimSpace(req.Context), options)
 
 	now := time.Now().UTC()
 	item := &Clarification{
-		ID:        newClarificationID(),
-		ThreadID:  ThreadIDFromContext(ctx),
-		Type:      kind,
-		Question:  question,
-		Options:   options,
-		Default:   strings.TrimSpace(req.Default),
-		Required:  req.Required,
-		CreatedAt: now,
+		ID:                newClarificationID(),
+		ThreadID:          ThreadIDFromContext(ctx),
+		Type:              kind,
+		ClarificationType: clarificationType,
+		Context:           strings.TrimSpace(req.Context),
+		Question:          question,
+		Options:           options,
+		Default:           strings.TrimSpace(req.Default),
+		Required:          req.Required,
+		CreatedAt:         now,
 	}
 
 	m.mu.Lock()
@@ -139,6 +135,7 @@ func (m *Manager) Pending() <-chan *Clarification {
 
 type threadIDContextKey struct{}
 type eventSinkContextKey struct{}
+type managerContextKey struct{}
 
 type EventSink func(*Clarification)
 
@@ -164,6 +161,21 @@ func WithEventSink(ctx context.Context, sink EventSink) context.Context {
 	return context.WithValue(ctx, eventSinkContextKey{}, sink)
 }
 
+func WithManager(ctx context.Context, manager *Manager) context.Context {
+	if manager == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, managerContextKey{}, manager)
+}
+
+func ManagerFromContext(ctx context.Context) *Manager {
+	if ctx == nil {
+		return nil
+	}
+	manager, _ := ctx.Value(managerContextKey{}).(*Manager)
+	return manager
+}
+
 func EmitEvent(ctx context.Context, item *Clarification) {
 	if ctx == nil || item == nil {
 		return
@@ -179,11 +191,42 @@ func normalizeType(kind string, options []ClarificationOption) string {
 	switch kind {
 	case "choice", "text", "confirm":
 		return kind
+	case "approach_choice":
+		return "choice"
+	case "risk_confirmation":
+		return "confirm"
+	case "missing_info", "ambiguous_requirement", "suggestion":
+		return "text"
 	}
 	if len(options) > 0 {
 		return "choice"
 	}
 	return "text"
+}
+
+func normalizeClarificationType(rawType string, kind string, options []ClarificationOption) string {
+	rawType = strings.TrimSpace(rawType)
+	switch rawType {
+	case "missing_info", "ambiguous_requirement", "approach_choice", "risk_confirmation", "suggestion":
+		return rawType
+	}
+
+	switch kind {
+	case "choice":
+		return "approach_choice"
+	case "confirm":
+		return "risk_confirmation"
+	case "text":
+		if len(options) > 0 {
+			return "approach_choice"
+		}
+		return "missing_info"
+	default:
+		if len(options) > 0 {
+			return "approach_choice"
+		}
+		return "missing_info"
+	}
 }
 
 func normalizeOptions(options []ClarificationOption) []ClarificationOption {
@@ -226,6 +269,15 @@ func clone(item *Clarification) *Clarification {
 		copyItem.Options = append([]ClarificationOption(nil), item.Options...)
 	}
 	return &copyItem
+}
+
+func firstNonEmptyClarificationType(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func newClarificationID() string {

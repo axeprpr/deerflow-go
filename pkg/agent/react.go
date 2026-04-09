@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/guardrails"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -61,6 +62,10 @@ type Agent struct {
 	eventsMu               sync.RWMutex
 	eventsClosed           bool
 	started                bool
+}
+
+type structuredToolCallProvider interface {
+	PrefersStructuredToolCalls() bool
 }
 
 func New(cfg AgentConfig) *Agent {
@@ -184,13 +189,6 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			SystemPrompt:    a.buildSystemPrompt(ctx, sessionID, deferredState),
 		}
 
-		stream, err := a.llm.Stream(ctx, req)
-		if err != nil {
-			err = normalizeRunError(ctx, err, a.requestTimeout)
-			emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
-			return nil, err
-		}
-
 		var (
 			aiMessageID = newMessageID("ai")
 			textBuilder strings.Builder
@@ -199,31 +197,59 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			stopReason  string
 		)
 
-		for chunk := range stream {
-			if chunk.Err != nil {
-				err := normalizeRunError(ctx, chunk.Err, a.requestTimeout)
+		if len(req.Tools) > 0 && prefersStructuredToolCalls(a.llm) {
+			resp, chatErr := a.llm.Chat(ctx, req)
+			if chatErr != nil {
+				err := normalizeRunError(ctx, chatErr, a.requestTimeout)
 				emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
 				return nil, err
 			}
-			if chunk.Delta != "" {
-				textBuilder.WriteString(chunk.Delta)
-				emit(AgentEvent{Type: AgentEventChunk, MessageID: aiMessageID, Text: chunk.Delta})
-				emit(AgentEvent{Type: AgentEventTextChunk, MessageID: aiMessageID, Text: chunk.Delta})
+			if resp.Message.Content != "" {
+				textBuilder.WriteString(resp.Message.Content)
+				emit(AgentEvent{Type: AgentEventChunk, MessageID: aiMessageID, Text: resp.Message.Content})
+				emit(AgentEvent{Type: AgentEventTextChunk, MessageID: aiMessageID, Text: resp.Message.Content})
 			}
-			if len(chunk.ToolCalls) > 0 {
-				toolCalls = mergeToolCalls(toolCalls, chunk.ToolCalls)
+			if len(resp.Message.ToolCalls) > 0 {
+				toolCalls = mergeToolCalls(toolCalls, resp.Message.ToolCalls)
 			}
-			if chunk.Usage != nil {
-				streamUsage = chunk.Usage
+			if resp.Usage != (llm.Usage{}) {
+				streamUsage = &resp.Usage
 			}
-			if chunk.Done {
-				stopReason = chunk.Stop
-				if chunk.Message != nil {
-					if textBuilder.Len() == 0 && chunk.Message.Content != "" {
-						textBuilder.WriteString(chunk.Message.Content)
-					}
-					if len(toolCalls) == 0 && len(chunk.Message.ToolCalls) > 0 {
-						toolCalls = append(toolCalls, chunk.Message.ToolCalls...)
+			stopReason = resp.Stop
+		} else {
+			stream, streamErr := a.llm.Stream(ctx, req)
+			if streamErr != nil {
+				err := normalizeRunError(ctx, streamErr, a.requestTimeout)
+				emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
+				return nil, err
+			}
+
+			for chunk := range stream {
+				if chunk.Err != nil {
+					err := normalizeRunError(ctx, chunk.Err, a.requestTimeout)
+					emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
+					return nil, err
+				}
+				if chunk.Delta != "" {
+					textBuilder.WriteString(chunk.Delta)
+					emit(AgentEvent{Type: AgentEventChunk, MessageID: aiMessageID, Text: chunk.Delta})
+					emit(AgentEvent{Type: AgentEventTextChunk, MessageID: aiMessageID, Text: chunk.Delta})
+				}
+				if len(chunk.ToolCalls) > 0 {
+					toolCalls = mergeToolCalls(toolCalls, chunk.ToolCalls)
+				}
+				if chunk.Usage != nil {
+					streamUsage = chunk.Usage
+				}
+				if chunk.Done {
+					stopReason = chunk.Stop
+					if chunk.Message != nil {
+						if textBuilder.Len() == 0 && chunk.Message.Content != "" {
+							textBuilder.WriteString(chunk.Message.Content)
+						}
+						if len(toolCalls) == 0 && len(chunk.Message.ToolCalls) > 0 {
+							toolCalls = append(toolCalls, chunk.Message.ToolCalls...)
+						}
 					}
 				}
 			}
@@ -239,6 +265,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 		}
 		toolCalls = truncateTaskToolCalls(toolCalls, a.maxConcurrentSubagents)
 		toolCalls = normalizeToolCalls(toolCalls)
+		toolCalls = rewriteSkillToolAliases(ctx, toolCalls)
 
 		assistantMetadata := map[string]string{"stop_reason": stopReason}
 		if streamUsage != nil {
@@ -261,6 +288,18 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 		}
 
 		if len(toolCalls) == 0 {
+			if strings.TrimSpace(assistantMessage.Content) == "" {
+				if retryPrompt := recoverableToolRetryPrompt(runMessages); retryPrompt != "" && turn+1 < a.maxTurns {
+					runMessages = append(runMessages, models.Message{
+						ID:        newMessageID("human"),
+						SessionID: sessionID,
+						Role:      models.RoleHuman,
+						Content:   retryPrompt,
+						CreatedAt: time.Now().UTC(),
+					})
+					continue
+				}
+			}
 			emit(AgentEvent{
 				Type:      AgentEventEnd,
 				MessageID: aiMessageID,
@@ -332,9 +371,10 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 
 		viewedImages := make([]viewedImage, 0)
 		pause := false
-		runMessages, viewedImages, pause, err = a.executeToolCalls(ctx, sessionID, aiMessageID, runMessages, toolCalls, deferredState, emit)
-		if err != nil {
-			return nil, err
+		var execErr error
+		runMessages, viewedImages, pause, execErr = a.executeToolCalls(ctx, sessionID, aiMessageID, runMessages, toolCalls, deferredState, emit)
+		if execErr != nil {
+			return nil, execErr
 		}
 		if len(viewedImages) > 0 {
 			runMessages = append(runMessages, viewedImagesMessage(sessionID, viewedImages, modelLikelySupportsVision(a.model)))
@@ -351,6 +391,14 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 	err := fmt.Errorf("agent exceeded max turns (%d)", a.maxTurns)
 	emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
 	return nil, err
+}
+
+func prefersStructuredToolCalls(provider llm.LLMProvider) bool {
+	if provider == nil {
+		return false
+	}
+	structured, ok := provider.(structuredToolCallProvider)
+	return ok && structured.PrefersStructuredToolCalls()
 }
 
 func (a *Agent) executeToolCalls(
@@ -562,6 +610,18 @@ func (a *Agent) executeSingleToolCall(
 
 func (a *Agent) performToolCall(ctx context.Context, sessionID string, call models.ToolCall, deferredState *deferredToolState) (models.ToolResult, error) {
 	toolStarted := time.Now().UTC()
+	if strings.TrimSpace(call.Name) == "ask_clarification" {
+		result, err := clarification.InterceptToolCall(ctx, call)
+		if err != nil {
+			err = normalizeRunError(ctx, err, a.requestTimeout)
+			result = preserveToolFailureResult(call, result, err)
+		}
+		result.Duration = time.Since(toolStarted)
+		if result.CompletedAt.IsZero() {
+			result.CompletedAt = time.Now().UTC()
+		}
+		return sanitizedToolResult(result), nil
+	}
 	if result, blocked := a.evaluateGuardrails(ctx, sessionID, call); blocked {
 		result.Duration = time.Since(toolStarted)
 		if result.CompletedAt.IsZero() {
@@ -723,7 +783,14 @@ func resolveGuardrails(cfg AgentConfig) (guardrails.Provider, bool, string) {
 }
 
 func shouldPauseAfterToolCall(call models.ToolCall, result models.ToolResult) bool {
-	return call.Name == "ask_clarification" && result.Status != models.CallStatusFailed
+	switch strings.TrimSpace(call.Name) {
+	case "ask_clarification":
+		return result.Status != models.CallStatusFailed
+	case "present_file", "present_files":
+		return result.Status == models.CallStatusCompleted
+	default:
+		return false
+	}
 }
 
 func detectToolCallLoop(history []string, calls []models.ToolCall, warned map[string]struct{}) (string, bool, []string) {
@@ -853,9 +920,6 @@ func (a *Agent) buildSystemPrompt(_ context.Context, _ string, deferredState *de
 	if deferredPrompt := deferredState.prompt(); deferredPrompt != "" {
 		sections = append(sections, deferredPrompt)
 	}
-	if toolDescriptions := describeTools(a.visibleTools(deferredState)); strings.TrimSpace(toolDescriptions) != "" {
-		sections = append(sections, "Available Tools:\n"+toolDescriptions)
-	}
 	return strings.Join(sections, "\n\n")
 }
 
@@ -959,23 +1023,6 @@ func (s *deferredToolState) prompt() string {
 		"Use `select:name1,name2` for exact names, keywords for search, or `+keyword rest` to require text in the tool name.\n" +
 		strings.Join(lines, "\n") + "\n" +
 		"</available_deferred_tools>"
-}
-
-func describeTools(items []models.Tool) string {
-	if len(items) == 0 {
-		return ""
-	}
-	var lines []string
-	for _, tool := range items {
-		line := fmt.Sprintf("- %s: %s", tool.Name, strings.TrimSpace(tool.Description))
-		if len(tool.InputSchema) > 0 {
-			if raw, err := json.MarshalIndent(tool.InputSchema, "", "  "); err == nil {
-				line += "\n  schema: " + strings.ReplaceAll(string(raw), "\n", "\n  ")
-			}
-		}
-		lines = append(lines, line)
-	}
-	return strings.Join(lines, "\n")
 }
 
 func (a *Agent) emit(evt AgentEvent) {
@@ -1168,6 +1215,39 @@ func toolMessageContent(result models.ToolResult) string {
 	return result.Content
 }
 
+func recoverableToolRetryPrompt(messages []models.Message) string {
+	if len(messages) == 0 {
+		return ""
+	}
+	last := messages[len(messages)-1]
+	if last.Role != models.RoleTool || last.ToolResult == nil {
+		return ""
+	}
+	result := last.ToolResult
+	if result.Status != models.CallStatusFailed {
+		return ""
+	}
+	detail := strings.ToLower(strings.TrimSpace(result.Error))
+	if !strings.Contains(detail, "missing required argument") && !strings.Contains(detail, "missing required arguments") {
+		return ""
+	}
+
+	switch strings.TrimSpace(result.ToolName) {
+	case "ask_clarification":
+		return "The previous ask_clarification call was invalid because required arguments were missing. Retry ask_clarification only if clarification is truly needed, and include at least `question`. Prefer also setting `clarification_type`, plus optional `context` and `options`. If the request is already clear enough, do not ask for clarification and continue with the next tool."
+	case "write_file":
+		return "The previous write_file call was invalid because required arguments were missing. Retry write_file with both `path` and `content`. For a final webpage, use `/mnt/user-data/outputs/index.html`."
+	case "str_replace":
+		return "The previous str_replace call was invalid because required arguments were missing. Retry str_replace with `path`, `old_str`, and `new_str`."
+	case "read_file":
+		return "The previous read_file call was invalid because required arguments were missing. Retry read_file with a valid `path`."
+	case "ls":
+		return "The previous ls call was invalid because required arguments were missing. Retry ls with a valid directory `path`."
+	default:
+		return ""
+	}
+}
+
 func normalizeToolCalls(calls []models.ToolCall) []models.ToolCall {
 	if len(calls) == 0 {
 		return nil
@@ -1185,6 +1265,67 @@ func normalizeToolCalls(calls []models.ToolCall) []models.ToolCall {
 		}
 		seen[normalized.ID] = struct{}{}
 		out = append(out, normalized)
+	}
+	return out
+}
+
+func rewriteSkillToolAliases(ctx context.Context, calls []models.ToolCall) []models.ToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	skillPaths := runtimeSkillPaths(ctx)
+	if len(skillPaths) == 0 {
+		return calls
+	}
+
+	out := make([]models.ToolCall, 0, len(calls))
+	for _, call := range calls {
+		skillPath := strings.TrimSpace(skillPaths[strings.TrimSpace(call.Name)])
+		if skillPath == "" {
+			out = append(out, call)
+			continue
+		}
+		description := strings.TrimSpace(stringFromAny(call.Arguments["description"]))
+		if description == "" {
+			description = "Load skill instructions before continuing."
+		}
+		out = append(out, models.ToolCall{
+			ID:   call.ID,
+			Name: "read_file",
+			Arguments: map[string]any{
+				"description": description,
+				"path":        skillPath,
+			},
+			Status: call.Status,
+		})
+	}
+	return out
+}
+
+func runtimeSkillPaths(ctx context.Context) map[string]string {
+	runtimeContext := tools.RuntimeContextFromContext(ctx)
+	if len(runtimeContext) == 0 {
+		return nil
+	}
+	raw, ok := runtimeContext["skill_paths"]
+	if !ok {
+		return nil
+	}
+	values, ok := raw.(map[string]any)
+	if !ok || len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for name, path := range values {
+		name = strings.TrimSpace(name)
+		resolvedPath := strings.TrimSpace(stringFromAny(path))
+		if name == "" || resolvedPath == "" {
+			continue
+		}
+		out[name] = resolvedPath
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

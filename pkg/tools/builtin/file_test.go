@@ -324,6 +324,23 @@ func TestWriteFileHandlerWritesRelativePathToThreadWorkspace(t *testing.T) {
 	}
 }
 
+func TestWriteFileHandlerRequiresPathWithActionableGuidance(t *testing.T) {
+	ctx := tools.WithThreadID(context.Background(), "thread-missing-path")
+	_, err := WriteFileHandler(ctx, models.ToolCall{
+		ID:   "call-missing-path-1",
+		Name: "write_file",
+		Arguments: map[string]any{
+			"content": "<html></html>",
+		},
+	})
+	if err == nil {
+		t.Fatal("WriteFileHandler() error = nil, want missing path guidance")
+	}
+	if !strings.Contains(err.Error(), "/mnt/user-data/outputs/index.html") {
+		t.Fatalf("error=%q want actionable path example", err.Error())
+	}
+}
+
 func TestWriteFileHandlerAppendMode(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DEERFLOW_DATA_ROOT", root)

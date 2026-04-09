@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -37,7 +38,7 @@ func TestApplyAgentTypeUsesUpdatedBuiltinFileToolsets(t *testing.T) {
 	}
 
 	got := registryToolNames(cfg.Tools)
-	want := []string{"ask_clarification", "bash", "ls", "present_files", "read_file", "str_replace", "task", "write_file"}
+	want := []string{"bash", "ls", "read_file", "write_file", "str_replace", "present_files", "ask_clarification", "task"}
 	if len(got) != len(want) {
 		t.Fatalf("coder tools=%v want=%v", got, want)
 	}
@@ -57,7 +58,7 @@ func TestApplyAgentTypeUsesUpdatedBuiltinFileToolsets(t *testing.T) {
 		t.Fatalf("ApplyAgentType(researcher) error = %v", err)
 	}
 	got = registryToolNames(cfg.Tools)
-	want = []string{"ask_clarification", "image_search", "ls", "present_files", "read_file", "task", "web_fetch", "web_search"}
+	want = []string{"ls", "read_file", "present_files", "ask_clarification", "task", "web_search", "web_fetch", "image_search"}
 	if len(got) != len(want) {
 		t.Fatalf("researcher tools=%v want=%v", got, want)
 	}
@@ -65,6 +66,18 @@ func TestApplyAgentTypeUsesUpdatedBuiltinFileToolsets(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("researcher tools=%v want=%v", got, want)
 		}
+	}
+}
+
+func TestBuiltinAgentPromptsEmphasizeDirectExecution(t *testing.T) {
+	if strings.Contains(generalPurposeSystemPrompt, "<execution_mode>") {
+		t.Fatalf("general prompt unexpectedly includes custom execution mode: %q", generalPurposeSystemPrompt)
+	}
+	if strings.Contains(coderSystemPrompt, "<execution_mode>") {
+		t.Fatalf("coder prompt unexpectedly includes custom execution mode: %q", coderSystemPrompt)
+	}
+	if !strings.Contains(generalPurposeSystemPrompt, "<role>") || !strings.Contains(coderSystemPrompt, "<role>") {
+		t.Fatalf("builtin prompts should remain role-only: general=%q coder=%q", generalPurposeSystemPrompt, coderSystemPrompt)
 	}
 }
 

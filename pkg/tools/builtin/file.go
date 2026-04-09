@@ -18,7 +18,7 @@ func ReadFileHandler(ctx context.Context, call models.ToolCall) (models.ToolResu
 	args := call.Arguments
 	path, ok := args["path"].(string)
 	if !ok || strings.TrimSpace(path) == "" {
-		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("path is required")
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("path is required; use an absolute virtual path such as /mnt/user-data/uploads/input.txt or /mnt/user-data/workspace/draft.txt")
 	}
 	path = resolveReadableFilePath(ctx, path)
 
@@ -136,7 +136,7 @@ func WriteFileHandler(ctx context.Context, call models.ToolCall) (models.ToolRes
 	args := call.Arguments
 	requestedPath, ok := args["path"].(string)
 	if !ok || strings.TrimSpace(requestedPath) == "" {
-		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("path is required")
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("path is required; use an absolute virtual path such as /mnt/user-data/workspace/draft.txt or /mnt/user-data/outputs/index.html")
 	}
 	path := tools.ResolveVirtualPath(ctx, requestedPath)
 	if err := tools.ValidateWritableToolPath(ctx, requestedPath, path); err != nil {
@@ -171,7 +171,7 @@ func GlobHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, 
 	args := call.Arguments
 	pattern, ok := args["pattern"].(string)
 	if !ok || strings.TrimSpace(pattern) == "" {
-		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("pattern is required")
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("pattern is required; use a virtual path glob such as /mnt/user-data/uploads/*.csv")
 	}
 	pattern = tools.ResolveVirtualPath(ctx, pattern)
 
@@ -191,7 +191,7 @@ func LsHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, er
 	args := call.Arguments
 	path, ok := args["path"].(string)
 	if !ok || strings.TrimSpace(path) == "" {
-		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("path is required")
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("path is required; use a directory path such as /mnt/user-data/uploads or /mnt/user-data/workspace")
 	}
 	path = tools.ResolveVirtualPath(ctx, path)
 
@@ -305,14 +305,15 @@ func GlobTool() models.Tool {
 func LsTool() models.Tool {
 	return models.Tool{
 		Name:        "ls",
-		Description: "List the contents of a directory.",
+		Description: "List the contents of a directory up to 2 levels deep in tree format.",
 		Groups:      []string{"builtin", "file_ops"},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path": map[string]any{"type": "string", "description": "Directory path to list"},
+				"description": map[string]any{"type": "string", "description": "Explain why you are listing this directory in short words. ALWAYS PROVIDE THIS PARAMETER FIRST."},
+				"path":        map[string]any{"type": "string", "description": "The absolute path to the directory to list."},
 			},
-			"required": []any{"path"},
+			"required": []any{"description", "path"},
 		},
 		Handler: LsHandler,
 	}
@@ -321,17 +322,18 @@ func LsTool() models.Tool {
 func ReadFileTool() models.Tool {
 	return models.Tool{
 		Name:        "read_file",
-		Description: "Read the contents of a file.",
+		Description: "Read the contents of a text file. Use this to examine source code, configuration files, logs, or any text-based file.",
 		Groups:      []string{"builtin", "file_ops"},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":       map[string]any{"type": "string", "description": "File path to read"},
-				"limit":      map[string]any{"type": "number", "description": "Maximum bytes to read"},
-				"start_line": map[string]any{"type": "integer", "description": "Optional starting line number (1-indexed, inclusive)"},
-				"end_line":   map[string]any{"type": "integer", "description": "Optional ending line number (1-indexed, inclusive)"},
+				"description": map[string]any{"type": "string", "description": "Explain why you are reading this file in short words. ALWAYS PROVIDE THIS PARAMETER FIRST."},
+				"path":        map[string]any{"type": "string", "description": "The absolute path to the file to read."},
+				"limit":       map[string]any{"type": "number", "description": "Maximum bytes to read"},
+				"start_line":  map[string]any{"type": "integer", "description": "Optional starting line number (1-indexed, inclusive)."},
+				"end_line":    map[string]any{"type": "integer", "description": "Optional ending line number (1-indexed, inclusive)."},
 			},
-			"required": []any{"path"},
+			"required": []any{"description", "path"},
 		},
 		Handler: ReadFileHandler,
 	}
@@ -340,16 +342,17 @@ func ReadFileTool() models.Tool {
 func WriteFileTool() models.Tool {
 	return models.Tool{
 		Name:        "write_file",
-		Description: "Write content to a file.",
+		Description: "Write text content to a file.",
 		Groups:      []string{"builtin", "file_ops"},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":    map[string]any{"type": "string", "description": "File path to write"},
-				"content": map[string]any{"type": "string", "description": "Content to write"},
-				"append":  map[string]any{"type": "boolean", "description": "Append instead of overwrite"},
+				"description": map[string]any{"type": "string", "description": "Explain why you are writing to this file in short words. ALWAYS PROVIDE THIS PARAMETER FIRST."},
+				"path":        map[string]any{"type": "string", "description": "The absolute path to the file to write to. ALWAYS PROVIDE THIS PARAMETER SECOND."},
+				"content":     map[string]any{"type": "string", "description": "The content to write to the file. ALWAYS PROVIDE THIS PARAMETER THIRD."},
+				"append":      map[string]any{"type": "boolean", "description": "Append instead of overwrite."},
 			},
-			"required": []any{"path", "content"},
+			"required": []any{"description", "path", "content"},
 		},
 		Handler: WriteFileHandler,
 	}
@@ -358,17 +361,18 @@ func WriteFileTool() models.Tool {
 func StrReplaceTool() models.Tool {
 	return models.Tool{
 		Name:        "str_replace",
-		Description: "Replace a string in a file.",
+		Description: "Replace a substring in a file with another substring. If `replace_all` is false, the substring to replace must appear exactly once in the file.",
 		Groups:      []string{"builtin", "file_ops"},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":        map[string]any{"type": "string", "description": "File path to update"},
-				"old_str":     map[string]any{"type": "string", "description": "Substring to replace"},
-				"new_str":     map[string]any{"type": "string", "description": "Replacement string"},
-				"replace_all": map[string]any{"type": "boolean", "description": "Replace all occurrences instead of just the first"},
+				"description": map[string]any{"type": "string", "description": "Explain why you are replacing the substring in short words. ALWAYS PROVIDE THIS PARAMETER FIRST."},
+				"path":        map[string]any{"type": "string", "description": "The absolute path to the file to update. ALWAYS PROVIDE THIS PARAMETER SECOND."},
+				"old_str":     map[string]any{"type": "string", "description": "The substring to replace. ALWAYS PROVIDE THIS PARAMETER THIRD."},
+				"new_str":     map[string]any{"type": "string", "description": "The new substring. ALWAYS PROVIDE THIS PARAMETER FOURTH."},
+				"replace_all": map[string]any{"type": "boolean", "description": "Whether to replace all occurrences instead of only the first."},
 			},
-			"required": []any{"path", "old_str", "new_str"},
+			"required": []any{"description", "path", "old_str", "new_str"},
 		},
 		Handler: StrReplaceHandler,
 	}

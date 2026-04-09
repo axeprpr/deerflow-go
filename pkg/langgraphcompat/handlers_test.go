@@ -1,19 +1,97 @@
 package langgraphcompat
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
+	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
+
+type capturingPromptLLMProvider struct {
+	mu      sync.Mutex
+	lastReq llm.ChatRequest
+}
+
+func (p *capturingPromptLLMProvider) Chat(_ context.Context, _ llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, nil
+}
+
+func (p *capturingPromptLLMProvider) Stream(_ context.Context, req llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	p.mu.Lock()
+	p.lastReq = req
+	p.mu.Unlock()
+	ch := make(chan llm.StreamChunk, 1)
+	go func() {
+		defer close(ch)
+		ch <- llm.StreamChunk{
+			Done: true,
+			Message: &models.Message{
+				ID:        "ai-final",
+				SessionID: "thread",
+				Role:      models.RoleAI,
+				Content:   "ok",
+			},
+		}
+	}()
+	return ch, nil
+}
+
+func (p *capturingPromptLLMProvider) LastReq() llm.ChatRequest {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lastReq
+}
+
+type capturingStructuredPromptLLMProvider struct {
+	t       *testing.T
+	mu      sync.Mutex
+	lastReq llm.ChatRequest
+}
+
+func (p *capturingStructuredPromptLLMProvider) PrefersStructuredToolCalls() bool { return true }
+
+func (p *capturingStructuredPromptLLMProvider) Chat(_ context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	p.mu.Lock()
+	p.lastReq = req
+	p.mu.Unlock()
+	return llm.ChatResponse{
+		Message: models.Message{
+			ID:        "ai-final",
+			SessionID: "thread",
+			Role:      models.RoleAI,
+			Content:   "ok",
+		},
+		Stop: "stop",
+	}, nil
+}
+
+func (p *capturingStructuredPromptLLMProvider) Stream(_ context.Context, _ llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	if p.t != nil {
+		p.t.Fatal("Stream() should not be used for structured prompt capture provider")
+	}
+	ch := make(chan llm.StreamChunk)
+	close(ch)
+	return ch, nil
+}
+
+func (p *capturingStructuredPromptLLMProvider) LastReq() llm.ChatRequest {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lastReq
+}
 
 func TestFilterTransientMessagesDropsViewedImageContext(t *testing.T) {
 	messages := []models.Message{
@@ -121,6 +199,106 @@ func TestFilterTransientMessagesKeepsRegularMultimodalImagesWithoutUploadContext
 	}
 	if got := multi[1]["type"]; got != "image_url" {
 		t.Fatalf("multi_content[1].type=%v want image_url", got)
+	}
+}
+
+func TestHandleRunsStreamUsesResolvedRuntimePrompt(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	writeGatewaySkill(t, s.dataRoot, "public", "frontend-design", `---
+name: frontend-design
+description: Build polished pages and interfaces.
+category: public
+license: MIT
+---
+
+# Frontend Design
+`)
+	s.skills = s.discoverGatewaySkills(nil)
+	s.tools = newRuntimeToolRegistry(t)
+	provider := &capturingPromptLLMProvider{}
+	s.llmProvider = provider
+
+	reqBody := `{"assistant_id":"lead_agent","input":{"messages":[{"role":"user","content":"帮我生成一个小鱼游泳的页面"}]}}`
+	resp, err := http.Post(ts.URL+"/threads/thread-runtime-prompt/runs/stream", "application/json", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(body))
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	prompt := provider.LastReq().SystemPrompt
+	if !strings.Contains(prompt, "<skill_system>") {
+		t.Fatalf("system prompt missing skill system: %q", prompt)
+	}
+	if !strings.Contains(prompt, "/mnt/skills/public/frontend-design/SKILL.md") {
+		t.Fatalf("system prompt missing frontend-design skill path: %q", prompt)
+	}
+	if !strings.Contains(prompt, "/mnt/user-data/outputs") {
+		t.Fatalf("system prompt missing working directory guidance: %q", prompt)
+	}
+	if !strings.Contains(prompt, "<citations>") {
+		t.Fatalf("system prompt missing citations section: %q", prompt)
+	}
+	if strings.Contains(prompt, "<task_skill_bootstrap>") {
+		t.Fatalf("system prompt unexpectedly included task bootstrap: %q", prompt)
+	}
+	if strings.Contains(prompt, "<preloaded_skill name=\"frontend-design\">") {
+		t.Fatalf("system prompt unexpectedly inlined frontend skill: %q", prompt)
+	}
+	if strings.Contains(prompt, "<file_workflow>") {
+		t.Fatalf("system prompt unexpectedly included custom file workflow guidance: %q", prompt)
+	}
+}
+
+func TestHandleRunsCreateUsesResolvedRuntimePromptWithoutTaskBootstrap(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	writeGatewaySkill(t, s.dataRoot, "public", "frontend-design", `---
+name: frontend-design
+description: Build polished pages and interfaces.
+category: public
+license: MIT
+---
+
+# Frontend Design
+`)
+	s.skills = s.discoverGatewaySkills(nil)
+	s.tools = newRuntimeToolRegistry(t)
+	provider := &capturingStructuredPromptLLMProvider{t: t}
+	s.llmProvider = provider
+
+	reqBody := `{"assistant_id":"lead_agent","input":{"messages":[{"role":"user","content":"帮我生成一个小鱼游泳的页面"}]}}`
+	resp, err := http.Post(ts.URL+"/threads/thread-runtime-prompt-create/runs", "application/json", strings.NewReader(reqBody))
+	if err != nil {
+		t.Fatalf("create request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(body))
+	}
+
+	prompt := provider.LastReq().SystemPrompt
+	if !strings.Contains(prompt, "<skill_system>") {
+		t.Fatalf("system prompt missing skill system: %q", prompt)
+	}
+	if !strings.Contains(prompt, "/mnt/skills/public/frontend-design/SKILL.md") {
+		t.Fatalf("system prompt missing frontend-design skill path: %q", prompt)
+	}
+	if !strings.Contains(prompt, "<citations>") {
+		t.Fatalf("system prompt missing citations section: %q", prompt)
+	}
+	if strings.Contains(prompt, "<task_skill_bootstrap>") {
+		t.Fatalf("system prompt unexpectedly included task bootstrap: %q", prompt)
+	}
+	if strings.Contains(prompt, "<preloaded_skill name=\"frontend-design\">") {
+		t.Fatalf("system prompt unexpectedly inlined frontend skill: %q", prompt)
+	}
+	if strings.Contains(prompt, "<file_workflow>") {
+		t.Fatalf("system prompt unexpectedly included custom file workflow guidance: %q", prompt)
 	}
 }
 

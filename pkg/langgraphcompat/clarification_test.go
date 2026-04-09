@@ -110,13 +110,11 @@ func TestThreadClarificationCreateAcceptsClarificationTypeAlias(t *testing.T) {
 	server.ensureSession("thread-2", nil)
 
 	createBody, _ := json.Marshal(map[string]any{
-		"clarification_type": "choice",
+		"clarification_type": "approach_choice",
 		"question":           "Which mode?",
-		"options": []map[string]any{
-			{"label": "Fast", "value": "fast"},
-			{"label": "Safe", "value": "safe"},
-		},
-		"required": true,
+		"context":            "There are multiple valid modes.",
+		"options":            []string{"Fast", "Safe"},
+		"required":           true,
 	})
 	createReq := httptest.NewRequest(http.MethodPost, "/threads/thread-2/clarifications", bytes.NewReader(createBody))
 	createReq.SetPathValue("thread_id", "thread-2")
@@ -132,5 +130,11 @@ func TestThreadClarificationCreateAcceptsClarificationTypeAlias(t *testing.T) {
 	}
 	if created.Type != "choice" {
 		t.Fatalf("created type = %q, want choice", created.Type)
+	}
+	if created.ClarificationType != "approach_choice" {
+		t.Fatalf("created clarification_type = %q, want approach_choice", created.ClarificationType)
+	}
+	if created.Context != "There are multiple valid modes." {
+		t.Fatalf("created context = %q", created.Context)
 	}
 }

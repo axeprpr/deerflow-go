@@ -104,21 +104,30 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 	s.setThreadMetadata(threadID, "assistant_id", assistantID)
 	s.setThreadMetadata(threadID, "graph_id", firstNonEmpty(assistantID, "lead_agent"))
 	s.setThreadMetadata(threadID, "run_id", runID)
+	s.deleteThreadMetadata(threadID, "interrupts")
 
 	runCfg := parseRunConfig(mergeRunConfig(req.Config, req.Context))
 	s.applyRunConfigMetadata(threadID, runCfg)
-	runAgent := s.newAgent(agent.AgentConfig{
-		PresentFiles:    session.PresentFiles,
-		AgentType:       runCfg.AgentType,
-		Model:           firstNonEmpty(runCfg.ModelName, s.defaultModel),
-		ReasoningEffort: runCfg.ReasoningEffort,
-		Temperature:     runCfg.Temperature,
-		MaxTokens:       runCfg.MaxTokens,
-	})
+	agentCfg, err := s.resolveRunConfig(runCfg, nil)
+	if err != nil {
+		run.Status = "error"
+		run.Error = err.Error()
+		run.UpdatedAt = time.Now().UTC()
+		s.saveRun(run)
+		s.markThreadStatus(threadID, "error")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	agentCfg.PresentFiles = session.PresentFiles
+	runAgent := s.newAgent(agentCfg)
 
 	ctx := subagent.WithEventSink(r.Context(), func(evt subagent.TaskEvent) {})
 	ctx = clarification.WithThreadID(ctx, threadID)
+	ctx = clarification.WithManager(ctx, s.clarify)
 	ctx = clarification.WithEventSink(ctx, func(item *clarification.Clarification) {})
+	ctx = tools.WithRuntimeContext(ctx, map[string]any{
+		"skill_paths": s.runtimeSkillPaths(),
+	})
 
 	result, err := runAgent.Run(ctx, threadID, deerMessages)
 	if err != nil {
@@ -132,11 +141,18 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.saveSession(threadID, result.Messages)
+	if interrupt := clarificationInterruptFromMessages(result.Messages); interrupt != nil {
+		s.setThreadMetadata(threadID, "interrupts", []any{interrupt})
+		s.markThreadStatus(threadID, "interrupted")
+		run.Status = "interrupted"
+	} else {
+		s.deleteThreadMetadata(threadID, "interrupts")
+		s.markThreadStatus(threadID, "idle")
+		run.Status = "success"
+	}
 	state := s.getThreadState(threadID)
-	run.Status = "success"
 	run.UpdatedAt = time.Now().UTC()
 	s.saveRun(run)
-	s.markThreadStatus(threadID, "idle")
 
 	values := map[string]any{}
 	if state != nil {
@@ -214,6 +230,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	s.setThreadMetadata(threadID, "assistant_id", assistantID)
 	s.setThreadMetadata(threadID, "graph_id", firstNonEmpty(assistantID, "lead_agent"))
 	s.setThreadMetadata(threadID, "run_id", runID)
+	s.deleteThreadMetadata(threadID, "interrupts")
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -230,14 +247,17 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 
 	runCfg := parseRunConfig(mergeRunConfig(req.Config, req.Context))
 	s.applyRunConfigMetadata(threadID, runCfg)
-	runAgent := s.newAgent(agent.AgentConfig{
-		PresentFiles:    session.PresentFiles,
-		AgentType:       runCfg.AgentType,
-		Model:           firstNonEmpty(runCfg.ModelName, s.defaultModel),
-		ReasoningEffort: runCfg.ReasoningEffort,
-		Temperature:     runCfg.Temperature,
-		MaxTokens:       runCfg.MaxTokens,
-	})
+	agentCfg, err := s.resolveRunConfig(runCfg, nil)
+	if err != nil {
+		run.Status = "error"
+		run.Error = err.Error()
+		run.UpdatedAt = time.Now().UTC()
+		s.saveRun(run)
+		s.markThreadStatus(threadID, "error")
+		return
+	}
+	agentCfg.PresentFiles = session.PresentFiles
+	runAgent := s.newAgent(agentCfg)
 
 	runCtx, cancelRun := context.WithCancel(context.WithoutCancel(r.Context()))
 	defer cancelRun()
@@ -249,11 +269,15 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		s.forwardTaskEvent(w, flusher, run, filter, evt)
 	})
 	ctx = clarification.WithThreadID(ctx, threadID)
+	ctx = clarification.WithManager(ctx, s.clarify)
 	ctx = clarification.WithEventSink(ctx, func(item *clarification.Clarification) {
 		if item == nil {
 			return
 		}
 		s.recordAndSendEventFiltered(w, flusher, run, filter, "clarification_request", item)
+	})
+	ctx = tools.WithRuntimeContext(ctx, map[string]any{
+		"skill_paths": s.runtimeSkillPaths(),
 	})
 	eventsDone := make(chan struct{})
 	go func() {
@@ -275,6 +299,15 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	}
 
 	s.saveSession(threadID, result.Messages)
+	if interrupt := clarificationInterruptFromMessages(result.Messages); interrupt != nil {
+		s.setThreadMetadata(threadID, "interrupts", []any{interrupt})
+		s.markThreadStatus(threadID, "interrupted")
+		run.Status = "interrupted"
+	} else {
+		s.deleteThreadMetadata(threadID, "interrupts")
+		s.markThreadStatus(threadID, "idle")
+		run.Status = "success"
+	}
 	state := s.getThreadState(threadID)
 	s.emitFinalMessagesTuple(w, flusher, run, filter, existingMessages, result.Messages, result.Usage)
 
@@ -291,10 +324,38 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		"usage":  result.Usage,
 	})
 
-	run.Status = "success"
 	run.UpdatedAt = time.Now().UTC()
 	s.saveRun(run)
-	s.markThreadStatus(threadID, "idle")
+}
+
+func clarificationInterruptFromMessages(messages []models.Message) map[string]any {
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != models.RoleTool || msg.ToolResult == nil {
+			continue
+		}
+		if strings.TrimSpace(msg.ToolResult.ToolName) != "ask_clarification" || msg.ToolResult.Status != models.CallStatusCompleted {
+			continue
+		}
+		value := strings.TrimSpace(firstNonEmpty(msg.Content, msg.ToolResult.Content))
+		if value == "" {
+			value = "Clarification requested"
+		}
+		interrupt := map[string]any{"value": value}
+		if len(msg.ToolResult.Data) > 0 {
+			if id := stringValue(msg.ToolResult.Data["id"]); id != "" {
+				interrupt["id"] = id
+			}
+			if question := stringValue(msg.ToolResult.Data["question"]); question != "" {
+				interrupt["question"] = question
+			}
+			if clarificationType := stringValue(msg.ToolResult.Data["clarification_type"]); clarificationType != "" {
+				interrupt["clarification_type"] = clarificationType
+			}
+		}
+		return interrupt
+	}
+	return nil
 }
 
 func (s *Server) handleRunStream(w http.ResponseWriter, r *http.Request) {

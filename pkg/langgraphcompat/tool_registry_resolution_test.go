@@ -28,19 +28,19 @@ func TestResolveAgentToolRegistryUsesUpdatedFileToolMappings(t *testing.T) {
 
 	t.Run("file", func(t *testing.T) {
 		got := registryNames(resolveAgentToolRegistry(registry, []string{"file"}))
-		want := []string{"ask_clarification", "ls", "present_files", "read_file", "str_replace", "write_file"}
+		want := []string{"ls", "read_file", "write_file", "str_replace", "present_files", "ask_clarification"}
 		assertToolNames(t, got, want)
 	})
 
 	t.Run("file read", func(t *testing.T) {
 		got := registryNames(resolveAgentToolRegistry(registry, []string{"file:read"}))
-		want := []string{"ask_clarification", "ls", "read_file"}
+		want := []string{"ls", "read_file", "ask_clarification"}
 		assertToolNames(t, got, want)
 	})
 
 	t.Run("file write", func(t *testing.T) {
 		got := registryNames(resolveAgentToolRegistry(registry, []string{"file:write"}))
-		want := []string{"ask_clarification", "present_files", "str_replace", "write_file"}
+		want := []string{"write_file", "str_replace", "present_files", "ask_clarification"}
 		assertToolNames(t, got, want)
 	})
 }

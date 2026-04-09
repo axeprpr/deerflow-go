@@ -26,6 +26,9 @@ func TestManagerRequestResolveAndGet(t *testing.T) {
 	if item.Type != "choice" {
 		t.Fatalf("Request() type = %q, want choice", item.Type)
 	}
+	if item.ClarificationType != "approach_choice" {
+		t.Fatalf("Request() clarification_type = %q, want approach_choice", item.ClarificationType)
+	}
 	if item.ThreadID != "thread-1" {
 		t.Fatalf("Request() thread_id = %q", item.ThreadID)
 	}
@@ -51,6 +54,28 @@ func TestManagerRequestResolveAndGet(t *testing.T) {
 	}
 	if resolved.ResolvedAt.IsZero() {
 		t.Fatal("resolved_at was not set")
+	}
+}
+
+func TestManagerNormalizesUpstreamClarificationTypes(t *testing.T) {
+	manager := NewManager(1)
+
+	item, err := manager.Request(context.Background(), ClarificationRequest{
+		ClarificationType: "risk_confirmation",
+		Context:           "This will overwrite an existing file.",
+		Question:          "Proceed?",
+	})
+	if err != nil {
+		t.Fatalf("Request() error = %v", err)
+	}
+	if item.Type != "confirm" {
+		t.Fatalf("Request() type = %q, want confirm", item.Type)
+	}
+	if item.ClarificationType != "risk_confirmation" {
+		t.Fatalf("Request() clarification_type = %q, want risk_confirmation", item.ClarificationType)
+	}
+	if item.Context != "This will overwrite an existing file." {
+		t.Fatalf("Request() context = %q", item.Context)
 	}
 }
 
