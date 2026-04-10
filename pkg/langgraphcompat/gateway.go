@@ -3,6 +3,7 @@ package langgraphcompat
 import (
 	"archive/zip"
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -808,7 +809,8 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if _, err := os.Stat(absPath); err != nil {
+	info, err := os.Stat(absPath)
+	if err != nil || info.IsDir() {
 		http.NotFound(w, r)
 		return
 	}
@@ -824,7 +826,19 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	if strings.EqualFold(r.URL.Query().Get("download"), "true") {
 		w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(absPath)+`"`)
 	}
-	http.ServeFile(w, r, absPath)
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	mimeType := detectArtifactMimeType(absPath)
+	if strings.HasPrefix(mimeType, "text/") && !strings.Contains(strings.ToLower(mimeType), "charset=") {
+		mimeType += "; charset=utf-8"
+	}
+	if mimeType != "" {
+		w.Header().Set("Content-Type", mimeType)
+	}
+	http.ServeContent(w, r, filepath.Base(absPath), info.ModTime(), bytes.NewReader(content))
 }
 
 func (s *Server) handleSuggestions(w http.ResponseWriter, r *http.Request) {
