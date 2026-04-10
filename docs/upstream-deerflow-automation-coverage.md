@@ -16,7 +16,7 @@ Status meanings:
 | Run lifecycle and SSE semantics | mostly covered | strong LangGraph/Gateway replay and reconnect coverage already exists |
 | Uploads, skills, agents, memory, MCP, channels | covered | Gateway compatibility tests are broad here |
 | Artifact download / preview | covered | `.skill` preview, redirect-free routing, and forced active-content attachment are now automated |
-| Clarification vs direct execution decisions | partial | prompt and event shaping are covered, but real decision-level path tests are still thin |
+| Clarification vs direct execution decisions | covered | opt-in live behavior regressions now verify concrete requests execute and ambiguous requests ask for more detail |
 | Full end-to-end deliverable completion | mostly covered | canonical `read_file -> write_file -> present_files -> final ai` chain now has deterministic coverage |
 | Embedded Python client parity | out-of-scope | upstream Python client does not have a Go-side equivalent test surface |
 
@@ -27,9 +27,9 @@ Status meanings:
 | Metric | Count |
 | --- | --- |
 | Total upstream use cases tracked | 30 |
-| `covered` | 19 |
-| `partial` | 8 |
-| `gap` | 1 |
+| `covered` | 21 |
+| `partial` | 7 |
+| `gap` | 0 |
 | `out-of-scope` | 2 |
 
 ### By Effective Coverage
@@ -39,24 +39,24 @@ Out-of-scope items are excluded from the effective Go-repo automation denominato
 | Metric | Value |
 | --- | --- |
 | Effective in-scope use cases | 28 |
-| Fully covered | 19 / 28 |
-| Covered + partial | 27 / 28 |
-| Full-cover ratio | 67.9% |
-| Broad-cover ratio (`covered + partial`) | 96.4% |
+| Fully covered | 21 / 28 |
+| Covered + partial | 28 / 28 |
+| Full-cover ratio | 75.0% |
+| Broad-cover ratio (`covered + partial`) | 100.0% |
 
 ### By Priority
 
 | Priority | Covered | Partial | Gap | Out-of-scope |
 | --- | --- | --- | --- | --- |
-| `P0` | 7 | 2 | 1 | 0 |
+| `P0` | 9 | 1 | 0 | 0 |
 | `P1` | 7 | 3 | 0 | 0 |
 | `P2` | 5 | 3 | 0 | 2 |
 
 ### Interpretation
 
 - The repo already has strong broad coverage on management contracts and runtime transport semantics.
-- The largest remaining risk is not “missing endpoints”; it is user-visible decision behavior and end-to-end completion behavior.
-- In other words, the long tail is concentrated in a small number of high-value gaps rather than a wide management-surface deficit.
+- The largest remaining risks are no longer hard `gap`s; they are now concentrated in a small number of high-value `partial` contracts.
+- In other words, the repo now has broad coverage across all in-scope upstream use cases, and the remaining work is about tightening release-grade confidence.
 
 ## Detailed Mapping
 
@@ -66,8 +66,8 @@ Out-of-scope items are excluded from the effective Go-repo automation denominato
 | DF-P0-02 Stream Disconnect Continue and Join Resume | covered | [run_stream_reconnect_test.go](/root/deerflow-go-clone/pkg/langgraphcompat/run_stream_reconnect_test.go), `TestRunsStreamContinuesAfterClientCancellationAndSupportsJoin`; [run_stream_reconnect_test.go](/root/deerflow-go-clone/pkg/langgraphcompat/run_stream_reconnect_test.go), `TestThreadRunJoinWaitsForCompletion` | strong upstream-aligned lifecycle coverage |
 | DF-P0-03 Run Cancel Interrupts a Long Task | covered | [run_stream_reconnect_test.go](/root/deerflow-go-clone/pkg/langgraphcompat/run_stream_reconnect_test.go), `TestRunsStreamCancelsAbandonedRunWhenDisconnectModeIsCancel`; [run_stream_reconnect_test.go](/root/deerflow-go-clone/pkg/langgraphcompat/run_stream_reconnect_test.go), `TestThreadRunJoinCanCancelRunOnDisconnect` | covers cancel semantics through runtime paths |
 | DF-P0-04 Thread Continuation Preserves Conversation State | covered | [gateway_test.go](/root/deerflow-go-clone/pkg/langgraphcompat/gateway_test.go), `TestThreadRunsCreatePersistsMessagesAcrossReload`; [gateway_test.go](/root/deerflow-go-clone/pkg/langgraphcompat/gateway_test.go), `TestThreadRunStreamPersistsMessagesAcrossReload` | strong persistence coverage |
-| DF-P0-05 Direct Deliverable Generation Without Unnecessary Clarification | gap | none | this remains the main user-visible decision-path gap |
-| DF-P0-06 Clarification Is Used Only When the Request Is Actually Underspecified | partial | [agent_test.go](/root/deerflow-go-clone/pkg/agent/agent_test.go), `TestAgentRunStopsAfterClarificationRequest`; [gateway_test.go](/root/deerflow-go-clone/pkg/langgraphcompat/gateway_test.go), `TestThreadRunStreamEmitsClarificationRequest` | covers the clarification mechanism, not the decision boundary between concrete vs ambiguous requests |
+| DF-P0-05 Direct Deliverable Generation Without Unnecessary Clarification | covered | [live_behavior_test.go](/root/deerflow-go-clone/pkg/langgraphcompat/live_behavior_test.go), `TestLiveBehaviorConcretePromptExecutesWithoutClarification` | opt-in live regression verifies the real concrete prompt path on a running gateway |
+| DF-P0-06 Clarification Is Used Only When the Request Is Actually Underspecified | covered | [live_behavior_test.go](/root/deerflow-go-clone/pkg/langgraphcompat/live_behavior_test.go), `TestLiveBehaviorAmbiguousPromptRequestsMoreDetail`; [agent_test.go](/root/deerflow-go-clone/pkg/agent/agent_test.go), `TestAgentRunStopsAfterClarificationRequest` | decision boundary is now behaviorally covered with a real ambiguous prompt |
 | DF-P0-07 HTML Artifact Is Generated, Surfaced, and Finalized | covered | [handlers_test.go](/root/deerflow-go-clone/pkg/langgraphcompat/handlers_test.go), artifact update tests; [agent_test.go](/root/deerflow-go-clone/pkg/agent/agent_test.go), `TestAgentRunCompletesArtifactWorkflowWithFinalAssistantReply` | now has a deterministic end-to-end workflow chain |
 | DF-P0-08 HTML Artifact Route Returns the File Without Redirect Loops | covered | [artifact_get_test.go](/root/deerflow-go-clone/pkg/langgraphcompat/artifact_get_test.go), `TestArtifactGetIndexHTMLServesFileWithoutRedirect`; [artifact_get_test.go](/root/deerflow-go-clone/pkg/langgraphcompat/artifact_get_test.go), `TestArtifactGetIndexHTMLDownloadDoesNotRedirect` | directly covers the recently fixed routing issue |
 | DF-P0-09 Skill Archive Preview Works by Default | covered | [skill_archive_preview_test.go](/root/deerflow-go-clone/pkg/langgraphcompat/skill_archive_preview_test.go), `TestArtifactGetSkillArchiveDefaultsToSkillMarkdownPreview` | direct upstream parity |
@@ -97,21 +97,11 @@ Out-of-scope items are excluded from the effective Go-repo automation denominato
 
 ### 1. Concrete vs ambiguous execution decisions
 
-Priority: highest
+Priority: resolved in current wave
 
-Missing coverage:
+Status:
 
-- concrete request should proceed to execution rather than stopping on clarification
-- ambiguous request should still clarify
-
-Why it matters:
-
-- this is where upstream parity has been most visible to users
-- current tests cover the mechanism, not the decision boundary
-
-Suggested additions:
-
-- deterministic scripted-provider tests around two prompts:
+- opt-in live behavior regressions now cover both:
   - `帮我生成一个小鱼游泳的页面`
   - `帮我做一个页面`
 
@@ -151,11 +141,11 @@ Missing coverage:
 
 If we continue immediately, the most pragmatic batch is:
 
-1. add a concrete-vs-ambiguous clarification decision regression
-2. add a user-profile endpoint lifecycle test
-3. add an artifact traversal rejection test
-4. add a memory clear/reload endpoint regression
-5. add a sandbox security-mode regression
+1. add a user-profile endpoint lifecycle test
+2. add an artifact traversal rejection test
+3. add a memory clear/reload endpoint regression
+4. add a sandbox security-mode regression
+5. optionally convert the live behavior pair into a lightweight release smoke harness
 
 ## Recommended Batch Plan
 
@@ -163,13 +153,17 @@ To keep the work broad-first rather than overfitting to one path too early:
 
 ### Wave 1: Close P0 Runtime Gaps
 
+Status: completed for the decision-boundary pair
+
+Closed items:
+
 - DF-P0-05 direct deliverable generation without unnecessary clarification
 - DF-P0-06 clarification only for truly underspecified requests
 
-Expected outcome:
+Outcome:
 
-- the last major user-visible decision-path risk is guarded
-- runtime parity moves from broad coverage to behavioral coverage
+- the last major user-visible decision-path gap is now behaviorally guarded
+- runtime parity has moved from broad coverage to behavior-level coverage
 
 ### Wave 2: Close P1 Contract Partials
 

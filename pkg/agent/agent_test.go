@@ -167,6 +167,24 @@ func TestCloneRegistryWithPresentFileToolPlacesPresentFilesBeforeClarification(t
 	}
 }
 
+func TestAgentVisibleToolsHidesLegacyPresentFileAlias(t *testing.T) {
+	agent := New(AgentConfig{
+		Tools:        tools.NewRegistry(),
+		PresentFiles: tools.NewPresentFileRegistry(),
+	})
+
+	got := make([]string, 0, len(agent.visibleTools(nil)))
+	for _, tool := range agent.visibleTools(nil) {
+		got = append(got, tool.Name)
+		if tool.Name == "present_file" {
+			t.Fatalf("visible tools unexpectedly exposed present_file alias: %v", got)
+		}
+	}
+	if !slices.Contains(got, "present_files") {
+		t.Fatalf("visible tools=%v want present_files", got)
+	}
+}
+
 func TestAgent_BuildSystemPrompt(t *testing.T) {
 	cfg := AgentConfig{
 		MaxTurns:     5,
@@ -1906,10 +1924,10 @@ func TestAgentRunRewritesSkillAliasToolCallsToReadFile(t *testing.T) {
 	}
 }
 
-func TestAgentRunStopsAfterSuccessfulPresentFile(t *testing.T) {
+func TestAgentRunStopsAfterSuccessfulPresentFiles(t *testing.T) {
 	registry := tools.NewRegistry()
 	if err := registry.Register(models.Tool{
-		Name: "present_file",
+		Name: "present_files",
 		Handler: func(_ context.Context, call models.ToolCall) (models.ToolResult, error) {
 			return models.ToolResult{
 				CallID:   call.ID,
@@ -1919,7 +1937,7 @@ func TestAgentRunStopsAfterSuccessfulPresentFile(t *testing.T) {
 			}, nil
 		},
 	}); err != nil {
-		t.Fatalf("register present_file: %v", err)
+		t.Fatalf("register present_files: %v", err)
 	}
 
 	var chatCalls int
@@ -1933,10 +1951,9 @@ func TestAgentRunStopsAfterSuccessfulPresentFile(t *testing.T) {
 					Role: models.RoleAI,
 					ToolCalls: []models.ToolCall{{
 						ID:   "call-1",
-						Name: "present_file",
+						Name: "present_files",
 						Arguments: map[string]any{
-							"description": "Final page",
-							"path":        "/mnt/user-data/outputs/result.html",
+							"filepaths": []string{"/mnt/user-data/outputs/result.html"},
 						},
 					}},
 				},
@@ -1947,8 +1964,8 @@ func TestAgentRunStopsAfterSuccessfulPresentFile(t *testing.T) {
 				t.Fatalf("messages=%d want at least 3", len(req.Messages))
 			}
 			last := req.Messages[len(req.Messages)-1]
-			if last.Role != models.RoleTool || last.ToolResult == nil || last.ToolResult.ToolName != "present_file" {
-				t.Fatalf("last message=%#v want present_file tool result", last)
+			if last.Role != models.RoleTool || last.ToolResult == nil || last.ToolResult.ToolName != "present_files" {
+				t.Fatalf("last message=%#v want present_files tool result", last)
 			}
 			return llm.ChatResponse{
 				Model: "test-model",

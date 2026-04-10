@@ -993,7 +993,17 @@ func (a *Agent) buildSystemPrompt(_ context.Context, _ string, deferredState *de
 }
 
 func (a *Agent) visibleTools(deferredState *deferredToolState) []models.Tool {
-	visible := append([]models.Tool(nil), a.tools.List()...)
+	base := a.tools.List()
+	visible := make([]models.Tool, 0, len(base))
+	for _, tool := range base {
+		// Upstream prompt text mentions `present_file`, but the bound model-visible
+		// builtin tool name is only `present_files`. Keep the alias executable for
+		// compatibility, but do not expose it to the model surface.
+		if tool.Name == "present_file" {
+			continue
+		}
+		visible = append(visible, tool)
+	}
 	if deferredState == nil || !deferredState.hasDeferred() {
 		return visible
 	}
