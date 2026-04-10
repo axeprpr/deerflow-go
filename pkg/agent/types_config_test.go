@@ -15,6 +15,8 @@ func TestApplyAgentTypeUsesUpdatedBuiltinFileToolsets(t *testing.T) {
 		"bash",
 		"ls",
 		"read_file",
+		"glob",
+		"grep",
 		"write_file",
 		"str_replace",
 		"present_files",
@@ -23,7 +25,6 @@ func TestApplyAgentTypeUsesUpdatedBuiltinFileToolsets(t *testing.T) {
 		"web_search",
 		"web_fetch",
 		"image_search",
-		"glob",
 	} {
 		if err := registry.Register(models.Tool{Name: name, Handler: func(_ context.Context, _ models.ToolCall) (models.ToolResult, error) {
 			return models.ToolResult{}, nil
@@ -38,7 +39,7 @@ func TestApplyAgentTypeUsesUpdatedBuiltinFileToolsets(t *testing.T) {
 	}
 
 	got := registryToolNames(cfg.Tools)
-	want := []string{"bash", "ls", "read_file", "write_file", "str_replace", "present_files", "ask_clarification", "task"}
+	want := []string{"bash", "ls", "read_file", "glob", "grep", "write_file", "str_replace", "present_files", "ask_clarification", "task"}
 	if len(got) != len(want) {
 		t.Fatalf("coder tools=%v want=%v", got, want)
 	}
@@ -47,18 +48,12 @@ func TestApplyAgentTypeUsesUpdatedBuiltinFileToolsets(t *testing.T) {
 			t.Fatalf("coder tools=%v want=%v", got, want)
 		}
 	}
-	for _, name := range got {
-		if name == "glob" {
-			t.Fatalf("coder tools unexpectedly include glob: %v", got)
-		}
-	}
-
 	cfg = AgentConfig{Tools: registry}
 	if err := ApplyAgentType(&cfg, AgentTypeResearch); err != nil {
 		t.Fatalf("ApplyAgentType(researcher) error = %v", err)
 	}
 	got = registryToolNames(cfg.Tools)
-	want = []string{"ls", "read_file", "present_files", "ask_clarification", "task", "web_search", "web_fetch", "image_search"}
+	want = []string{"ls", "read_file", "glob", "grep", "present_files", "ask_clarification", "task", "web_search", "web_fetch", "image_search"}
 	if len(got) != len(want) {
 		t.Fatalf("researcher tools=%v want=%v", got, want)
 	}

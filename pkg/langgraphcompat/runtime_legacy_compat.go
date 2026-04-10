@@ -202,9 +202,9 @@ func resolveAgentToolRegistry(registry *tools.Registry, groups []string) *tools.
 	for _, group := range groups {
 		switch strings.ToLower(strings.TrimSpace(group)) {
 		case "file":
-			add("ask_clarification", "ls", "present_files", "read_file", "str_replace", "write_file")
+			add("ask_clarification", "ls", "present_files", "read_file", "glob", "grep", "str_replace", "write_file")
 		case "file:read":
-			add("ask_clarification", "ls", "read_file")
+			add("ask_clarification", "ls", "read_file", "glob", "grep")
 		case "file:write":
 			add("ask_clarification", "present_files", "str_replace", "write_file")
 		}

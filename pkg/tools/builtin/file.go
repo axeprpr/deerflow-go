@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,7 +17,16 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
+const (
+	defaultReadFileOutputMaxChars = 50000
+	defaultGlobMaxResults         = 200
+	defaultGrepMaxResults         = 100
+)
+
 func ReadFileHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+	if err := tools.EnsureThreadDataDirs(ctx); err != nil {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("prepare thread directories failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
+	}
 	args := call.Arguments
 	path, ok := args["path"].(string)
 	if !ok || strings.TrimSpace(path) == "" {
@@ -27,14 +39,16 @@ func ReadFileHandler(ctx context.Context, call models.ToolCall) (models.ToolResu
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("read failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
 	}
 
-	if limit, ok := args["limit"].(float64); ok && limit > 0 && int(limit) < len(data) {
-		data = data[:int(limit)]
-	}
 	if startLine, endLine, ok := resolveLineRange(args); ok {
 		data = []byte(sliceContentLines(string(data), startLine, endLine))
 	}
+	if limit, ok := args["limit"].(float64); ok && limit > 0 && int(limit) < len(data) {
+		data = data[:int(limit)]
+	}
 
-	return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: string(data)}, nil
+	content := truncateReadFileOutput(string(data), defaultReadFileOutputMaxChars)
+
+	return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: content}, nil
 }
 
 func resolveLineRange(args map[string]any) (int, int, bool) {
@@ -77,6 +91,13 @@ func intArg(raw any) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func intValueFromArgs(raw any, fallback int) int {
+	if value, ok := intArg(raw); ok {
+		return value
+	}
+	return fallback
 }
 
 func sliceContentLines(content string, startLine, endLine int) string {
@@ -132,7 +153,139 @@ func shouldPreferMarkdownCompanion(path string) bool {
 	}
 }
 
+func compileGlobMatcher(pattern string) (func(string) bool, error) {
+	pattern = path.Clean(strings.TrimSpace(filepath.ToSlash(pattern)))
+	if pattern == "." || pattern == "" {
+		pattern = "*"
+	}
+	re, err := regexp.Compile("^" + globToRegexp(pattern) + "$")
+	if err != nil {
+		return nil, err
+	}
+	return func(candidate string) bool {
+		candidate = filepath.ToSlash(strings.TrimSpace(candidate))
+		return re.MatchString(candidate)
+	}, nil
+}
+
+func globToRegexp(pattern string) string {
+	var b strings.Builder
+	for i := 0; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '*':
+			if i+1 < len(pattern) && pattern[i+1] == '*' {
+				if i+2 < len(pattern) && pattern[i+2] == '/' {
+					b.WriteString(`(?:.*/)?`)
+					i += 2
+				} else {
+					b.WriteString(".*")
+					i++
+				}
+			} else {
+				b.WriteString(`[^/]*`)
+			}
+		case '?':
+			b.WriteString(`[^/]`)
+		default:
+			b.WriteString(regexp.QuoteMeta(string(pattern[i])))
+		}
+	}
+	return b.String()
+}
+
+func joinVirtualPath(root, rel string) string {
+	root = strings.TrimRight(strings.TrimSpace(root), "/")
+	rel = filepath.ToSlash(strings.TrimSpace(rel))
+	if rel == "" || rel == "." {
+		return root
+	}
+	if root == "" {
+		return "/" + strings.TrimLeft(rel, "/")
+	}
+	return root + "/" + strings.TrimLeft(rel, "/")
+}
+
+func formatGlobResults(rootPath string, matches []string, truncated bool) string {
+	if len(matches) == 0 {
+		return fmt.Sprintf("No files matched under %s", rootPath)
+	}
+	lines := []string{fmt.Sprintf("Found %d paths under %s", len(matches), rootPath)}
+	if truncated {
+		lines[0] += fmt.Sprintf(" (showing first %d)", len(matches))
+	}
+	for idx, match := range matches {
+		lines = append(lines, fmt.Sprintf("%d. %s", idx+1, match))
+	}
+	if truncated {
+		lines = append(lines, "Results truncated. Narrow the path or pattern to see fewer matches.")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatGrepResults(rootPath string, matches []string, truncated bool) string {
+	if len(matches) == 0 {
+		return fmt.Sprintf("No matches found under %s", rootPath)
+	}
+	lines := []string{fmt.Sprintf("Found %d matches under %s", len(matches), rootPath)}
+	if truncated {
+		lines[0] += fmt.Sprintf(" (showing first %d)", len(matches))
+	}
+	lines = append(lines, matches...)
+	if truncated {
+		lines = append(lines, "Results truncated. Narrow the path or add a glob filter.")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func truncateReadFileOutput(output string, maxChars int) string {
+	if maxChars == 0 {
+		return output
+	}
+	runes := []rune(output)
+	if len(runes) <= maxChars {
+		return output
+	}
+	total := len(runes)
+	markerMaxLen := len([]rune(fmt.Sprintf(
+		"\n... [truncated: showing first %d of %d chars. Use start_line/end_line to read a specific range] ...",
+		total,
+		total,
+	)))
+	kept := max(0, maxChars-markerMaxLen)
+	if kept == 0 {
+		return string(runes[:maxChars])
+	}
+	marker := fmt.Sprintf(
+		"\n... [truncated: showing first %d of %d chars. Use start_line/end_line to read a specific range] ...",
+		kept,
+		total,
+	)
+	return string(runes[:kept]) + marker
+}
+
+func grepLineMatches(line string, re *regexp.Regexp, literalNeed string, literal bool, caseSensitive bool) bool {
+	if literal {
+		if !caseSensitive {
+			line = strings.ToLower(line)
+		}
+		return strings.Contains(line, literalNeed)
+	}
+	return re != nil && re.MatchString(line)
+}
+
+type dirEntryFromFileInfo struct {
+	info fs.FileInfo
+}
+
+func (d dirEntryFromFileInfo) Name() string               { return d.info.Name() }
+func (d dirEntryFromFileInfo) IsDir() bool                { return d.info.IsDir() }
+func (d dirEntryFromFileInfo) Type() fs.FileMode          { return d.info.Mode().Type() }
+func (d dirEntryFromFileInfo) Info() (fs.FileInfo, error) { return d.info, nil }
+
 func WriteFileHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+	if err := tools.EnsureThreadDataDirs(ctx); err != nil {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("prepare thread directories failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
+	}
 	args := call.Arguments
 	requestedPath, ok := args["path"].(string)
 	if !ok || strings.TrimSpace(requestedPath) == "" {
@@ -168,26 +321,209 @@ func WriteFileHandler(ctx context.Context, call models.ToolCall) (models.ToolRes
 }
 
 func GlobHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+	if err := tools.EnsureThreadDataDirs(ctx); err != nil {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("prepare thread directories failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
+	}
 	args := call.Arguments
 	pattern, ok := args["pattern"].(string)
 	if !ok || strings.TrimSpace(pattern) == "" {
-		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("pattern is required; use a virtual path glob such as /mnt/user-data/uploads/*.csv")
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("pattern is required")
 	}
-	pattern = tools.ResolveVirtualPath(ctx, pattern)
+	requestedPath, hasRoot := args["path"].(string)
+	if !hasRoot || strings.TrimSpace(requestedPath) == "" {
+		legacyPattern := tools.ResolveVirtualPath(ctx, pattern)
+		matches, err := filepath.Glob(legacyPattern)
+		if err != nil {
+			return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("glob failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
+		}
+		for i := range matches {
+			matches[i] = tools.MaskLocalPaths(ctx, matches[i])
+		}
+		data, _ := json.Marshal(matches)
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: string(data)}, nil
+	}
 
-	matches, err := filepath.Glob(pattern)
+	resolvedRoot := tools.ResolveVirtualPath(ctx, requestedPath)
+	info, err := os.Stat(resolvedRoot)
 	if err != nil {
 		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("glob failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
 	}
-	for i := range matches {
-		matches[i] = tools.MaskLocalPaths(ctx, matches[i])
+	if !info.IsDir() {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("path is not a directory")
 	}
 
-	data, _ := json.Marshal(matches)
-	return models.ToolResult{CallID: call.ID, ToolName: call.Name, Content: string(data)}, nil
+	includeDirs, _ := args["include_dirs"].(bool)
+	maxResults := intValueFromArgs(args["max_results"], defaultGlobMaxResults)
+	if maxResults <= 0 {
+		maxResults = defaultGlobMaxResults
+	}
+	matcher, err := compileGlobMatcher(pattern)
+	if err != nil {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("glob failed: %v", err)
+	}
+
+	matches := make([]string, 0, min(maxResults, 16))
+	truncated := false
+	err = filepath.WalkDir(resolvedRoot, func(candidate string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if candidate == resolvedRoot {
+			return nil
+		}
+		rel, err := filepath.Rel(resolvedRoot, candidate)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if entry.IsDir() {
+			if includeDirs && matcher(rel) {
+				if len(matches) >= maxResults {
+					truncated = true
+					return fs.SkipAll
+				}
+				matches = append(matches, joinVirtualPath(requestedPath, rel))
+			}
+			return nil
+		}
+		if !matcher(rel) {
+			return nil
+		}
+		if len(matches) >= maxResults {
+			truncated = true
+			return fs.SkipAll
+		}
+		matches = append(matches, joinVirtualPath(requestedPath, rel))
+		return nil
+	})
+	if err != nil {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("glob failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
+	}
+	return models.ToolResult{
+		CallID:   call.ID,
+		ToolName: call.Name,
+		Content:  formatGlobResults(requestedPath, matches, truncated),
+	}, nil
+}
+
+func GrepHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+	if err := tools.EnsureThreadDataDirs(ctx); err != nil {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("prepare thread directories failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
+	}
+	args := call.Arguments
+	pattern, ok := args["pattern"].(string)
+	if !ok || strings.TrimSpace(pattern) == "" {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("pattern is required")
+	}
+	requestedPath, ok := args["path"].(string)
+	if !ok || strings.TrimSpace(requestedPath) == "" {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("path is required")
+	}
+
+	maxResults := intValueFromArgs(args["max_results"], defaultGrepMaxResults)
+	if maxResults <= 0 {
+		maxResults = defaultGrepMaxResults
+	}
+	globFilter, _ := args["glob"].(string)
+	literal, _ := args["literal"].(bool)
+	caseSensitive, _ := args["case_sensitive"].(bool)
+
+	var (
+		re          *regexp.Regexp
+		literalNeed string
+	)
+	if literal {
+		literalNeed = pattern
+		if !caseSensitive {
+			literalNeed = strings.ToLower(literalNeed)
+		}
+	} else {
+		compiledPattern := pattern
+		if !caseSensitive {
+			compiledPattern = "(?i)" + compiledPattern
+		}
+		var err error
+		re, err = regexp.Compile(compiledPattern)
+		if err != nil {
+			return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("grep failed: %v", err)
+		}
+	}
+
+	var filter func(string) bool
+	if strings.TrimSpace(globFilter) != "" {
+		var err error
+		filter, err = compileGlobMatcher(globFilter)
+		if err != nil {
+			return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("grep failed: %v", err)
+		}
+	}
+
+	resolvedRoot := tools.ResolveVirtualPath(ctx, requestedPath)
+	info, err := os.Stat(resolvedRoot)
+	if err != nil {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("grep failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
+	}
+
+	matches := make([]string, 0, min(maxResults, 16))
+	truncated := false
+	searchFile := func(candidate string, rel string) error {
+		if filter != nil && !filter(rel) {
+			return nil
+		}
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			return nil
+		}
+		lines := strings.Split(string(data), "\n")
+		for idx, line := range lines {
+			if !grepLineMatches(line, re, literalNeed, literal, caseSensitive) {
+				continue
+			}
+			virtualPath := requestedPath
+			if info.IsDir() {
+				virtualPath = joinVirtualPath(requestedPath, rel)
+			}
+			matches = append(matches, fmt.Sprintf("%s:%d: %s", virtualPath, idx+1, line))
+			if len(matches) >= maxResults {
+				truncated = true
+				return fs.SkipAll
+			}
+		}
+		return nil
+	}
+
+	if info.IsDir() {
+		err = filepath.WalkDir(resolvedRoot, func(candidate string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			rel, err := filepath.Rel(resolvedRoot, candidate)
+			if err != nil {
+				return err
+			}
+			return searchFile(candidate, filepath.ToSlash(rel))
+		})
+	} else {
+		err = searchFile(resolvedRoot, filepath.Base(requestedPath))
+	}
+	if err != nil && err != fs.SkipAll {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("grep failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
+	}
+
+	return models.ToolResult{
+		CallID:   call.ID,
+		ToolName: call.Name,
+		Content:  formatGrepResults(requestedPath, matches, truncated),
+	}, nil
 }
 
 func LsHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+	if err := tools.EnsureThreadDataDirs(ctx); err != nil {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("prepare thread directories failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
+	}
 	args := call.Arguments
 	path, ok := args["path"].(string)
 	if !ok || strings.TrimSpace(path) == "" {
@@ -244,6 +580,9 @@ func renderDirTree(root string, entries []os.DirEntry, depth int) string {
 }
 
 func StrReplaceHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
+	if err := tools.EnsureThreadDataDirs(ctx); err != nil {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("prepare thread directories failed: %s", tools.MaskLocalPaths(ctx, err.Error()))
+	}
 	args := call.Arguments
 	requestedPath, ok := args["path"].(string)
 	if !ok || strings.TrimSpace(requestedPath) == "" {
@@ -288,17 +627,42 @@ func StrReplaceHandler(ctx context.Context, call models.ToolCall) (models.ToolRe
 func GlobTool() models.Tool {
 	return models.Tool{
 		Name:        "glob",
-		Description: "List files matching a glob pattern.",
+		Description: "Find files or directories that match a glob pattern under a root directory.",
 		Groups:      []string{"builtin", "file_ops"},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"pattern": map[string]any{"type": "string", "description": "Glob pattern (e.g. *.go)"},
-				"root":    map[string]any{"type": "string", "description": "Root directory (default .)"},
+				"description":  map[string]any{"type": "string", "description": "Explain why you are searching for these paths in short words. ALWAYS PROVIDE THIS PARAMETER FIRST."},
+				"pattern":      map[string]any{"type": "string", "description": "The glob pattern to match relative to the root path, for example `**/*.py`."},
+				"path":         map[string]any{"type": "string", "description": "The absolute root directory to search under."},
+				"include_dirs": map[string]any{"type": "boolean", "description": "Whether matching directories should also be returned. Default is false."},
+				"max_results":  map[string]any{"type": "integer", "description": "Maximum number of paths to return. Default is 200."},
 			},
-			"required": []any{"pattern"},
+			"required": []any{"description", "pattern", "path"},
 		},
 		Handler: GlobHandler,
+	}
+}
+
+func GrepTool() models.Tool {
+	return models.Tool{
+		Name:        "grep",
+		Description: "Search for matching lines inside text files under a root directory.",
+		Groups:      []string{"builtin", "file_ops"},
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"description":    map[string]any{"type": "string", "description": "Explain why you are searching file contents in short words. ALWAYS PROVIDE THIS PARAMETER FIRST."},
+				"pattern":        map[string]any{"type": "string", "description": "The string or regex pattern to search for."},
+				"path":           map[string]any{"type": "string", "description": "The absolute root directory to search under."},
+				"glob":           map[string]any{"type": "string", "description": "Optional glob filter for candidate files, for example `**/*.py`."},
+				"literal":        map[string]any{"type": "boolean", "description": "Whether to treat `pattern` as a plain string. Default is false."},
+				"case_sensitive": map[string]any{"type": "boolean", "description": "Whether matching is case-sensitive. Default is false."},
+				"max_results":    map[string]any{"type": "integer", "description": "Maximum number of matching lines to return. Default is 100."},
+			},
+			"required": []any{"description", "pattern", "path"},
+		},
+		Handler: GrepHandler,
 	}
 }
 
@@ -329,7 +693,6 @@ func ReadFileTool() models.Tool {
 			"properties": map[string]any{
 				"description": map[string]any{"type": "string", "description": "Explain why you are reading this file in short words. ALWAYS PROVIDE THIS PARAMETER FIRST."},
 				"path":        map[string]any{"type": "string", "description": "The absolute path to the file to read."},
-				"limit":       map[string]any{"type": "number", "description": "Maximum bytes to read"},
 				"start_line":  map[string]any{"type": "integer", "description": "Optional starting line number (1-indexed, inclusive)."},
 				"end_line":    map[string]any{"type": "integer", "description": "Optional ending line number (1-indexed, inclusive)."},
 			},
@@ -383,8 +746,9 @@ func FileTools() []models.Tool {
 	return []models.Tool{
 		LsTool(),
 		ReadFileTool(),
+		GlobTool(),
+		GrepTool(),
 		WriteFileTool(),
 		StrReplaceTool(),
-		GlobTool(),
 	}
 }

@@ -225,6 +225,19 @@ func ThreadWorkspaceDir(threadID string) string {
 	return filepath.Join(root, "workspace")
 }
 
+func EnsureThreadDataDirs(ctx context.Context) error {
+	root := threadDataRootFromThreadID(ThreadIDFromContext(ctx))
+	if root == "" {
+		return nil
+	}
+	for _, name := range []string{"workspace", "uploads", "outputs"} {
+		if err := os.MkdirAll(filepath.Join(root, name), 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func ResolveWorkingDirectory(ctx context.Context) string {
 	return ThreadWorkspaceDir(ThreadIDFromContext(ctx))
 }

@@ -161,6 +161,9 @@ func TestPresentFileTool(t *testing.T) {
 	if result.Status != models.CallStatusCompleted {
 		t.Errorf("Status = %q, want %q", result.Status, models.CallStatusCompleted)
 	}
+	if result.Content != "Successfully presented files" {
+		t.Errorf("Content = %q, want %q", result.Content, "Successfully presented files")
+	}
 	if result.Data["path"] != path {
 		t.Errorf("Data path = %v, want %q", result.Data["path"], path)
 	}
@@ -220,6 +223,9 @@ func TestPresentFilesTool(t *testing.T) {
 	if result.Status != models.CallStatusCompleted {
 		t.Fatalf("Status = %q, want %q", result.Status, models.CallStatusCompleted)
 	}
+	if result.Content != "Successfully presented files" {
+		t.Fatalf("Content = %q, want %q", result.Content, "Successfully presented files")
+	}
 	filepaths, ok := result.Data["filepaths"].([]string)
 	if !ok {
 		t.Fatalf("filepaths type = %T, want []string", result.Data["filepaths"])
@@ -229,6 +235,27 @@ func TestPresentFilesTool(t *testing.T) {
 	}
 	if len(registry.List()) != 2 {
 		t.Fatalf("registry len = %d, want 2", len(registry.List()))
+	}
+}
+
+func TestPresentFilesToolSchemaMatchesUpstreamContract(t *testing.T) {
+	tool := PresentFilesTool(NewPresentFileRegistry())
+	properties, _ := tool.InputSchema["properties"].(map[string]any)
+	if len(properties) != 1 {
+		t.Fatalf("properties=%v want only filepaths", properties)
+	}
+	if _, ok := properties["filepaths"]; !ok {
+		t.Fatalf("properties=%v missing filepaths", properties)
+	}
+	required, _ := tool.InputSchema["required"].([]any)
+	if len(required) != 1 || required[0] != "filepaths" {
+		t.Fatalf("required=%v want [filepaths]", required)
+	}
+	if !strings.Contains(tool.Description, "When to use the present_files tool:") {
+		t.Fatalf("description=%q want upstream usage guidance", tool.Description)
+	}
+	if !strings.Contains(tool.Description, "Only files in `/mnt/user-data/outputs` can be presented") {
+		t.Fatalf("description=%q want outputs contract", tool.Description)
 	}
 }
 

@@ -14,9 +14,10 @@ func TestResolveAgentToolRegistryUsesUpdatedFileToolMappings(t *testing.T) {
 		{Name: "bash", Groups: []string{"builtin"}, Handler: noopToolHandler},
 		{Name: "ls", Groups: []string{"builtin", "file_ops"}, Handler: noopToolHandler},
 		{Name: "read_file", Groups: []string{"builtin", "file_ops"}, Handler: noopToolHandler},
+		{Name: "glob", Groups: []string{"builtin", "file_ops"}, Handler: noopToolHandler},
+		{Name: "grep", Groups: []string{"builtin", "file_ops"}, Handler: noopToolHandler},
 		{Name: "write_file", Groups: []string{"builtin", "file_ops"}, Handler: noopToolHandler},
 		{Name: "str_replace", Groups: []string{"builtin", "file_ops"}, Handler: noopToolHandler},
-		{Name: "glob", Groups: []string{"builtin", "file_ops"}, Handler: noopToolHandler},
 		{Name: "present_files", Groups: []string{"builtin", "file_ops"}, Handler: noopToolHandler},
 		{Name: "ask_clarification", Groups: []string{"builtin", "interaction"}, Handler: noopToolHandler},
 		{Name: "task", Groups: []string{"agent"}, Handler: noopToolHandler},
@@ -28,13 +29,13 @@ func TestResolveAgentToolRegistryUsesUpdatedFileToolMappings(t *testing.T) {
 
 	t.Run("file", func(t *testing.T) {
 		got := registryNames(resolveAgentToolRegistry(registry, []string{"file"}))
-		want := []string{"ls", "read_file", "write_file", "str_replace", "present_files", "ask_clarification"}
+		want := []string{"ls", "read_file", "glob", "grep", "write_file", "str_replace", "present_files", "ask_clarification"}
 		assertToolNames(t, got, want)
 	})
 
 	t.Run("file read", func(t *testing.T) {
 		got := registryNames(resolveAgentToolRegistry(registry, []string{"file:read"}))
-		want := []string{"ls", "read_file", "ask_clarification"}
+		want := []string{"ls", "read_file", "glob", "grep", "ask_clarification"}
 		assertToolNames(t, got, want)
 	})
 
@@ -66,11 +67,6 @@ func assertToolNames(t *testing.T, got, want []string) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("tool names=%v want=%v", got, want)
-		}
-	}
-	for _, name := range got {
-		if name == "glob" {
-			t.Fatalf("tool names unexpectedly include glob: %v", got)
 		}
 	}
 }

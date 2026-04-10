@@ -40,6 +40,31 @@ func TestReadFileHandlerResolvesThreadVirtualPath(t *testing.T) {
 	}
 }
 
+func TestWriteFileHandlerCreatesThreadDataDirectoriesLikeUpstream(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	threadID := "thread-file-thread-dirs"
+	ctx := tools.WithThreadID(context.Background(), threadID)
+	_, err := WriteFileHandler(ctx, models.ToolCall{
+		ID:   "call-write-thread-dirs-1",
+		Name: "write_file",
+		Arguments: map[string]any{
+			"path":    "/mnt/user-data/workspace/index.html",
+			"content": "page",
+		},
+	})
+	if err != nil {
+		t.Fatalf("WriteFileHandler() error = %v", err)
+	}
+
+	for _, name := range []string{"workspace", "uploads", "outputs"} {
+		if info, err := os.Stat(filepath.Join(root, "threads", threadID, "user-data", name)); err != nil || !info.IsDir() {
+			t.Fatalf("%s directory missing after write_file tool: info=%v err=%v", name, info, err)
+		}
+	}
+}
+
 func TestReadFileHandlerPrefersMarkdownCompanionForConvertibleUploads(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DEERFLOW_DATA_ROOT", root)
@@ -133,6 +158,42 @@ func TestReadFileHandlerFallsBackToOriginalUploadWhenMarkdownCompanionMissing(t 
 	}
 }
 
+func TestReadFileHandlerTruncatesLargeOutputLikeUpstream(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	threadID := "thread-large-read"
+	target := filepath.Join(root, "threads", threadID, "user-data", "workspace", "large.txt")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	large := strings.Repeat("a", defaultReadFileOutputMaxChars+128)
+	if err := os.WriteFile(target, []byte(large), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	ctx := tools.WithThreadID(context.Background(), threadID)
+	result, err := ReadFileHandler(ctx, models.ToolCall{
+		ID:   "call-read-large-1",
+		Name: "read_file",
+		Arguments: map[string]any{
+			"path": "/mnt/user-data/workspace/large.txt",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ReadFileHandler() error = %v", err)
+	}
+	if len([]rune(result.Content)) > defaultReadFileOutputMaxChars {
+		t.Fatalf("content len=%d exceeds max=%d", len([]rune(result.Content)), defaultReadFileOutputMaxChars)
+	}
+	if !strings.Contains(result.Content, "[truncated: showing first") {
+		t.Fatalf("content=%q want truncation marker", result.Content)
+	}
+	if !strings.HasPrefix(result.Content, strings.Repeat("a", 64)) {
+		t.Fatalf("content=%q want preserved head", result.Content)
+	}
+}
+
 func TestWriteFileHandlerWritesToResolvedVirtualPath(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DEERFLOW_DATA_ROOT", root)
@@ -183,17 +244,65 @@ func TestGlobHandlerResolvesVirtualPattern(t *testing.T) {
 		ID:   "call-3",
 		Name: "glob",
 		Arguments: map[string]any{
-			"pattern": "/mnt/user-data/uploads/*.txt",
+			"path":    "/mnt/user-data/uploads",
+			"pattern": "*.txt",
 		},
 	})
 	if err != nil {
 		t.Fatalf("GlobHandler() error = %v", err)
+	}
+	if !strings.Contains(result.Content, "Found 2 paths under /mnt/user-data/uploads") {
+		t.Fatalf("glob result=%q", result.Content)
 	}
 	if !strings.Contains(result.Content, "/mnt/user-data/uploads/a.txt") || !strings.Contains(result.Content, "/mnt/user-data/uploads/b.txt") {
 		t.Fatalf("glob result=%q", result.Content)
 	}
 	if strings.Contains(result.Content, root) {
 		t.Fatalf("glob result=%q should not expose host root %q", result.Content, root)
+	}
+}
+
+func TestGrepHandlerSearchesVirtualDirectory(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	threadID := "thread-grep-tool"
+	dir := filepath.Join(root, "threads", threadID, "user-data", "uploads")
+	if err := os.MkdirAll(filepath.Join(dir, "nested"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello world\nbye"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "nested", "b.txt"), []byte("HELLO again\n"), 0o644); err != nil {
+		t.Fatalf("write nested file: %v", err)
+	}
+
+	ctx := tools.WithThreadID(context.Background(), threadID)
+	result, err := GrepHandler(ctx, models.ToolCall{
+		ID:   "call-grep-1",
+		Name: "grep",
+		Arguments: map[string]any{
+			"path":    "/mnt/user-data/uploads",
+			"pattern": "hello",
+			"literal": true,
+			"glob":    "**/*.txt",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GrepHandler() error = %v", err)
+	}
+	if !strings.Contains(result.Content, "Found 2 matches under /mnt/user-data/uploads") {
+		t.Fatalf("grep result=%q", result.Content)
+	}
+	if !strings.Contains(result.Content, "/mnt/user-data/uploads/a.txt:1: hello world") {
+		t.Fatalf("grep result=%q missing first match", result.Content)
+	}
+	if !strings.Contains(result.Content, "/mnt/user-data/uploads/nested/b.txt:1: HELLO again") {
+		t.Fatalf("grep result=%q missing nested match", result.Content)
+	}
+	if strings.Contains(result.Content, root) {
+		t.Fatalf("grep result=%q should not expose host root %q", result.Content, root)
 	}
 }
 

@@ -59,6 +59,9 @@ func TestResolveRunConfigIncludesWorkingDirectoryGuidance(t *testing.T) {
 	if !strings.Contains(cfg.SystemPrompt, "Language Consistency") {
 		t.Fatalf("system prompt missing critical reminders: %q", cfg.SystemPrompt)
 	}
+	if !strings.Contains(cfg.SystemPrompt, "<current_date>") {
+		t.Fatalf("system prompt missing current_date tag: %q", cfg.SystemPrompt)
+	}
 }
 
 func TestResolveRunConfigIncludesACPGuidanceWhenToolConfigured(t *testing.T) {
@@ -169,6 +172,47 @@ func TestSkillsPromptMatchesUpstreamProgressiveLoadingShape(t *testing.T) {
 	}
 	if strings.Index(prompt, "<name>a-skill</name>") > strings.Index(prompt, "<name>z-skill</name>") {
 		t.Fatalf("skills prompt ordering is not stable: %q", prompt)
+	}
+	if !strings.Contains(prompt, "First public skill [built-in]") {
+		t.Fatalf("skills prompt missing built-in mutability label: %q", prompt)
+	}
+}
+
+func TestSkillsPromptPrefersCustomSkillForDuplicateNames(t *testing.T) {
+	root := t.TempDir()
+	for _, skill := range []struct {
+		category    string
+		description string
+	}{
+		{category: "public", description: "Public variant"},
+		{category: "custom", description: "Custom variant"},
+	} {
+		skillDir := filepath.Join(root, "skills", skill.category, "duplicate-skill")
+		if err := os.MkdirAll(skillDir, 0o755); err != nil {
+			t.Fatalf("mkdir skill dir: %v", err)
+		}
+		body := "---\nname: duplicate-skill\ndescription: " + skill.description + "\n---\n\n# Skill\n"
+		if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(body), 0o644); err != nil {
+			t.Fatalf("write skill: %v", err)
+		}
+	}
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	s := &Server{dataRoot: root}
+	prompt := s.skillsPrompt()
+	if strings.Count(prompt, "<name>duplicate-skill</name>") != 1 {
+		t.Fatalf("skills prompt should render duplicate skill once: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Custom variant [custom, editable]") {
+		t.Fatalf("skills prompt should prefer custom duplicate: %q", prompt)
+	}
+	if strings.Contains(prompt, "Public variant [built-in]") {
+		t.Fatalf("skills prompt should hide public duplicate when custom exists: %q", prompt)
+	}
+
+	paths := s.runtimeSkillPaths()
+	if got := paths["duplicate-skill"]; got != "/mnt/skills/custom/duplicate-skill/SKILL.md" {
+		t.Fatalf("runtimeSkillPaths duplicate=%v want custom skill path", got)
 	}
 }
 

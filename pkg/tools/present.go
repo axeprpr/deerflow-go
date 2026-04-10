@@ -182,27 +182,37 @@ func PresentFilesTool(registry *PresentFileRegistry) models.Tool {
 
 func buildPresentFileTool(registry *PresentFileRegistry, name string, multiple bool) models.Tool {
 	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"description": map[string]any{"type": "string", "description": "Short description shown in the UI"},
-			"mime_type":   map[string]any{"type": "string", "description": "Optional MIME type override"},
-		},
+		"type":       "object",
+		"properties": map[string]any{},
 	}
 	if multiple {
 		schema["properties"].(map[string]any)["filepaths"] = map[string]any{
 			"type":        "array",
-			"description": "Paths to generated files",
+			"description": "List of absolute file paths to present to the user. Only files in `/mnt/user-data/outputs` can be presented.",
 			"items":       map[string]any{"type": "string"},
 		}
 		schema["required"] = []any{"filepaths"}
 	} else {
-		schema["properties"].(map[string]any)["path"] = map[string]any{"type": "string", "description": "Path to the generated file"}
+		schema["properties"].(map[string]any)["path"] = map[string]any{"type": "string", "description": "Absolute file path to present to the user. Only files in `/mnt/user-data/outputs` can be presented."}
 		schema["required"] = []any{"path"}
 	}
 
+	description := "Make files visible to the user for viewing and rendering in the client interface.\n\n" +
+		"When to use the present_files tool:\n\n" +
+		"- Making any file available for the user to view, download, or interact with\n" +
+		"- Presenting multiple related files at once\n" +
+		"- After creating files that should be presented to the user\n\n" +
+		"When NOT to use the present_files tool:\n" +
+		"- When you only need to read file contents for your own processing\n" +
+		"- For temporary or intermediate files not meant for user viewing\n\n" +
+		"Notes:\n" +
+		"- You should call this tool after creating files and moving them to the `/mnt/user-data/outputs` directory.\n" +
+		"- Only files in `/mnt/user-data/outputs` can be presented.\n" +
+		"- This tool can be safely called in parallel with other tools.\n"
+
 	return models.Tool{
 		Name:        name,
-		Description: "Register generated output files so the UI can display them.",
+		Description: description,
 		Groups:      []string{"builtin", "file_ops"},
 		InputSchema: schema,
 		Handler: func(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
@@ -277,10 +287,9 @@ func presentFiles(ctx context.Context, registry *PresentFileRegistry, call model
 	resultData := map[string]any{
 		"filepaths": presentRegistryPaths(registeredFiles),
 	}
-	content := fmt.Sprintf("Presented %d file(s)", len(registeredFiles))
+	content := "Successfully presented files"
 	if len(registeredFiles) == 1 {
 		registered := registeredFiles[0]
-		content = fmt.Sprintf("Registered file %s", registered.Path)
 		resultData["id"] = registered.ID
 		resultData["path"] = registered.Path
 		resultData["description"] = registered.Description

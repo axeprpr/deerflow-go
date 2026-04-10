@@ -112,16 +112,23 @@ func New(cfg AgentConfig) *Agent {
 
 func cloneRegistryWithPresentFileTool(base *tools.Registry, presentFiles *tools.PresentFileRegistry) *tools.Registry {
 	cloned := tools.NewRegistry()
+	insertedPresentFiles := false
 	if base != nil {
 		for _, tool := range base.List() {
 			if tool.Name == "present_file" || tool.Name == "present_files" {
 				continue
 			}
+			if !insertedPresentFiles && tool.Name == "ask_clarification" {
+				_ = cloned.Register(tools.PresentFilesTool(presentFiles))
+				insertedPresentFiles = true
+			}
 			_ = cloned.Register(tool)
 		}
 	}
+	if !insertedPresentFiles {
+		_ = cloned.Register(tools.PresentFilesTool(presentFiles))
+	}
 	_ = cloned.Register(tools.PresentFileTool(presentFiles))
-	_ = cloned.Register(tools.PresentFilesTool(presentFiles))
 	return cloned
 }
 
@@ -978,10 +985,7 @@ func (a *Agent) BuildSystemPrompt(ctx context.Context, sessionID string) string 
 }
 
 func (a *Agent) buildSystemPrompt(_ context.Context, _ string, deferredState *deferredToolState) string {
-	sections := []string{
-		strings.TrimSpace(a.systemPrompt),
-		"You are running in a ReAct-style loop. Think step by step, call tools when necessary, and stop when you have a complete answer.",
-	}
+	sections := []string{strings.TrimSpace(a.systemPrompt)}
 	if deferredPrompt := deferredState.prompt(); deferredPrompt != "" {
 		sections = append(sections, deferredPrompt)
 	}

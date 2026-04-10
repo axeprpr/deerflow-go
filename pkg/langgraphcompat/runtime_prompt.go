@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const thinkingStylePrompt = "<thinking_style>\n" +
@@ -120,6 +121,7 @@ func (s *Server) environmentPrompt(runtimeContext map[string]any, skillNames ...
 	parts = append(parts, responseStylePrompt)
 	parts = append(parts, citationsPrompt)
 	parts = append(parts, criticalRemindersPrompt)
+	parts = append(parts, "<current_date>"+time.Now().Format("2006-01-02, Monday")+"</current_date>")
 	return strings.Join(parts, "\n\n")
 }
 
@@ -128,28 +130,8 @@ func (s *Server) runtimeSkillPaths(skillNames ...string) map[string]any {
 		return nil
 	}
 
-	allowed := make(map[string]struct{}, len(skillNames))
-	for _, name := range skillNames {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		allowed[name] = struct{}{}
-	}
-
 	out := map[string]any{}
-	for _, skill := range s.currentGatewaySkills() {
-		if !skill.Enabled {
-			continue
-		}
-		if len(allowed) > 0 {
-			if _, ok := allowed[skill.Name]; !ok {
-				continue
-			}
-		}
-		if _, ok := s.loadGatewaySkillBody(skill.Name, skill.Category); !ok {
-			continue
-		}
+	for _, skill := range s.promptVisibleSkills(skillNames...) {
 		category := resolveSkillCategory(skill.Category, skillCategoryPublic)
 		out[skill.Name] = "/mnt/skills/" + category + "/" + skill.Name + "/SKILL.md"
 	}
@@ -170,64 +152,10 @@ func (s *Server) skillsPrompt(skillNames ...string) string {
 	if s == nil {
 		return ""
 	}
-
-	allowed := make(map[string]struct{}, len(skillNames))
-	for _, name := range skillNames {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		allowed[name] = struct{}{}
-	}
-
-	skillsByKey := make(map[string]gatewaySkill)
-	for _, skill := range s.currentGatewaySkills() {
-		if !skill.Enabled {
-			continue
-		}
-		if len(allowed) > 0 {
-			if _, ok := allowed[skill.Name]; !ok {
-				continue
-			}
-		}
-		if _, ok := s.loadGatewaySkillBody(skill.Name, skill.Category); !ok {
-			continue
-		}
-		skillsByKey[skillStorageKey(skill.Category, skill.Name)] = skill
-	}
-	for name := range allowed {
-		if name == "" {
-			continue
-		}
-		if _, ok := findGatewaySkill(skillsByKey, name, ""); ok {
-			continue
-		}
-		body, ok := s.loadGatewaySkillBody(name, "")
-		if !ok || strings.TrimSpace(body) == "" {
-			continue
-		}
-		skillsByKey[skillStorageKey(skillCategoryPublic, name)] = gatewaySkill{
-			Name:        name,
-			Description: "Internal skill loaded by explicit runtime request.",
-			Category:    skillCategoryPublic,
-			Enabled:     true,
-		}
-	}
-
-	skills := make([]gatewaySkill, 0, len(skillsByKey))
-	for _, skill := range skillsByKey {
-		skills = append(skills, skill)
-	}
+	skills := s.promptVisibleSkills(skillNames...)
 	if len(skills) == 0 {
 		return ""
 	}
-
-	sort.Slice(skills, func(i, j int) bool {
-		if skills[i].Category == skills[j].Category {
-			return skills[i].Name < skills[j].Name
-		}
-		return skills[i].Category < skills[j].Category
-	})
 
 	var b strings.Builder
 	b.WriteString("<skill_system>\n")
@@ -245,11 +173,91 @@ func (s *Server) skillsPrompt(skillNames ...string) string {
 		category := resolveSkillCategory(skill.Category, skillCategoryPublic)
 		b.WriteString("    <skill>\n")
 		b.WriteString("        <name>" + skill.Name + "</name>\n")
-		b.WriteString("        <description>" + skill.Description + "</description>\n")
+		b.WriteString("        <description>" + skill.Description + " " + skillMutabilityLabel(skill.Category) + "</description>\n")
 		b.WriteString("        <location>/mnt/skills/" + category + "/" + skill.Name + "/SKILL.md</location>\n")
 		b.WriteString("    </skill>\n")
 	}
 	b.WriteString("</available_skills>\n")
 	b.WriteString("</skill_system>")
 	return b.String()
+}
+
+func (s *Server) promptVisibleSkills(skillNames ...string) []gatewaySkill {
+	if s == nil {
+		return nil
+	}
+
+	allowed := make(map[string]struct{}, len(skillNames))
+	for _, name := range skillNames {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		allowed[name] = struct{}{}
+	}
+
+	visibleByName := make(map[string]gatewaySkill)
+	for _, skill := range s.currentGatewaySkills() {
+		if !skill.Enabled {
+			continue
+		}
+		if len(allowed) > 0 {
+			if _, ok := allowed[skill.Name]; !ok {
+				continue
+			}
+		}
+		if _, ok := s.loadGatewaySkillBody(skill.Name, skill.Category); !ok {
+			continue
+		}
+		current, exists := visibleByName[skill.Name]
+		if !exists || preferPromptSkill(skill, current) {
+			visibleByName[skill.Name] = skill
+		}
+	}
+
+	for name := range allowed {
+		if _, ok := visibleByName[name]; ok {
+			continue
+		}
+		if _, ok := s.loadGatewaySkillBody(name, skillCategoryCustom); ok {
+			visibleByName[name] = gatewaySkill{
+				Name:        name,
+				Description: "Internal skill loaded by explicit runtime request.",
+				Category:    skillCategoryCustom,
+				Enabled:     true,
+			}
+			continue
+		}
+		if _, ok := s.loadGatewaySkillBody(name, skillCategoryPublic); ok {
+			visibleByName[name] = gatewaySkill{
+				Name:        name,
+				Description: "Internal skill loaded by explicit runtime request.",
+				Category:    skillCategoryPublic,
+				Enabled:     true,
+			}
+		}
+	}
+
+	skills := make([]gatewaySkill, 0, len(visibleByName))
+	for _, skill := range visibleByName {
+		skills = append(skills, skill)
+	}
+	sort.Slice(skills, func(i, j int) bool { return skills[i].Name < skills[j].Name })
+	return skills
+}
+
+func preferPromptSkill(candidate, current gatewaySkill) bool {
+	left := resolveSkillCategory(candidate.Category, skillCategoryPublic)
+	right := resolveSkillCategory(current.Category, skillCategoryPublic)
+	if left == right {
+		return candidate.Name < current.Name
+	}
+	return left == skillCategoryCustom
+}
+
+func skillMutabilityLabel(category string) string {
+	if resolveSkillCategory(category, skillCategoryPublic) == skillCategoryCustom {
+		return "[custom, editable]"
+	}
+	return "[built-in]"
 }

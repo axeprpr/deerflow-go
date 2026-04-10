@@ -51,6 +51,38 @@ func TestBashHandlerResolvesThreadVirtualPaths(t *testing.T) {
 	}
 }
 
+func TestBashHandlerCreatesThreadDataDirectoriesLikeUpstream(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", root)
+
+	threadID := "thread-bash-thread-dirs"
+	ctx := tools.WithThreadID(context.Background(), threadID)
+	result, err := BashHandler(ctx, models.ToolCall{
+		ID:   "call-bash-thread-dirs-1",
+		Name: "bash",
+		Arguments: map[string]any{
+			"command": "printf 'page' > /mnt/user-data/workspace/index.html && cp /mnt/user-data/workspace/index.html /mnt/user-data/outputs/index.html",
+		},
+	})
+	if err != nil {
+		t.Fatalf("BashHandler() error = %v", err)
+	}
+
+	var output BashOutput
+	if err := json.Unmarshal([]byte(result.Content), &output); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if output.ExitCode != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%q stderr=%q", output.ExitCode, output.Stdout, output.Stderr)
+	}
+
+	for _, name := range []string{"workspace", "uploads", "outputs"} {
+		if info, err := os.Stat(filepath.Join(root, "threads", threadID, "user-data", name)); err != nil || !info.IsDir() {
+			t.Fatalf("%s directory missing after bash tool: info=%v err=%v", name, info, err)
+		}
+	}
+}
+
 func TestResolveVirtualCommandWithoutThreadIDLeavesCommandUntouched(t *testing.T) {
 	cmd := "cat /mnt/user-data/uploads/demo.txt"
 	if got := tools.ResolveVirtualCommand(context.Background(), cmd); got != cmd {

@@ -125,8 +125,8 @@ func TestCloneRegistryWithPresentFileToolSupportsLegacySingleFileAlias(t *testin
 	if err != nil {
 		t.Fatalf("present_file alias failed: %v", err)
 	}
-	if !strings.Contains(content, "/mnt/user-data/outputs/report.md") {
-		t.Fatalf("content=%q missing normalized output path", content)
+	if content != "Successfully presented files" {
+		t.Fatalf("content=%q want success message", content)
 	}
 
 	files := presentRegistry.List()
@@ -135,6 +135,35 @@ func TestCloneRegistryWithPresentFileToolSupportsLegacySingleFileAlias(t *testin
 	}
 	if files[0].Path != "/mnt/user-data/outputs/report.md" {
 		t.Fatalf("registered path=%q want=%q", files[0].Path, "/mnt/user-data/outputs/report.md")
+	}
+}
+
+func TestCloneRegistryWithPresentFileToolPlacesPresentFilesBeforeClarification(t *testing.T) {
+	base := tools.NewRegistry()
+	for _, name := range []string{"ls", "read_file", "glob", "grep", "write_file", "str_replace", "bash", "ask_clarification", "task"} {
+		if err := base.Register(models.Tool{
+			Name: name,
+			Handler: func(context.Context, models.ToolCall) (models.ToolResult, error) {
+				return models.ToolResult{}, nil
+			},
+		}); err != nil {
+			t.Fatalf("register %s: %v", name, err)
+		}
+	}
+
+	registry := cloneRegistryWithPresentFileTool(base, tools.NewPresentFileRegistry())
+	got := make([]string, 0, len(registry.List()))
+	for _, tool := range registry.List() {
+		got = append(got, tool.Name)
+	}
+	wantPrefix := []string{"ls", "read_file", "glob", "grep", "write_file", "str_replace", "bash", "present_files", "ask_clarification", "task"}
+	if len(got) < len(wantPrefix) {
+		t.Fatalf("tool order=%v want prefix=%v", got, wantPrefix)
+	}
+	for i := range wantPrefix {
+		if got[i] != wantPrefix[i] {
+			t.Fatalf("tool order=%v want prefix=%v", got, wantPrefix)
+		}
 	}
 }
 
@@ -152,8 +181,11 @@ func TestAgent_BuildSystemPrompt(t *testing.T) {
 	if prompt == "" {
 		t.Error("System prompt should not be empty")
 	}
-	if prompt == "custom system prompt" {
-		t.Error("BuildSystemPrompt should include runtime instructions in addition to the base prompt")
+	if prompt != "custom system prompt" {
+		t.Fatalf("BuildSystemPrompt()=%q want base prompt unchanged when no deferred tools are active", prompt)
+	}
+	if strings.Contains(prompt, "ReAct-style loop") {
+		t.Fatalf("BuildSystemPrompt() unexpectedly included extra react guidance: %q", prompt)
 	}
 }
 
@@ -1955,6 +1987,153 @@ func TestAgentRunStopsAfterSuccessfulPresentFile(t *testing.T) {
 	last := result.Messages[len(result.Messages)-1]
 	if last.Role != models.RoleAI || last.Content != "页面已经准备好了。" {
 		t.Fatalf("last message=%#v", last)
+	}
+}
+
+func TestAgentRunCompletesArtifactWorkflowWithFinalAssistantReply(t *testing.T) {
+	dataRoot := t.TempDir()
+	t.Setenv("DEERFLOW_DATA_ROOT", dataRoot)
+
+	threadID := "thread-artifact-workflow"
+	uploadsDir := filepath.Join(dataRoot, "threads", threadID, "user-data", "uploads")
+	if err := os.MkdirAll(uploadsDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+	briefPath := filepath.Join(uploadsDir, "brief.md")
+	if err := os.WriteFile(briefPath, []byte("# Brief\n\nBuild a fish page.\n"), 0o644); err != nil {
+		t.Fatalf("write brief: %v", err)
+	}
+
+	presentRegistry := tools.NewPresentFileRegistry()
+	registry := tools.NewRegistry()
+	if err := registry.Register(builtin.ReadFileTool()); err != nil {
+		t.Fatalf("register read_file: %v", err)
+	}
+	if err := registry.Register(builtin.WriteFileTool()); err != nil {
+		t.Fatalf("register write_file: %v", err)
+	}
+	if err := registry.Register(tools.PresentFilesTool(presentRegistry)); err != nil {
+		t.Fatalf("register present_files: %v", err)
+	}
+
+	var chatCalls int
+	provider := chatOnlyProvider{t: t, chat: func(req llm.ChatRequest) llm.ChatResponse {
+		chatCalls++
+		switch chatCalls {
+		case 1:
+			return llm.ChatResponse{
+				Model: "test-model",
+				Message: models.Message{
+					Role: models.RoleAI,
+					ToolCalls: []models.ToolCall{{
+						ID:   "call-read-1",
+						Name: "read_file",
+						Arguments: map[string]any{
+							"description": "Load the uploaded brief",
+							"path":        "/mnt/user-data/uploads/brief.md",
+						},
+					}},
+				},
+				Stop: "tool_calls",
+			}
+		case 2:
+			last := req.Messages[len(req.Messages)-1]
+			if last.ToolResult == nil || last.ToolResult.ToolName != "read_file" {
+				t.Fatalf("last message=%#v want read_file tool result", last)
+			}
+			if !strings.Contains(last.ToolResult.Content, "Build a fish page") {
+				t.Fatalf("read_file result=%q", last.ToolResult.Content)
+			}
+			return llm.ChatResponse{
+				Model: "test-model",
+				Message: models.Message{
+					Role: models.RoleAI,
+					ToolCalls: []models.ToolCall{{
+						ID:   "call-write-1",
+						Name: "write_file",
+						Arguments: map[string]any{
+							"description": "Write the final fish page",
+							"path":        "/mnt/user-data/outputs/index.html",
+							"content":     "<!doctype html><title>Fish</title><p>fish page</p>",
+						},
+					}},
+				},
+				Stop: "tool_calls",
+			}
+		case 3:
+			last := req.Messages[len(req.Messages)-1]
+			if last.ToolResult == nil || last.ToolResult.ToolName != "write_file" {
+				t.Fatalf("last message=%#v want write_file tool result", last)
+			}
+			target := filepath.Join(dataRoot, "threads", threadID, "user-data", "outputs", "index.html")
+			data, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatalf("read output file: %v", err)
+			}
+			if string(data) != "<!doctype html><title>Fish</title><p>fish page</p>" {
+				t.Fatalf("output file=%q", string(data))
+			}
+			return llm.ChatResponse{
+				Model: "test-model",
+				Message: models.Message{
+					Role: models.RoleAI,
+					ToolCalls: []models.ToolCall{{
+						ID:   "call-present-1",
+						Name: "present_files",
+						Arguments: map[string]any{
+							"description": "Fish page artifact",
+							"filepaths":   []any{"/mnt/user-data/outputs/index.html"},
+						},
+					}},
+				},
+				Stop: "tool_calls",
+			}
+		case 4:
+			last := req.Messages[len(req.Messages)-1]
+			if last.ToolResult == nil || last.ToolResult.ToolName != "present_files" {
+				t.Fatalf("last message=%#v want present_files tool result", last)
+			}
+			return llm.ChatResponse{
+				Model: "test-model",
+				Message: models.Message{
+					Role:    models.RoleAI,
+					Content: "已为你创建页面，并完成交付。",
+				},
+				Stop: "stop",
+			}
+		default:
+			t.Fatalf("unexpected Chat call %d", chatCalls)
+			return llm.ChatResponse{}
+		}
+	}}
+
+	agent := New(AgentConfig{
+		LLMProvider:  provider,
+		Tools:        registry,
+		SystemPrompt: "test",
+		MaxTurns:     6,
+	})
+	result, err := agent.Run(tools.WithThreadID(context.Background(), threadID), threadID, []models.Message{{
+		ID:        "msg-1",
+		SessionID: threadID,
+		Role:      models.RoleHuman,
+		Content:   "帮我生成一个小鱼游泳的页面",
+	}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if chatCalls != 4 {
+		t.Fatalf("chat calls=%d want 4", chatCalls)
+	}
+	if result.FinalOutput != "已为你创建页面，并完成交付。" {
+		t.Fatalf("final output=%q", result.FinalOutput)
+	}
+	files := presentRegistry.List()
+	if len(files) != 1 {
+		t.Fatalf("presented files=%d want 1", len(files))
+	}
+	if files[0].Path != "/mnt/user-data/outputs/index.html" {
+		t.Fatalf("presented path=%q", files[0].Path)
 	}
 }
 

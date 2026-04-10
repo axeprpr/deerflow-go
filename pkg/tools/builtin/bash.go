@@ -27,6 +27,9 @@ func BashHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, 
 	}
 
 	cmd = tools.ResolveVirtualCommand(ctx, cmd)
+	if err := tools.EnsureThreadDataDirs(ctx); err != nil {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf("prepare thread directories failed: %w", err)
+	}
 	workdir := tools.ResolveWorkingDirectory(ctx)
 	if strings.TrimSpace(workdir) != "" {
 		if err := os.MkdirAll(workdir, 0o755); err != nil {
@@ -62,8 +65,8 @@ func BashTool() models.Tool {
 			"type": "object",
 			"properties": map[string]any{
 				"description": map[string]any{"type": "string", "description": "Explain why you are running this command in short words. ALWAYS PROVIDE THIS PARAMETER FIRST."},
-				"command": map[string]any{"type": "string", "description": "The bash command to execute. Always use absolute paths for files and directories."},
-				"timeout": map[string]any{"type": "number", "description": "Timeout in seconds (default 60)"},
+				"command":     map[string]any{"type": "string", "description": "The bash command to execute. Always use absolute paths for files and directories."},
+				"timeout":     map[string]any{"type": "number", "description": "Timeout in seconds (default 60)"},
 			},
 			"required": []any{"description", "command"},
 		},
