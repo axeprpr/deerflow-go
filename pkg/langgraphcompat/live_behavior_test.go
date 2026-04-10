@@ -180,8 +180,9 @@ func TestLiveBehaviorConcretePromptExecutesWithoutClarification(t *testing.T) {
 				sawClarificationTool = true
 			}
 		}
-		if (msg.Role == "assistant" || msg.Type == "ai") && liveBehaviorContentString(msg.Content) != "" {
-			finalAssistant = liveBehaviorContentString(msg.Content)
+		content := strings.TrimSpace(liveBehaviorContentString(msg.Content))
+		if (msg.Role == "assistant" || msg.Type == "ai") && content != "" {
+			finalAssistant = content
 		}
 	}
 	if !sawSkillRead {
@@ -199,8 +200,8 @@ func TestLiveBehaviorAmbiguousPromptRequestsMoreDetail(t *testing.T) {
 	baseURL := requireLiveBehaviorBaseURL(t)
 	threadID := fmt.Sprintf("live-ambiguous-%d", time.Now().UnixNano())
 	thread := runLiveBehaviorThread(t, baseURL, threadID, "帮我做一个页面")
-	if thread.Status != "idle" {
-		t.Fatalf("thread status=%q want idle", thread.Status)
+	if thread.Status != "idle" && thread.Status != "interrupted" {
+		t.Fatalf("thread status=%q want idle or interrupted", thread.Status)
 	}
 	if len(thread.Values.Artifacts) != 0 {
 		t.Fatalf("ambiguous prompt should not create artifacts, got %v", thread.Values.Artifacts)
@@ -208,21 +209,32 @@ func TestLiveBehaviorAmbiguousPromptRequestsMoreDetail(t *testing.T) {
 
 	messages := decodeLiveBehaviorMessages(t, thread.Values.Messages)
 	var (
-		sawWriteTool   bool
-		finalAssistant string
+		sawWriteTool         bool
+		sawClarificationTool bool
+		finalAssistant       string
 	)
 	for _, msg := range messages {
 		for _, call := range msg.ToolCalls {
 			if call.Name == "write_file" || call.Name == "present_files" {
 				sawWriteTool = true
 			}
+			if call.Name == "ask_clarification" {
+				sawClarificationTool = true
+			}
 		}
-		if (msg.Role == "assistant" || msg.Type == "ai") && liveBehaviorContentString(msg.Content) != "" {
-			finalAssistant = liveBehaviorContentString(msg.Content)
+		content := strings.TrimSpace(liveBehaviorContentString(msg.Content))
+		if (msg.Role == "assistant" || msg.Type == "ai") && content != "" {
+			finalAssistant = content
 		}
 	}
 	if sawWriteTool {
 		t.Fatal("ambiguous prompt unexpectedly executed artifact-writing tools")
+	}
+	if finalAssistant == "" && !sawClarificationTool {
+		t.Fatal("ambiguous prompt should either ask a clarification question or emit ask_clarification")
+	}
+	if finalAssistant == "" {
+		return
 	}
 	normalized := strings.ToLower(finalAssistant)
 	if !strings.Contains(normalized, "?") && !strings.Contains(finalAssistant, "？") {
