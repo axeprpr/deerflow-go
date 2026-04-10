@@ -219,6 +219,13 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 		} else {
 			stream, streamErr := a.llm.Stream(ctx, req)
 			if streamErr != nil {
+				if recovered, recoverErr := a.recoverToolTurnWithChat(ctx, req, aiMessageID, textBuilder.String(), len(toolCalls) > 0, &textBuilder, &toolCalls, &streamUsage, &stopReason, emit, streamErr); recovered {
+					goto llmTurnComplete
+				} else if recoverErr != nil {
+					err := normalizeRunError(ctx, recoverErr, a.requestTimeout)
+					emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
+					return nil, err
+				}
 				err := normalizeRunError(ctx, streamErr, a.requestTimeout)
 				emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
 				return nil, err
@@ -226,6 +233,13 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 
 			for chunk := range stream {
 				if chunk.Err != nil {
+					if recovered, recoverErr := a.recoverToolTurnWithChat(ctx, req, aiMessageID, textBuilder.String(), len(toolCalls) > 0, &textBuilder, &toolCalls, &streamUsage, &stopReason, emit, chunk.Err); recovered {
+						break
+					} else if recoverErr != nil {
+						err := normalizeRunError(ctx, recoverErr, a.requestTimeout)
+						emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
+						return nil, err
+					}
 					err := normalizeRunError(ctx, chunk.Err, a.requestTimeout)
 					emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
 					return nil, err
@@ -247,13 +261,14 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 						if textBuilder.Len() == 0 && chunk.Message.Content != "" {
 							textBuilder.WriteString(chunk.Message.Content)
 						}
-						if len(toolCalls) == 0 && len(chunk.Message.ToolCalls) > 0 {
-							toolCalls = append(toolCalls, chunk.Message.ToolCalls...)
+						if len(chunk.Message.ToolCalls) > 0 {
+							toolCalls = mergeToolCalls(toolCalls, chunk.Message.ToolCalls)
 						}
 					}
 				}
 			}
 		}
+	llmTurnComplete:
 		if err := ctx.Err(); err != nil {
 			err = normalizeRunError(ctx, err, a.requestTimeout)
 			emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
@@ -391,6 +406,58 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 	err := fmt.Errorf("agent exceeded max turns (%d)", a.maxTurns)
 	emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
 	return nil, err
+}
+
+func (a *Agent) recoverToolTurnWithChat(
+	ctx context.Context,
+	req llm.ChatRequest,
+	aiMessageID string,
+	partialText string,
+	hasPartialToolCalls bool,
+	textBuilder *strings.Builder,
+	toolCalls *[]models.ToolCall,
+	streamUsage **llm.Usage,
+	stopReason *string,
+	emit func(AgentEvent),
+	streamErr error,
+) (bool, error) {
+	if len(req.Tools) == 0 || ctx.Err() != nil {
+		return false, nil
+	}
+	if strings.TrimSpace(partialText) == "" && !hasPartialToolCalls {
+		return false, nil
+	}
+
+	resp, err := a.llm.Chat(ctx, req)
+	if err != nil {
+		return false, fmt.Errorf("tool stream failed: %w (chat fallback failed: %v)", streamErr, err)
+	}
+
+	if content := resp.Message.Content; content != "" {
+		switch {
+		case partialText == "":
+			emit(AgentEvent{Type: AgentEventChunk, MessageID: aiMessageID, Text: content})
+			emit(AgentEvent{Type: AgentEventTextChunk, MessageID: aiMessageID, Text: content})
+		case strings.HasPrefix(content, partialText):
+			suffix := strings.TrimPrefix(content, partialText)
+			if suffix != "" {
+				emit(AgentEvent{Type: AgentEventChunk, MessageID: aiMessageID, Text: suffix})
+				emit(AgentEvent{Type: AgentEventTextChunk, MessageID: aiMessageID, Text: suffix})
+			}
+		}
+		textBuilder.Reset()
+		textBuilder.WriteString(content)
+	} else {
+		textBuilder.Reset()
+	}
+
+	*toolCalls = append((*toolCalls)[:0], resp.Message.ToolCalls...)
+	if resp.Usage != (llm.Usage{}) {
+		usage := resp.Usage
+		*streamUsage = &usage
+	}
+	*stopReason = resp.Stop
+	return true, nil
 }
 
 func prefersStructuredToolCalls(provider llm.LLMProvider) bool {
@@ -786,8 +853,6 @@ func shouldPauseAfterToolCall(call models.ToolCall, result models.ToolResult) bo
 	switch strings.TrimSpace(call.Name) {
 	case "ask_clarification":
 		return result.Status != models.CallStatusFailed
-	case "present_file", "present_files":
-		return result.Status == models.CallStatusCompleted
 	default:
 		return false
 	}

@@ -1,25 +1,35 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	einoOpenAI "github.com/cloudwego/eino-ext/components/model/openai"
 	einoModel "github.com/cloudwego/eino/components/model"
 	einoSchema "github.com/cloudwego/eino/schema"
+	"gopkg.in/yaml.v3"
 )
 
 const (
-	defaultOpenAIBaseURL      = "https://api.openai.com/v1"
-	defaultSiliconFlowBaseURL = "https://api.siliconflow.cn/v1"
+	defaultOpenAIBaseURL       = "https://api.openai.com/v1"
+	defaultSiliconFlowBaseURL  = "https://api.siliconflow.cn/v1"
+	defaultHTTPDumpDir         = "/tmp/deerflow-eino-dump"
+	defaultModelRequestTimeout = 10 * time.Minute
 )
+
+var httpDumpSeq uint64
 
 type EinoProvider struct {
 	provider string
@@ -27,7 +37,10 @@ type EinoProvider struct {
 }
 
 func (p *EinoProvider) PrefersStructuredToolCalls() bool {
-	return p != nil
+	// Let the agent keep using the streaming path for tool turns.
+	// In practice this matches upstream DeerFlow's agent loop better and
+	// avoids stalling on a second synchronous completion after a tool result.
+	return false
 }
 
 func NewEinoProvider(name string) (*EinoProvider, error) {
@@ -123,7 +136,7 @@ func (p *EinoProvider) Stream(ctx context.Context, req ChatRequest) (<-chan Stre
 			if !send(StreamChunk{
 				Model:     req.Model,
 				Delta:     msg.Content,
-				ToolCalls: fromEinoToolCalls(msg.ToolCalls),
+				ToolCalls: collectStreamToolCalls(chunks),
 			}) {
 				return
 			}
@@ -141,6 +154,11 @@ func (p *EinoProvider) Stream(ctx context.Context, req ChatRequest) (<-chan Stre
 		}
 
 		streamedToolCalls := collectStreamToolCalls(chunks)
+		if needsStructuredToolCallRepair(streamedToolCalls) {
+			if repaired, repairErr := p.Chat(ctx, req); repairErr == nil && len(repaired.Message.ToolCalls) > 0 {
+				streamedToolCalls = repairStructuredToolCalls(streamedToolCalls, repaired.Message.ToolCalls)
+			}
+		}
 
 		send(StreamChunk{
 			Model:   req.Model,
@@ -193,13 +211,19 @@ func newEinoChatModelConfig(provider string) (*einoOpenAI.ChatModelConfig, error
 	if modelName == "" {
 		modelName = "gpt-4.1-mini"
 	}
+	timeout := resolveEinoRequestTimeout()
+
+	httpClient := &http.Client{
+		Timeout: timeout,
+	}
+	if transport := newHTTPDumpRoundTripper(http.DefaultTransport, provider); transport != nil {
+		httpClient.Transport = transport
+	}
 
 	cfg := &einoOpenAI.ChatModelConfig{
-		Model:   modelName,
-		Timeout: 2 * time.Minute,
-		HTTPClient: &http.Client{
-			Timeout: 2 * time.Minute,
-		},
+		Model:      modelName,
+		Timeout:    timeout,
+		HTTPClient: httpClient,
 	}
 
 	switch provider {
@@ -231,6 +255,221 @@ func newEinoChatModelConfig(provider string) (*einoOpenAI.ChatModelConfig, error
 	return cfg, nil
 }
 
+func resolveEinoRequestTimeout() time.Duration {
+	if timeout := timeoutFromEnv("DEERFLOW_LLM_REQUEST_TIMEOUT"); timeout > 0 {
+		return timeout
+	}
+	if timeout := configuredModelRequestTimeout(); timeout > 0 {
+		return timeout
+	}
+	return defaultModelRequestTimeout
+}
+
+func timeoutFromEnv(key string) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return 0
+	}
+	seconds, err := strconv.ParseFloat(raw, 64)
+	if err != nil || seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds * float64(time.Second))
+}
+
+func configuredModelRequestTimeout() time.Duration {
+	path, ok := resolveLLMConfigPath()
+	if !ok {
+		return 0
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	var raw struct {
+		Models []map[string]any `yaml:"models"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return 0
+	}
+	var maxTimeout time.Duration
+	for _, item := range raw.Models {
+		if timeout := modelRequestTimeout(item); timeout > maxTimeout {
+			maxTimeout = timeout
+		}
+	}
+	return maxTimeout
+}
+
+func resolveLLMConfigPath() (string, bool) {
+	for _, key := range []string{"DEERFLOW_CONFIG_PATH", "DEER_FLOW_CONFIG_PATH"} {
+		if path := strings.TrimSpace(os.Getenv(key)); path != "" {
+			if info, err := os.Stat(path); err == nil && !info.IsDir() {
+				return path, true
+			}
+			return "", false
+		}
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", false
+	}
+	for _, candidate := range []string{
+		filepath.Join(wd, "config.yaml"),
+		filepath.Join(filepath.Dir(wd), "config.yaml"),
+	} {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+func modelRequestTimeout(raw map[string]any) time.Duration {
+	if raw == nil {
+		return 0
+	}
+	for _, key := range []string{"request_timeout", "requestTimeout", "timeout"} {
+		if seconds := floatSeconds(raw[key]); seconds > 0 {
+			return time.Duration(seconds * float64(time.Second))
+		}
+	}
+	return 0
+}
+
+func floatSeconds(value any) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case json.Number:
+		n, _ := typed.Float64()
+		return n
+	case string:
+		n, _ := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		return n
+	default:
+		return 0
+	}
+}
+
+func newHTTPDumpRoundTripper(base http.RoundTripper, provider string) http.RoundTripper {
+	if _, err := os.Stat(defaultHTTPDumpDir); err != nil {
+		return nil
+	}
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return &httpDumpRoundTripper{
+		base:     base,
+		provider: strings.TrimSpace(provider),
+		dir:      defaultHTTPDumpDir,
+	}
+}
+
+type httpDumpRoundTripper struct {
+	base     http.RoundTripper
+	provider string
+	dir      string
+}
+
+func (rt *httpDumpRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req == nil {
+		return rt.base.RoundTrip(req)
+	}
+
+	seq := atomic.AddUint64(&httpDumpSeq, 1)
+	prefix := filepath.Join(rt.dir, dumpFilePrefix(seq, rt.provider))
+	reqCopy := req.Clone(req.Context())
+
+	if req.Body != nil {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		reqCopy.Body = io.NopCloser(bytes.NewReader(body))
+		if writeErr := os.WriteFile(prefix+".request.json", body, 0o644); writeErr != nil {
+			log.Printf("eino http dump request write failed: %v", writeErr)
+		}
+	}
+
+	resp, err := rt.base.RoundTrip(reqCopy)
+	if err != nil {
+		if writeErr := os.WriteFile(prefix+".error.txt", []byte(err.Error()), 0o644); writeErr != nil {
+			log.Printf("eino http dump error write failed: %v", writeErr)
+		}
+		return nil, err
+	}
+
+	headerText := dumpResponseHeaders(resp)
+	if writeErr := os.WriteFile(prefix+".response.headers.txt", []byte(headerText), 0o644); writeErr != nil {
+		log.Printf("eino http dump headers write failed: %v", writeErr)
+	}
+	resp.Body = &dumpingReadCloser{
+		ReadCloser: resp.Body,
+		path:       prefix + ".response.body.txt",
+	}
+	return resp, nil
+}
+
+func dumpFilePrefix(seq uint64, provider string) string {
+	timestamp := time.Now().UTC().Format("20060102T150405.000000000")
+	if provider == "" {
+		provider = "provider"
+	}
+	return timestamp + "-" + provider + "-" + strconv.FormatUint(seq, 10)
+}
+
+func dumpResponseHeaders(resp *http.Response) string {
+	if resp == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(resp.Proto)
+	b.WriteByte(' ')
+	b.WriteString(resp.Status)
+	b.WriteByte('\n')
+	for key, values := range resp.Header {
+		for _, value := range values {
+			b.WriteString(key)
+			b.WriteString(": ")
+			b.WriteString(value)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+type dumpingReadCloser struct {
+	io.ReadCloser
+	path string
+	buf  bytes.Buffer
+}
+
+func (rc *dumpingReadCloser) Read(p []byte) (int, error) {
+	n, err := rc.ReadCloser.Read(p)
+	if n > 0 {
+		_, _ = rc.buf.Write(p[:n])
+	}
+	return n, err
+}
+
+func (rc *dumpingReadCloser) Close() error {
+	if rc.path != "" && rc.buf.Len() > 0 {
+		if err := os.WriteFile(rc.path, rc.buf.Bytes(), 0o644); err != nil {
+			log.Printf("eino http dump body write failed: %v", err)
+		}
+	}
+	return rc.ReadCloser.Close()
+}
+
 func toEinoMessage(msg models.Message) *einoSchema.Message {
 	out := &einoSchema.Message{
 		Content: msg.Content,
@@ -240,8 +479,10 @@ func toEinoMessage(msg models.Message) *einoSchema.Message {
 	case models.RoleHuman:
 		out.Role = einoSchema.User
 		if multi := userInputMultiContent(msg.Metadata); len(multi) > 0 {
-			out.Content = ""
-			out.UserInputMultiContent = multi
+			if hasNonTextUserInputPart(multi) {
+				out.Content = ""
+				out.UserInputMultiContent = multi
+			}
 		}
 	case models.RoleSystem:
 		out.Role = einoSchema.System
@@ -274,6 +515,15 @@ func toEinoMessage(msg models.Message) *einoSchema.Message {
 	}
 
 	return out
+}
+
+func hasNonTextUserInputPart(parts []einoSchema.MessageInputPart) bool {
+	for _, part := range parts {
+		if part.Type != einoSchema.ChatMessagePartTypeText {
+			return true
+		}
+	}
+	return false
 }
 
 func userInputMultiContent(metadata map[string]string) []einoSchema.MessageInputPart {
@@ -431,10 +681,7 @@ func collectStreamToolCalls(chunks []*einoSchema.Message) []models.ToolCall {
 		}
 		for i, call := range msg.ToolCalls {
 			id := strings.TrimSpace(call.ID)
-			key := id
-			if key == "" {
-				key = fmt.Sprintf("index:%d:%s", i, strings.TrimSpace(call.Function.Name))
-			}
+			key := fmt.Sprintf("index:%d", i)
 
 			acc, ok := accumulators[key]
 			if !ok {
@@ -487,6 +734,53 @@ func decodeToolArguments(raw string) map[string]any {
 	return args
 }
 
+func needsStructuredToolCallRepair(calls []models.ToolCall) bool {
+	if len(calls) == 0 {
+		return false
+	}
+	for _, call := range calls {
+		if len(call.Arguments) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func repairStructuredToolCalls(streamed, repaired []models.ToolCall) []models.ToolCall {
+	if len(streamed) == 0 {
+		return append([]models.ToolCall(nil), repaired...)
+	}
+
+	out := append([]models.ToolCall(nil), streamed...)
+	indexByID := make(map[string]int, len(out))
+	for i, call := range out {
+		if id := strings.TrimSpace(call.ID); id != "" {
+			indexByID[id] = i
+		}
+	}
+
+	for _, call := range repaired {
+		id := strings.TrimSpace(call.ID)
+		if id == "" {
+			continue
+		}
+		idx, ok := indexByID[id]
+		if !ok {
+			continue
+		}
+		if out[idx].Name == "" {
+			out[idx].Name = call.Name
+		}
+		if len(out[idx].Arguments) == 0 && len(call.Arguments) > 0 {
+			out[idx].Arguments = call.Arguments
+		}
+		if out[idx].Status == "" && call.Status != "" {
+			out[idx].Status = call.Status
+		}
+	}
+
+	return out
+}
 
 func toEinoToolInfos(tools []models.Tool) []*einoSchema.ToolInfo {
 	out := make([]*einoSchema.ToolInfo, 0, len(tools))

@@ -1,6 +1,7 @@
 package langgraphcompat
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -1044,6 +1045,62 @@ func (s *Server) handleThreadScopedRunGet(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, runResponse(run))
 }
 
+func (s *Server) handleThreadRunJoin(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	runID := r.PathValue("run_id")
+	cancelOnDisconnect, _ := strconv.ParseBool(strings.TrimSpace(r.URL.Query().Get("cancel_on_disconnect")))
+
+	for {
+		run := s.getRun(runID)
+		if run == nil || run.ThreadID != threadID {
+			http.Error(w, "run not found", http.StatusNotFound)
+			return
+		}
+		switch strings.ToLower(strings.TrimSpace(run.Status)) {
+		case "", "running", "queued", "busy":
+		default:
+			writeJSON(w, http.StatusOK, runResponse(run))
+			return
+		}
+
+		select {
+		case <-r.Context().Done():
+			if cancelOnDisconnect {
+				s.cancelActiveRun(runID)
+			}
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func (s *Server) handleThreadRunCancel(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	runID := r.PathValue("run_id")
+	run := s.getRun(runID)
+	if run == nil || run.ThreadID != threadID {
+		http.Error(w, "run not found", http.StatusNotFound)
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(run.Status)) {
+	case "", "running", "queued", "busy":
+	default:
+		http.Error(w, "run is not cancellable", http.StatusConflict)
+		return
+	}
+
+	if !s.cancelActiveRun(runID) {
+		http.Error(w, "run is not cancellable", http.StatusConflict)
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"run_id":    runID,
+		"thread_id": threadID,
+		"status":    "interrupted",
+	})
+}
+
 func (s *Server) handleThreadRunsList(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	s.runsMu.RLock()
@@ -1977,6 +2034,38 @@ func (s *Server) saveRun(run *Run) {
 	copyRun.Events = append([]StreamEvent(nil), run.Events...)
 	s.runs[run.RunID] = &copyRun
 	_ = s.persistRunFile(&copyRun)
+}
+
+func (s *Server) setRunCancel(runID string, cancel context.CancelFunc) {
+	if cancel == nil || strings.TrimSpace(runID) == "" {
+		return
+	}
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
+	if s.runCancels == nil {
+		s.runCancels = make(map[string]context.CancelFunc)
+	}
+	s.runCancels[runID] = cancel
+}
+
+func (s *Server) clearRunCancel(runID string) {
+	if strings.TrimSpace(runID) == "" {
+		return
+	}
+	s.runsMu.Lock()
+	defer s.runsMu.Unlock()
+	delete(s.runCancels, runID)
+}
+
+func (s *Server) cancelActiveRun(runID string) bool {
+	s.runsMu.RLock()
+	cancel := s.runCancels[runID]
+	s.runsMu.RUnlock()
+	if cancel == nil {
+		return false
+	}
+	cancel()
+	return true
 }
 
 func (s *Server) appendRunEvent(runID string, event StreamEvent) {

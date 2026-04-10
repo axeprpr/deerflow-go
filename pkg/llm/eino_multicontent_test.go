@@ -32,3 +32,26 @@ func TestToEinoMessageUsesUserInputMultiContent(t *testing.T) {
 		t.Fatalf("part type=%s", out.UserInputMultiContent[1].Type)
 	}
 }
+
+func TestToEinoMessageKeepsPlainTextForTextOnlyMultiContent(t *testing.T) {
+	msg := models.Message{
+		ID:        "m1",
+		SessionID: "s1",
+		Role:      models.RoleHuman,
+		Content:   "帮我生成一个小鱼游泳的页面",
+		Metadata: map[string]string{
+			"multi_content": `[{"type":"text","text":"帮我生成一个小鱼游泳的页面"}]`,
+		},
+	}
+
+	out := toEinoMessage(msg)
+	if out.Role != einoSchema.User {
+		t.Fatalf("role=%s", out.Role)
+	}
+	if out.Content != "帮我生成一个小鱼游泳的页面" {
+		t.Fatalf("content=%q", out.Content)
+	}
+	if len(out.UserInputMultiContent) != 0 {
+		t.Fatalf("parts=%d want 0", len(out.UserInputMultiContent))
+	}
+}

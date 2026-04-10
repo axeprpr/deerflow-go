@@ -359,6 +359,89 @@ func TestAgent_RunKeepsStreamingToolTurnsForNonStructuredProviders(t *testing.T)
 	}
 }
 
+func TestAgent_RunFallsBackToChatWhenToolStreamFailsMidTurn(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name:        "echo_tool",
+		Description: "echo content",
+		InputSchema: map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "string"}}, "required": []any{"value"}},
+		Handler: func(_ context.Context, call models.ToolCall) (models.ToolResult, error) {
+			return models.ToolResult{
+				CallID:   call.ID,
+				ToolName: call.Name,
+				Status:   models.CallStatusCompleted,
+				Content:  call.Arguments["value"].(string),
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register echo_tool: %v", err)
+	}
+
+	provider := &streamThenChatFallbackProvider{t: t}
+	agent := New(AgentConfig{
+		LLMProvider: provider,
+		Tools:       registry,
+		MaxTurns:    4,
+	})
+
+	done := make(chan []AgentEvent, 1)
+	go func() {
+		var events []AgentEvent
+		for evt := range agent.Events() {
+			events = append(events, evt)
+			if evt.Type == AgentEventEnd || evt.Type == AgentEventError {
+				break
+			}
+		}
+		done <- events
+	}()
+
+	result, err := agent.Run(context.Background(), "session_stream_chat_fallback", []models.Message{{
+		ID:        "m1",
+		SessionID: "session_stream_chat_fallback",
+		Role:      models.RoleHuman,
+		Content:   "run tool",
+	}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "done" {
+		t.Fatalf("final output=%q want done", result.FinalOutput)
+	}
+	if got := provider.streamCalls.Load(); got != 2 {
+		t.Fatalf("stream calls=%d want 2", got)
+	}
+	if got := provider.chatCalls.Load(); got != 1 {
+		t.Fatalf("chat calls=%d want 1", got)
+	}
+	if len(result.Messages) < 4 {
+		t.Fatalf("messages=%d want>=4", len(result.Messages))
+	}
+	toolTurn := result.Messages[1]
+	if toolTurn.Content != "先调用工具。" {
+		t.Fatalf("tool turn content=%q want 先调用工具。", toolTurn.Content)
+	}
+	if len(toolTurn.ToolCalls) != 1 || toolTurn.ToolCalls[0].Arguments["value"] != "ok" {
+		t.Fatalf("tool turn tool_calls=%#v want completed fallback arguments", toolTurn.ToolCalls)
+	}
+
+	events := <-done
+	for _, evt := range events {
+		if evt.Type == AgentEventError {
+			t.Fatalf("unexpected error event: %s", evt.Err)
+		}
+	}
+	var streamedText int
+	for _, evt := range events {
+		if evt.Type == AgentEventTextChunk && evt.Text == "先调用工具。" {
+			streamedText++
+		}
+	}
+	if streamedText != 1 {
+		t.Fatalf("text chunk count=%d want 1", streamedText)
+	}
+}
+
 func TestAgent_RunUsesStreamingForNonToolTurnsEvenWithStructuredProviders(t *testing.T) {
 	provider := structuredNoToolProvider{t: t}
 	agent := New(AgentConfig{
@@ -371,6 +454,79 @@ func TestAgent_RunUsesStreamingForNonToolTurnsEvenWithStructuredProviders(t *tes
 		SessionID: "session_no_tools_stream",
 		Role:      models.RoleHuman,
 		Content:   "just answer",
+	}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "done" {
+		t.Fatalf("final output=%q want done", result.FinalOutput)
+	}
+}
+
+func TestAgent_RunUsesFinalStreamToolCallArguments(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name:        "echo_tool",
+		Description: "echo content",
+		InputSchema: map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "string"}}, "required": []any{"value"}},
+		Handler: func(_ context.Context, call models.ToolCall) (models.ToolResult, error) {
+			value, _ := call.Arguments["value"].(string)
+			if value == "" {
+				return models.ToolResult{CallID: call.ID, ToolName: call.Name}, errors.New("value is required")
+			}
+			return models.ToolResult{
+				CallID:   call.ID,
+				ToolName: call.Name,
+				Status:   models.CallStatusCompleted,
+				Content:  value,
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register echo_tool: %v", err)
+	}
+
+	provider := &scriptedStreamProvider{
+		t: t,
+		steps: []streamStep{
+			{
+				content: "先调用工具。",
+				toolCalls: []models.ToolCall{{
+					ID:     "call-1",
+					Name:   "echo_tool",
+					Status: models.CallStatusPending,
+				}},
+				finalToolCalls: []models.ToolCall{{
+					ID:        "call-1",
+					Name:      "echo_tool",
+					Arguments: map[string]any{"value": "ok"},
+					Status:    models.CallStatusPending,
+				}},
+			},
+			{
+				content: "done",
+				check: func(t *testing.T, req llm.ChatRequest) {
+					if len(req.Messages) < 3 {
+						t.Fatalf("second request messages=%d want>=3", len(req.Messages))
+					}
+					if req.Messages[2].ToolResult == nil || req.Messages[2].ToolResult.Content != "ok" {
+						t.Fatalf("tool result history=%#v", req.Messages[2].ToolResult)
+					}
+				},
+			},
+		},
+	}
+
+	agent := New(AgentConfig{
+		LLMProvider: provider,
+		Tools:       registry,
+		MaxTurns:    4,
+	})
+
+	result, err := agent.Run(context.Background(), "session_stream_final_tool_args", []models.Message{{
+		ID:        "m1",
+		SessionID: "session_stream_final_tool_args",
+		Role:      models.RoleHuman,
+		Content:   "run tool",
 	}})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -1554,6 +1710,66 @@ func (p *streamOnlyToolProvider) Stream(_ context.Context, req llm.ChatRequest) 
 	return ch, nil
 }
 
+type streamThenChatFallbackProvider struct {
+	t           *testing.T
+	streamCalls atomic.Int32
+	chatCalls   atomic.Int32
+}
+
+func (p *streamThenChatFallbackProvider) Chat(_ context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	callIndex := int(p.chatCalls.Add(1))
+	if callIndex != 1 {
+		p.t.Fatalf("unexpected Chat call %d", callIndex)
+	}
+	if len(req.Tools) == 0 {
+		p.t.Fatal("Chat() fallback should only be used for tool turns")
+	}
+	return llm.ChatResponse{
+		Message: models.Message{
+			Role:    models.RoleAI,
+			Content: "先调用工具。",
+			ToolCalls: []models.ToolCall{{
+				ID:        "call-1",
+				Name:      "echo_tool",
+				Arguments: map[string]any{"value": "ok"},
+				Status:    models.CallStatusPending,
+			}},
+		},
+		Stop: "tool_calls",
+	}, nil
+}
+
+func (p *streamThenChatFallbackProvider) Stream(_ context.Context, req llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	callIndex := int(p.streamCalls.Add(1))
+	ch := make(chan llm.StreamChunk, 2)
+	go func() {
+		defer close(ch)
+		switch callIndex {
+		case 1:
+			ch <- llm.StreamChunk{Delta: "先调用工具。"}
+			ch <- llm.StreamChunk{Err: errors.New("stream truncated"), Done: true}
+		case 2:
+			if len(req.Messages) < 3 {
+				p.t.Fatalf("second stream request messages=%d want>=3", len(req.Messages))
+			}
+			if req.Messages[2].ToolResult == nil || req.Messages[2].ToolResult.Content != "ok" {
+				p.t.Fatalf("tool result history=%#v", req.Messages[2].ToolResult)
+			}
+			ch <- llm.StreamChunk{
+				Message: &models.Message{
+					Role:    models.RoleAI,
+					Content: "done",
+				},
+				Stop: "stop",
+				Done: true,
+			}
+		default:
+			p.t.Fatalf("unexpected Stream call %d", callIndex)
+		}
+	}()
+	return ch, nil
+}
+
 type structuredNoToolProvider struct {
 	t *testing.T
 }
@@ -1694,10 +1910,25 @@ func TestAgentRunStopsAfterSuccessfulPresentFile(t *testing.T) {
 				},
 				Stop: "tool_calls",
 			}
-		default:
-			t.Fatalf("unexpected Chat call %d", chatCalls)
-			return llm.ChatResponse{}
+		case 2:
+			if len(req.Messages) < 3 {
+				t.Fatalf("messages=%d want at least 3", len(req.Messages))
+			}
+			last := req.Messages[len(req.Messages)-1]
+			if last.Role != models.RoleTool || last.ToolResult == nil || last.ToolResult.ToolName != "present_file" {
+				t.Fatalf("last message=%#v want present_file tool result", last)
+			}
+			return llm.ChatResponse{
+				Model: "test-model",
+				Message: models.Message{
+					Role:    models.RoleAI,
+					Content: "页面已经准备好了。",
+				},
+				Stop: "stop",
+			}
 		}
+		t.Fatalf("unexpected Chat call %d", chatCalls)
+		return llm.ChatResponse{}
 	}}
 
 	agent := New(AgentConfig{
@@ -1715,14 +1946,14 @@ func TestAgentRunStopsAfterSuccessfulPresentFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if chatCalls != 1 {
-		t.Fatalf("chat calls=%d want 1", chatCalls)
+	if chatCalls != 2 {
+		t.Fatalf("chat calls=%d want 2", chatCalls)
 	}
 	if len(result.Messages) < 2 {
 		t.Fatalf("messages=%d want at least 2", len(result.Messages))
 	}
 	last := result.Messages[len(result.Messages)-1]
-	if last.Role != models.RoleTool || last.ToolResult == nil || last.ToolResult.ToolName != "present_file" {
+	if last.Role != models.RoleAI || last.Content != "页面已经准备好了。" {
 		t.Fatalf("last message=%#v", last)
 	}
 }
@@ -1761,9 +1992,10 @@ func (timeoutProvider) Stream(ctx context.Context, req llm.ChatRequest) (<-chan 
 }
 
 type streamStep struct {
-	content   string
-	toolCalls []models.ToolCall
-	check     func(*testing.T, llm.ChatRequest)
+	content        string
+	toolCalls      []models.ToolCall
+	finalToolCalls []models.ToolCall
+	check          func(*testing.T, llm.ChatRequest)
 }
 
 type scriptedStreamProvider struct {
@@ -1792,7 +2024,7 @@ func (p *scriptedStreamProvider) Stream(_ context.Context, req llm.ChatRequest) 
 			Message: &models.Message{
 				Role:      models.RoleAI,
 				Content:   step.content,
-				ToolCalls: step.toolCalls,
+				ToolCalls: firstNonEmptyToolCalls(step.finalToolCalls, step.toolCalls),
 			},
 			ToolCalls: step.toolCalls,
 			Stop:      "stop",
@@ -1800,6 +2032,13 @@ func (p *scriptedStreamProvider) Stream(_ context.Context, req llm.ChatRequest) 
 		}
 	}()
 	return ch, nil
+}
+
+func firstNonEmptyToolCalls(primary, fallback []models.ToolCall) []models.ToolCall {
+	if len(primary) > 0 {
+		return primary
+	}
+	return fallback
 }
 
 func toolNames(items []models.Tool) []string {

@@ -121,13 +121,20 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 	if runtimeContext == nil {
 		runtimeContext = map[string]any{}
 	}
+	resolvedModel, catalogModel := s.resolveConfiguredModel(cfg.ModelName)
 	agentCfg := agent.AgentConfig{
 		Tools:           s.tools,
 		AgentType:       cfg.AgentType,
-		Model:           firstNonEmpty(cfg.ModelName, s.defaultModel),
+		Model:           resolvedModel,
 		ReasoningEffort: cfg.ReasoningEffort,
 		Temperature:     cfg.Temperature,
 		MaxTokens:       cfg.MaxTokens,
+	}
+	if catalogModel != nil && !catalogModel.SupportsReasoningEffort {
+		agentCfg.ReasoningEffort = ""
+	}
+	if catalogModel != nil && catalogModel.RequestTimeoutSeconds > 0 {
+		agentCfg.RequestTimeout = time.Duration(catalogModel.RequestTimeoutSeconds * float64(time.Second))
 	}
 
 	if agentCfg.AgentType == "" {
@@ -139,6 +146,23 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 	}
 	agentCfg.SystemPrompt = strings.TrimSpace(basePrompt + "\n\n" + s.environmentPrompt(runtimeContext))
 	return agentCfg, nil
+}
+
+func (s *Server) resolveConfiguredModel(name string) (string, *gatewayModel) {
+	resolved := strings.TrimSpace(firstNonEmpty(name, s.defaultModel))
+	if resolved == "" {
+		return "", nil
+	}
+
+	s.uiStateMu.RLock()
+	model, ok := s.findModelLocked(resolved)
+	s.uiStateMu.RUnlock()
+	if !ok {
+		return resolved, nil
+	}
+
+	providerModel := strings.TrimSpace(firstNonEmpty(model.Model, model.Name, model.ID, resolved))
+	return providerModel, &model
 }
 
 func (s *Server) threadHistory(threadID string) []ThreadState {

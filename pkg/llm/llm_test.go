@@ -111,10 +111,10 @@ func TestNewProvider(t *testing.T) {
 	}
 }
 
-func TestEinoProviderPrefersStructuredToolCalls(t *testing.T) {
+func TestEinoProviderDoesNotPreferStructuredToolCalls(t *testing.T) {
 	provider := &EinoProvider{}
-	if !provider.PrefersStructuredToolCalls() {
-		t.Fatal("EinoProvider should prefer structured tool calls")
+	if provider.PrefersStructuredToolCalls() {
+		t.Fatal("EinoProvider should keep tool turns on the streaming path")
 	}
 }
 
@@ -390,6 +390,57 @@ func TestCollectStreamToolCalls_ReassemblesArgumentsAcrossChunks(t *testing.T) {
 	}
 }
 
+func TestCollectStreamToolCalls_ReassemblesArgumentsWhenFollowupChunksOmitIDAndName(t *testing.T) {
+	merged := collectStreamToolCalls([]*einoSchema.Message{
+		{
+			ToolCalls: []einoSchema.ToolCall{{
+				ID:   "call-1",
+				Type: "function",
+				Function: einoSchema.FunctionCall{
+					Name:      "read_file",
+					Arguments: "",
+				},
+			}},
+		},
+		{
+			ToolCalls: []einoSchema.ToolCall{{
+				Function: einoSchema.FunctionCall{Arguments: "{"},
+			}},
+		},
+		{
+			ToolCalls: []einoSchema.ToolCall{{
+				Function: einoSchema.FunctionCall{Arguments: `"description":"Load skill"`},
+			}},
+		},
+		{
+			ToolCalls: []einoSchema.ToolCall{{
+				Function: einoSchema.FunctionCall{Arguments: `,"path":"/mnt/skills/public/frontend-design/SKILL.md"`},
+			}},
+		},
+		{
+			ToolCalls: []einoSchema.ToolCall{{
+				Function: einoSchema.FunctionCall{Arguments: "}"},
+			}},
+		},
+	})
+
+	if len(merged) != 1 {
+		t.Fatalf("tool calls=%d want 1", len(merged))
+	}
+	if merged[0].ID != "call-1" {
+		t.Fatalf("tool id=%q want call-1", merged[0].ID)
+	}
+	if merged[0].Name != "read_file" {
+		t.Fatalf("tool name=%q want read_file", merged[0].Name)
+	}
+	if got, _ := merged[0].Arguments["description"].(string); got != "Load skill" {
+		t.Fatalf("description=%q want Load skill", got)
+	}
+	if got, _ := merged[0].Arguments["path"].(string); got != "/mnt/skills/public/frontend-design/SKILL.md" {
+		t.Fatalf("path=%q", got)
+	}
+}
+
 func TestFinalStreamMessage_PrefersReassembledToolArguments(t *testing.T) {
 	msg := &einoSchema.Message{
 		Role:    einoSchema.Assistant,
@@ -415,6 +466,53 @@ func TestFinalStreamMessage_PrefersReassembledToolArguments(t *testing.T) {
 		t.Fatalf("tool calls=%d want 1", len(out.ToolCalls))
 	}
 	if got, _ := out.ToolCalls[0].Arguments["path"].(string); got != "/mnt/skills/public/frontend-design/SKILL.md" {
+		t.Fatalf("path=%q", got)
+	}
+}
+
+func TestNeedsStructuredToolCallRepair(t *testing.T) {
+	if needsStructuredToolCallRepair(nil) {
+		t.Fatal("nil tool calls should not need repair")
+	}
+	if !needsStructuredToolCallRepair([]models.ToolCall{{
+		ID:     "call-1",
+		Name:   "read_file",
+		Status: models.CallStatusPending,
+	}}) {
+		t.Fatal("missing arguments should require repair")
+	}
+	if needsStructuredToolCallRepair([]models.ToolCall{{
+		ID:        "call-1",
+		Name:      "read_file",
+		Arguments: map[string]any{"path": "/tmp/demo.txt"},
+		Status:    models.CallStatusPending,
+	}}) {
+		t.Fatal("complete tool calls should not require repair")
+	}
+}
+
+func TestRepairStructuredToolCallsFillsMissingArgumentsByID(t *testing.T) {
+	repaired := repairStructuredToolCalls(
+		[]models.ToolCall{{
+			ID:     "call-1",
+			Name:   "read_file",
+			Status: models.CallStatusPending,
+		}},
+		[]models.ToolCall{{
+			ID:        "call-1",
+			Name:      "read_file",
+			Arguments: map[string]any{"description": "Load skill", "path": "/mnt/skills/public/frontend-design/SKILL.md"},
+			Status:    models.CallStatusPending,
+		}},
+	)
+
+	if len(repaired) != 1 {
+		t.Fatalf("tool calls=%d want 1", len(repaired))
+	}
+	if got, _ := repaired[0].Arguments["description"].(string); got != "Load skill" {
+		t.Fatalf("description=%q want Load skill", got)
+	}
+	if got, _ := repaired[0].Arguments["path"].(string); got != "/mnt/skills/public/frontend-design/SKILL.md" {
 		t.Fatalf("path=%q", got)
 	}
 }

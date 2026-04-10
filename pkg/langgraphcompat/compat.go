@@ -46,6 +46,7 @@ type Server struct {
 	runs             map[string]*Run
 	runsMu           sync.RWMutex
 	runStreams       map[string]map[uint64]chan StreamEvent
+	runCancels       map[string]context.CancelFunc
 	dataRoot         string
 	uiStateMu        sync.RWMutex
 	models           map[string]gatewayModel
@@ -120,16 +121,20 @@ type Run struct {
 
 // LangGraph API types
 type RunCreateRequest struct {
-	AssistantID  string         `json:"assistant_id"`
-	AssistantIDX string         `json:"assistantId,omitempty"`
-	ThreadID     string         `json:"thread_id,omitempty"`
-	ThreadIDX    string         `json:"threadId,omitempty"`
-	Messages     []any          `json:"messages,omitempty"`
-	Input        map[string]any `json:"input,omitempty"`
-	Config       map[string]any `json:"config,omitempty"`
-	Context      map[string]any `json:"context,omitempty"`
-	StreamMode   any            `json:"stream_mode,omitempty"`
-	StreamModeX  any            `json:"streamMode,omitempty"`
+	AssistantID       string         `json:"assistant_id"`
+	AssistantIDX      string         `json:"assistantId,omitempty"`
+	ThreadID          string         `json:"thread_id,omitempty"`
+	ThreadIDX         string         `json:"threadId,omitempty"`
+	Messages          []any          `json:"messages,omitempty"`
+	Input             map[string]any `json:"input,omitempty"`
+	Config            map[string]any `json:"config,omitempty"`
+	Context           map[string]any `json:"context,omitempty"`
+	StreamMode        any            `json:"stream_mode,omitempty"`
+	StreamModeX       any            `json:"streamMode,omitempty"`
+	StreamResumable  *bool      `json:"stream_resumable,omitempty"`
+	StreamResumableX *bool      `json:"streamResumable,omitempty"`
+	OnDisconnect      string         `json:"on_disconnect,omitempty"`
+	OnDisconnectX     string         `json:"onDisconnect,omitempty"`
 }
 
 // Message represents a LangGraph-compatible message
@@ -221,6 +226,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		sessions:      make(map[string]*Session),
 		runs:          make(map[string]*Run),
 		runStreams:    make(map[string]map[uint64]chan StreamEvent),
+		runCancels:    make(map[string]context.CancelFunc),
 		dataRoot:      dataRootAbs,
 		models:        defaultGatewayModels(defaultModel),
 		skills:        nil,
@@ -335,6 +341,8 @@ func (s *Server) registerLangGraphRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/runs", s.handleThreadRunsCreate)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/runs", s.handleThreadRunsList)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/runs/{run_id}", s.handleThreadScopedRunGet)
+	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/runs/{run_id}/join", s.handleThreadRunJoin)
+	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/runs/{run_id}/cancel", s.handleThreadRunCancel)
 	mux.HandleFunc("POST "+prefix+"/threads/{thread_id}/runs/stream", s.handleThreadRunsStream)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/runs/{run_id}/stream", s.handleThreadRunStream)
 	mux.HandleFunc("GET "+prefix+"/threads/{thread_id}/stream", s.handleThreadJoinStream)

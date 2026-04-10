@@ -185,6 +185,9 @@ func gatewayOpenAPIPaths() map[string]any {
 		"/api/threads/{thread_id}/runs/{run_id}/stream": pathItem(map[string]any{
 			"get": operation("threads", "Replay Thread Run Stream", "Replay a thread run event stream through the gateway prefix."),
 		}),
+		"/api/threads/{thread_id}/runs/{run_id}/join": pathItem(map[string]any{
+			"get": operation("threads", "Join Thread Run", "Wait for a thread-scoped run to finish through the gateway prefix."),
+		}),
 		"/api/threads/{thread_id}/stream": pathItem(map[string]any{
 			"get": operation("threads", "Join Thread Stream", "Join the latest active thread stream through the gateway prefix."),
 		}),
@@ -276,6 +279,9 @@ func gatewayOpenAPIPaths() map[string]any {
 		"/threads/{thread_id}/runs/{run_id}/stream": pathItem(map[string]any{
 			"get": operation("langgraph", "Replay Thread Run Stream", "Replay a thread run event stream."),
 		}),
+		"/threads/{thread_id}/runs/{run_id}/join": pathItem(map[string]any{
+			"get": operation("langgraph", "Join Thread Run", "Wait for a thread-scoped run to finish."),
+		}),
 		"/threads/{thread_id}/stream": pathItem(map[string]any{
 			"get": operation("langgraph", "Join Thread Stream", "Join the latest active thread stream."),
 		}),
@@ -344,6 +350,9 @@ func gatewayOpenAPIPaths() map[string]any {
 		}),
 		"/api/langgraph/threads/{thread_id}/runs/{run_id}/stream": pathItem(map[string]any{
 			"get": operation("langgraph", "Replay Thread Run Stream (Prefixed)", "Replay a thread run event stream via the prefixed API."),
+		}),
+		"/api/langgraph/threads/{thread_id}/runs/{run_id}/join": pathItem(map[string]any{
+			"get": operation("langgraph", "Join Thread Run (Prefixed)", "Wait for a thread-scoped run to finish via the prefixed API."),
 		}),
 		"/api/langgraph/threads/{thread_id}/stream": pathItem(map[string]any{
 			"get": operation("langgraph", "Join Thread Stream (Prefixed)", "Join the latest active thread stream via the prefixed API."),

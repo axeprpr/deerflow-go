@@ -25,13 +25,14 @@ import (
 )
 
 type gatewayModel struct {
-	ID                      string `json:"id"`
-	Name                    string `json:"name"`
-	Model                   string `json:"model"`
-	DisplayName             string `json:"display_name"`
-	Description             string `json:"description,omitempty"`
-	SupportsThinking        bool   `json:"supports_thinking,omitempty"`
-	SupportsReasoningEffort bool   `json:"supports_reasoning_effort,omitempty"`
+	ID                      string  `json:"id"`
+	Name                    string  `json:"name"`
+	Model                   string  `json:"model"`
+	DisplayName             string  `json:"display_name"`
+	Description             string  `json:"description,omitempty"`
+	RequestTimeoutSeconds   float64 `json:"request_timeout,omitempty"`
+	SupportsThinking        bool    `json:"supports_thinking,omitempty"`
+	SupportsReasoningEffort bool    `json:"supports_reasoning_effort,omitempty"`
 }
 
 type gatewaySkill struct {
@@ -2310,6 +2311,7 @@ func gatewayModelFromMap(raw map[string]any) gatewayModel {
 		Model:                   firstNonEmpty(stringFromAny(raw["model"]), stringFromAny(raw["model_name"]), stringFromAny(raw["modelName"])),
 		DisplayName:             firstNonEmpty(stringFromAny(raw["display_name"]), stringFromAny(raw["displayName"])),
 		Description:             firstNonEmpty(stringFromAny(raw["description"])),
+		RequestTimeoutSeconds:   floatValue(firstNonNil(raw["request_timeout"], raw["requestTimeout"], raw["timeout"])),
 		SupportsThinking:        boolValue(firstNonNil(raw["supports_thinking"], raw["supportsThinking"])),
 		SupportsReasoningEffort: boolValue(firstNonNil(raw["supports_reasoning_effort"], raw["supportsReasoningEffort"])),
 	}
@@ -2492,6 +2494,27 @@ func intValue(value any) int {
 	case json.Number:
 		n, _ := typed.Int64()
 		return int(n)
+	default:
+		return 0
+	}
+}
+
+func floatValue(value any) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case json.Number:
+		n, _ := typed.Float64()
+		return n
+	case string:
+		n, _ := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		return n
 	default:
 		return 0
 	}

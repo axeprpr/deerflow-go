@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
@@ -42,8 +44,42 @@ type streamModeFilter struct {
 }
 
 const maxUploadedImageParts = 4
+const defaultSSEHeartbeatInterval = 15 * time.Second
 
-const defaultRunReconnectGrace = 5 * time.Second
+type synchronizedSSEWriter struct {
+	http.ResponseWriter
+	flusher http.Flusher
+	mu      *sync.Mutex
+}
+
+func newSSEWriter(w http.ResponseWriter, flusher http.Flusher) *synchronizedSSEWriter {
+	return &synchronizedSSEWriter{
+		ResponseWriter: w,
+		flusher:        flusher,
+		mu:             &sync.Mutex{},
+	}
+}
+
+func (w *synchronizedSSEWriter) Flush() {
+	if w == nil || w.flusher == nil {
+		return
+	}
+	w.flusher.Flush()
+}
+
+func (w *synchronizedSSEWriter) lockSSE() {
+	if w == nil || w.mu == nil {
+		return
+	}
+	w.mu.Lock()
+}
+
+func (w *synchronizedSSEWriter) unlockSSE() {
+	if w == nil || w.mu == nil {
+		return
+	}
+	w.mu.Unlock()
+}
 
 func (s *Server) handleRunsStream(w http.ResponseWriter, r *http.Request) {
 	s.handleStreamRequest(w, r, "")
@@ -216,6 +252,9 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
 		return
 	}
+	sse := newSSEWriter(w, flusher)
+	w = sse
+	flusher = sse
 
 	runID := uuid.New().String()
 	run := &Run{
@@ -261,9 +300,16 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 
 	runCtx, cancelRun := context.WithCancel(context.WithoutCancel(r.Context()))
 	defer cancelRun()
+	s.setRunCancel(runID, cancelRun)
+	defer s.clearRunCancel(runID)
 	runDone := make(chan struct{})
 	defer close(runDone)
-	go s.cancelDetachedRunOnClientDisconnect(r.Context(), runID, runDone, cancelRun)
+	if requestedOnDisconnect(req) == "cancel" {
+		go s.cancelRunOnClientDisconnect(r.Context(), runDone, cancelRun)
+	}
+	heartbeatDone := make(chan struct{})
+	go streamSSEHeartbeats(runCtx, heartbeatDone, w, flusher)
+	defer close(heartbeatDone)
 
 	ctx := subagent.WithEventSink(runCtx, func(evt subagent.TaskEvent) {
 		s.forwardTaskEvent(w, flusher, run, filter, evt)
@@ -290,11 +336,17 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	result, err := runAgent.Run(ctx, threadID, deerMessages)
 	<-eventsDone
 	if err != nil {
-		run.Status = "error"
-		run.Error = err.Error()
+		if isRunCanceledErr(err) {
+			run.Status = "interrupted"
+			run.Error = ""
+			s.markThreadStatus(threadID, "interrupted")
+		} else {
+			run.Status = "error"
+			run.Error = err.Error()
+			s.markThreadStatus(threadID, "error")
+		}
 		run.UpdatedAt = time.Now().UTC()
 		s.saveRun(run)
-		s.markThreadStatus(threadID, "error")
 		return
 	}
 
@@ -358,6 +410,35 @@ func clarificationInterruptFromMessages(messages []models.Message) map[string]an
 	return nil
 }
 
+func streamResumableRequested(req RunCreateRequest) bool {
+	if req.StreamResumable != nil {
+		return *req.StreamResumable
+	}
+	if req.StreamResumableX != nil {
+		return *req.StreamResumableX
+	}
+	return false
+}
+
+func requestedOnDisconnect(req RunCreateRequest) string {
+	mode := strings.ToLower(strings.TrimSpace(req.OnDisconnect))
+	if mode == "" {
+		mode = strings.ToLower(strings.TrimSpace(req.OnDisconnectX))
+	}
+	switch mode {
+	case "", "continue":
+		return "continue"
+	case "cancel":
+		return "cancel"
+	default:
+		return "continue"
+	}
+}
+
+func isRunCanceledErr(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
 func (s *Server) handleRunStream(w http.ResponseWriter, r *http.Request) {
 	s.streamRecordedRun(w, r, "", r.PathValue("run_id"))
 }
@@ -384,6 +465,9 @@ func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
 		return
 	}
+	sse := newSSEWriter(w, flusher)
+	w = sse
+	flusher = sse
 
 	s.sessionsMu.RLock()
 	_, exists := s.sessions[threadID]
@@ -440,15 +524,19 @@ func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) 
 		s.runsMu.Unlock()
 	}()
 	for {
-		event, ok := <-sub
-		if !ok {
-			return
-		}
-		if filter.allows(event.Event) {
-			s.sendSSEEvent(w, flusher, event)
-		}
-		if event.Event == "end" {
-			return
+		select {
+		case event, ok := <-sub:
+			if !ok {
+				return
+			}
+			if filter.allows(event.Event) {
+				s.sendSSEEvent(w, flusher, event)
+			}
+			if event.Event == "end" {
+				return
+			}
+		case <-time.After(defaultSSEHeartbeatInterval):
+			sendSSEHeartbeat(w, flusher)
 		}
 	}
 }
@@ -949,6 +1037,13 @@ func (s *Server) sendSSEEvent(w http.ResponseWriter, flusher http.Flusher, event
 	if w == nil || flusher == nil {
 		return
 	}
+	if locker, ok := w.(interface {
+		lockSSE()
+		unlockSSE()
+	}); ok {
+		locker.lockSSE()
+		defer locker.unlockSSE()
+	}
 	jsonData, err := json.Marshal(event.Data)
 	if err != nil {
 		return
@@ -960,6 +1055,36 @@ func (s *Server) sendSSEEvent(w http.ResponseWriter, flusher http.Flusher, event
 	fmt.Fprintf(w, "event: %s\n", event.Event)
 	fmt.Fprintf(w, "data: %s\n\n", jsonData)
 	flusher.Flush()
+}
+
+func sendSSEHeartbeat(w http.ResponseWriter, flusher http.Flusher) {
+	if w == nil || flusher == nil {
+		return
+	}
+	if locker, ok := w.(interface {
+		lockSSE()
+		unlockSSE()
+	}); ok {
+		locker.lockSSE()
+		defer locker.unlockSSE()
+	}
+	fmt.Fprint(w, ": heartbeat\n\n")
+	flusher.Flush()
+}
+
+func streamSSEHeartbeats(ctx context.Context, done <-chan struct{}, w http.ResponseWriter, flusher http.Flusher) {
+	ticker := time.NewTicker(defaultSSEHeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-done:
+			return
+		case <-ticker.C:
+			sendSSEHeartbeat(w, flusher)
+		}
+	}
 }
 
 func (s *Server) recordAndSendEvent(w http.ResponseWriter, flusher http.Flusher, run *Run, eventType string, data any) {
@@ -1168,19 +1293,7 @@ func (s *Server) forwardTaskEvent(w http.ResponseWriter, flusher http.Flusher, r
 	s.recordAndSendEventFiltered(w, flusher, run, filter, evt.Type, data)
 }
 
-func runReconnectGrace() time.Duration {
-	raw := strings.TrimSpace(os.Getenv("DEERFLOW_RUN_RECONNECT_GRACE"))
-	if raw == "" {
-		return defaultRunReconnectGrace
-	}
-	grace, err := time.ParseDuration(raw)
-	if err != nil || grace <= 0 {
-		return defaultRunReconnectGrace
-	}
-	return grace
-}
-
-func (s *Server) cancelDetachedRunOnClientDisconnect(clientCtx context.Context, runID string, runDone <-chan struct{}, cancel context.CancelFunc) {
+func (s *Server) cancelRunOnClientDisconnect(clientCtx context.Context, runDone <-chan struct{}, cancel context.CancelFunc) {
 	if clientCtx == nil || cancel == nil {
 		return
 	}
@@ -1188,28 +1301,6 @@ func (s *Server) cancelDetachedRunOnClientDisconnect(clientCtx context.Context, 
 	case <-runDone:
 		return
 	case <-clientCtx.Done():
-	}
-
-	timer := time.NewTimer(runReconnectGrace())
-	defer timer.Stop()
-
-	select {
-	case <-runDone:
-		return
-	case <-timer.C:
-	}
-
-	if s.runHasJoinSubscribers(runID) {
-		return
-	}
-	if run := s.getRun(runID); run == nil {
-		return
-	} else {
-		switch strings.ToLower(strings.TrimSpace(run.Status)) {
-		case "", "running", "queued", "busy":
-		default:
-			return
-		}
 	}
 	cancel()
 }
