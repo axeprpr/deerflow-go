@@ -9,9 +9,29 @@ import (
 const thinkingStylePrompt = "<thinking_style>\n" +
 	"- Think concisely and strategically before taking action.\n" +
 	"- Break down the task into what is clear, what is ambiguous, and what is missing.\n" +
+	"- PRIORITY CHECK: If anything is unclear, missing, or has multiple interpretations, ask for clarification FIRST before doing work.\n" +
 	"- Never write your full final answer inside hidden reasoning; use reasoning only to plan.\n" +
 	"- After planning, always provide the user-facing answer or continue with the next visible action.\n" +
 	"</thinking_style>"
+
+const clarificationSystemPrompt = "<clarification_system>\n" +
+	"**WORKFLOW PRIORITY: CLARIFY -> PLAN -> ACT**\n" +
+	"1. **FIRST**: Analyze the request in your thinking - identify what is unclear, missing, or ambiguous\n" +
+	"2. **SECOND**: If clarification is needed, call `ask_clarification` immediately - do NOT start working\n" +
+	"3. **THIRD**: Only after clarifications are resolved, proceed with planning and execution\n\n" +
+	"**CRITICAL RULE: Clarification ALWAYS comes BEFORE action. Never start working and clarify mid-execution.**\n\n" +
+	"**MANDATORY Clarification Scenarios - You MUST call ask_clarification BEFORE starting work when:**\n\n" +
+	"1. **Missing Information** (`missing_info`): Required details are not provided\n" +
+	"2. **Ambiguous Requirements** (`ambiguous_requirement`): Multiple valid interpretations exist\n" +
+	"3. **Approach Choices** (`approach_choice`): Several valid approaches exist and user preference matters\n" +
+	"4. **Risky Operations** (`risk_confirmation`): Destructive or high-impact changes need confirmation\n" +
+	"5. **Suggestions** (`suggestion`): You have a recommendation but need approval before proceeding\n\n" +
+	"**STRICT ENFORCEMENT:**\n" +
+	"- DO NOT start working and then ask for clarification mid-execution\n" +
+	"- DO NOT skip clarification for speed\n" +
+	"- DO NOT proceed with guesses when key information is missing\n" +
+	"- After calling `ask_clarification`, execution will be interrupted automatically\n" +
+	"</clarification_system>"
 
 const workingDirectoryPrompt = "<working_directory existed=\"true\">\n" +
 	"- User uploads: `/mnt/user-data/uploads` - Files uploaded by the user (automatically listed in context)\n" +
@@ -84,8 +104,9 @@ func subagentPrompt(maxConcurrent int) string {
 }
 
 func (s *Server) environmentPrompt(runtimeContext map[string]any, skillNames ...string) string {
-	parts := make([]string, 0, 8)
+	parts := make([]string, 0, 9)
 	parts = append(parts, thinkingStylePrompt)
+	parts = append(parts, clarificationSystemPrompt)
 	if boolFromAny(runtimeContext["subagent_enabled"]) {
 		parts = append(parts, subagentPrompt(intValueFromAny(runtimeContext["max_concurrent_subagents"], defaultGatewaySubagentMaxConcurrent)))
 	}

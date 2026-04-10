@@ -240,6 +240,9 @@ license: MIT
 	if !strings.Contains(prompt, "/mnt/user-data/outputs") {
 		t.Fatalf("system prompt missing working directory guidance: %q", prompt)
 	}
+	if !strings.Contains(prompt, "<clarification_system>") {
+		t.Fatalf("system prompt missing clarification system: %q", prompt)
+	}
 	if !strings.Contains(prompt, "<citations>") {
 		t.Fatalf("system prompt missing citations section: %q", prompt)
 	}
@@ -287,6 +290,9 @@ license: MIT
 	}
 	if !strings.Contains(prompt, "/mnt/skills/public/frontend-design/SKILL.md") {
 		t.Fatalf("system prompt missing frontend-design skill path: %q", prompt)
+	}
+	if !strings.Contains(prompt, "<clarification_system>") {
+		t.Fatalf("system prompt missing clarification system: %q", prompt)
 	}
 	if !strings.Contains(prompt, "<citations>") {
 		t.Fatalf("system prompt missing citations section: %q", prompt)

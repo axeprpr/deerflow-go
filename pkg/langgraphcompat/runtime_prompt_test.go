@@ -32,8 +32,14 @@ func TestResolveRunConfigIncludesWorkingDirectoryGuidance(t *testing.T) {
 	if !strings.Contains(cfg.SystemPrompt, "<response_style>") {
 		t.Fatalf("system prompt missing response style section: %q", cfg.SystemPrompt)
 	}
-	if strings.Contains(cfg.SystemPrompt, "<clarification_system>") {
-		t.Fatalf("system prompt unexpectedly included custom clarification workflow: %q", cfg.SystemPrompt)
+	if !strings.Contains(cfg.SystemPrompt, "<clarification_system>") {
+		t.Fatalf("system prompt missing clarification workflow: %q", cfg.SystemPrompt)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "WORKFLOW PRIORITY: CLARIFY -> PLAN -> ACT") {
+		t.Fatalf("system prompt missing clarification priority guidance: %q", cfg.SystemPrompt)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "PRIORITY CHECK") {
+		t.Fatalf("system prompt missing thinking priority check: %q", cfg.SystemPrompt)
 	}
 	if strings.Contains(cfg.SystemPrompt, "<subagent_system>") {
 		t.Fatalf("system prompt unexpectedly included subagent guidance: %q", cfg.SystemPrompt)
