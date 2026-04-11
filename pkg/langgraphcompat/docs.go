@@ -122,13 +122,22 @@ func gatewayOpenAPIPaths() map[string]any {
 		}),
 		"/api/memory": pathItem(map[string]any{
 			"get":    operation("memory", "Get Memory", "Get current memory data."),
-			"put":    operation("memory", "Update Memory", "Replace the persisted memory snapshot."),
 			"delete": operation("memory", "Clear Memory", "Delete all persisted memory."),
+		}),
+		"/api/memory/export": pathItem(map[string]any{
+			"get": operation("memory", "Export Memory", "Export the current memory snapshot."),
+		}),
+		"/api/memory/import": pathItem(map[string]any{
+			"post": operation("memory", "Import Memory", "Import and replace the current memory snapshot."),
 		}),
 		"/api/memory/reload": pathItem(map[string]any{
 			"post": operation("memory", "Reload Memory", "Reload memory data from storage."),
 		}),
+		"/api/memory/facts": pathItem(map[string]any{
+			"post": operation("memory", "Create Memory Fact", "Create one memory fact."),
+		}),
 		"/api/memory/facts/{fact_id}": pathItem(map[string]any{
+			"patch":  operation("memory", "Update Memory Fact", "Update one memory fact."),
 			"delete": operation("memory", "Delete Memory Fact", "Delete one memory fact."),
 		}),
 		"/api/memory/config": pathItem(map[string]any{

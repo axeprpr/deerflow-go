@@ -1,0 +1,236 @@
+package langgraphcompat
+
+import (
+	"context"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/axeprpr/deerflow-go/pkg/agent"
+	"github.com/axeprpr/deerflow-go/pkg/clarification"
+	"github.com/axeprpr/deerflow-go/pkg/models"
+	"github.com/axeprpr/deerflow-go/pkg/subagent"
+	"github.com/axeprpr/deerflow-go/pkg/tools"
+	"github.com/google/uuid"
+)
+
+type preparedRunRequest struct {
+	ThreadID         string
+	AssistantID      string
+	Session          *Session
+	ExistingMessages []models.Message
+	Messages         []models.Message
+	Run              *Run
+}
+
+type completedRun struct {
+	Result      *agent.RunResult
+	State       *ThreadState
+	Interrupted bool
+}
+
+func (s *Server) prepareRunRequest(routeThreadID string, req RunCreateRequest) *preparedRunRequest {
+	threadID := routeThreadID
+	if threadID == "" {
+		threadID = firstNonEmpty(req.ThreadID, req.ThreadIDX)
+	}
+	if threadID == "" {
+		threadID = uuid.New().String()
+	}
+	assistantID := firstNonEmpty(req.AssistantID, req.AssistantIDX)
+
+	session := s.ensureSession(threadID, nil)
+	if session.PresentFiles != nil {
+		session.PresentFiles.Clear()
+	}
+	s.markThreadStatus(threadID, "busy")
+
+	input := req.Input
+	if input == nil {
+		input = make(map[string]any)
+	}
+	rawMessages, _ := input["messages"].([]any)
+	if len(rawMessages) == 0 {
+		rawMessages = req.Messages
+	}
+	newMessages := s.convertToMessages(threadID, rawMessages)
+
+	s.sessionsMu.RLock()
+	existingMessages := append([]models.Message(nil), session.Messages...)
+	s.sessionsMu.RUnlock()
+
+	run := &Run{
+		RunID:       uuid.New().String(),
+		ThreadID:    threadID,
+		AssistantID: assistantID,
+		Status:      "running",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.saveRun(run)
+	s.setThreadMetadata(threadID, "assistant_id", assistantID)
+	s.setThreadMetadata(threadID, "graph_id", firstNonEmpty(assistantID, "lead_agent"))
+	s.setThreadMetadata(threadID, "run_id", run.RunID)
+	s.deleteThreadMetadata(threadID, "interrupts")
+
+	return &preparedRunRequest{
+		ThreadID:         threadID,
+		AssistantID:      assistantID,
+		Session:          session,
+		ExistingMessages: existingMessages,
+		Messages:         append(existingMessages, newMessages...),
+		Run:              run,
+	}
+}
+
+func (s *Server) buildRunAgent(prepared *preparedRunRequest, req RunCreateRequest) (*agent.Agent, error) {
+	runCfg := parseRunConfig(mergeRunConfig(req.Config, req.Context))
+	s.applyRunConfigMetadata(prepared.ThreadID, runCfg)
+	agentCfg, err := s.resolveRunConfig(runCfg, nil)
+	if err != nil {
+		return nil, err
+	}
+	agentCfg.PresentFiles = prepared.Session.PresentFiles
+	return s.newAgent(agentCfg), nil
+}
+
+func (s *Server) buildRunContext(ctx context.Context, threadID string, taskSink func(subagent.TaskEvent), clarificationSink func(*clarification.Clarification)) context.Context {
+	runCtx := subagent.WithEventSink(ctx, taskSink)
+	runCtx = clarification.WithThreadID(runCtx, threadID)
+	runCtx = clarification.WithManager(runCtx, s.clarify)
+	runCtx = clarification.WithEventSink(runCtx, clarificationSink)
+	runCtx = tools.WithRuntimeContext(runCtx, map[string]any{
+		"skill_paths": s.runtimeSkillPaths(),
+	})
+	return runCtx
+}
+
+func (s *Server) markRunError(run *Run, threadID string, err error) {
+	run.Status = "error"
+	run.Error = err.Error()
+	run.UpdatedAt = time.Now().UTC()
+	s.saveRun(run)
+	s.markThreadStatus(threadID, "error")
+}
+
+func (s *Server) markRunCanceled(run *Run, threadID string) {
+	run.Status = "interrupted"
+	run.Error = ""
+	run.UpdatedAt = time.Now().UTC()
+	s.saveRun(run)
+	s.markThreadStatus(threadID, "interrupted")
+}
+
+func (s *Server) finalizeCompletedRun(prepared *preparedRunRequest, result *agent.RunResult) *completedRun {
+	s.saveSession(prepared.ThreadID, result.Messages)
+
+	interrupted := false
+	if interrupt := clarificationInterruptFromMessages(result.Messages); interrupt != nil {
+		s.setThreadMetadata(prepared.ThreadID, "interrupts", []any{interrupt})
+		s.markThreadStatus(prepared.ThreadID, "interrupted")
+		prepared.Run.Status = "interrupted"
+		interrupted = true
+	} else {
+		s.deleteThreadMetadata(prepared.ThreadID, "interrupts")
+		s.markThreadStatus(prepared.ThreadID, "idle")
+		prepared.Run.Status = "success"
+	}
+
+	state := s.getThreadState(prepared.ThreadID)
+	prepared.Run.UpdatedAt = time.Now().UTC()
+	s.saveRun(prepared.Run)
+
+	return &completedRun{
+		Result:      result,
+		State:       state,
+		Interrupted: interrupted,
+	}
+}
+
+func (s *Server) threadRun(threadID, runID string) *Run {
+	run := s.getRun(strings.TrimSpace(runID))
+	if run == nil {
+		return nil
+	}
+	if threadID != "" && run.ThreadID != strings.TrimSpace(threadID) {
+		return nil
+	}
+	return run
+}
+
+func (s *Server) waitForThreadRun(ctx context.Context, threadID, runID string, cancelOnDisconnect bool) (*Run, bool) {
+	for {
+		run := s.threadRun(threadID, runID)
+		if run == nil {
+			return nil, false
+		}
+		switch strings.ToLower(strings.TrimSpace(run.Status)) {
+		case "", "running", "queued", "busy":
+		default:
+			return run, true
+		}
+
+		select {
+		case <-ctx.Done():
+			if cancelOnDisconnect {
+				s.cancelActiveRun(runID)
+			}
+			return nil, true
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func (s *Server) cancelThreadRun(threadID, runID string) (map[string]any, bool, bool) {
+	run := s.threadRun(threadID, runID)
+	if run == nil {
+		return nil, false, false
+	}
+	switch strings.ToLower(strings.TrimSpace(run.Status)) {
+	case "", "running", "queued", "busy":
+	default:
+		return nil, true, false
+	}
+	if !s.cancelActiveRun(runID) {
+		return nil, true, false
+	}
+	return map[string]any{
+		"run_id":    runID,
+		"thread_id": threadID,
+		"status":    "interrupted",
+	}, true, true
+}
+
+func (s *Server) listThreadRunResponses(threadID string) []map[string]any {
+	s.runsMu.RLock()
+	runs := make([]map[string]any, 0)
+	for _, run := range s.runs {
+		if run.ThreadID != threadID {
+			continue
+		}
+		runs = append(runs, runResponse(run))
+	}
+	s.runsMu.RUnlock()
+	sort.Slice(runs, func(i, j int) bool {
+		return runs[i]["created_at"].(string) > runs[j]["created_at"].(string)
+	})
+	return runs
+}
+
+func runResponse(run *Run) map[string]any {
+	if run == nil {
+		return nil
+	}
+	out := map[string]any{
+		"run_id":       run.RunID,
+		"thread_id":    run.ThreadID,
+		"assistant_id": run.AssistantID,
+		"status":       run.Status,
+		"created_at":   run.CreatedAt.Format(time.RFC3339Nano),
+		"updated_at":   run.UpdatedAt.Format(time.RFC3339Nano),
+	}
+	if strings.TrimSpace(run.Error) != "" {
+		out["error"] = run.Error
+	}
+	return out
+}

@@ -250,15 +250,15 @@ func newCompatTestServer(t *testing.T) (*Server, *compatTestServer) {
 	t.Setenv(compatRootEnv, filepath.Join(root, "compat"))
 	writeGatewaySkill(t, root, "public", "deep-research", "---\nname: deep-research\ndescription: Research and summarize a topic with structured outputs.\ncategory: public\nlicense: MIT\n---\n")
 	s := &Server{
-		sessions:  make(map[string]*Session),
-		runs:      make(map[string]*Run),
-		dataRoot:  root,
-		startedAt: time.Now().UTC(),
-		models:    defaultGatewayModels("qwen/Qwen3.5-9B"),
-		skills:    nil,
-		mcpConfig: defaultGatewayMCPConfig(),
-		agents:    map[string]gatewayAgent{},
-		memory:    defaultGatewayMemory(),
+		sessions:    make(map[string]*Session),
+		runs:        make(map[string]*Run),
+		dataRoot:    root,
+		startedAt:   time.Now().UTC(),
+		models:      defaultGatewayModels("qwen/Qwen3.5-9B"),
+		skills:      nil,
+		mcpConfig:   defaultGatewayMCPConfig(),
+		agents:      map[string]gatewayAgent{},
+		memoryCache: defaultGatewayMemory(),
 	}
 	s.clarify = clarification.NewManager(8)
 	s.clarifyAPI = clarification.NewAPI(s.clarify)
@@ -2224,10 +2224,10 @@ func TestGatewayModelStatePersistence(t *testing.T) {
 				SupportsReasoningEffort: true,
 			},
 		},
-		skills:    map[string]gatewaySkill{},
-		mcpConfig: defaultGatewayMCPConfig(),
-		agents:    map[string]gatewayAgent{},
-		memory:    defaultGatewayMemory(),
+		skills:      map[string]gatewaySkill{},
+		mcpConfig:   defaultGatewayMCPConfig(),
+		agents:      map[string]gatewayAgent{},
+		memoryCache: defaultGatewayMemory(),
 	}
 
 	if err := s.persistGatewayState(); err != nil {
@@ -2241,7 +2241,7 @@ func TestGatewayModelStatePersistence(t *testing.T) {
 		skills:       map[string]gatewaySkill{},
 		mcpConfig:    defaultGatewayMCPConfig(),
 		agents:       map[string]gatewayAgent{},
-		memory:       defaultGatewayMemory(),
+		memoryCache:  defaultGatewayMemory(),
 	}
 	if err := loaded.loadGatewayState(); err != nil {
 		t.Fatalf("load state: %v", err)
@@ -5027,7 +5027,7 @@ func TestMemoryFilePersistAndLoad(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{
 		dataRoot: root,
-		memory: gatewayMemoryResponse{
+		memoryCache: gatewayMemoryResponse{
 			Version:     "1.0",
 			LastUpdated: "2026-01-01T00:00:00Z",
 			Facts: []memoryFact{{

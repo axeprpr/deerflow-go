@@ -54,7 +54,7 @@ type Server struct {
 	mcpConfig        gatewayMCPConfig
 	agents           map[string]gatewayAgent
 	userProfile      string
-	memory           gatewayMemoryResponse
+	memoryCache      gatewayMemoryResponse
 	memoryConfig     gatewayMemoryConfig
 	memoryStore      memory.Storage
 	channelMu        sync.Mutex
@@ -121,20 +121,20 @@ type Run struct {
 
 // LangGraph API types
 type RunCreateRequest struct {
-	AssistantID       string         `json:"assistant_id"`
-	AssistantIDX      string         `json:"assistantId,omitempty"`
-	ThreadID          string         `json:"thread_id,omitempty"`
-	ThreadIDX         string         `json:"threadId,omitempty"`
-	Messages          []any          `json:"messages,omitempty"`
-	Input             map[string]any `json:"input,omitempty"`
-	Config            map[string]any `json:"config,omitempty"`
-	Context           map[string]any `json:"context,omitempty"`
-	StreamMode        any            `json:"stream_mode,omitempty"`
-	StreamModeX       any            `json:"streamMode,omitempty"`
-	StreamResumable  *bool      `json:"stream_resumable,omitempty"`
-	StreamResumableX *bool      `json:"streamResumable,omitempty"`
-	OnDisconnect      string         `json:"on_disconnect,omitempty"`
-	OnDisconnectX     string         `json:"onDisconnect,omitempty"`
+	AssistantID      string         `json:"assistant_id"`
+	AssistantIDX     string         `json:"assistantId,omitempty"`
+	ThreadID         string         `json:"thread_id,omitempty"`
+	ThreadIDX        string         `json:"threadId,omitempty"`
+	Messages         []any          `json:"messages,omitempty"`
+	Input            map[string]any `json:"input,omitempty"`
+	Config           map[string]any `json:"config,omitempty"`
+	Context          map[string]any `json:"context,omitempty"`
+	StreamMode       any            `json:"stream_mode,omitempty"`
+	StreamModeX      any            `json:"streamMode,omitempty"`
+	StreamResumable  *bool          `json:"stream_resumable,omitempty"`
+	StreamResumableX *bool          `json:"streamResumable,omitempty"`
+	OnDisconnect     string         `json:"on_disconnect,omitempty"`
+	OnDisconnectX    string         `json:"onDisconnect,omitempty"`
 }
 
 // Message represents a LangGraph-compatible message
@@ -232,10 +232,19 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		skills:        nil,
 		mcpConfig:     defaultGatewayMCPConfig(),
 		agents:        map[string]gatewayAgent{},
-		memory:        defaultGatewayMemory(),
+		memoryCache:   defaultGatewayMemory(),
 		memoryConfig:  defaultGatewayMemoryConfig(dataRootAbs),
 		channelConfig: gatewayChannelsConfig{},
 		channels:      defaultGatewayChannelsStatus(),
+	}
+	if store, err := memory.NewFileStore(filepath.Join(dataRootAbs, "memory")); err == nil {
+		if migrateErr := store.AutoMigrate(ctx); migrateErr != nil {
+			logger.Printf("Warning: failed to initialize memory store: %v", migrateErr)
+		} else {
+			s.memoryStore = store
+		}
+	} else {
+		logger.Printf("Warning: failed to configure memory store: %v", err)
 	}
 	s.skills = s.discoverGatewaySkills(nil)
 	for _, option := range options {
@@ -245,6 +254,9 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	}
 	if err := s.loadGatewayState(); err != nil {
 		logger.Printf("Warning: failed to load gateway state: %v", err)
+	}
+	if err := s.bootstrapGatewayMemory(ctx); err != nil {
+		logger.Printf("Warning: failed to bootstrap gateway memory: %v", err)
 	}
 	s.loadPersistedThreads()
 	s.loadPersistedRuns()

@@ -1,15 +1,20 @@
 gateway
+agent
 bin/
 *.exe
+sandbox.test.exe
 
 # Local Codex configuration may contain credentials.
 .codex/
+.playwright-cli/
 
 # Compiled binaries
 langgraph
 # Thread session data (runtime)
 pkg/langgraphcompat/threads/
+pkg/langgraphcompat/runs/
 .tmp/
 dist/
+output/
 
 pkg/langgraphcompat/threads/
