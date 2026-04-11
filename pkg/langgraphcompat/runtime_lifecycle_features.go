@@ -6,52 +6,9 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
-
-type runtimeSummarizer struct {
-	server *Server
-}
-
-func (s runtimeSummarizer) Compact(ctx context.Context, state *harness.RunState) (harness.SummarizationCompaction, error) {
-	if s.server == nil || state == nil || len(state.Messages) == 0 {
-		return harness.SummarizationCompaction{Messages: append([]models.Message(nil), state.Messages...)}, nil
-	}
-	existingSummary := s.server.threadHistorySummary(state.ThreadID)
-	compacted := s.server.compactConversationHistory(ctx, state.ThreadID, state.Model, existingSummary, state.Messages)
-	return harness.SummarizationCompaction{
-		Summary:  compacted.Summary,
-		Messages: compacted.Messages,
-		Changed:  compacted.Changed,
-	}, nil
-}
-
-func (s runtimeSummarizer) PersistSummary(threadID string, summary string) {
-	if s.server == nil {
-		return
-	}
-	s.server.setThreadHistorySummary(threadID, summary)
-}
-
-type runtimeMemoryResolver struct{}
-
-func (runtimeMemoryResolver) ResolveMemorySession(state *harness.RunState) string {
-	if state == nil {
-		return ""
-	}
-	return deriveMemorySessionID(state.ThreadID, state.AgentName)
-}
-
-type runtimeTitleGenerator struct {
-	server *Server
-}
-
-func (g runtimeTitleGenerator) GenerateTitle(ctx context.Context, state *harness.RunState, result *agent.RunResult) string {
-	if g.server == nil || state == nil || result == nil {
-		return ""
-	}
-	return g.server.computeThreadTitle(ctx, state.ThreadID, state.Model, result.Messages)
-}
 
 func (s *Server) runtimeFeatureAssembly(memoryRuntime *harness.MemoryRuntime) harness.FeatureAssembly {
 	return harness.FeatureAssembly{
@@ -76,12 +33,47 @@ func (s *Server) runtimeLifecycleHooks(memoryRuntime *harness.MemoryRuntime) *ha
 
 	var titleHooks *harness.LifecycleHooks
 	if features.Title.Enabled {
-		titleHooks = harness.TitleLifecycleHooksWithGenerator(runtimeTitleGenerator{server: s}, "generated_title")
+		titleHooks = harness.TitleLifecycleHooksWithGenerator(harnessruntime.TitleGenerator{
+			Generate: func(ctx context.Context, threadID string, modelName string, messages []models.Message) string {
+				if s == nil {
+					return ""
+				}
+				return s.computeThreadTitle(ctx, threadID, modelName, messages)
+			},
+		}, "generated_title")
 	}
 
 	return harness.MergeLifecycleHooks(
-		harness.SummarizationLifecycleHooksWithSummarizer(runtimeSummarizer{server: s}, historySummaryMetadataKey),
-		harness.MemoryLifecycleHooksWithResolver(memoryRuntime, runtimeMemoryResolver{}, "memory_session_id"),
+		harness.SummarizationLifecycleHooksWithSummarizer(harnessruntime.Summarizer{
+			LoadSummary: func(threadID string) string {
+				if s == nil {
+					return ""
+				}
+				return s.threadHistorySummary(threadID)
+			},
+			CompactConversation: func(ctx context.Context, threadID string, modelName string, existingSummary string, messages []models.Message) harness.SummarizationCompaction {
+				if s == nil {
+					return harness.SummarizationCompaction{Messages: append([]models.Message(nil), messages...)}
+				}
+				compacted := s.compactConversationHistory(ctx, threadID, modelName, existingSummary, messages)
+				return harness.SummarizationCompaction{
+					Summary:  compacted.Summary,
+					Messages: compacted.Messages,
+					Changed:  compacted.Changed,
+				}
+			},
+			Persist: func(threadID string, summary string) {
+				if s == nil {
+					return
+				}
+				s.setThreadHistorySummary(threadID, summary)
+			},
+		}, historySummaryMetadataKey),
+		harness.MemoryLifecycleHooksWithResolver(memoryRuntime, harnessruntime.MemorySessionResolver{
+			Resolve: func(threadID string, agentName string) string {
+				return deriveMemorySessionID(threadID, agentName)
+			},
+		}, "memory_session_id"),
 		harness.ClarificationLifecycleHooks(harness.ClarificationLifecycleConfig{
 			InterruptMetadataKey: "clarification_interrupt",
 		}),
