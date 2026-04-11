@@ -45,7 +45,7 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	ctx := s.runtimeView().BindContext(r.Context(), s.buildRunContextSpec(prepared.ThreadID, func(evt subagent.TaskEvent) {}, func(item *clarification.Clarification) {}))
+	ctx := s.bindRunContext(r.Context(), prepared.ThreadID, func(evt subagent.TaskEvent) {}, func(item *clarification.Clarification) {})
 
 	result, err := execution.Run(ctx)
 	if err != nil {
@@ -125,14 +125,14 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	go streamSSEHeartbeats(runCtx, heartbeatDone, w, flusher)
 	defer close(heartbeatDone)
 
-	ctx := s.runtimeView().BindContext(runCtx, s.buildRunContextSpec(prepared.ThreadID, func(evt subagent.TaskEvent) {
+	ctx := s.bindRunContext(runCtx, prepared.ThreadID, func(evt subagent.TaskEvent) {
 		s.forwardTaskEvent(w, flusher, prepared.Run, filter, evt)
 	}, func(item *clarification.Clarification) {
 		if item == nil {
 			return
 		}
 		s.recordAndSendEventFiltered(w, flusher, prepared.Run, filter, "clarification_request", item)
-	}))
+	})
 	eventsDone := make(chan struct{})
 	go func() {
 		defer close(eventsDone)

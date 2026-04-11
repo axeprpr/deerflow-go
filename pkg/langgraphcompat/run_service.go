@@ -134,18 +134,11 @@ func applyRunRecord(run *Run, record harnessruntime.RunRecord) {
 	run.UpdatedAt = record.UpdatedAt
 }
 
-func (s *Server) buildRunContextSpec(threadID string, taskSink func(subagent.TaskEvent), clarificationSink func(*clarification.Clarification)) harness.ContextSpec {
-	return harness.ContextSpec{
-		ThreadID:             threadID,
-		ClarificationManager: s.clarify,
-		RuntimeContext: map[string]any{
-			"skill_paths": s.runtimeSkillPaths(),
-		},
-		Hooks: harness.RunHooks{
-			TaskSink:          taskSink,
-			ClarificationSink: clarificationSink,
-		},
-	}
+func (s *Server) bindRunContext(ctx context.Context, threadID string, taskSink func(subagent.TaskEvent), clarificationSink func(*clarification.Clarification)) context.Context {
+	return harnessruntime.NewContextService(s.runtimeContextAdapter(), s.runtimeView()).Bind(ctx, threadID, harness.RunHooks{
+		TaskSink:          taskSink,
+		ClarificationSink: clarificationSink,
+	})
 }
 
 func (s *Server) markRunError(run *Run, threadID string, err error) {

@@ -3,6 +3,7 @@ package langgraphcompat
 import (
 	"context"
 
+	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -28,6 +29,10 @@ type runtimeRunStateAdapter struct {
 	server *Server
 }
 
+type runtimeContextAdapter struct {
+	server *Server
+}
+
 func (s *Server) runtimeConversationAdapter() runtimeConversationAdapter {
 	return runtimeConversationAdapter{server: s}
 }
@@ -46,6 +51,10 @@ func (s *Server) runtimePreflightAdapter() runtimePreflightAdapter {
 
 func (s *Server) runtimeRunStateAdapter() runtimeRunStateAdapter {
 	return runtimeRunStateAdapter{server: s}
+}
+
+func (s *Server) runtimeContextAdapter() runtimeContextAdapter {
+	return runtimeContextAdapter{server: s}
 }
 
 func (a runtimeConversationAdapter) HistorySummary(threadID string) string {
@@ -125,4 +134,12 @@ func (a runtimeRunStateAdapter) SaveRunRecord(record harnessruntime.RunRecord) {
 
 func (a runtimeRunStateAdapter) MarkThreadStatus(threadID string, status string) {
 	a.server.markThreadStatus(threadID, status)
+}
+
+func (a runtimeContextAdapter) ClarificationManager() *clarification.Manager {
+	return a.server.clarify
+}
+
+func (a runtimeContextAdapter) SkillPaths() any {
+	return a.server.runtimeSkillPaths()
 }

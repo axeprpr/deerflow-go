@@ -60,6 +60,12 @@ type fakeRunStateRuntime struct {
 	threadStatus string
 }
 
+type fakeContextRuntime struct{}
+
+type fakeContextBinder struct {
+	bound harness.ContextSpec
+}
+
 func (r *fakeCompletionRuntime) SetThreadTitle(_ string, title string) {
 	r.title = title
 }
@@ -106,6 +112,19 @@ func (r *fakeRunStateRuntime) SaveRunRecord(record RunRecord) {
 
 func (r *fakeRunStateRuntime) MarkThreadStatus(threadID string, status string) {
 	r.threadStatus = threadID + ":" + status
+}
+
+func (fakeContextRuntime) ClarificationManager() *clarification.Manager {
+	return clarification.NewManager(4)
+}
+
+func (fakeContextRuntime) SkillPaths() any {
+	return []string{"/mnt/skills/public/frontend-design/SKILL.md"}
+}
+
+func (b *fakeContextBinder) BindContext(ctx context.Context, spec harness.ContextSpec) context.Context {
+	b.bound = spec
+	return ctx
 }
 
 func TestSummarizerCompactUsesConfiguredFunctions(t *testing.T) {
@@ -449,5 +468,26 @@ func TestRunStateServiceTransitionsRecords(t *testing.T) {
 	record = service.Finalize(record, CompletionOutcome{RunOutcome: RunOutcome{RunStatus: "success"}})
 	if record.Status != "success" || runtime.saved.Status != "success" {
 		t.Fatalf("finalized record = %+v runtime=%+v", record, runtime)
+	}
+}
+
+func TestContextServiceBuildsAndBindsSpec(t *testing.T) {
+	t.Parallel()
+
+	binder := &fakeContextBinder{}
+	service := NewContextService(fakeContextRuntime{}, binder)
+	ctx := service.Bind(context.Background(), "thread-1", harness.RunHooks{})
+	if ctx == nil {
+		t.Fatal("Bind() returned nil context")
+	}
+	if binder.bound.ThreadID != "thread-1" {
+		t.Fatalf("thread id = %q", binder.bound.ThreadID)
+	}
+	paths, _ := binder.bound.RuntimeContext["skill_paths"].([]string)
+	if len(paths) != 1 || paths[0] == "" {
+		t.Fatalf("skill_paths = %#v", binder.bound.RuntimeContext["skill_paths"])
+	}
+	if binder.bound.ClarificationManager == nil {
+		t.Fatal("ClarificationManager is nil")
 	}
 }
