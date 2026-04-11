@@ -310,8 +310,8 @@ license: MIT
 
 func TestForwardAgentEventEmitsLangChainToolEndEvent(t *testing.T) {
 	s := &Server{
-		runs:       map[string]*Run{},
-		runStreams: map[string]map[uint64]chan StreamEvent{},
+		runs:        map[string]*Run{},
+		runRegistry: newRunRegistry(),
 	}
 	run := &Run{
 		RunID:       "run-1",
@@ -382,9 +382,9 @@ func TestForwardAgentEventEmitsLangChainToolEndEvent(t *testing.T) {
 
 func TestForwardAgentEventEmitsCreatedAgentNameUpdateAfterSetupAgent(t *testing.T) {
 	s := &Server{
-		sessions:   map[string]*Session{},
-		runs:       map[string]*Run{},
-		runStreams: map[string]map[uint64]chan StreamEvent{},
+		sessions:    map[string]*Session{},
+		runs:        map[string]*Run{},
+		runRegistry: newRunRegistry(),
 	}
 	s.ensureSession("thread-bootstrap", nil)
 	s.setThreadValue("thread-bootstrap", "created_agent_name", "code-reviewer")
@@ -446,9 +446,9 @@ func TestForwardAgentEventEmitsCreatedAgentNameUpdateAfterSetupAgent(t *testing.
 
 func TestForwardAgentEventDoesNotEmitCreatedAgentNameUpdateAfterFailedSetupAgent(t *testing.T) {
 	s := &Server{
-		sessions:   map[string]*Session{},
-		runs:       map[string]*Run{},
-		runStreams: map[string]map[uint64]chan StreamEvent{},
+		sessions:    map[string]*Session{},
+		runs:        map[string]*Run{},
+		runRegistry: newRunRegistry(),
 	}
 	s.ensureSession("thread-bootstrap", nil)
 	s.setThreadValue("thread-bootstrap", "created_agent_name", "code-reviewer")
@@ -506,8 +506,8 @@ func TestForwardAgentEventDoesNotEmitCreatedAgentNameUpdateAfterFailedSetupAgent
 
 func TestForwardAgentEventEmitsLangChainToolStartEvent(t *testing.T) {
 	s := &Server{
-		runs:       map[string]*Run{},
-		runStreams: map[string]map[uint64]chan StreamEvent{},
+		runs:        map[string]*Run{},
+		runRegistry: newRunRegistry(),
 	}
 	run := &Run{
 		RunID:       "run-2",
@@ -572,8 +572,8 @@ func TestForwardAgentEventEmitsLangChainToolStartEvent(t *testing.T) {
 
 func TestForwardTaskEventIncludesStructuredMessageMetadata(t *testing.T) {
 	s := &Server{
-		runs:       map[string]*Run{},
-		runStreams: map[string]map[uint64]chan StreamEvent{},
+		runs:        map[string]*Run{},
+		runRegistry: newRunRegistry(),
 	}
 	run := &Run{
 		RunID:       "run-task-1",
@@ -638,8 +638,8 @@ func TestForwardTaskEventIncludesStructuredMessageMetadata(t *testing.T) {
 
 func TestForwardAgentEventEmitsFinalAssistantMessageTupleWithUsage(t *testing.T) {
 	s := &Server{
-		runs:       map[string]*Run{},
-		runStreams: map[string]map[uint64]chan StreamEvent{},
+		runs:        map[string]*Run{},
+		runRegistry: newRunRegistry(),
 	}
 	run := &Run{
 		RunID:       "run-3",
@@ -694,8 +694,8 @@ func TestForwardAgentEventEmitsFinalAssistantMessageTupleWithUsage(t *testing.T)
 
 func TestForwardAgentEventEmitsNormalizedFinalAssistantText(t *testing.T) {
 	s := &Server{
-		runs:       map[string]*Run{},
-		runStreams: map[string]map[uint64]chan StreamEvent{},
+		runs:        map[string]*Run{},
+		runRegistry: newRunRegistry(),
 	}
 	run := &Run{
 		RunID:       "run-think",
@@ -737,8 +737,8 @@ func TestForwardAgentEventEmitsNormalizedFinalAssistantText(t *testing.T) {
 
 func TestForwardAgentEventRewritesFinalAssistantArtifactLinks(t *testing.T) {
 	s := &Server{
-		runs:       map[string]*Run{},
-		runStreams: map[string]map[uint64]chan StreamEvent{},
+		runs:        map[string]*Run{},
+		runRegistry: newRunRegistry(),
 	}
 	run := &Run{
 		RunID:       "run-artifact-links",
@@ -780,8 +780,8 @@ func TestForwardAgentEventRewritesFinalAssistantArtifactLinks(t *testing.T) {
 
 func TestForwardAgentEventPreservesFinalAssistantAdditionalKwargs(t *testing.T) {
 	s := &Server{
-		runs:       map[string]*Run{},
-		runStreams: map[string]map[uint64]chan StreamEvent{},
+		runs:        map[string]*Run{},
+		runRegistry: newRunRegistry(),
 	}
 	run := &Run{
 		RunID:       "run-think-meta",
@@ -829,8 +829,8 @@ func TestForwardAgentEventPreservesFinalAssistantAdditionalKwargs(t *testing.T) 
 
 func TestForwardAgentEventEmitsReasoningOnlyAssistantMessage(t *testing.T) {
 	s := &Server{
-		runs:       map[string]*Run{},
-		runStreams: map[string]map[uint64]chan StreamEvent{},
+		runs:        map[string]*Run{},
+		runRegistry: newRunRegistry(),
 	}
 	run := &Run{
 		RunID:       "run-think-only",

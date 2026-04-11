@@ -47,8 +47,7 @@ type Server struct {
 	sessionsMu       sync.RWMutex
 	runs             map[string]*Run
 	runsMu           sync.RWMutex
-	runStreams       map[string]map[uint64]chan StreamEvent
-	runCancels       map[string]context.CancelFunc
+	runRegistry      *runRegistry
 	dataRoot         string
 	uiStateMu        sync.RWMutex
 	models           map[string]gatewayModel
@@ -225,8 +224,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		startedAt:     time.Now().UTC(),
 		sessions:      make(map[string]*Session),
 		runs:          make(map[string]*Run),
-		runStreams:    make(map[string]map[uint64]chan StreamEvent),
-		runCancels:    make(map[string]context.CancelFunc),
+		runRegistry:   newRunRegistry(),
 		dataRoot:      dataRootAbs,
 		models:        defaultGatewayModels(defaultModel),
 		skills:        nil,

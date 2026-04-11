@@ -146,10 +146,10 @@ func TestThreadStatePatchPersistsCustomValuesAcrossReload(t *testing.T) {
 	}
 
 	reloaded := &Server{
-		sessions:   make(map[string]*Session),
-		runs:       make(map[string]*Run),
-		runStreams: make(map[string]map[uint64]chan StreamEvent),
-		dataRoot:   s.dataRoot,
+		sessions:    make(map[string]*Session),
+		runs:        make(map[string]*Run),
+		runRegistry: newRunRegistry(),
+		dataRoot:    s.dataRoot,
 	}
 	if err := reloaded.loadPersistedSessions(); err != nil {
 		t.Fatalf("loadPersistedSessions() error = %v", err)
@@ -539,10 +539,10 @@ func TestReloadedSessionKeepsLatestCheckpointID(t *testing.T) {
 	}
 
 	reloaded := &Server{
-		sessions:   make(map[string]*Session),
-		runs:       make(map[string]*Run),
-		runStreams: make(map[string]map[uint64]chan StreamEvent),
-		dataRoot:   s.dataRoot,
+		sessions:    make(map[string]*Session),
+		runs:        make(map[string]*Run),
+		runRegistry: newRunRegistry(),
+		dataRoot:    s.dataRoot,
 	}
 	if err := reloaded.loadPersistedSessions(); err != nil {
 		t.Fatalf("loadPersistedSessions() error = %v", err)

@@ -688,9 +688,7 @@ func (s *Server) cancelRunOnClientDisconnect(clientCtx context.Context, runDone 
 }
 
 func (s *Server) runHasJoinSubscribers(runID string) bool {
-	s.runsMu.RLock()
-	defer s.runsMu.RUnlock()
-	return len(s.runStreams[runID]) > 0
+	return s.ensureRunRegistry().hasSubscribers(runID)
 }
 
 func newStreamModeFilter(raw any) streamModeFilter {

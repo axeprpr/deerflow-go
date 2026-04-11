@@ -223,10 +223,7 @@ func resolveAgentToolRegistry(registry *tools.Registry, groups []string) *tools.
 func waitForRunSubscriber(t interface{ Fatalf(string, ...any) }, s *Server, runID string) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		s.runsMu.RLock()
-		count := len(s.runStreams[runID])
-		s.runsMu.RUnlock()
-		if count > 0 {
+		if s.runSubscriberCount(runID) > 0 {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

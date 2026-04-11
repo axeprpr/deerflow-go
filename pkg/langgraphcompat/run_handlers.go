@@ -266,27 +266,8 @@ func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	s.runsMu.Lock()
-	if s.runStreams == nil {
-		s.runStreams = make(map[string]map[uint64]chan StreamEvent)
-	}
-	if s.runStreams[run.RunID] == nil {
-		s.runStreams[run.RunID] = map[uint64]chan StreamEvent{}
-	}
-	subID := uint64(len(s.runStreams[run.RunID]) + 1)
-	sub := make(chan StreamEvent, 16)
-	s.runStreams[run.RunID][subID] = sub
-	s.runsMu.Unlock()
-	defer func() {
-		s.runsMu.Lock()
-		if subscribers := s.runStreams[run.RunID]; subscribers != nil {
-			delete(subscribers, subID)
-			if len(subscribers) == 0 {
-				delete(s.runStreams, run.RunID)
-			}
-		}
-		s.runsMu.Unlock()
-	}()
+	sub, unsubscribe := s.ensureRunRegistry().subscribe(run.RunID, 16)
+	defer unsubscribe()
 	for {
 		select {
 		case event, ok := <-sub:

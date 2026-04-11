@@ -252,6 +252,7 @@ func newCompatTestServer(t *testing.T) (*Server, *compatTestServer) {
 	s := &Server{
 		sessions:    make(map[string]*Session),
 		runs:        make(map[string]*Run),
+		runRegistry: newRunRegistry(),
 		dataRoot:    root,
 		startedAt:   time.Now().UTC(),
 		models:      defaultGatewayModels("qwen/Qwen3.5-9B"),

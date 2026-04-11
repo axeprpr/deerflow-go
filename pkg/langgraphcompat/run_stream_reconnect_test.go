@@ -60,7 +60,7 @@ func TestRunsStreamContinuesAfterClientCancellationAndSupportsJoin(t *testing.T)
 		tools:        newRuntimeToolRegistry(t),
 		sessions:     make(map[string]*Session),
 		runs:         make(map[string]*Run),
-		runStreams:   make(map[string]map[uint64]chan StreamEvent),
+		runRegistry:  newRunRegistry(),
 		dataRoot:     t.TempDir(),
 		agents:       map[string]gatewayAgent{},
 	}
@@ -118,10 +118,7 @@ func TestRunsStreamContinuesAfterClientCancellationAndSupportsJoin(t *testing.T)
 		default:
 		}
 
-		s.runsMu.RLock()
-		count := len(s.runStreams[activeRun.RunID])
-		s.runsMu.RUnlock()
-		if count > 0 {
+		if s.runSubscriberCount(activeRun.RunID) > 0 {
 			joined = true
 			break
 		}
@@ -174,7 +171,7 @@ func TestRunsStreamCancelsAbandonedRunWhenDisconnectModeIsCancel(t *testing.T) {
 		tools:        newRuntimeToolRegistry(t),
 		sessions:     make(map[string]*Session),
 		runs:         make(map[string]*Run),
-		runStreams:   make(map[string]map[uint64]chan StreamEvent),
+		runRegistry:  newRunRegistry(),
 		dataRoot:     t.TempDir(),
 		agents:       map[string]gatewayAgent{},
 	}
@@ -235,7 +232,7 @@ func TestRunsStreamResumableRequestsSurviveClientCancellationWithoutJoin(t *test
 		tools:        newRuntimeToolRegistry(t),
 		sessions:     make(map[string]*Session),
 		runs:         make(map[string]*Run),
-		runStreams:   make(map[string]map[uint64]chan StreamEvent),
+		runRegistry:  newRunRegistry(),
 		dataRoot:     t.TempDir(),
 		agents:       map[string]gatewayAgent{},
 	}
@@ -294,7 +291,7 @@ func TestThreadRunJoinWaitsForCompletion(t *testing.T) {
 		tools:        newRuntimeToolRegistry(t),
 		sessions:     make(map[string]*Session),
 		runs:         make(map[string]*Run),
-		runStreams:   make(map[string]map[uint64]chan StreamEvent),
+		runRegistry:  newRunRegistry(),
 		dataRoot:     t.TempDir(),
 		agents:       map[string]gatewayAgent{},
 	}
@@ -369,7 +366,7 @@ func TestThreadRunJoinCanCancelRunOnDisconnect(t *testing.T) {
 		tools:        newRuntimeToolRegistry(t),
 		sessions:     make(map[string]*Session),
 		runs:         make(map[string]*Run),
-		runStreams:   make(map[string]map[uint64]chan StreamEvent),
+		runRegistry:  newRunRegistry(),
 		dataRoot:     t.TempDir(),
 		agents:       map[string]gatewayAgent{},
 	}

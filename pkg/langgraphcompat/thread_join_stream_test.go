@@ -106,7 +106,7 @@ func TestThreadJoinStreamFollowsLatestActiveRunOnly(t *testing.T) {
 	}()
 
 	waitForRunSubscriber(t, s, "run-new-running")
-	if got := len(s.runStreams["run-old-running"]); got != 0 {
+	if got := s.runSubscriberCount("run-old-running"); got != 0 {
 		t.Fatalf("expected old running run to have no subscribers, got %d", got)
 	}
 
