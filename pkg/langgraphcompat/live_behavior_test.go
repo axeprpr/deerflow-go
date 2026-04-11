@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type liveBehaviorThread struct {
@@ -47,6 +49,7 @@ func runLiveBehaviorThread(t *testing.T, baseURL, threadID, prompt string) liveB
 	t.Helper()
 
 	payload := map[string]any{
+		"assistant_id": "lead_agent",
 		"input": map[string]any{
 			"messages": []any{
 				map[string]any{
@@ -156,7 +159,7 @@ func liveBehaviorContentString(content any) string {
 
 func TestLiveBehaviorConcretePromptExecutesWithoutClarification(t *testing.T) {
 	baseURL := requireLiveBehaviorBaseURL(t)
-	threadID := fmt.Sprintf("live-concrete-%d", time.Now().UnixNano())
+	threadID := uuid.NewString()
 	thread := runLiveBehaviorThread(t, baseURL, threadID, "帮我生成一个小鱼游泳的页面")
 	if thread.Status != "idle" {
 		t.Fatalf("thread status=%q want idle", thread.Status)
@@ -198,7 +201,7 @@ func TestLiveBehaviorConcretePromptExecutesWithoutClarification(t *testing.T) {
 
 func TestLiveBehaviorAmbiguousPromptRequestsMoreDetail(t *testing.T) {
 	baseURL := requireLiveBehaviorBaseURL(t)
-	threadID := fmt.Sprintf("live-ambiguous-%d", time.Now().UnixNano())
+	threadID := uuid.NewString()
 	thread := runLiveBehaviorThread(t, baseURL, threadID, "帮我做一个页面")
 	if thread.Status != "idle" && thread.Status != "interrupted" {
 		t.Fatalf("thread status=%q want idle or interrupted", thread.Status)

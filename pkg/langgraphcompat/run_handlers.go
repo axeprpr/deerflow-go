@@ -37,6 +37,10 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
+	if err := validateStrictLangGraphRunRequest(r, threadID, req); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
 	prepared := s.prepareRunRequest(threadID, req)
 	execution, err := s.buildRunExecution(r.Context(), prepared, req)
 	if err != nil {
@@ -81,6 +85,10 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 			http.Error(w, fmt.Sprintf("invalid request: %v", err), http.StatusBadRequest)
 			return
 		}
+	}
+	if err := validateStrictLangGraphRunRequest(r, routeThreadID, req); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
 	}
 	prepared := s.prepareRunRequest(routeThreadID, req)
 
