@@ -2180,6 +2180,16 @@ func TestModelsSkillsMCPConfigEndpoints(t *testing.T) {
 	if setResp.StatusCode != http.StatusOK {
 		t.Fatalf("set skill status=%d", setResp.StatusCode)
 	}
+	var setSkill map[string]any
+	if err := json.NewDecoder(setResp.Body).Decode(&setSkill); err != nil {
+		t.Fatalf("decode set skill: %v", err)
+	}
+	if _, ok := setSkill["skill"]; ok {
+		t.Fatalf("set skill response should be raw skill object, got wrapper: %#v", setSkill)
+	}
+	if setSkill["name"] != "deep-research" || setSkill["enabled"] != false {
+		t.Fatalf("set skill response=%#v", setSkill)
+	}
 
 	mcpResp, err := http.Get(ts.URL + "/api/mcp/config")
 	if err != nil {

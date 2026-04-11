@@ -45,7 +45,7 @@ func (s *Server) handleSkillSetEnabled(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, map[string]any{"detail": detail})
 		return
 	}
-	writeJSON(w, status, map[string]any{"success": true, "skill": skill})
+	writeJSON(w, status, skill)
 }
 
 func (s *Server) handleSkillInstall(w http.ResponseWriter, r *http.Request) {
