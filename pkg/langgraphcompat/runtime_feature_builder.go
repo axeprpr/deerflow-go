@@ -18,8 +18,10 @@ func (b serverRuntimeFeatureBuilder) Build() harness.FeatureBundle {
 	if b.server == nil {
 		return harness.FeatureBundle{}
 	}
+	config := b.server.runtimeFeatureConfig(b.memoryRuntime)
+	assembly := config.BuildAssembly(b.server.clarify)
 	return harness.FeatureBundle{
-		Assembly:  b.server.runtimeFeatureAssembly(b.memoryRuntime),
-		Lifecycle: b.server.runtimeLifecycleHooks(b.memoryRuntime),
+		Assembly:  assembly,
+		Lifecycle: b.server.runtimeLifecycleHooks(b.memoryRuntime, assembly),
 	}
 }

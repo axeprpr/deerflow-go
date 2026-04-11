@@ -10,27 +10,16 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
-func (s *Server) runtimeFeatureAssembly(memoryRuntime *harness.MemoryRuntime) harness.FeatureAssembly {
-	return harness.FeatureAssembly{
-		Clarification: harness.ClarificationFeature{
-			Enabled: s != nil && s.clarify != nil,
-			Manager: s.clarify,
-		},
-		Memory: harness.MemoryFeature{
-			Enabled: memoryRuntime != nil && memoryRuntime.Enabled(),
-		},
-		Summarization: harness.SummarizationFeature{
-			Enabled: true,
-		},
-		Title: harness.TitleFeature{
-			Enabled: false,
-		},
+func (s *Server) runtimeFeatureConfig(memoryRuntime *harness.MemoryRuntime) harnessruntime.FeatureConfig {
+	return harnessruntime.FeatureConfig{
+		ClarificationEnabled: s != nil && s.clarify != nil,
+		MemoryEnabled:        memoryRuntime != nil && memoryRuntime.Enabled(),
+		SummarizationEnabled: true,
+		TitleEnabled:         false,
 	}
 }
 
-func (s *Server) runtimeLifecycleHooks(memoryRuntime *harness.MemoryRuntime) *harness.LifecycleHooks {
-	features := s.runtimeFeatureAssembly(memoryRuntime)
-
+func (s *Server) runtimeLifecycleHooks(memoryRuntime *harness.MemoryRuntime, features harness.FeatureAssembly) *harness.LifecycleHooks {
 	var conversationRuntime harnessruntime.ConversationRuntime
 	var sessionRuntime harnessruntime.SessionRuntime
 	var titleRuntime harnessruntime.TitleRuntime

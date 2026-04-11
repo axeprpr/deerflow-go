@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
+	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	pkgmemory "github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -276,5 +277,23 @@ func TestOutcomeServiceMapsInterruptedState(t *testing.T) {
 	}
 	if got := outcomes.Resolve(false); got.Interrupted || got.RunStatus != "success" {
 		t.Fatalf("success outcome = %+v", got)
+	}
+}
+
+func TestFeatureConfigBuildAssembly(t *testing.T) {
+	t.Parallel()
+
+	manager := clarification.NewManager(8)
+	assembly := FeatureConfig{
+		ClarificationEnabled: true,
+		MemoryEnabled:        true,
+		SummarizationEnabled: true,
+		TitleEnabled:         false,
+	}.BuildAssembly(manager)
+	if !assembly.Clarification.Enabled || assembly.Clarification.Manager != manager {
+		t.Fatalf("clarification assembly = %+v", assembly.Clarification)
+	}
+	if !assembly.Memory.Enabled || !assembly.Summarization.Enabled || assembly.Title.Enabled {
+		t.Fatalf("assembly = %+v", assembly)
 	}
 }
