@@ -125,10 +125,14 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 	agentCfg := agent.AgentConfig{
 		Tools:           s.tools,
 		AgentType:       cfg.AgentType,
+		MaxTurns:        s.maxTurns,
 		Model:           resolvedModel,
 		ReasoningEffort: cfg.ReasoningEffort,
 		Temperature:     cfg.Temperature,
 		MaxTokens:       cfg.MaxTokens,
+	}
+	if cfg.MaxTurns != nil && *cfg.MaxTurns > 0 {
+		agentCfg.MaxTurns = *cfg.MaxTurns
 	}
 	if catalogModel != nil && !catalogModel.SupportsReasoningEffort {
 		agentCfg.ReasoningEffort = ""

@@ -31,6 +31,7 @@ type runConfig struct {
 	ReasoningEffort string
 	AgentType       agent.AgentType
 	AgentName       string
+	MaxTurns        *int
 	ThinkingEnabled *bool
 	IsPlanMode      *bool
 	SubagentEnabled *bool
@@ -1459,6 +1460,12 @@ func parseRunConfig(raw map[string]any) runConfig {
 			stringFromAny(configurable["agent_name"]),
 			stringFromAny(configurable["agentName"]),
 		),
+		MaxTurns: intPointerFromAny(firstNonNil(
+			raw["recursion_limit"],
+			raw["recursionLimit"],
+			configurable["recursion_limit"],
+			configurable["recursionLimit"],
+		)),
 		ThinkingEnabled: boolPointerFromAny(firstNonNil(
 			raw["thinking_enabled"],
 			raw["thinkingEnabled"],
@@ -1543,6 +1550,9 @@ func (s *Server) applyRunConfigMetadata(threadID string, cfg runConfig) {
 	}
 	if cfg.MaxTokens != nil {
 		s.setThreadMetadata(threadID, "max_tokens", *cfg.MaxTokens)
+	}
+	if cfg.MaxTurns != nil {
+		s.setThreadMetadata(threadID, "recursion_limit", *cfg.MaxTurns)
 	}
 }
 

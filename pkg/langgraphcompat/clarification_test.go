@@ -33,6 +33,15 @@ func TestParseRunConfigMode(t *testing.T) {
 	}
 }
 
+func TestParseRunConfigRecursionLimit(t *testing.T) {
+	cfg := parseRunConfig(map[string]any{
+		"recursion_limit": 100,
+	})
+	if cfg.MaxTurns == nil || *cfg.MaxTurns != 100 {
+		t.Fatalf("MaxTurns = %v, want 100", cfg.MaxTurns)
+	}
+}
+
 func TestThreadClarificationHandlers(t *testing.T) {
 	manager := clarification.NewManager(4)
 	root := t.TempDir()

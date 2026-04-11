@@ -57,6 +57,18 @@ func TestNewAgentLazilyInitializesSandbox(t *testing.T) {
 	}
 }
 
+func TestNewServerDefaultsMainRunMaxTurnsToUpstreamRecursionLimit(t *testing.T) {
+	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
+
+	s, err := NewServer(":0", "", "test-model")
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	if s.maxTurns != 100 {
+		t.Fatalf("maxTurns = %d, want 100", s.maxTurns)
+	}
+}
+
 func TestNewServerDoesNotServeFrontendAtRoot(t *testing.T) {
 	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
 

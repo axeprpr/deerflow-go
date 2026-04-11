@@ -220,7 +220,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		clarify:       clarifyManager,
 		clarifyAPI:    clarification.NewAPI(clarifyManager),
 		defaultModel:  defaultModel,
-		maxTurns:      8,
+		maxTurns:      100,
 		store:         store,
 		startedAt:     time.Now().UTC(),
 		sessions:      make(map[string]*Session),
@@ -267,11 +267,15 @@ func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
 			sandboxRef = sb
 		}
 	}
+	maxTurns := s.maxTurns
+	if cfg.MaxTurns > 0 {
+		maxTurns = cfg.MaxTurns
+	}
 	return agent.New(agent.AgentConfig{
 		LLMProvider:     s.llmProvider,
 		Tools:           s.tools,
 		PresentFiles:    cfg.PresentFiles,
-		MaxTurns:        s.maxTurns,
+		MaxTurns:        maxTurns,
 		AgentType:       cfg.AgentType,
 		Model:           cfg.Model,
 		ReasoningEffort: cfg.ReasoningEffort,

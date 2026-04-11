@@ -111,3 +111,29 @@ func TestResolveRunConfigUsesGatewayModelRequestTimeout(t *testing.T) {
 		t.Fatalf("request_timeout=%v want=%v", cfg.RequestTimeout, 10*time.Minute)
 	}
 }
+
+func TestResolveRunConfigUsesRecursionLimitAsMaxTurns(t *testing.T) {
+	s := &Server{
+		defaultModel: "qwen3.5-27b",
+		maxTurns:     100,
+		models: map[string]gatewayModel{
+			"qwen3.5-27b": {
+				ID:    "qwen3.5-27b",
+				Name:  "qwen3.5-27b",
+				Model: "Qwen/Qwen3.5-27B",
+			},
+		},
+	}
+	maxTurns := 250
+
+	cfg, err := s.resolveRunConfig(runConfig{
+		ModelName: "qwen3.5-27b",
+		MaxTurns:  &maxTurns,
+	}, nil)
+	if err != nil {
+		t.Fatalf("resolveRunConfig error: %v", err)
+	}
+	if cfg.MaxTurns != 250 {
+		t.Fatalf("max_turns=%d want=%d", cfg.MaxTurns, 250)
+	}
+}
