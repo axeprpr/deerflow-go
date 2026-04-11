@@ -36,6 +36,17 @@ func WithLifecycle(hooks *LifecycleHooks) RuntimeOption {
 	}
 }
 
+func WithFeatureBuilder(builder FeatureBuilder) RuntimeOption {
+	return func(r *Runtime) {
+		if r == nil || builder == nil {
+			return
+		}
+		bundle := builder.Build()
+		r.features = bundle.Assembly
+		r.lifecycle = bundle.Lifecycle
+	}
+}
+
 func NewRuntime(deps RuntimeDeps, memory *MemoryRuntime, opts ...RuntimeOption) *Runtime {
 	factory := NewFactory(deps)
 	runtime := &Runtime{
