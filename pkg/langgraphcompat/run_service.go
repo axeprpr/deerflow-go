@@ -106,6 +106,34 @@ func runFromRecord(record harnessruntime.RunRecord) *Run {
 	}
 }
 
+func runRecordFromRun(run *Run) harnessruntime.RunRecord {
+	if run == nil {
+		return harnessruntime.RunRecord{}
+	}
+	return harnessruntime.RunRecord{
+		RunID:       run.RunID,
+		ThreadID:    run.ThreadID,
+		AssistantID: run.AssistantID,
+		Status:      run.Status,
+		Error:       run.Error,
+		CreatedAt:   run.CreatedAt,
+		UpdatedAt:   run.UpdatedAt,
+	}
+}
+
+func applyRunRecord(run *Run, record harnessruntime.RunRecord) {
+	if run == nil {
+		return
+	}
+	run.RunID = record.RunID
+	run.ThreadID = record.ThreadID
+	run.AssistantID = record.AssistantID
+	run.Status = record.Status
+	run.Error = record.Error
+	run.CreatedAt = record.CreatedAt
+	run.UpdatedAt = record.UpdatedAt
+}
+
 func (s *Server) buildRunContextSpec(threadID string, taskSink func(subagent.TaskEvent), clarificationSink func(*clarification.Clarification)) harness.ContextSpec {
 	return harness.ContextSpec{
 		ThreadID:             threadID,
@@ -121,19 +149,13 @@ func (s *Server) buildRunContextSpec(threadID string, taskSink func(subagent.Tas
 }
 
 func (s *Server) markRunError(run *Run, threadID string, err error) {
-	run.Status = "error"
-	run.Error = err.Error()
-	run.UpdatedAt = time.Now().UTC()
-	s.saveRun(run)
-	s.markThreadStatus(threadID, "error")
+	record := harnessruntime.NewRunStateService(s.runtimeRunStateAdapter()).MarkError(runRecordFromRun(run), err)
+	applyRunRecord(run, record)
 }
 
 func (s *Server) markRunCanceled(run *Run, threadID string) {
-	run.Status = "interrupted"
-	run.Error = ""
-	run.UpdatedAt = time.Now().UTC()
-	s.saveRun(run)
-	s.markThreadStatus(threadID, "interrupted")
+	record := harnessruntime.NewRunStateService(s.runtimeRunStateAdapter()).MarkCanceled(runRecordFromRun(run))
+	applyRunRecord(run, record)
 }
 
 func (s *Server) finalizeCompletedRun(ctx context.Context, prepared *preparedRunRequest, result *agent.RunResult) *completedRun {
@@ -144,11 +166,10 @@ func (s *Server) finalizeCompletedRun(ctx context.Context, prepared *preparedRun
 	s.saveSession(prepared.ThreadID, result.Messages)
 
 	outcome := harnessruntime.NewCompletionService(s.runtimeCompletionAdapter(), "generated_title", "clarification_interrupt").Apply(prepared.ThreadID, prepared.Lifecycle, result)
-	prepared.Run.Status = outcome.RunStatus
+	record := harnessruntime.NewRunStateService(s.runtimeRunStateAdapter()).Finalize(runRecordFromRun(prepared.Run), outcome)
+	applyRunRecord(prepared.Run, record)
 
 	state := s.getThreadState(prepared.ThreadID)
-	prepared.Run.UpdatedAt = time.Now().UTC()
-	s.saveRun(prepared.Run)
 
 	return &completedRun{
 		Result:      result,

@@ -55,6 +55,11 @@ type fakePreflightRuntime struct {
 	threadStatus      string
 }
 
+type fakeRunStateRuntime struct {
+	saved        RunRecord
+	threadStatus string
+}
+
 func (r *fakeCompletionRuntime) SetThreadTitle(_ string, title string) {
 	r.title = title
 }
@@ -93,6 +98,14 @@ func (r *fakePreflightRuntime) ClearThreadMetadata(_ string, key string) {
 
 func (r *fakePreflightRuntime) SaveRunRecord(record RunRecord) {
 	r.saved = record
+}
+
+func (r *fakeRunStateRuntime) SaveRunRecord(record RunRecord) {
+	r.saved = record
+}
+
+func (r *fakeRunStateRuntime) MarkThreadStatus(threadID string, status string) {
+	r.threadStatus = threadID + ":" + status
 }
 
 func TestSummarizerCompactUsesConfiguredFunctions(t *testing.T) {
@@ -411,5 +424,30 @@ func TestPreflightServicePreparesRunState(t *testing.T) {
 	}
 	if runtime.metadata["assistant_id"] != "lead_agent" || runtime.metadata["run_id"] != "generated-id" {
 		t.Fatalf("metadata = %#v", runtime.metadata)
+	}
+}
+
+func TestRunStateServiceTransitionsRecords(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 4, 11, 11, 0, 0, 0, time.UTC)
+	runtime := &fakeRunStateRuntime{}
+	service := NewRunStateService(runtime)
+	service.now = func() time.Time { return now }
+
+	record := RunRecord{RunID: "run-1", ThreadID: "thread-1", Status: "running"}
+	record = service.MarkError(record, context.DeadlineExceeded)
+	if record.Status != "error" || runtime.threadStatus != "thread-1:error" {
+		t.Fatalf("error record = %+v runtime=%+v", record, runtime)
+	}
+
+	record = service.MarkCanceled(record)
+	if record.Status != "interrupted" || runtime.threadStatus != "thread-1:interrupted" {
+		t.Fatalf("canceled record = %+v runtime=%+v", record, runtime)
+	}
+
+	record = service.Finalize(record, CompletionOutcome{RunOutcome: RunOutcome{RunStatus: "success"}})
+	if record.Status != "success" || runtime.saved.Status != "success" {
+		t.Fatalf("finalized record = %+v runtime=%+v", record, runtime)
 	}
 }

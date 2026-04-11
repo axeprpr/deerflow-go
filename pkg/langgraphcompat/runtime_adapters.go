@@ -24,6 +24,10 @@ type runtimePreflightAdapter struct {
 	server *Server
 }
 
+type runtimeRunStateAdapter struct {
+	server *Server
+}
+
 func (s *Server) runtimeConversationAdapter() runtimeConversationAdapter {
 	return runtimeConversationAdapter{server: s}
 }
@@ -38,6 +42,10 @@ func (s *Server) runtimeCompletionAdapter() runtimeCompletionAdapter {
 
 func (s *Server) runtimePreflightAdapter() runtimePreflightAdapter {
 	return runtimePreflightAdapter{server: s}
+}
+
+func (s *Server) runtimeRunStateAdapter() runtimeRunStateAdapter {
+	return runtimeRunStateAdapter{server: s}
 }
 
 func (a runtimeConversationAdapter) HistorySummary(threadID string) string {
@@ -109,4 +117,12 @@ func (a runtimePreflightAdapter) ClearThreadMetadata(threadID string, key string
 
 func (a runtimePreflightAdapter) SaveRunRecord(record harnessruntime.RunRecord) {
 	a.server.saveRun(runFromRecord(record))
+}
+
+func (a runtimeRunStateAdapter) SaveRunRecord(record harnessruntime.RunRecord) {
+	a.server.saveRun(runFromRecord(record))
+}
+
+func (a runtimeRunStateAdapter) MarkThreadStatus(threadID string, status string) {
+	a.server.markThreadStatus(threadID, status)
 }
