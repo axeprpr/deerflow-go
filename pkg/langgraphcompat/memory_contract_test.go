@@ -231,7 +231,12 @@ func TestMemoryImportPersistsToMemoryStore(t *testing.T) {
 	if err := store.AutoMigrate(context.Background()); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
-	s.memoryRuntime = harness.NewMemoryRuntime(store, nil)
+	s.runtime = harness.NewRuntime(harness.RuntimeDeps{
+		LLMProvider:     s.llmProvider,
+		Tools:           s.tools,
+		DefaultMaxTurns: s.maxTurns,
+		SandboxProvider: harness.NewLocalSandboxProvider(s.sandboxName, s.sandboxRoot),
+	}, harness.NewMemoryRuntime(store, nil))
 
 	body := `{
 		"version":"1",
@@ -269,7 +274,12 @@ func TestMemoryReloadPrefersMemoryStoreState(t *testing.T) {
 	if err := store.AutoMigrate(context.Background()); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
-	s.memoryRuntime = harness.NewMemoryRuntime(store, nil)
+	s.runtime = harness.NewRuntime(harness.RuntimeDeps{
+		LLMProvider:     s.llmProvider,
+		Tools:           s.tools,
+		DefaultMaxTurns: s.maxTurns,
+		SandboxProvider: harness.NewLocalSandboxProvider(s.sandboxName, s.sandboxRoot),
+	}, harness.NewMemoryRuntime(store, nil))
 
 	if err := store.Save(context.Background(), memory.Document{
 		SessionID: gatewayMemorySessionID,

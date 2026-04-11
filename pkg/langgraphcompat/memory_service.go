@@ -27,7 +27,7 @@ type memoryFactPatchRequest struct {
 }
 
 func (s *Server) bootstrapGatewayMemory(ctx context.Context) error {
-	if s == nil || s.memoryRuntime == nil || !s.memoryRuntime.Enabled() {
+	if s == nil || s.runtime == nil || s.runtime.Memory() == nil || !s.runtime.Memory().Enabled() {
 		return nil
 	}
 	mem, ok, err := s.loadGatewayMemoryFromStore(ctx)
@@ -271,10 +271,10 @@ func (s *Server) gatewayMemoryUpdateFact(ctx context.Context, factID string, req
 }
 
 func (s *Server) loadGatewayMemoryFromStore(ctx context.Context) (gatewayMemoryResponse, bool, error) {
-	if s == nil || s.memoryRuntime == nil || !s.memoryRuntime.Enabled() {
+	if s == nil || s.runtime == nil || s.runtime.Memory() == nil || !s.runtime.Memory().Enabled() {
 		return gatewayMemoryResponse{}, false, nil
 	}
-	doc, ok, err := s.memoryRuntime.LoadDocument(ctx, gatewayMemorySessionID)
+	doc, ok, err := s.runtime.Memory().LoadDocument(ctx, gatewayMemorySessionID)
 	if err != nil {
 		return gatewayMemoryResponse{}, false, err
 	}
@@ -285,10 +285,10 @@ func (s *Server) loadGatewayMemoryFromStore(ctx context.Context) (gatewayMemoryR
 }
 
 func (s *Server) persistGatewayMemoryToStore(ctx context.Context, mem gatewayMemoryResponse) error {
-	if s == nil || s.memoryRuntime == nil || !s.memoryRuntime.Enabled() {
+	if s == nil || s.runtime == nil || s.runtime.Memory() == nil || !s.runtime.Memory().Enabled() {
 		return nil
 	}
-	return s.memoryRuntime.SaveDocument(ctx, gatewayMemoryDocument(mem))
+	return s.runtime.Memory().SaveDocument(ctx, gatewayMemoryDocument(mem))
 }
 
 func (s *Server) setAndPersistGatewayMemory(ctx context.Context, mem gatewayMemoryResponse) error {

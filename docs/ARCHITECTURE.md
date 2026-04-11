@@ -39,9 +39,17 @@ It exposes:
 
 This layer exists because upstream DeerFlow expects both a gateway API and a LangGraph-style runtime API.
 
-### 2. Runtime layer
+### 2. Harness / Runtime layer
 
-`pkg/agent` is the actual execution core.
+`pkg/harness` owns runtime assembly and longer-lived runtime dependencies.
+
+It groups:
+
+- agent factory
+- durable memory runtime
+- sandbox provider abstraction
+
+`pkg/agent` remains the actual execution core.
 
 It is not LangGraph. It is a custom Go loop that:
 
@@ -51,7 +59,9 @@ It is not LangGraph. It is a custom Go loop that:
 - handles clarification/present-files/subagent flow
 - emits runtime events back to the compatibility layer
 
-This is the main structural difference from upstream.
+This remains the main structural difference from upstream, but the dependency
+direction is now cleaner: compat depends on a harness runtime instead of owning
+agent assembly, durable memory, and sandbox lifecycle as separate concerns.
 
 ### 3. Model / tool layer
 
@@ -97,6 +107,6 @@ The compatibility layer is now split by responsibility:
 - `gateway_compat_fs_service.go`
 - `memory_handlers.go` / `memory_service.go`
 - `suggestions_handlers.go`
+- `pkg/harness` for runtime assembly, memory ownership, and sandbox provider abstraction
 
 This is closer to upstream's router/service split, while still remaining a single Go process.
-

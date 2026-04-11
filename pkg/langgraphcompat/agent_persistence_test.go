@@ -87,7 +87,12 @@ func TestAgentDeleteClearsScopedMemory(t *testing.T) {
 	if err := store.AutoMigrate(context.Background()); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
-	s.memoryRuntime = harness.NewMemoryRuntime(store, nil)
+	s.runtime = harness.NewRuntime(harness.RuntimeDeps{
+		LLMProvider:     s.llmProvider,
+		Tools:           s.tools,
+		DefaultMaxTurns: s.maxTurns,
+		SandboxProvider: harness.NewLocalSandboxProvider(s.sandboxName, s.sandboxRoot),
+	}, harness.NewMemoryRuntime(store, nil))
 
 	createResp := performCompatRequest(t, handler, http.MethodPost, "/api/agents", strings.NewReader(`{
 		"name":"writer-bot",

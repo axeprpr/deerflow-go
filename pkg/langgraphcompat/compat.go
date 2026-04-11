@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,9 +31,8 @@ type Server struct {
 	httpServer       *http.Server
 	logger           *log.Logger
 	llmProvider      llm.LLMProvider
-	harnessFactory   *harness.Factory
+	runtime          *harness.Runtime
 	tools            *tools.Registry
-	sandboxProvider  harness.SandboxProvider
 	sandboxName      string
 	sandboxRoot      string
 	subagents        *subagent.Pool
@@ -57,7 +57,6 @@ type Server struct {
 	userProfile      string
 	memoryCache      gatewayMemoryResponse
 	memoryConfig     gatewayMemoryConfig
-	memoryRuntime    *harness.MemoryRuntime
 	channelMu        sync.Mutex
 	channelService   *gatewayChannelService
 	channelConfig    gatewayChannelsConfig
@@ -237,22 +236,22 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		channelConfig: gatewayChannelsConfig{},
 		channels:      defaultGatewayChannelsStatus(),
 	}
-	s.sandboxProvider = harness.NewLocalSandboxProvider(s.sandboxName, s.sandboxRoot)
-	s.harnessFactory = harness.NewFactory(harness.RuntimeDeps{
-		LLMProvider:     provider,
-		Tools:           registry,
-		DefaultMaxTurns: s.maxTurns,
-		SandboxProvider: s.sandboxProvider,
-	})
+	var memoryRuntime *harness.MemoryRuntime
 	if store, err := memory.NewFileStore(filepath.Join(dataRootAbs, "memory")); err == nil {
 		if migrateErr := store.AutoMigrate(ctx); migrateErr != nil {
 			logger.Printf("Warning: failed to initialize memory store: %v", migrateErr)
 		} else {
-			s.memoryRuntime = harness.NewMemoryRuntime(store, nil)
+			memoryRuntime = harness.NewMemoryRuntime(store, nil)
 		}
 	} else {
 		logger.Printf("Warning: failed to configure memory store: %v", err)
 	}
+	s.runtime = harness.NewRuntime(harness.RuntimeDeps{
+		LLMProvider:     provider,
+		Tools:           registry,
+		DefaultMaxTurns: s.maxTurns,
+		SandboxProvider: s.defaultSandboxProvider(nil),
+	}, memoryRuntime)
 	s.skills = s.discoverGatewaySkills(nil)
 	for _, option := range options {
 		if option != nil {
@@ -279,19 +278,47 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	return s, nil
 }
 
+func (s *Server) runtimeView() *harness.Runtime {
+	if s == nil {
+		return nil
+	}
+	var (
+		memoryRuntime    *harness.MemoryRuntime
+		sandboxProvider  harness.SandboxProvider
+	)
+	if s.runtime != nil {
+		memoryRuntime = s.runtime.Memory()
+		sandboxProvider = s.runtime.SandboxProvider()
+	}
+	s.runtime = harness.NewRuntime(harness.RuntimeDeps{
+		LLMProvider:     s.llmProvider,
+		Tools:           s.tools,
+		DefaultMaxTurns: s.maxTurns,
+		SandboxProvider: s.defaultSandboxProvider(sandboxProvider),
+	}, memoryRuntime)
+	return s.runtime
+}
+
+func (s *Server) defaultSandboxProvider(existing harness.SandboxProvider) harness.SandboxProvider {
+	if existing != nil {
+		return existing
+	}
+	root := strings.TrimSpace(s.sandboxRoot)
+	if root == "" {
+		root = filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
+	}
+	name := strings.TrimSpace(s.sandboxName)
+	if name == "" {
+		name = "langgraph"
+	}
+	return harness.NewLocalSandboxProvider(name, root)
+}
+
 func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
 	if s == nil {
 		return agent.New(cfg)
 	}
-	if s.harnessFactory == nil {
-		s.harnessFactory = harness.NewFactory(harness.RuntimeDeps{
-			LLMProvider:     s.llmProvider,
-			Tools:           s.tools,
-			DefaultMaxTurns: s.maxTurns,
-			SandboxProvider: s.sandboxProvider,
-		})
-	}
-	runAgent, err := s.harnessFactory.NewAgent(harness.AgentRequest{
+	runAgent, err := s.runtimeView().NewAgent(harness.AgentRequest{
 		Config:   cfg,
 		Features: harness.Features{Sandbox: true},
 	})
@@ -305,10 +332,7 @@ func (s *Server) getOrCreateSandbox() (*sandbox.Sandbox, error) {
 	if s == nil {
 		return nil, errors.New("server is nil")
 	}
-	if s.sandboxProvider == nil {
-		s.sandboxProvider = harness.NewLocalSandboxProvider(s.sandboxName, s.sandboxRoot)
-	}
-	return s.sandboxProvider.Acquire()
+	return s.runtimeView().SandboxProvider().Acquire()
 }
 
 func (s *Server) registerRoutes(mux *http.ServeMux) {
@@ -372,8 +396,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	s.closeGatewayMCPClients()
 	s.stopGatewayChannels()
-	if s.sandboxProvider != nil {
-		if err := s.sandboxProvider.Close(); err != nil && shutdownErr == nil {
+	if s.runtime != nil && s.runtime.SandboxProvider() != nil {
+		if err := s.runtime.SandboxProvider().Close(); err != nil && shutdownErr == nil {
 			shutdownErr = err
 		}
 	}
@@ -450,10 +474,10 @@ func (s *Server) checkDatabase(ctx context.Context) string {
 }
 
 func (s *Server) checkSandbox(ctx context.Context) string {
-	if s == nil || s.sandboxProvider == nil {
+	if s == nil || s.runtimeView() == nil || s.runtimeView().SandboxProvider() == nil {
 		return "disabled"
 	}
-	sb, err := s.sandboxProvider.Acquire()
+	sb, err := s.runtimeView().SandboxProvider().Acquire()
 	if err != nil || sb == nil {
 		if err != nil {
 			s.logger.Printf("health check: sandbox acquire failed: %v", err)
