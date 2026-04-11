@@ -7,13 +7,13 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
-func TestRuntimeAdapterSummaryAccessors(t *testing.T) {
+func TestRuntimeConversationAdapterSummaryAccessors(t *testing.T) {
 	server := &Server{
 		sessions: map[string]*Session{},
 		runs:     map[string]*Run{},
 	}
 	server.ensureSession("thread-1", nil)
-	adapter := server.runtimeAdapter()
+	adapter := server.runtimeConversationAdapter()
 
 	adapter.PersistHistorySummary("thread-1", "summary-1")
 	if got := adapter.HistorySummary("thread-1"); got != "summary-1" {
@@ -21,20 +21,20 @@ func TestRuntimeAdapterSummaryAccessors(t *testing.T) {
 	}
 }
 
-func TestRuntimeAdapterResolveMemorySessionID(t *testing.T) {
-	adapter := (&Server{}).runtimeAdapter()
+func TestRuntimeMemoryAdapterResolveMemorySessionID(t *testing.T) {
+	adapter := (&Server{}).runtimeMemoryAdapter()
 	if got := adapter.ResolveMemorySessionID("thread-1", "planner"); got != "agent:planner" {
 		t.Fatalf("ResolveMemorySessionID() = %q, want %q", got, "agent:planner")
 	}
 }
 
-func TestRuntimeAdapterCompactConversationUsesExistingImplementation(t *testing.T) {
+func TestRuntimeConversationAdapterCompactConversationUsesExistingImplementation(t *testing.T) {
 	server := &Server{
 		sessions: map[string]*Session{},
 		runs:     map[string]*Run{},
 	}
 	server.ensureSession("thread-1", nil)
-	adapter := server.runtimeAdapter()
+	adapter := server.runtimeConversationAdapter()
 
 	messages := make([]models.Message, 0, 34)
 	for i := 0; i < 34; i++ {

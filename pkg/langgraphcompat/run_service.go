@@ -155,7 +155,7 @@ func (s *Server) finalizeCompletedRun(ctx context.Context, prepared *preparedRun
 	}
 	s.saveSession(prepared.ThreadID, result.Messages)
 
-	outcome := harnessruntime.NewCompletionService(s.runtimeAdapter(), "generated_title", "clarification_interrupt").Apply(prepared.ThreadID, prepared.Lifecycle, result)
+	outcome := harnessruntime.NewCompletionService(s.runtimeCompletionAdapter(), "generated_title", "clarification_interrupt").Apply(prepared.ThreadID, prepared.Lifecycle, result)
 	prepared.Run.Status = outcome.RunStatus
 
 	state := s.getThreadState(prepared.ThreadID)

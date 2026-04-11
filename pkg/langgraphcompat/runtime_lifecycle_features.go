@@ -27,13 +27,14 @@ func (s *Server) runtimeLifecycleHooks(memoryRuntime *harness.MemoryRuntime, fea
 		TitleMetadataKey:     "generated_title",
 	}
 
-	adapter := s.runtimeAdapter()
+	conversationAdapter := s.runtimeConversationAdapter()
+	memoryAdapter := s.runtimeMemoryAdapter()
 
 	return config.BuildHooks(features, harnessruntime.LifecycleProviders{
 		MemoryRuntime:  memoryRuntime,
-		Summarizer:     harnessruntime.NewSummarizer(adapter),
-		MemoryResolver: harnessruntime.NewMemorySessionResolver(adapter),
-		TitleGenerator: harnessruntime.NewTitleGenerator(adapter),
+		Summarizer:     harnessruntime.NewSummarizer(conversationAdapter),
+		MemoryResolver: harnessruntime.NewMemorySessionResolver(memoryAdapter),
+		TitleGenerator: harnessruntime.NewTitleGenerator(conversationAdapter),
 	})
 }
 
