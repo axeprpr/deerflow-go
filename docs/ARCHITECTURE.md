@@ -39,6 +39,42 @@ It exposes:
 
 This layer exists because upstream DeerFlow expects both a gateway API and a LangGraph-style runtime API.
 
+This package is now split by concern instead of centered on a few large files:
+
+- HTTP handlers:
+  - `thread_handlers.go`
+  - `thread_state_handlers.go`
+  - `thread_files_handlers.go`
+  - `thread_search_handlers.go`
+  - `run_handlers.go`
+  - `gateway_admin_handlers.go`
+  - `gateway_runtime_handlers.go`
+  - `memory_handlers.go`
+  - `clarification_handlers.go`
+  - `health_handlers.go`
+  - `suggestions_handlers.go`
+- Compat services and mappers:
+  - `thread_*_service.go`
+  - `run_service.go`
+  - `run_store.go`
+  - `run_registry.go`
+  - `run_stream_service.go`
+  - `run_mapper.go`
+  - `run_response_mapper.go`
+  - `gateway_catalog_service.go`
+  - `gateway_compat_fs_service.go`
+  - `memory_service.go`
+- Protocol / compat helpers:
+  - `response_helpers.go`
+  - `compat_value_helpers.go`
+  - `thread_message_service.go`
+  - `thread_payload_service.go`
+  - `thread_view_service.go`
+  - `thread_persistence_paths.go`
+  - `thread_persistence_service.go`
+
+The goal is that this layer owns protocol adaptation, response shaping, storage compatibility, and HTTP semantics, but not core runtime orchestration policy.
+
 ### 2. Harness / Runtime layer
 
 `pkg/harness` owns runtime assembly and longer-lived runtime dependencies.
@@ -46,7 +82,9 @@ This layer exists because upstream DeerFlow expects both a gateway API and a Lan
 It groups:
 
 - agent factory
-- durable memory runtime
+- runtime feature assembly
+- lifecycle hook composition
+- durable memory runtime boundary
 - sandbox provider abstraction
 
 `pkg/agent` remains the actual execution core.
@@ -63,7 +101,28 @@ This remains the main structural difference from upstream, but the dependency
 direction is now cleaner: compat depends on a harness runtime instead of owning
 agent assembly, durable memory, and sandbox lifecycle as separate concerns.
 
-### 3. Model / tool layer
+### 3. Runtime services
+
+`pkg/harnessruntime` now carries most runtime-side orchestration that used to leak into the compat package.
+
+It includes:
+
+- feature config and lifecycle config
+- feature providers and provider adapters
+- memory runtime construction
+- preflight and context binding
+- orchestrator and runner-facing execution planning
+- completion / outcome / run-state services
+- coordination and query services
+
+This is the closest Go equivalent to the upstream `gateway -> harness runtime` split. The upstream implementation is still Python + LangGraph/LangChain, but the dependency shape is now similar:
+
+- compat/http layer prepares requests
+- harness/harnessruntime assemble runtime execution
+- agent loop executes
+- compat/http layer encodes responses and streams events
+
+### 4. Model / tool layer
 
 `pkg/llm` and `pkg/tools` provide the runtime substrate:
 
@@ -73,7 +132,7 @@ agent assembly, durable memory, and sandbox lifecycle as separate concerns.
 
 The runtime depends on this layer, but this layer is independent from the HTTP compatibility surface.
 
-### 4. Execution services
+### 5. Execution services
 
 `pkg/memory` and `pkg/sandbox` hold longer-lived execution concerns:
 
@@ -97,16 +156,17 @@ These are conceptually parallel to upstream harness subsystems, but implemented 
 
 ## Current structure after cleanup
 
-The compatibility layer is now split by responsibility:
+The current dependency flow is:
 
-- `run_handlers.go` / `run_service.go`
-- `thread_state_service.go` / `thread_query_service.go`
-- `gateway_admin_handlers.go`
-- `gateway_runtime_handlers.go`
-- `gateway_catalog_service.go`
-- `gateway_compat_fs_service.go`
-- `memory_handlers.go` / `memory_service.go`
-- `suggestions_handlers.go`
-- `pkg/harness` for runtime assembly, memory ownership, and sandbox provider abstraction
+1. `pkg/langgraphcompat`
+   Request decode, protocol compatibility, HTTP/SSE transport, compat persistence views
+2. `pkg/harness`
+   Runtime assembly boundary, feature builders, lifecycle wiring, sandbox/memory abstractions
+3. `pkg/harnessruntime`
+   Runtime services and adapters used by the compatibility layer and harness
+4. `pkg/agent`
+   Execution loop
+5. `pkg/llm`, `pkg/tools`, `pkg/memory`, `pkg/sandbox`
+   Provider, tools, storage, and isolation substrate
 
-This is closer to upstream's router/service split, while still remaining a single Go process.
+This is closer to upstream's router/service split and app/runtime dependency direction, while still remaining a single Go process.
