@@ -14,6 +14,7 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/checkpoint"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
+	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -30,6 +31,7 @@ type Server struct {
 	httpServer       *http.Server
 	logger           *log.Logger
 	llmProvider      llm.LLMProvider
+	harnessFactory   *harness.Factory
 	tools            *tools.Registry
 	sandbox          *sandbox.Sandbox
 	sandboxName      string
@@ -237,6 +239,12 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		channelConfig: gatewayChannelsConfig{},
 		channels:      defaultGatewayChannelsStatus(),
 	}
+	s.harnessFactory = harness.NewFactory(harness.RuntimeDeps{
+		LLMProvider:     provider,
+		Tools:           registry,
+		DefaultMaxTurns: s.maxTurns,
+		ResolveSandbox:  s.getOrCreateSandbox,
+	})
 	if store, err := memory.NewFileStore(filepath.Join(dataRootAbs, "memory")); err == nil {
 		if migrateErr := store.AutoMigrate(ctx); migrateErr != nil {
 			logger.Printf("Warning: failed to initialize memory store: %v", migrateErr)
@@ -273,30 +281,25 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 }
 
 func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
-	sandboxRef := cfg.Sandbox
-	if sandboxRef == nil {
-		if sb, err := s.getOrCreateSandbox(); err == nil {
-			sandboxRef = sb
-		}
+	if s == nil {
+		return agent.New(cfg)
 	}
-	maxTurns := s.maxTurns
-	if cfg.MaxTurns > 0 {
-		maxTurns = cfg.MaxTurns
+	if s.harnessFactory == nil {
+		s.harnessFactory = harness.NewFactory(harness.RuntimeDeps{
+			LLMProvider:     s.llmProvider,
+			Tools:           s.tools,
+			DefaultMaxTurns: s.maxTurns,
+			ResolveSandbox:  s.getOrCreateSandbox,
+		})
 	}
-	return agent.New(agent.AgentConfig{
-		LLMProvider:     s.llmProvider,
-		Tools:           s.tools,
-		PresentFiles:    cfg.PresentFiles,
-		MaxTurns:        maxTurns,
-		AgentType:       cfg.AgentType,
-		Model:           cfg.Model,
-		ReasoningEffort: cfg.ReasoningEffort,
-		SystemPrompt:    cfg.SystemPrompt,
-		Temperature:     cfg.Temperature,
-		MaxTokens:       cfg.MaxTokens,
-		Sandbox:         sandboxRef,
-		RequestTimeout:  cfg.RequestTimeout,
+	runAgent, err := s.harnessFactory.NewAgent(harness.AgentRequest{
+		Config:   cfg,
+		Features: harness.Features{Sandbox: true},
 	})
+	if err != nil {
+		return agent.New(cfg)
+	}
+	return runAgent
 }
 
 func (s *Server) getOrCreateSandbox() (*sandbox.Sandbox, error) {
