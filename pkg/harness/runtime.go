@@ -21,7 +21,7 @@ func NewRuntime(deps RuntimeDeps, memory *MemoryRuntime) *Runtime {
 
 func (r *Runtime) NewAgent(req AgentRequest) (*agent.Agent, error) {
 	if r == nil || r.factory == nil {
-		return agent.New(req.Config), nil
+		return agent.New(req.Spec.AgentConfig()), nil
 	}
 	return r.factory.NewAgent(req)
 }

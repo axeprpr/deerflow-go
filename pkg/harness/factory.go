@@ -15,7 +15,7 @@ func NewFactory(deps RuntimeDeps) *Factory {
 }
 
 func (f *Factory) NewAgent(req AgentRequest) (*agent.Agent, error) {
-	cfg := req.Config
+	cfg := req.Spec.AgentConfig()
 	if cfg.LLMProvider == nil {
 		cfg.LLMProvider = f.deps.LLMProvider
 	}

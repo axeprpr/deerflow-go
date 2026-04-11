@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/axeprpr/deerflow-go/pkg/agent"
+	"github.com/axeprpr/deerflow-go/pkg/harness"
 )
 
 func TestNewServerDefersSandboxCreation(t *testing.T) {
@@ -43,7 +43,7 @@ func TestNewAgentLazilyInitializesSandbox(t *testing.T) {
 		t.Fatalf("NewServer() error = %v", err)
 	}
 
-	_ = s.newAgent(agent.AgentConfig{})
+	_ = s.newAgent(harness.AgentSpec{})
 
 	sandboxDir := filepath.Join(tmp, "deerflow-langgraph-sandbox", "langgraph")
 	if _, err := os.Stat(sandboxDir); err != nil {

@@ -86,12 +86,12 @@ func (s *Server) prepareRunRequest(routeThreadID string, req RunCreateRequest) *
 func (s *Server) buildRunAgent(prepared *preparedRunRequest, req RunCreateRequest) (*agent.Agent, error) {
 	runCfg := parseRunConfig(mergeRunConfig(req.Config, req.Context))
 	s.applyRunConfigMetadata(prepared.ThreadID, runCfg)
-	agentCfg, err := s.resolveRunConfig(runCfg, nil)
+	agentSpec, err := s.resolveRunConfig(runCfg, nil)
 	if err != nil {
 		return nil, err
 	}
-	agentCfg.PresentFiles = prepared.Session.PresentFiles
-	return s.newAgent(agentCfg), nil
+	agentSpec.PresentFiles = prepared.Session.PresentFiles
+	return s.newAgent(agentSpec), nil
 }
 
 func (s *Server) buildRunContext(ctx context.Context, threadID string, taskSink func(subagent.TaskEvent), clarificationSink func(*clarification.Clarification)) context.Context {

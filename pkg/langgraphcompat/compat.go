@@ -283,8 +283,8 @@ func (s *Server) runtimeView() *harness.Runtime {
 		return nil
 	}
 	var (
-		memoryRuntime    *harness.MemoryRuntime
-		sandboxProvider  harness.SandboxProvider
+		memoryRuntime   *harness.MemoryRuntime
+		sandboxProvider harness.SandboxProvider
 	)
 	if s.runtime != nil {
 		memoryRuntime = s.runtime.Memory()
@@ -314,16 +314,16 @@ func (s *Server) defaultSandboxProvider(existing harness.SandboxProvider) harnes
 	return harness.NewLocalSandboxProvider(name, root)
 }
 
-func (s *Server) newAgent(cfg agent.AgentConfig) *agent.Agent {
+func (s *Server) newAgent(spec harness.AgentSpec) *agent.Agent {
 	if s == nil {
-		return agent.New(cfg)
+		return agent.New(spec.AgentConfig())
 	}
 	runAgent, err := s.runtimeView().NewAgent(harness.AgentRequest{
-		Config:   cfg,
-		Features: harness.Features{Sandbox: true},
+		Spec:     spec,
+		Features: harness.FeatureSet{Sandbox: true},
 	})
 	if err != nil {
-		return agent.New(cfg)
+		return agent.New(spec.AgentConfig())
 	}
 	return runAgent
 }

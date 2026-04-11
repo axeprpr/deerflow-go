@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
+	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 	"gopkg.in/yaml.v3"
 )
@@ -117,13 +118,12 @@ func (s *Server) getLatestActiveRunForThread(threadID string) *Run {
 	return latest
 }
 
-func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) (agent.AgentConfig, error) {
+func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) (harness.AgentSpec, error) {
 	if runtimeContext == nil {
 		runtimeContext = map[string]any{}
 	}
 	resolvedModel, catalogModel := s.resolveConfiguredModel(cfg.ModelName)
-	agentCfg := agent.AgentConfig{
-		Tools:           s.tools,
+	agentSpec := harness.AgentSpec{
 		AgentType:       cfg.AgentType,
 		MaxTurns:        s.maxTurns,
 		Model:           resolvedModel,
@@ -132,24 +132,24 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 		MaxTokens:       cfg.MaxTokens,
 	}
 	if cfg.MaxTurns != nil && *cfg.MaxTurns > 0 {
-		agentCfg.MaxTurns = *cfg.MaxTurns
+		agentSpec.MaxTurns = *cfg.MaxTurns
 	}
 	if catalogModel != nil && !catalogModel.SupportsReasoningEffort {
-		agentCfg.ReasoningEffort = ""
+		agentSpec.ReasoningEffort = ""
 	}
 	if catalogModel != nil && catalogModel.RequestTimeoutSeconds > 0 {
-		agentCfg.RequestTimeout = time.Duration(catalogModel.RequestTimeoutSeconds * float64(time.Second))
+		agentSpec.RequestTimeout = time.Duration(catalogModel.RequestTimeoutSeconds * float64(time.Second))
 	}
 
-	if agentCfg.AgentType == "" {
-		agentCfg.AgentType = agent.AgentTypeGeneral
+	if agentSpec.AgentType == "" {
+		agentSpec.AgentType = agent.AgentTypeGeneral
 	}
-	basePrompt := agent.GetAgentTypeConfig(agentCfg.AgentType).SystemPrompt
+	basePrompt := agent.GetAgentTypeConfig(agentSpec.AgentType).SystemPrompt
 	if profile := strings.TrimSpace(s.userProfile); profile != "" {
 		basePrompt = strings.TrimSpace(basePrompt + "\n\nUSER.md:\n" + profile)
 	}
-	agentCfg.SystemPrompt = strings.TrimSpace(basePrompt + "\n\n" + s.environmentPrompt(runtimeContext))
-	return agentCfg, nil
+	agentSpec.SystemPrompt = strings.TrimSpace(basePrompt + "\n\n" + s.environmentPrompt(runtimeContext))
+	return agentSpec, nil
 }
 
 func (s *Server) resolveConfiguredModel(name string) (string, *gatewayModel) {

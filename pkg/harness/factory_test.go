@@ -3,7 +3,6 @@ package harness
 import (
 	"testing"
 
-	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/sandbox"
 )
 
@@ -19,8 +18,8 @@ func TestFactoryAppliesDefaultsAndResolvesSandbox(t *testing.T) {
 	})
 
 	runAgent, err := factory.NewAgent(AgentRequest{
-		Config:   agent.AgentConfig{},
-		Features: Features{Sandbox: true},
+		Spec:     AgentSpec{},
+		Features: FeatureSet{Sandbox: true},
 	})
 	if err != nil {
 		t.Fatalf("NewAgent() error = %v", err)
@@ -43,8 +42,8 @@ func TestFactoryDoesNotResolveSandboxWhenFeatureDisabled(t *testing.T) {
 	})
 
 	runAgent, err := factory.NewAgent(AgentRequest{
-		Config:   agent.AgentConfig{},
-		Features: Features{Sandbox: false},
+		Spec:     AgentSpec{},
+		Features: FeatureSet{Sandbox: false},
 	})
 	if err != nil {
 		t.Fatalf("NewAgent() error = %v", err)
