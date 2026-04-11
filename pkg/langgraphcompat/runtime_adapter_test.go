@@ -7,33 +7,34 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
-func TestRuntimeCapabilitiesExposeSummaryAccessors(t *testing.T) {
+func TestRuntimeAdapterSummaryAccessors(t *testing.T) {
 	server := &Server{
 		sessions: map[string]*Session{},
 		runs:     map[string]*Run{},
 	}
 	server.ensureSession("thread-1", nil)
+	adapter := server.runtimeAdapter()
 
-	server.PersistHistorySummary("thread-1", "summary-1")
-
-	if got := server.HistorySummary("thread-1"); got != "summary-1" {
+	adapter.PersistHistorySummary("thread-1", "summary-1")
+	if got := adapter.HistorySummary("thread-1"); got != "summary-1" {
 		t.Fatalf("HistorySummary() = %q, want %q", got, "summary-1")
 	}
 }
 
-func TestRuntimeCapabilitiesResolveMemorySessionID(t *testing.T) {
-	server := &Server{}
-	if got := server.ResolveMemorySessionID("thread-1", "planner"); got != "agent:planner" {
+func TestRuntimeAdapterResolveMemorySessionID(t *testing.T) {
+	adapter := (&Server{}).runtimeAdapter()
+	if got := adapter.ResolveMemorySessionID("thread-1", "planner"); got != "agent:planner" {
 		t.Fatalf("ResolveMemorySessionID() = %q, want %q", got, "agent:planner")
 	}
 }
 
-func TestRuntimeCapabilitiesCompactConversationUsesExistingImplementation(t *testing.T) {
+func TestRuntimeAdapterCompactConversationUsesExistingImplementation(t *testing.T) {
 	server := &Server{
 		sessions: map[string]*Session{},
 		runs:     map[string]*Run{},
 	}
 	server.ensureSession("thread-1", nil)
+	adapter := server.runtimeAdapter()
 
 	messages := make([]models.Message, 0, 34)
 	for i := 0; i < 34; i++ {
@@ -49,7 +50,7 @@ func TestRuntimeCapabilitiesCompactConversationUsesExistingImplementation(t *tes
 		})
 	}
 
-	compacted := server.CompactConversation(context.Background(), "thread-1", "model-1", "", messages)
+	compacted := adapter.CompactConversation(context.Background(), "thread-1", "model-1", "", messages)
 	if !compacted.Changed {
 		t.Fatalf("CompactConversation() did not mark result as changed")
 	}
