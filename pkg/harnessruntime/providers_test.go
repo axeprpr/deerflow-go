@@ -259,7 +259,22 @@ func TestCompletionServiceFallsBackToIdleWithoutInterrupt(t *testing.T) {
 	if outcome.Interrupted {
 		t.Fatalf("Interrupted = true, want false")
 	}
+	if outcome.RunStatus != "success" {
+		t.Fatalf("RunStatus = %q, want %q", outcome.RunStatus, "success")
+	}
 	if runtime.status != "idle" || !runtime.cleared {
 		t.Fatalf("unexpected runtime state: status=%q cleared=%v", runtime.status, runtime.cleared)
+	}
+}
+
+func TestOutcomeServiceMapsInterruptedState(t *testing.T) {
+	t.Parallel()
+
+	outcomes := NewOutcomeService()
+	if got := outcomes.Resolve(true); !got.Interrupted || got.RunStatus != "interrupted" {
+		t.Fatalf("interrupted outcome = %+v", got)
+	}
+	if got := outcomes.Resolve(false); got.Interrupted || got.RunStatus != "success" {
+		t.Fatalf("success outcome = %+v", got)
 	}
 }

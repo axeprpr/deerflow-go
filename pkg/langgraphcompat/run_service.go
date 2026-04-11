@@ -156,11 +156,7 @@ func (s *Server) finalizeCompletedRun(ctx context.Context, prepared *preparedRun
 	s.saveSession(prepared.ThreadID, result.Messages)
 
 	outcome := harnessruntime.NewCompletionService(s, "generated_title", "clarification_interrupt").Apply(prepared.ThreadID, prepared.Lifecycle, result)
-	if outcome.Interrupted {
-		prepared.Run.Status = "interrupted"
-	} else {
-		prepared.Run.Status = "success"
-	}
+	prepared.Run.Status = outcome.RunStatus
 
 	state := s.getThreadState(prepared.ThreadID)
 	prepared.Run.UpdatedAt = time.Now().UTC()

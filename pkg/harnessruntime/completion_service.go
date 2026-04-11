@@ -21,7 +21,7 @@ type CompletionService struct {
 }
 
 type CompletionOutcome struct {
-	Interrupted bool
+	RunOutcome
 }
 
 func NewCompletionService(runtime CompletionRuntime, titleMetadataKey string, interruptMetadataKey string) CompletionService {
@@ -43,6 +43,7 @@ func (s CompletionService) Apply(threadID string, state *harness.RunState, resul
 	if threadID == "" {
 		return CompletionOutcome{}
 	}
+	outcomes := NewOutcomeService()
 
 	if title := strings.TrimSpace(metadataString(state, s.titleMetadataKey)); title != "" && s.runtime != nil {
 		s.runtime.SetThreadTitle(threadID, title)
@@ -57,14 +58,14 @@ func (s CompletionService) Apply(threadID string, state *harness.RunState, resul
 			s.runtime.SetThreadInterrupts(threadID, []any{interrupt})
 			s.runtime.MarkThreadStatus(threadID, "interrupted")
 		}
-		return CompletionOutcome{Interrupted: true}
+		return CompletionOutcome{RunOutcome: outcomes.Resolve(true)}
 	}
 
 	if s.runtime != nil {
 		s.runtime.ClearThreadInterrupts(threadID)
 		s.runtime.MarkThreadStatus(threadID, "idle")
 	}
-	return CompletionOutcome{}
+	return CompletionOutcome{RunOutcome: outcomes.Resolve(false)}
 }
 
 func metadataString(state *harness.RunState, key string) string {
