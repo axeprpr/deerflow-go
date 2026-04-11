@@ -12,13 +12,13 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
-	"github.com/google/uuid"
+	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
 type preparedRunRequest struct {
 	ThreadID         string
 	AssistantID      string
-	Session          *Session
+	PresentFiles     *tools.PresentFileRegistry
 	ExistingMessages []models.Message
 	Messages         []models.Message
 	Lifecycle        *harness.RunState
@@ -32,20 +32,14 @@ type completedRun struct {
 }
 
 func (s *Server) prepareRunRequest(routeThreadID string, req RunCreateRequest) *preparedRunRequest {
-	threadID := routeThreadID
-	if threadID == "" {
-		threadID = firstNonEmpty(req.ThreadID, req.ThreadIDX)
-	}
-	if threadID == "" {
-		threadID = uuid.New().String()
-	}
-	assistantID := firstNonEmpty(req.AssistantID, req.AssistantIDX)
-
-	session := s.ensureSession(threadID, nil)
-	if session.PresentFiles != nil {
-		session.PresentFiles.Clear()
-	}
-	s.markThreadStatus(threadID, "busy")
+	preflightService := harnessruntime.NewPreflightService(s.runtimePreflightAdapter())
+	threadID, _ := preflightService.Resolve(harnessruntime.PreflightInput{
+		RouteThreadID:      routeThreadID,
+		RequestedThreadID:  req.ThreadID,
+		RequestedThreadIDX: req.ThreadIDX,
+		AssistantID:        req.AssistantID,
+		AssistantIDX:       req.AssistantIDX,
+	})
 
 	input := req.Input
 	if input == nil {
@@ -56,32 +50,22 @@ func (s *Server) prepareRunRequest(routeThreadID string, req RunCreateRequest) *
 		rawMessages = req.Messages
 	}
 	newMessages := s.convertToMessages(threadID, rawMessages)
-
-	s.sessionsMu.RLock()
-	existingMessages := append([]models.Message(nil), session.Messages...)
-	s.sessionsMu.RUnlock()
-
-	run := &Run{
-		RunID:       uuid.New().String(),
-		ThreadID:    threadID,
-		AssistantID: assistantID,
-		Status:      "running",
-		CreatedAt:   time.Now().UTC(),
-		UpdatedAt:   time.Now().UTC(),
-	}
-	s.saveRun(run)
-	s.setThreadMetadata(threadID, "assistant_id", assistantID)
-	s.setThreadMetadata(threadID, "graph_id", firstNonEmpty(assistantID, "lead_agent"))
-	s.setThreadMetadata(threadID, "run_id", run.RunID)
-	s.deleteThreadMetadata(threadID, "interrupts")
+	preflight := preflightService.Prepare(harnessruntime.PreflightInput{
+		RouteThreadID:      routeThreadID,
+		RequestedThreadID:  req.ThreadID,
+		RequestedThreadIDX: req.ThreadIDX,
+		AssistantID:        req.AssistantID,
+		AssistantIDX:       req.AssistantIDX,
+		NewMessages:        newMessages,
+	})
 
 	return &preparedRunRequest{
-		ThreadID:         threadID,
-		AssistantID:      assistantID,
-		Session:          session,
-		ExistingMessages: existingMessages,
-		Messages:         append(existingMessages, newMessages...),
-		Run:              run,
+		ThreadID:         preflight.ThreadID,
+		AssistantID:      preflight.AssistantID,
+		PresentFiles:     preflight.PresentFiles,
+		ExistingMessages: preflight.ExistingMessages,
+		Messages:         preflight.Messages,
+		Run:              runFromRecord(preflight.Run),
 	}
 }
 
@@ -92,7 +76,7 @@ func (s *Server) buildRunExecution(ctx context.Context, prepared *preparedRunReq
 	if err != nil {
 		return nil, err
 	}
-	agentSpec.PresentFiles = prepared.Session.PresentFiles
+	agentSpec.PresentFiles = prepared.PresentFiles
 	orchestrated, err := harnessruntime.NewOrchestrator(s.runtimeView()).Prepare(ctx, harnessruntime.RunPlan{
 		ThreadID:         prepared.ThreadID,
 		AssistantID:      prepared.AssistantID,
@@ -108,6 +92,18 @@ func (s *Server) buildRunExecution(ctx context.Context, prepared *preparedRunReq
 	prepared.Lifecycle = orchestrated.Lifecycle
 	prepared.Messages = append([]models.Message(nil), orchestrated.Lifecycle.Messages...)
 	return orchestrated.Execution, nil
+}
+
+func runFromRecord(record harnessruntime.RunRecord) *Run {
+	return &Run{
+		RunID:       record.RunID,
+		ThreadID:    record.ThreadID,
+		AssistantID: record.AssistantID,
+		Status:      record.Status,
+		Error:       record.Error,
+		CreatedAt:   record.CreatedAt,
+		UpdatedAt:   record.UpdatedAt,
+	}
 }
 
 func (s *Server) buildRunContextSpec(threadID string, taskSink func(subagent.TaskEvent), clarificationSink func(*clarification.Clarification)) harness.ContextSpec {

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
@@ -19,6 +20,10 @@ type runtimeCompletionAdapter struct {
 	server *Server
 }
 
+type runtimePreflightAdapter struct {
+	server *Server
+}
+
 func (s *Server) runtimeConversationAdapter() runtimeConversationAdapter {
 	return runtimeConversationAdapter{server: s}
 }
@@ -29,6 +34,10 @@ func (s *Server) runtimeMemoryAdapter() runtimeMemoryAdapter {
 
 func (s *Server) runtimeCompletionAdapter() runtimeCompletionAdapter {
 	return runtimeCompletionAdapter{server: s}
+}
+
+func (s *Server) runtimePreflightAdapter() runtimePreflightAdapter {
+	return runtimePreflightAdapter{server: s}
 }
 
 func (a runtimeConversationAdapter) HistorySummary(threadID string) string {
@@ -70,4 +79,34 @@ func (a runtimeCompletionAdapter) ClearThreadInterrupts(threadID string) {
 
 func (a runtimeCompletionAdapter) MarkThreadStatus(threadID string, status string) {
 	a.server.markThreadStatus(threadID, status)
+}
+
+func (a runtimePreflightAdapter) PrepareSession(threadID string) harnessruntime.SessionSnapshot {
+	session := a.server.ensureSession(threadID, nil)
+	if session.PresentFiles != nil {
+		session.PresentFiles.Clear()
+	}
+	a.server.sessionsMu.RLock()
+	existingMessages := append([]models.Message(nil), session.Messages...)
+	a.server.sessionsMu.RUnlock()
+	return harnessruntime.SessionSnapshot{
+		PresentFiles:     session.PresentFiles,
+		ExistingMessages: existingMessages,
+	}
+}
+
+func (a runtimePreflightAdapter) MarkThreadStatus(threadID string, status string) {
+	a.server.markThreadStatus(threadID, status)
+}
+
+func (a runtimePreflightAdapter) SetThreadMetadata(threadID string, key string, value any) {
+	a.server.setThreadMetadata(threadID, key, value)
+}
+
+func (a runtimePreflightAdapter) ClearThreadMetadata(threadID string, key string) {
+	a.server.deleteThreadMetadata(threadID, key)
+}
+
+func (a runtimePreflightAdapter) SaveRunRecord(record harnessruntime.RunRecord) {
+	a.server.saveRun(runFromRecord(record))
 }

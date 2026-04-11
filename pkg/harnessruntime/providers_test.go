@@ -3,6 +3,7 @@ package harnessruntime
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
@@ -46,6 +47,14 @@ type fakeCompletionRuntime struct {
 	cleared    bool
 }
 
+type fakePreflightRuntime struct {
+	snapshot          SessionSnapshot
+	saved             RunRecord
+	metadata          map[string]any
+	clearedKey        string
+	threadStatus      string
+}
+
 func (r *fakeCompletionRuntime) SetThreadTitle(_ string, title string) {
 	r.title = title
 }
@@ -61,6 +70,29 @@ func (r *fakeCompletionRuntime) ClearThreadInterrupts(_ string) {
 
 func (r *fakeCompletionRuntime) MarkThreadStatus(_ string, status string) {
 	r.status = status
+}
+
+func (r *fakePreflightRuntime) PrepareSession(_ string) SessionSnapshot {
+	return r.snapshot
+}
+
+func (r *fakePreflightRuntime) MarkThreadStatus(_ string, status string) {
+	r.threadStatus = status
+}
+
+func (r *fakePreflightRuntime) SetThreadMetadata(_ string, key string, value any) {
+	if r.metadata == nil {
+		r.metadata = map[string]any{}
+	}
+	r.metadata[key] = value
+}
+
+func (r *fakePreflightRuntime) ClearThreadMetadata(_ string, key string) {
+	r.clearedKey = key
+}
+
+func (r *fakePreflightRuntime) SaveRunRecord(record RunRecord) {
+	r.saved = record
 }
 
 func TestSummarizerCompactUsesConfiguredFunctions(t *testing.T) {
@@ -343,5 +375,41 @@ func TestOrchestratorPrepareBuildsLifecycleAndExecution(t *testing.T) {
 	}
 	if prepared.Lifecycle.ThreadID != "thread-1" || prepared.Lifecycle.AssistantID != "lead_agent" {
 		t.Fatalf("lifecycle = %+v", prepared.Lifecycle)
+	}
+}
+
+func TestPreflightServicePreparesRunState(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 4, 11, 10, 0, 0, 0, time.UTC)
+	runtime := &fakePreflightRuntime{
+		snapshot: SessionSnapshot{
+			ExistingMessages: []models.Message{{Role: models.RoleHuman, Content: "old"}},
+		},
+	}
+	service := NewPreflightService(runtime)
+	service.now = func() time.Time { return now }
+	service.newID = func() string { return "generated-id" }
+
+	result := service.Prepare(PreflightInput{
+		RequestedThreadID: "thread-1",
+		AssistantID:       "lead_agent",
+		NewMessages:       []models.Message{{Role: models.RoleHuman, Content: "new"}},
+	})
+
+	if result.ThreadID != "thread-1" || result.AssistantID != "lead_agent" {
+		t.Fatalf("result ids = %+v", result)
+	}
+	if result.Run.RunID != "generated-id" || result.Run.Status != "running" {
+		t.Fatalf("run = %+v", result.Run)
+	}
+	if len(result.Messages) != 2 {
+		t.Fatalf("messages len = %d", len(result.Messages))
+	}
+	if runtime.threadStatus != "busy" || runtime.clearedKey != "interrupts" {
+		t.Fatalf("runtime state = %+v", runtime)
+	}
+	if runtime.metadata["assistant_id"] != "lead_agent" || runtime.metadata["run_id"] != "generated-id" {
+		t.Fatalf("metadata = %#v", runtime.metadata)
 	}
 }
