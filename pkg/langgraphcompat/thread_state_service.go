@@ -5,6 +5,40 @@ import (
 	"time"
 )
 
+func (s *Server) getThreadState(threadID string) *ThreadState {
+	s.sessionsMu.RLock()
+	session, exists := s.sessions[threadID]
+	s.sessionsMu.RUnlock()
+	if !exists {
+		return nil
+	}
+
+	values := s.threadValues(session)
+	values["messages"] = s.messagesToLangChain(session.Messages)
+
+	next := stringSliceFromAny(session.Metadata["next"])
+	tasks := anySlice(session.Metadata["tasks"])
+	interrupts := anySlice(session.Metadata["interrupts"])
+	checkpoint := checkpointObjectFromMetadata(session.Metadata, "")
+	parentCheckpoint := checkpointObjectFromMetadata(session.Metadata, "parent_")
+
+	return &ThreadState{
+		CheckpointID:       firstNonEmpty(stringValue(session.Metadata["checkpoint_id"]), session.CheckpointID),
+		ParentCheckpointID: stringValue(session.Metadata["parent_checkpoint_id"]),
+		Checkpoint:         checkpoint,
+		ParentCheckpoint:   parentCheckpoint,
+		Values:             values,
+		Config: map[string]any{
+			"configurable": s.threadConfigurable(session),
+		},
+		Next:       append([]string(nil), next...),
+		Tasks:      append([]any(nil), tasks...),
+		Interrupts: append([]any(nil), interrupts...),
+		Metadata:   threadMetadata(session),
+		CreatedAt:  firstNonZeroTime(session.CreatedAt, session.UpdatedAt).Format(time.RFC3339Nano),
+	}
+}
+
 func (s *Server) updateThreadState(threadID string, req map[string]any) (*ThreadState, int, string) {
 	if threadID == "" {
 		return nil, http.StatusBadRequest, "thread ID required"
