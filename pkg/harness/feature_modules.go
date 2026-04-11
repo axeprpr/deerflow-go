@@ -35,6 +35,19 @@ type TitleLifecycleConfig struct {
 	Generate         func(context.Context, *RunState, *agent.RunResult) string
 }
 
+type MemorySessionResolver interface {
+	ResolveMemorySession(*RunState) string
+}
+
+type Summarizer interface {
+	Compact(context.Context, *RunState) (SummarizationCompaction, error)
+	PersistSummary(threadID string, summary string)
+}
+
+type TitleGenerator interface {
+	GenerateTitle(context.Context, *RunState, *agent.RunResult) string
+}
+
 func MergeLifecycleHooks(items ...*LifecycleHooks) *LifecycleHooks {
 	merged := &LifecycleHooks{}
 	for _, item := range items {
@@ -148,6 +161,19 @@ func MemoryLifecycleHooks(cfg MemoryLifecycleConfig) *LifecycleHooks {
 	}
 }
 
+func MemoryLifecycleHooksWithResolver(runtime *MemoryRuntime, resolver MemorySessionResolver, sessionKey string) *LifecycleHooks {
+	if resolver == nil {
+		return nil
+	}
+	return MemoryLifecycleHooks(MemoryLifecycleConfig{
+		Runtime:    runtime,
+		SessionKey: sessionKey,
+		ResolveSession: func(state *RunState) string {
+			return resolver.ResolveMemorySession(state)
+		},
+	})
+}
+
 func ClarificationInterruptFromMessages(messages []models.Message) map[string]any {
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
@@ -226,6 +252,33 @@ func TitleLifecycleHooks(cfg TitleLifecycleConfig) *LifecycleHooks {
 			},
 		},
 	}
+}
+
+func SummarizationLifecycleHooksWithSummarizer(summarizer Summarizer, summaryMetadataKey string) *LifecycleHooks {
+	if summarizer == nil {
+		return nil
+	}
+	return SummarizationLifecycleHooks(SummarizationLifecycleConfig{
+		SummaryMetadataKey: summaryMetadataKey,
+		Compact: func(ctx context.Context, state *RunState) (SummarizationCompaction, error) {
+			return summarizer.Compact(ctx, state)
+		},
+		Persist: func(threadID string, summary string) {
+			summarizer.PersistSummary(threadID, summary)
+		},
+	})
+}
+
+func TitleLifecycleHooksWithGenerator(generator TitleGenerator, titleMetadataKey string) *LifecycleHooks {
+	if generator == nil {
+		return nil
+	}
+	return TitleLifecycleHooks(TitleLifecycleConfig{
+		TitleMetadataKey: titleMetadataKey,
+		Generate: func(ctx context.Context, state *RunState, result *agent.RunResult) string {
+			return generator.GenerateTitle(ctx, state, result)
+		},
+	})
 }
 
 func firstNonEmpty(values ...string) string {

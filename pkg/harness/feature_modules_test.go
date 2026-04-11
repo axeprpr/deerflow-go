@@ -8,6 +8,32 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
+var providerStylePersistedSummary string
+
+type providerStyleSummarizerStub struct{}
+type providerStyleResolverStub struct{}
+type providerStyleTitleStub struct{}
+
+func (providerStyleSummarizerStub) Compact(_ context.Context, state *RunState) (SummarizationCompaction, error) {
+	return SummarizationCompaction{
+		Summary:  "summary",
+		Messages: append([]models.Message(nil), state.Messages...),
+		Changed:  true,
+	}, nil
+}
+
+func (providerStyleSummarizerStub) PersistSummary(_ string, summary string) {
+	providerStylePersistedSummary = summary
+}
+
+func (providerStyleResolverStub) ResolveMemorySession(_ *RunState) string {
+	return "session-1"
+}
+
+func (providerStyleTitleStub) GenerateTitle(_ context.Context, _ *RunState, _ *agent.RunResult) string {
+	return "title"
+}
+
 func TestMergeLifecycleHooksCombinesPhases(t *testing.T) {
 	var before []string
 	var after []string
@@ -72,5 +98,39 @@ func TestClarificationLifecycleHooksStoresInterrupt(t *testing.T) {
 	raw, _ := state.Metadata["clarification_interrupt"].(map[string]any)
 	if stringValue(raw["id"]) != "clarify-1" {
 		t.Fatalf("clarification id = %q", stringValue(raw["id"]))
+	}
+}
+
+func TestProviderStyleLifecycleAdapters(t *testing.T) {
+	providerStylePersistedSummary = ""
+
+	memoryHooks := MemoryLifecycleHooksWithResolver(&MemoryRuntime{}, providerStyleResolverStub{}, "memory_session_id")
+	if memoryHooks != nil {
+		t.Fatal("memory hooks should be nil when runtime is disabled")
+	}
+
+	summaryHooks := SummarizationLifecycleHooksWithSummarizer(providerStyleSummarizerStub{}, "summary_key")
+	titleHooks := TitleLifecycleHooksWithGenerator(providerStyleTitleStub{}, "title_key")
+	hooks := MergeLifecycleHooks(summaryHooks, titleHooks)
+
+	state := &RunState{
+		ThreadID: "thread-1",
+		Messages: []models.Message{{Role: models.RoleHuman, Content: "hello"}},
+		Metadata: map[string]any{},
+	}
+	if err := hooks.Before(context.Background(), state); err != nil {
+		t.Fatalf("Before() error = %v", err)
+	}
+	if got := stringValue(state.Metadata["summary_key"]); got != "summary" {
+		t.Fatalf("summary metadata = %q", got)
+	}
+	if err := hooks.After(context.Background(), state, &agent.RunResult{}); err != nil {
+		t.Fatalf("After() error = %v", err)
+	}
+	if providerStylePersistedSummary != "summary" {
+		t.Fatalf("persistedSummary = %q", providerStylePersistedSummary)
+	}
+	if got := stringValue(state.Metadata["title_key"]); got != "title" {
+		t.Fatalf("title metadata = %q", got)
 	}
 }
