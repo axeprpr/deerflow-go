@@ -322,3 +322,26 @@ func TestLifecycleConfigBuildHooks(t *testing.T) {
 		t.Fatal("BuildHooks() = nil")
 	}
 }
+
+func TestOrchestratorPrepareBuildsLifecycleAndExecution(t *testing.T) {
+	t.Parallel()
+
+	orchestrator := NewOrchestrator(nil)
+	prepared, err := orchestrator.Prepare(context.Background(), RunPlan{
+		ThreadID:    "thread-1",
+		AssistantID: "lead_agent",
+		Model:       "model-1",
+		AgentName:   "lead_agent",
+		Spec:        harness.AgentSpec{},
+		Messages:    []models.Message{{Role: models.RoleHuman, Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+	if prepared == nil || prepared.Lifecycle == nil || prepared.Execution == nil {
+		t.Fatalf("prepared = %#v", prepared)
+	}
+	if prepared.Lifecycle.ThreadID != "thread-1" || prepared.Lifecycle.AssistantID != "lead_agent" {
+		t.Fatalf("lifecycle = %+v", prepared.Lifecycle)
+	}
+}

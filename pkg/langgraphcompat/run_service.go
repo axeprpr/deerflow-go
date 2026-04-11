@@ -93,29 +93,21 @@ func (s *Server) buildRunExecution(ctx context.Context, prepared *preparedRunReq
 		return nil, err
 	}
 	agentSpec.PresentFiles = prepared.Session.PresentFiles
-	lifecycle := &harness.RunState{
+	orchestrated, err := harnessruntime.NewOrchestrator(s.runtimeView()).Prepare(ctx, harnessruntime.RunPlan{
 		ThreadID:         prepared.ThreadID,
 		AssistantID:      prepared.AssistantID,
 		Model:            agentSpec.Model,
 		AgentName:        runCfg.AgentName,
 		Spec:             agentSpec,
-		ExistingMessages: append([]models.Message(nil), prepared.ExistingMessages...),
-		Messages:         append([]models.Message(nil), prepared.Messages...),
-		Metadata:         map[string]any{},
-	}
-	if err := s.runtimeView().BeforeRun(ctx, lifecycle); err != nil {
+		ExistingMessages: prepared.ExistingMessages,
+		Messages:         prepared.Messages,
+	})
+	if err != nil {
 		return nil, err
 	}
-	prepared.Lifecycle = lifecycle
-	prepared.Messages = append([]models.Message(nil), lifecycle.Messages...)
-	return s.runtimeView().PrepareRun(harness.RunRequest{
-		Agent: harness.AgentRequest{
-			Spec:     lifecycle.Spec,
-			Features: harness.FeatureSet{Sandbox: true},
-		},
-		SessionID: prepared.ThreadID,
-		Messages:  lifecycle.Messages,
-	})
+	prepared.Lifecycle = orchestrated.Lifecycle
+	prepared.Messages = append([]models.Message(nil), orchestrated.Lifecycle.Messages...)
+	return orchestrated.Execution, nil
 }
 
 func (s *Server) buildRunContextSpec(threadID string, taskSink func(subagent.TaskEvent), clarificationSink func(*clarification.Clarification)) harness.ContextSpec {
