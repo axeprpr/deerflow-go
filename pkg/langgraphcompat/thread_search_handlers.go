@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 )
@@ -103,75 +102,4 @@ func (s *Server) handleThreadSearch(w http.ResponseWriter, r *http.Request) {
 		Metadata:  req.Metadata,
 		Values:    req.Values,
 	}))
-}
-
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	status := s.healthStatus(r.Context())
-	code := http.StatusOK
-	if status.Status == "down" {
-		code = http.StatusServiceUnavailable
-	}
-	writeJSON(w, code, status)
-}
-
-func (s *Server) handleThreadClarificationCreate(w http.ResponseWriter, r *http.Request) {
-	threadID := r.PathValue("thread_id")
-	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
-		return
-	}
-	if s.getThreadState(threadID) == nil {
-		http.Error(w, "thread not found", http.StatusNotFound)
-		return
-	}
-	s.clarifyAPI.HandleCreate(w, r, threadID)
-}
-
-func (s *Server) handleThreadClarificationsList(w http.ResponseWriter, r *http.Request) {
-	threadID := r.PathValue("thread_id")
-	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
-		return
-	}
-	if s.getThreadState(threadID) == nil {
-		http.Error(w, "thread not found", http.StatusNotFound)
-		return
-	}
-	s.clarifyAPI.HandleList(w, r, threadID)
-}
-
-func (s *Server) handleThreadClarificationGet(w http.ResponseWriter, r *http.Request) {
-	threadID := r.PathValue("thread_id")
-	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
-		return
-	}
-	s.clarifyAPI.HandleGet(w, r, threadID, r.PathValue("id"))
-}
-
-func (s *Server) handleThreadClarificationResolve(w http.ResponseWriter, r *http.Request) {
-	threadID := r.PathValue("thread_id")
-	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
-		return
-	}
-	s.clarifyAPI.HandleResolve(w, r, threadID, r.PathValue("id"))
-}
-
-func (s *Server) deleteRunsForThread(threadID string) {
-	s.runsMu.Lock()
-	defer s.runsMu.Unlock()
-	for runID, run := range s.runs {
-		if run.ThreadID != threadID {
-			continue
-		}
-		delete(s.runs, runID)
-		_ = os.Remove(s.runStatePath(runID))
-	}
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
 }
