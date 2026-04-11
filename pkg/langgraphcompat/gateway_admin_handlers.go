@@ -94,9 +94,9 @@ func (s *Server) handleAgentsList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAgentCheck(w http.ResponseWriter, r *http.Request) {
-	name, available := s.checkGatewayAgentName(r.URL.Query().Get("name"))
+	name, available, detail := s.checkGatewayAgentName(r.URL.Query().Get("name"))
 	if name == "" {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": "Invalid agent name"})
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": detail})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"available": available, "name": name})

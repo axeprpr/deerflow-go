@@ -208,22 +208,22 @@ func (s *Server) listGatewayAgents() []gatewayAgent {
 	return agents
 }
 
-func (s *Server) checkGatewayAgentName(name string) (string, bool) {
+func (s *Server) checkGatewayAgentName(name string) (string, bool, string) {
 	name = strings.TrimSpace(name)
 	if !agentNameRE.MatchString(name) {
-		return "", false
+		return "", false, invalidAgentNameDetail(name)
 	}
 	normalized := strings.ToLower(name)
 	s.uiStateMu.RLock()
 	_, exists := s.getAgentsLocked()[normalized]
 	s.uiStateMu.RUnlock()
-	return normalized, !exists
+	return normalized, !exists, ""
 }
 
 func (s *Server) gatewayAgentByName(name string) (gatewayAgent, int, string) {
 	normalized, ok := normalizeAgentName(name)
 	if !ok {
-		return gatewayAgent{}, http.StatusUnprocessableEntity, "Invalid agent name"
+		return gatewayAgent{}, http.StatusUnprocessableEntity, invalidAgentNameDetail(name)
 	}
 	s.uiStateMu.RLock()
 	agent, exists := s.getAgentsLocked()[normalized]
@@ -237,7 +237,7 @@ func (s *Server) gatewayAgentByName(name string) (gatewayAgent, int, string) {
 func (s *Server) createGatewayAgent(agentReq gatewayAgent) (gatewayAgent, int, string) {
 	name, ok := normalizeAgentName(agentReq.Name)
 	if !ok {
-		return gatewayAgent{}, http.StatusUnprocessableEntity, "Invalid agent name"
+		return gatewayAgent{}, http.StatusUnprocessableEntity, invalidAgentNameDetail(agentReq.Name)
 	}
 
 	s.uiStateMu.Lock()
@@ -262,7 +262,7 @@ func (s *Server) createGatewayAgent(agentReq gatewayAgent) (gatewayAgent, int, s
 func (s *Server) updateGatewayAgent(name string, req map[string]any) (gatewayAgent, int, string) {
 	normalized, ok := normalizeAgentName(name)
 	if !ok {
-		return gatewayAgent{}, http.StatusUnprocessableEntity, "Invalid agent name"
+		return gatewayAgent{}, http.StatusUnprocessableEntity, invalidAgentNameDetail(name)
 	}
 
 	s.uiStateMu.Lock()
@@ -314,7 +314,7 @@ func (s *Server) updateGatewayAgent(name string, req map[string]any) (gatewayAge
 func (s *Server) deleteGatewayAgent(ctx context.Context, name string) (int, string) {
 	normalized, ok := normalizeAgentName(name)
 	if !ok {
-		return http.StatusUnprocessableEntity, "Invalid agent name"
+		return http.StatusUnprocessableEntity, invalidAgentNameDetail(name)
 	}
 
 	s.uiStateMu.Lock()

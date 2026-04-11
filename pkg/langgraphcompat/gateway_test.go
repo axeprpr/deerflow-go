@@ -12012,6 +12012,72 @@ func TestAgentsListOmitsSoul(t *testing.T) {
 	t.Fatalf("agent not found in payload: %#v", payload.Agents)
 }
 
+func TestAgentCheckInvalidNameUsesUpstreamDetail(t *testing.T) {
+	_, ts := newCompatTestServer(t)
+
+	resp, err := http.Get(ts.URL + "/api/agents/check?name=bad.name")
+	if err != nil {
+		t.Fatalf("check agent request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	want := "Invalid agent name 'bad.name'. Must match ^[A-Za-z0-9-]+$ (letters, digits, and hyphens only)."
+	if payload["detail"] != want {
+		t.Fatalf("payload=%#v", payload)
+	}
+}
+
+func TestAgentGetInvalidNameUsesUpstreamDetail(t *testing.T) {
+	_, ts := newCompatTestServer(t)
+
+	resp, err := http.Get(ts.URL + "/api/agents/bad.name")
+	if err != nil {
+		t.Fatalf("get agent request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	want := "Invalid agent name 'bad.name'. Must match ^[A-Za-z0-9-]+$ (letters, digits, and hyphens only)."
+	if payload["detail"] != want {
+		t.Fatalf("payload=%#v", payload)
+	}
+}
+
+func TestAgentCreateInvalidNameUsesUpstreamDetail(t *testing.T) {
+	_, ts := newCompatTestServer(t)
+
+	resp, err := http.Post(ts.URL+"/api/agents", "application/json", strings.NewReader(`{"name":"bad.name","description":"a","soul":"x"}`))
+	if err != nil {
+		t.Fatalf("create agent request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	want := "Invalid agent name 'bad.name'. Must match ^[A-Za-z0-9-]+$ (letters, digits, and hyphens only)."
+	if payload["detail"] != want {
+		t.Fatalf("payload=%#v", payload)
+	}
+}
+
 func TestUserProfileAcceptsNullContent(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.setUserProfileLocked("existing profile")

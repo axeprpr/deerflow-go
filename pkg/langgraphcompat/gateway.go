@@ -1055,6 +1055,11 @@ func normalizeAgentName(name string) (string, bool) {
 	return strings.ToLower(name), true
 }
 
+func invalidAgentNameDetail(name string) string {
+	name = strings.TrimSpace(name)
+	return fmt.Sprintf("Invalid agent name '%s'. Must match ^[A-Za-z0-9-]+$ (letters, digits, and hyphens only).", name)
+}
+
 func gatewaySkillEnabledState(skills map[string]gatewaySkill) map[string]bool {
 	if len(skills) == 0 {
 		return nil
