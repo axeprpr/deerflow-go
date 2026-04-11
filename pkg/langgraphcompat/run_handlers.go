@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
@@ -251,39 +250,12 @@ func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) 
 	}
 
 	filter := newStreamModeFilter(streamModeFromQuery(r))
-	replayedEnd := false
-	for _, event := range run.Events {
-		if !filter.allows(event.Event) {
-			continue
-		}
-		s.sendSSEEvent(w, flusher, event)
-		if event.Event == "end" {
-			replayedEnd = true
-		}
-	}
-	flusher.Flush()
+	streamer := s.newRunReplayStreamer(w, flusher, filter)
+	replayedEnd := streamer.Replay(run)
 	if replayedEnd || run.Status != "running" {
 		return
 	}
-
-	sub, unsubscribe := s.ensureRunRegistry().subscribe(run.RunID, 16)
-	defer unsubscribe()
-	for {
-		select {
-		case event, ok := <-sub:
-			if !ok {
-				return
-			}
-			if filter.allows(event.Event) {
-				s.sendSSEEvent(w, flusher, event)
-			}
-			if event.Event == "end" {
-				return
-			}
-		case <-time.After(defaultSSEHeartbeatInterval):
-			sendSSEHeartbeat(w, flusher)
-		}
-	}
+	streamer.Join(run)
 }
 
 func (s *Server) streamRecordedRun(w http.ResponseWriter, r *http.Request, threadID string, runID string) {
@@ -309,11 +281,5 @@ func (s *Server) streamRecordedRun(w http.ResponseWriter, r *http.Request, threa
 		return
 	}
 
-	filter := newStreamModeFilter(streamModeFromQuery(r))
-	for _, event := range run.Events {
-		if !filter.allows(event.Event) {
-			continue
-		}
-		s.sendSSEEvent(w, flusher, event)
-	}
+	s.newRunReplayStreamer(w, flusher, newStreamModeFilter(streamModeFromQuery(r))).Replay(run)
 }

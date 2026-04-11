@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
@@ -19,12 +20,28 @@ type runStreamEmitter struct {
 	filter  streamModeFilter
 }
 
+type runReplayStreamer struct {
+	server  *Server
+	w       http.ResponseWriter
+	flusher http.Flusher
+	filter  streamModeFilter
+}
+
 func (s *Server) newRunStreamEmitter(w http.ResponseWriter, flusher http.Flusher, run *Run, filter streamModeFilter) runStreamEmitter {
 	return runStreamEmitter{
 		server:  s,
 		w:       w,
 		flusher: flusher,
 		run:     run,
+		filter:  filter,
+	}
+}
+
+func (s *Server) newRunReplayStreamer(w http.ResponseWriter, flusher http.Flusher, filter streamModeFilter) runReplayStreamer {
+	return runReplayStreamer{
+		server:  s,
+		w:       w,
+		flusher: flusher,
 		filter:  filter,
 	}
 }
@@ -72,6 +89,48 @@ func (e runStreamEmitter) Completion(completed *completedRun, usage *agent.Usage
 		"run_id": e.run.RunID,
 		"usage":  usage,
 	})
+}
+
+func (s runReplayStreamer) Replay(run *Run) bool {
+	if run == nil {
+		return false
+	}
+	replayedEnd := false
+	for _, event := range run.Events {
+		if !s.filter.allows(event.Event) {
+			continue
+		}
+		s.server.sendSSEEvent(s.w, s.flusher, event)
+		if event.Event == "end" {
+			replayedEnd = true
+		}
+	}
+	s.flusher.Flush()
+	return replayedEnd
+}
+
+func (s runReplayStreamer) Join(run *Run) {
+	if run == nil {
+		return
+	}
+	sub, unsubscribe := s.server.ensureRunRegistry().subscribe(run.RunID, 16)
+	defer unsubscribe()
+	for {
+		select {
+		case event, ok := <-sub:
+			if !ok {
+				return
+			}
+			if s.filter.allows(event.Event) {
+				s.server.sendSSEEvent(s.w, s.flusher, event)
+			}
+			if event.Event == "end" {
+				return
+			}
+		case <-time.After(defaultSSEHeartbeatInterval):
+			sendSSEHeartbeat(s.w, s.flusher)
+		}
+	}
 }
 
 func (s *Server) recordAndSendEvent(w http.ResponseWriter, flusher http.Flusher, run *Run, eventType string, data any) {
