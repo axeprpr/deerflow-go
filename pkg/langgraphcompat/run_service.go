@@ -11,7 +11,6 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
-	"github.com/axeprpr/deerflow-go/pkg/tools"
 	"github.com/google/uuid"
 )
 
@@ -102,15 +101,18 @@ func (s *Server) buildRunExecution(prepared *preparedRunRequest, req RunCreateRe
 	})
 }
 
-func (s *Server) buildRunContext(ctx context.Context, threadID string, taskSink func(subagent.TaskEvent), clarificationSink func(*clarification.Clarification)) context.Context {
-	runCtx := subagent.WithEventSink(ctx, taskSink)
-	runCtx = clarification.WithThreadID(runCtx, threadID)
-	runCtx = clarification.WithManager(runCtx, s.clarify)
-	runCtx = clarification.WithEventSink(runCtx, clarificationSink)
-	runCtx = tools.WithRuntimeContext(runCtx, map[string]any{
-		"skill_paths": s.runtimeSkillPaths(),
-	})
-	return runCtx
+func (s *Server) buildRunContextSpec(threadID string, taskSink func(subagent.TaskEvent), clarificationSink func(*clarification.Clarification)) harness.ContextSpec {
+	return harness.ContextSpec{
+		ThreadID:             threadID,
+		ClarificationManager: s.clarify,
+		RuntimeContext: map[string]any{
+			"skill_paths": s.runtimeSkillPaths(),
+		},
+		Hooks: harness.RunHooks{
+			TaskSink:          taskSink,
+			ClarificationSink: clarificationSink,
+		},
+	}
 }
 
 func (s *Server) markRunError(run *Run, threadID string, err error) {

@@ -1,6 +1,10 @@
 package harness
 
-import "github.com/axeprpr/deerflow-go/pkg/agent"
+import (
+	"context"
+
+	"github.com/axeprpr/deerflow-go/pkg/agent"
+)
 
 // Runtime groups harness-managed runtime subsystems behind one boundary so
 // compat/app layers do not own agent assembly, durable memory, or sandbox
@@ -34,6 +38,10 @@ func (r *Runtime) PrepareRun(req RunRequest) (*Execution, error) {
 		return NewRunner(nil).Prepare(req)
 	}
 	return r.runner.Prepare(req)
+}
+
+func (r *Runtime) BindContext(ctx context.Context, spec ContextSpec) context.Context {
+	return BindContext(ctx, spec)
 }
 
 func (r *Runtime) Memory() *MemoryRuntime {
