@@ -15,10 +15,27 @@ type SummaryPersist func(threadID string, summary string)
 
 type ConversationCompactor func(ctx context.Context, threadID string, modelName string, existingSummary string, messages []models.Message) harness.SummarizationCompaction
 
+type ConversationRuntime interface {
+	HistorySummary(threadID string) string
+	PersistHistorySummary(threadID string, summary string)
+	CompactConversation(ctx context.Context, threadID string, modelName string, existingSummary string, messages []models.Message) harness.SummarizationCompaction
+}
+
 type Summarizer struct {
 	LoadSummary         SummaryLookup
 	CompactConversation ConversationCompactor
 	Persist             SummaryPersist
+}
+
+func NewSummarizer(runtime ConversationRuntime) Summarizer {
+	if runtime == nil {
+		return Summarizer{}
+	}
+	return Summarizer{
+		LoadSummary:         runtime.HistorySummary,
+		CompactConversation: runtime.CompactConversation,
+		Persist:             runtime.PersistHistorySummary,
+	}
 }
 
 func (s Summarizer) Compact(ctx context.Context, state *harness.RunState) (harness.SummarizationCompaction, error) {
@@ -49,8 +66,19 @@ func (s Summarizer) PersistSummary(threadID string, summary string) {
 
 type MemorySessionIDResolver func(threadID string, agentName string) string
 
+type SessionRuntime interface {
+	ResolveMemorySessionID(threadID string, agentName string) string
+}
+
 type MemorySessionResolver struct {
 	Resolve MemorySessionIDResolver
+}
+
+func NewMemorySessionResolver(runtime SessionRuntime) MemorySessionResolver {
+	if runtime == nil {
+		return MemorySessionResolver{}
+	}
+	return MemorySessionResolver{Resolve: runtime.ResolveMemorySessionID}
 }
 
 func (r MemorySessionResolver) ResolveMemorySession(state *harness.RunState) string {
@@ -62,8 +90,19 @@ func (r MemorySessionResolver) ResolveMemorySession(state *harness.RunState) str
 
 type TitleGeneratorFunc func(ctx context.Context, threadID string, modelName string, messages []models.Message) string
 
+type TitleRuntime interface {
+	ComputeThreadTitle(ctx context.Context, threadID string, modelName string, messages []models.Message) string
+}
+
 type TitleGenerator struct {
 	Generate TitleGeneratorFunc
+}
+
+func NewTitleGenerator(runtime TitleRuntime) TitleGenerator {
+	if runtime == nil {
+		return TitleGenerator{}
+	}
+	return TitleGenerator{Generate: runtime.ComputeThreadTitle}
 }
 
 func (g TitleGenerator) GenerateTitle(ctx context.Context, state *harness.RunState, result *agent.RunResult) string {

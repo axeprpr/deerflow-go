@@ -9,6 +9,34 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
+type fakeConversationRuntime struct{}
+
+func (fakeConversationRuntime) HistorySummary(threadID string) string {
+	return "summary:" + threadID
+}
+
+func (fakeConversationRuntime) PersistHistorySummary(threadID string, summary string) {}
+
+func (fakeConversationRuntime) CompactConversation(_ context.Context, threadID string, modelName string, existingSummary string, messages []models.Message) harness.SummarizationCompaction {
+	return harness.SummarizationCompaction{
+		Summary:  existingSummary + ":" + modelName,
+		Messages: messages,
+		Changed:  true,
+	}
+}
+
+type fakeSessionRuntime struct{}
+
+func (fakeSessionRuntime) ResolveMemorySessionID(threadID string, agentName string) string {
+	return threadID + "/" + agentName
+}
+
+type fakeTitleRuntime struct{}
+
+func (fakeTitleRuntime) ComputeThreadTitle(_ context.Context, threadID string, modelName string, messages []models.Message) string {
+	return threadID + ":" + modelName + ":" + messages[0].Content
+}
+
 func TestSummarizerCompactUsesConfiguredFunctions(t *testing.T) {
 	t.Parallel()
 
@@ -111,5 +139,41 @@ func TestTitleGeneratorUsesRunResultMessages(t *testing.T) {
 	})
 	if title != "generated title" {
 		t.Fatalf("title = %q, want %q", title, "generated title")
+	}
+}
+
+func TestConstructorsWrapRuntimeInterfaces(t *testing.T) {
+	t.Parallel()
+
+	summarizer := NewSummarizer(fakeConversationRuntime{})
+	compacted, err := summarizer.Compact(context.Background(), &harness.RunState{
+		ThreadID: "thread-1",
+		Model:    "model-1",
+		Messages: []models.Message{{Role: models.RoleHuman, Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Compact returned error: %v", err)
+	}
+	if compacted.Summary != "summary:thread-1:model-1" {
+		t.Fatalf("summary = %q", compacted.Summary)
+	}
+
+	resolver := NewMemorySessionResolver(fakeSessionRuntime{})
+	sessionID := resolver.ResolveMemorySession(&harness.RunState{
+		ThreadID:  "thread-1",
+		AgentName: "lead_agent",
+	})
+	if sessionID != "thread-1/lead_agent" {
+		t.Fatalf("sessionID = %q", sessionID)
+	}
+
+	title := NewTitleGenerator(fakeTitleRuntime{}).GenerateTitle(context.Background(), &harness.RunState{
+		ThreadID: "thread-1",
+		Model:    "model-1",
+	}, &agent.RunResult{
+		Messages: []models.Message{{Role: models.RoleAI, Content: "reply"}},
+	})
+	if title != "thread-1:model-1:reply" {
+		t.Fatalf("title = %q", title)
 	}
 }
