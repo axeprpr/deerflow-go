@@ -9,6 +9,7 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
 	"github.com/google/uuid"
@@ -154,28 +155,10 @@ func (s *Server) finalizeCompletedRun(ctx context.Context, prepared *preparedRun
 	}
 	s.saveSession(prepared.ThreadID, result.Messages)
 
-	var interrupt map[string]any
-	if prepared.Lifecycle != nil {
-		if title := strings.TrimSpace(stringValue(prepared.Lifecycle.Metadata["generated_title"])); title != "" {
-			s.setThreadMetadata(prepared.ThreadID, "title", title)
-		}
-		if stored, _ := prepared.Lifecycle.Metadata["clarification_interrupt"].(map[string]any); len(stored) > 0 {
-			interrupt = stored
-		}
-	}
-	if interrupt == nil {
-		interrupt = clarificationInterruptFromMessages(result.Messages)
-	}
-
-	interrupted := false
-	if interrupt != nil {
-		s.setThreadMetadata(prepared.ThreadID, "interrupts", []any{interrupt})
-		s.markThreadStatus(prepared.ThreadID, "interrupted")
+	outcome := harnessruntime.NewCompletionService(s, "generated_title", "clarification_interrupt").Apply(prepared.ThreadID, prepared.Lifecycle, result)
+	if outcome.Interrupted {
 		prepared.Run.Status = "interrupted"
-		interrupted = true
 	} else {
-		s.deleteThreadMetadata(prepared.ThreadID, "interrupts")
-		s.markThreadStatus(prepared.ThreadID, "idle")
 		prepared.Run.Status = "success"
 	}
 
@@ -186,7 +169,7 @@ func (s *Server) finalizeCompletedRun(ctx context.Context, prepared *preparedRun
 	return &completedRun{
 		Result:      result,
 		State:       state,
-		Interrupted: interrupted,
+		Interrupted: outcome.Interrupted,
 	}
 }
 

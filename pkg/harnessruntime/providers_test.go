@@ -38,6 +38,30 @@ func (fakeTitleRuntime) ComputeThreadTitle(_ context.Context, threadID string, m
 	return threadID + ":" + modelName + ":" + messages[0].Content
 }
 
+type fakeCompletionRuntime struct {
+	title      string
+	interrupts []any
+	status     string
+	cleared    bool
+}
+
+func (r *fakeCompletionRuntime) SetThreadTitle(_ string, title string) {
+	r.title = title
+}
+
+func (r *fakeCompletionRuntime) SetThreadInterrupts(_ string, interrupts []any) {
+	r.interrupts = append([]any(nil), interrupts...)
+}
+
+func (r *fakeCompletionRuntime) ClearThreadInterrupts(_ string) {
+	r.cleared = true
+	r.interrupts = nil
+}
+
+func (r *fakeCompletionRuntime) MarkThreadStatus(_ string, status string) {
+	r.status = status
+}
+
 func TestSummarizerCompactUsesConfiguredFunctions(t *testing.T) {
 	t.Parallel()
 
@@ -195,5 +219,47 @@ func TestMemoryServiceBuildsHarnessRuntime(t *testing.T) {
 	}
 	if service.Store() == nil {
 		t.Fatalf("Store() = nil")
+	}
+}
+
+func TestCompletionServiceAppliesTitleAndInterruptState(t *testing.T) {
+	t.Parallel()
+
+	runtime := &fakeCompletionRuntime{}
+	service := NewCompletionService(runtime, "generated_title", "clarification_interrupt")
+
+	outcome := service.Apply("thread-1", &harness.RunState{
+		ThreadID: "thread-1",
+		Metadata: map[string]any{
+			"generated_title": "Title 1",
+			"clarification_interrupt": map[string]any{
+				"value": "Need input",
+			},
+		},
+	}, &agent.RunResult{})
+	if !outcome.Interrupted {
+		t.Fatalf("Interrupted = false, want true")
+	}
+	if runtime.title != "Title 1" {
+		t.Fatalf("title = %q", runtime.title)
+	}
+	if runtime.status != "interrupted" || len(runtime.interrupts) != 1 {
+		t.Fatalf("unexpected runtime state: status=%q interrupts=%#v", runtime.status, runtime.interrupts)
+	}
+}
+
+func TestCompletionServiceFallsBackToIdleWithoutInterrupt(t *testing.T) {
+	t.Parallel()
+
+	runtime := &fakeCompletionRuntime{}
+	service := NewCompletionService(runtime, "generated_title", "clarification_interrupt")
+	outcome := service.Apply("thread-1", &harness.RunState{
+		ThreadID: "thread-1",
+	}, &agent.RunResult{})
+	if outcome.Interrupted {
+		t.Fatalf("Interrupted = true, want false")
+	}
+	if runtime.status != "idle" || !runtime.cleared {
+		t.Fatalf("unexpected runtime state: status=%q cleared=%v", runtime.status, runtime.cleared)
 	}
 }

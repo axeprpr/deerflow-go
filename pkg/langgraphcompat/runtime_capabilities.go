@@ -31,3 +31,19 @@ func (s *Server) ResolveMemorySessionID(threadID string, agentName string) strin
 func (s *Server) ComputeThreadTitle(ctx context.Context, threadID string, modelName string, messages []models.Message) string {
 	return s.computeThreadTitle(ctx, threadID, modelName, messages)
 }
+
+func (s *Server) SetThreadTitle(threadID string, title string) {
+	s.setThreadMetadata(threadID, "title", title)
+}
+
+func (s *Server) SetThreadInterrupts(threadID string, interrupts []any) {
+	s.setThreadMetadata(threadID, "interrupts", interrupts)
+}
+
+func (s *Server) ClearThreadInterrupts(threadID string) {
+	s.deleteThreadMetadata(threadID, "interrupts")
+}
+
+func (s *Server) MarkThreadStatus(threadID string, status string) {
+	s.markThreadStatus(threadID, status)
+}
