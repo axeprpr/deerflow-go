@@ -100,11 +100,8 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	w.Header().Set("Content-Location", fmt.Sprintf("/threads/%s/runs/%s", prepared.ThreadID, prepared.Run.RunID))
 
 	filter := newStreamModeFilter(firstNonNil(req.StreamMode, req.StreamModeX))
-	s.recordAndSendEventFiltered(w, flusher, prepared.Run, filter, "metadata", map[string]any{
-		"run_id":       prepared.Run.RunID,
-		"thread_id":    prepared.ThreadID,
-		"assistant_id": prepared.AssistantID,
-	})
+	emitter := s.newRunStreamEmitter(w, flusher, prepared.Run, filter)
+	emitter.Metadata(prepared.ThreadID, prepared.AssistantID)
 
 	execution, err := s.buildRunExecution(r.Context(), prepared, req)
 	if err != nil {
@@ -126,18 +123,15 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	defer close(heartbeatDone)
 
 	ctx := s.bindRunContext(runCtx, prepared.ThreadID, func(evt subagent.TaskEvent) {
-		s.forwardTaskEvent(w, flusher, prepared.Run, filter, evt)
+		emitter.Task(evt)
 	}, func(item *clarification.Clarification) {
-		if item == nil {
-			return
-		}
-		s.recordAndSendEventFiltered(w, flusher, prepared.Run, filter, "clarification_request", item)
+		emitter.Clarification(item)
 	})
 	eventsDone := make(chan struct{})
 	go func() {
 		defer close(eventsDone)
 		for evt := range execution.Events() {
-			s.forwardAgentEvent(w, flusher, prepared.Run, filter, evt)
+			emitter.Agent(evt)
 		}
 	}()
 
@@ -153,20 +147,8 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	}
 
 	completed := s.finalizeCompletedRun(ctx, prepared, result)
-	s.emitFinalMessagesTuple(w, flusher, prepared.Run, filter, prepared.ExistingMessages, result.Messages, result.Usage)
-
-	s.recordAndSendEventFiltered(w, flusher, prepared.Run, filter, "updates", map[string]any{
-		"agent": map[string]any{
-			"messages":  completed.State.Values["messages"],
-			"title":     completed.State.Values["title"],
-			"artifacts": completed.State.Values["artifacts"],
-		},
-	})
-	s.recordAndSendEventFiltered(w, flusher, prepared.Run, filter, "values", completed.State.Values)
-	s.recordAndSendEventFiltered(w, flusher, prepared.Run, filter, "end", map[string]any{
-		"run_id": prepared.Run.RunID,
-		"usage":  result.Usage,
-	})
+	emitter.FinalMessages(prepared.ExistingMessages, result.Messages, result.Usage)
+	emitter.Completion(completed, result.Usage)
 }
 
 func (s *Server) handleRunStream(w http.ResponseWriter, r *http.Request) {
