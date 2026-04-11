@@ -38,7 +38,7 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	prepared := s.prepareRunRequest(threadID, req)
-	runAgent, err := s.buildRunAgent(prepared, req)
+	execution, err := s.buildRunExecution(prepared, req)
 	if err != nil {
 		s.markRunError(prepared.Run, prepared.ThreadID, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -47,7 +47,7 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 
 	ctx := s.buildRunContext(r.Context(), prepared.ThreadID, func(evt subagent.TaskEvent) {}, func(item *clarification.Clarification) {})
 
-	result, err := runAgent.Run(ctx, prepared.ThreadID, prepared.Messages)
+	result, err := execution.Run(ctx)
 	if err != nil {
 		s.markRunError(prepared.Run, prepared.ThreadID, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -106,7 +106,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		"assistant_id": prepared.AssistantID,
 	})
 
-	runAgent, err := s.buildRunAgent(prepared, req)
+	execution, err := s.buildRunExecution(prepared, req)
 	if err != nil {
 		s.markRunError(prepared.Run, prepared.ThreadID, err)
 		return
@@ -136,12 +136,12 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	eventsDone := make(chan struct{})
 	go func() {
 		defer close(eventsDone)
-		for evt := range runAgent.Events() {
+		for evt := range execution.Events() {
 			s.forwardAgentEvent(w, flusher, prepared.Run, filter, evt)
 		}
 	}()
 
-	result, err := runAgent.Run(ctx, prepared.ThreadID, prepared.Messages)
+	result, err := execution.Run(ctx)
 	<-eventsDone
 	if err != nil {
 		if isRunCanceledErr(err) {

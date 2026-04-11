@@ -8,6 +8,7 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
+	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
@@ -83,7 +84,7 @@ func (s *Server) prepareRunRequest(routeThreadID string, req RunCreateRequest) *
 	}
 }
 
-func (s *Server) buildRunAgent(prepared *preparedRunRequest, req RunCreateRequest) (*agent.Agent, error) {
+func (s *Server) buildRunExecution(prepared *preparedRunRequest, req RunCreateRequest) (*harness.Execution, error) {
 	runCfg := parseRunConfig(mergeRunConfig(req.Config, req.Context))
 	s.applyRunConfigMetadata(prepared.ThreadID, runCfg)
 	agentSpec, err := s.resolveRunConfig(runCfg, nil)
@@ -91,7 +92,14 @@ func (s *Server) buildRunAgent(prepared *preparedRunRequest, req RunCreateReques
 		return nil, err
 	}
 	agentSpec.PresentFiles = prepared.Session.PresentFiles
-	return s.newAgent(agentSpec), nil
+	return s.runtimeView().PrepareRun(harness.RunRequest{
+		Agent: harness.AgentRequest{
+			Spec:     agentSpec,
+			Features: harness.FeatureSet{Sandbox: true},
+		},
+		SessionID: prepared.ThreadID,
+		Messages:  prepared.Messages,
+	})
 }
 
 func (s *Server) buildRunContext(ctx context.Context, threadID string, taskSink func(subagent.TaskEvent), clarificationSink func(*clarification.Clarification)) context.Context {

@@ -7,13 +7,16 @@ import "github.com/axeprpr/deerflow-go/pkg/agent"
 // lifecycle separately.
 type Runtime struct {
 	factory         *Factory
+	runner          *Runner
 	memory          *MemoryRuntime
 	sandboxProvider SandboxProvider
 }
 
 func NewRuntime(deps RuntimeDeps, memory *MemoryRuntime) *Runtime {
+	factory := NewFactory(deps)
 	return &Runtime{
-		factory:         NewFactory(deps),
+		factory:         factory,
+		runner:          NewRunner(factory),
 		memory:          memory,
 		sandboxProvider: deps.SandboxProvider,
 	}
@@ -24,6 +27,13 @@ func (r *Runtime) NewAgent(req AgentRequest) (*agent.Agent, error) {
 		return agent.New(req.Spec.AgentConfig()), nil
 	}
 	return r.factory.NewAgent(req)
+}
+
+func (r *Runtime) PrepareRun(req RunRequest) (*Execution, error) {
+	if r == nil || r.runner == nil {
+		return NewRunner(nil).Prepare(req)
+	}
+	return r.runner.Prepare(req)
 }
 
 func (r *Runtime) Memory() *MemoryRuntime {
