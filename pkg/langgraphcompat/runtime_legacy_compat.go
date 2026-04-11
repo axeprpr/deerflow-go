@@ -95,29 +95,6 @@ func configuredGatewayModelsFromConfig() []gatewayModel {
 	return normalizeGatewayModels(models)
 }
 
-func (s *Server) getLatestActiveRunForThread(threadID string) *Run {
-	s.runsMu.RLock()
-	defer s.runsMu.RUnlock()
-
-	var latest *Run
-	for _, run := range s.runs {
-		if run.ThreadID != threadID {
-			continue
-		}
-		switch strings.ToLower(strings.TrimSpace(run.Status)) {
-		case "", "running", "queued", "busy":
-		default:
-			continue
-		}
-		if latest == nil || run.CreatedAt.After(latest.CreatedAt) {
-			copyRun := *run
-			copyRun.Events = append([]StreamEvent(nil), run.Events...)
-			latest = &copyRun
-		}
-	}
-	return latest
-}
-
 func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) (harness.AgentSpec, error) {
 	if runtimeContext == nil {
 		runtimeContext = map[string]any{}

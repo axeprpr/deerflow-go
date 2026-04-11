@@ -2,9 +2,6 @@ package langgraphcompat
 
 import (
 	"context"
-	"sort"
-	"strings"
-	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
@@ -132,7 +129,7 @@ func (s *Server) finalizeCompletedRun(ctx context.Context, prepared *preparedRun
 }
 
 func (s *Server) threadRun(threadID, runID string) *Run {
-	record, found := harnessruntime.NewCoordinationService(s.runtimeCoordinationAdapter()).ThreadRun(threadID, runID)
+	record, found := harnessruntime.NewQueryService(s.runtimeQueryAdapter()).Run(threadID, runID)
 	if !found {
 		return nil
 	}
@@ -155,35 +152,10 @@ func (s *Server) cancelThreadRun(threadID, runID string) (map[string]any, bool, 
 }
 
 func (s *Server) listThreadRunResponses(threadID string) []map[string]any {
-	s.runsMu.RLock()
-	runs := make([]map[string]any, 0)
-	for _, run := range s.runs {
-		if run.ThreadID != threadID {
-			continue
-		}
-		runs = append(runs, runResponse(run))
+	records := harnessruntime.NewQueryService(s.runtimeQueryAdapter()).ListThreadRuns(threadID)
+	runs := make([]map[string]any, 0, len(records))
+	for _, record := range records {
+		runs = append(runs, runRecordResponse(record))
 	}
-	s.runsMu.RUnlock()
-	sort.Slice(runs, func(i, j int) bool {
-		return runs[i]["created_at"].(string) > runs[j]["created_at"].(string)
-	})
 	return runs
-}
-
-func runResponse(run *Run) map[string]any {
-	if run == nil {
-		return nil
-	}
-	out := map[string]any{
-		"run_id":       run.RunID,
-		"thread_id":    run.ThreadID,
-		"assistant_id": run.AssistantID,
-		"status":       run.Status,
-		"created_at":   run.CreatedAt.Format(time.RFC3339Nano),
-		"updated_at":   run.UpdatedAt.Format(time.RFC3339Nano),
-	}
-	if strings.TrimSpace(run.Error) != "" {
-		out["error"] = run.Error
-	}
-	return out
 }

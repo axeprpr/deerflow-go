@@ -37,6 +37,10 @@ type runtimeCoordinationAdapter struct {
 	server *Server
 }
 
+type runtimeQueryAdapter struct {
+	server *Server
+}
+
 func (s *Server) runtimeConversationAdapter() runtimeConversationAdapter {
 	return runtimeConversationAdapter{server: s}
 }
@@ -63,6 +67,10 @@ func (s *Server) runtimeContextAdapter() runtimeContextAdapter {
 
 func (s *Server) runtimeCoordinationAdapter() runtimeCoordinationAdapter {
 	return runtimeCoordinationAdapter{server: s}
+}
+
+func (s *Server) runtimeQueryAdapter() runtimeQueryAdapter {
+	return runtimeQueryAdapter{server: s}
 }
 
 func (a runtimeConversationAdapter) HistorySummary(threadID string) string {
@@ -162,4 +170,33 @@ func (a runtimeCoordinationAdapter) LoadRunRecord(runID string) (harnessruntime.
 
 func (a runtimeCoordinationAdapter) CancelRun(runID string) bool {
 	return a.server.cancelActiveRun(runID)
+}
+
+func (a runtimeQueryAdapter) LoadRunRecord(runID string) (harnessruntime.RunRecord, bool) {
+	run := a.server.getRun(runID)
+	if run == nil {
+		return harnessruntime.RunRecord{}, false
+	}
+	return runRecordFromRun(run), true
+}
+
+func (a runtimeQueryAdapter) ListRunRecords(threadID string) []harnessruntime.RunRecord {
+	a.server.runsMu.RLock()
+	defer a.server.runsMu.RUnlock()
+
+	records := make([]harnessruntime.RunRecord, 0)
+	for _, run := range a.server.runs {
+		if threadID != "" && run.ThreadID != threadID {
+			continue
+		}
+		records = append(records, runRecordFromRun(run))
+	}
+	return records
+}
+
+func (a runtimeQueryAdapter) HasThread(threadID string) bool {
+	a.server.sessionsMu.RLock()
+	defer a.server.sessionsMu.RUnlock()
+	_, exists := a.server.sessions[threadID]
+	return exists
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
 )
 
@@ -215,7 +216,7 @@ func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	run := s.getLatestActiveRunForThread(threadID)
+	selection := harnessruntime.NewQueryService(s.runtimeQueryAdapter()).SelectJoinRun(threadID)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -231,22 +232,19 @@ func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) 
 	w = sse
 	flusher = sse
 
-	s.sessionsMu.RLock()
-	_, exists := s.sessions[threadID]
-	s.sessionsMu.RUnlock()
+	if !selection.ThreadFound {
+		http.Error(w, "thread not found", http.StatusNotFound)
+		return
+	}
+	if !selection.HasRun {
+		fmt.Fprint(w, ": no active run\n\n")
+		flusher.Flush()
+		return
+	}
+	run := s.getRun(selection.Run.RunID)
 	if run == nil {
-		if !exists {
-			run = s.getLatestRunForThread(threadID)
-		}
-		if run == nil && !exists {
-			http.Error(w, "thread not found", http.StatusNotFound)
-			return
-		}
-		if run == nil {
-			fmt.Fprint(w, ": no active run\n\n")
-			flusher.Flush()
-			return
-		}
+		http.Error(w, "run not found", http.StatusNotFound)
+		return
 	}
 
 	filter := newStreamModeFilter(streamModeFromQuery(r))

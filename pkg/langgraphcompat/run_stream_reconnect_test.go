@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
@@ -91,8 +92,9 @@ func TestRunsStreamContinuesAfterClientCancellationAndSupportsJoin(t *testing.T)
 	deadline := time.Now().Add(2 * time.Second)
 	var activeRun *Run
 	for time.Now().Before(deadline) {
-		activeRun = s.getLatestActiveRunForThread("thread-detached")
-		if activeRun != nil {
+		record, ok := harnessruntime.NewQueryService(s.runtimeQueryAdapter()).LatestActiveRun("thread-detached")
+		if ok {
+			activeRun = runFromRecord(record)
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
