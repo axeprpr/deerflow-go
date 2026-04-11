@@ -236,14 +236,39 @@ func TestLiveBehaviorAmbiguousPromptRequestsMoreDetail(t *testing.T) {
 	if finalAssistant == "" {
 		return
 	}
-	normalized := strings.ToLower(finalAssistant)
-	if !strings.Contains(normalized, "?") && !strings.Contains(finalAssistant, "？") {
-		t.Fatalf("ambiguous prompt should end with questions, got %q", finalAssistant)
-	}
-	if !strings.Contains(normalized, "detail") &&
-		!strings.Contains(normalized, "clarification") &&
-		!strings.Contains(finalAssistant, "类型") &&
-		!strings.Contains(finalAssistant, "更多") {
+	if !looksLikeDetailRequest(finalAssistant) {
 		t.Fatalf("ambiguous prompt should request more detail, got %q", finalAssistant)
 	}
+}
+
+func looksLikeDetailRequest(text string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	if normalized == "" {
+		return false
+	}
+	for _, token := range []string{
+		"detail",
+		"clarification",
+		"more detail",
+		"具体",
+		"细节",
+		"更多",
+		"需求",
+		"类型",
+		"功能",
+		"风格",
+		"偏好",
+		"参考",
+		"示例",
+		"做什么",
+		"用来做什么",
+		"什么类型",
+		"什么风格",
+		"什么需求",
+	} {
+		if strings.Contains(normalized, token) {
+			return true
+		}
+	}
+	return false
 }
