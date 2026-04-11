@@ -12,10 +12,10 @@ func TestFactoryAppliesDefaultsAndResolvesSandbox(t *testing.T) {
 	var resolved int
 	factory := NewFactory(RuntimeDeps{
 		DefaultMaxTurns: 100,
-		ResolveSandbox: func() (*sandbox.Sandbox, error) {
+		SandboxProvider: testSandboxProvider(func() (*sandbox.Sandbox, error) {
 			resolved++
 			return sandbox.New("harness-test", tmp)
-		},
+		}),
 	})
 
 	runAgent, err := factory.NewAgent(AgentRequest{
@@ -36,10 +36,10 @@ func TestFactoryAppliesDefaultsAndResolvesSandbox(t *testing.T) {
 func TestFactoryDoesNotResolveSandboxWhenFeatureDisabled(t *testing.T) {
 	factory := NewFactory(RuntimeDeps{
 		DefaultMaxTurns: 100,
-		ResolveSandbox: func() (*sandbox.Sandbox, error) {
+		SandboxProvider: testSandboxProvider(func() (*sandbox.Sandbox, error) {
 			t.Fatal("ResolveSandbox should not be called")
 			return nil, nil
-		},
+		}),
 	})
 
 	runAgent, err := factory.NewAgent(AgentRequest{
@@ -54,3 +54,7 @@ func TestFactoryDoesNotResolveSandboxWhenFeatureDisabled(t *testing.T) {
 	}
 }
 
+type testSandboxProvider func() (*sandbox.Sandbox, error)
+
+func (p testSandboxProvider) Acquire() (*sandbox.Sandbox, error) { return p() }
+func (p testSandboxProvider) Close() error                       { return nil }

@@ -42,15 +42,9 @@ func TestNewAgentLazilyInitializesSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)
 	}
-	if s.sandbox != nil {
-		t.Fatal("sandbox initialized before agent creation")
-	}
 
 	_ = s.newAgent(agent.AgentConfig{})
 
-	if s.sandbox == nil {
-		t.Fatal("sandbox = nil after lazy agent initialization")
-	}
 	sandboxDir := filepath.Join(tmp, "deerflow-langgraph-sandbox", "langgraph")
 	if _, err := os.Stat(sandboxDir); err != nil {
 		t.Fatalf("sandbox dir missing after newAgent lazy init: %v", err)

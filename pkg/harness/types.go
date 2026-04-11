@@ -3,7 +3,6 @@ package harness
 import (
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
-	"github.com/axeprpr/deerflow-go/pkg/sandbox"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
@@ -32,7 +31,7 @@ type RuntimeDeps struct {
 	LLMProvider     llm.LLMProvider
 	Tools           *tools.Registry
 	DefaultMaxTurns int
-	ResolveSandbox  func() (*sandbox.Sandbox, error)
+	SandboxProvider SandboxProvider
 }
 
 // AgentRequest describes one harness assembly request.
@@ -41,4 +40,3 @@ type AgentRequest struct {
 	Features    Features
 	Middlewares []Middleware
 }
-

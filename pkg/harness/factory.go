@@ -25,8 +25,8 @@ func (f *Factory) NewAgent(req AgentRequest) (*agent.Agent, error) {
 	if cfg.MaxTurns <= 0 && f.deps.DefaultMaxTurns > 0 {
 		cfg.MaxTurns = f.deps.DefaultMaxTurns
 	}
-	if cfg.Sandbox == nil && f.deps.ResolveSandbox != nil && req.Features.Sandbox {
-		sb, err := f.deps.ResolveSandbox()
+	if cfg.Sandbox == nil && f.deps.SandboxProvider != nil && req.Features.Sandbox {
+		sb, err := f.deps.SandboxProvider.Acquire()
 		if err != nil {
 			return nil, err
 		}
@@ -34,4 +34,3 @@ func (f *Factory) NewAgent(req AgentRequest) (*agent.Agent, error) {
 	}
 	return agent.New(cfg), nil
 }
-
