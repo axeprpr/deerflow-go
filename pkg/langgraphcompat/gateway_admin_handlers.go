@@ -68,7 +68,6 @@ func (s *Server) handleSkillInstall(w http.ResponseWriter, r *http.Request) {
 		"success":    true,
 		"skill_name": skill.Name,
 		"message":    fmt.Sprintf("Skill '%s' installed successfully", skill.Name),
-		"skill":      skill,
 	})
 }
 

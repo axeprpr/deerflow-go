@@ -11829,7 +11829,7 @@ func TestSkillInstallFromArchive(t *testing.T) {
 	var payload struct {
 		Success   bool                   `json:"success"`
 		SkillName string                 `json:"skill_name"`
-		Skill     map[string]interface{} `json:"skill"`
+		Message   string                 `json:"message"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode install response: %v", err)
@@ -11837,11 +11837,8 @@ func TestSkillInstallFromArchive(t *testing.T) {
 	if !payload.Success || payload.SkillName != "demo-skill" {
 		t.Fatalf("unexpected install payload: %#v", payload)
 	}
-	if payload.Skill["category"] != "productivity" {
-		t.Fatalf("skill category=%v want productivity", payload.Skill["category"])
-	}
-	if payload.Skill["license"] != "MIT" {
-		t.Fatalf("skill license=%v want MIT", payload.Skill["license"])
+	if payload.Message != "Skill 'demo-skill' installed successfully" {
+		t.Fatalf("message=%q", payload.Message)
 	}
 
 	target := filepath.Join(s.dataRoot, "skills", "custom", "demo-skill", "SKILL.md")
