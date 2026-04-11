@@ -15,6 +15,7 @@ import (
 func TestBashHandlerResolvesThreadVirtualPaths(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DEERFLOW_DATA_ROOT", root)
+	t.Setenv(allowHostBashEnv, "true")
 
 	threadID := "thread-bash-tool"
 	ctx := tools.WithThreadID(context.Background(), threadID)
@@ -54,6 +55,7 @@ func TestBashHandlerResolvesThreadVirtualPaths(t *testing.T) {
 func TestBashHandlerCreatesThreadDataDirectoriesLikeUpstream(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DEERFLOW_DATA_ROOT", root)
+	t.Setenv(allowHostBashEnv, "true")
 
 	threadID := "thread-bash-thread-dirs"
 	ctx := tools.WithThreadID(context.Background(), threadID)
@@ -93,6 +95,7 @@ func TestResolveVirtualCommandWithoutThreadIDLeavesCommandUntouched(t *testing.T
 func TestBashHandlerResolvesACPWorkspacePaths(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DEERFLOW_DATA_ROOT", root)
+	t.Setenv(allowHostBashEnv, "true")
 
 	threadID := "thread-bash-acp"
 	acpDir := filepath.Join(root, "threads", threadID, "acp-workspace")
@@ -127,6 +130,7 @@ func TestBashHandlerResolvesACPWorkspacePaths(t *testing.T) {
 func TestBashHandlerUsesThreadWorkspaceAsWorkingDirectory(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DEERFLOW_DATA_ROOT", root)
+	t.Setenv(allowHostBashEnv, "true")
 
 	threadID := "thread-bash-workdir"
 	ctx := tools.WithThreadID(context.Background(), threadID)
@@ -163,6 +167,7 @@ func TestBashHandlerUsesThreadWorkspaceAsWorkingDirectory(t *testing.T) {
 func TestBashHandlerMasksHostPathsInStderr(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DEERFLOW_DATA_ROOT", root)
+	t.Setenv(allowHostBashEnv, "true")
 
 	threadID := "thread-bash-stderr"
 	ctx := tools.WithThreadID(context.Background(), threadID)
@@ -186,5 +191,24 @@ func TestBashHandlerMasksHostPathsInStderr(t *testing.T) {
 	}
 	if !strings.Contains(output.Stdout, "/mnt/user-data/workspace") {
 		t.Fatalf("stdout=%q missing virtual path", output.Stdout)
+	}
+}
+
+func TestBashHandlerRejectsHostExecutionByDefault(t *testing.T) {
+	result, err := BashHandler(context.Background(), models.ToolCall{
+		ID:   "call-bash-disabled-1",
+		Name: "bash",
+		Arguments: map[string]any{
+			"command": "pwd",
+		},
+	})
+	if err == nil {
+		t.Fatal("BashHandler() error = nil, want disabled error")
+	}
+	if !strings.Contains(err.Error(), "Host bash execution is disabled") {
+		t.Fatalf("error=%q want host-bash disabled message", err)
+	}
+	if result.CallID != "call-bash-disabled-1" || result.ToolName != "bash" {
+		t.Fatalf("result=%#v", result)
 	}
 }

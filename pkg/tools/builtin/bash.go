@@ -13,8 +13,16 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
+const allowHostBashEnv = "DEERFLOW_SANDBOX_ALLOW_HOST_BASH"
+
+const localHostBashDisabledMessage = "Host bash execution is disabled for LocalSandboxProvider because it is not a secure sandbox boundary. Switch to an isolated sandbox for bash access, or set DEERFLOW_SANDBOX_ALLOW_HOST_BASH=true only in a fully trusted local environment."
+
 func BashHandler(ctx context.Context, call models.ToolCall) (models.ToolResult, error) {
 	args := call.Arguments
+
+	if !hostBashAllowed() {
+		return models.ToolResult{CallID: call.ID, ToolName: call.Name}, fmt.Errorf(localHostBashDisabledMessage)
+	}
 
 	cmd, ok := args["command"].(string)
 	if !ok || strings.TrimSpace(cmd) == "" {
@@ -71,5 +79,15 @@ func BashTool() models.Tool {
 			"required": []any{"description", "command"},
 		},
 		Handler: BashHandler,
+	}
+}
+
+func hostBashAllowed() bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(allowHostBashEnv)))
+	switch value {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
 	}
 }
