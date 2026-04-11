@@ -20,6 +20,7 @@ type preparedRunRequest struct {
 	Session          *Session
 	ExistingMessages []models.Message
 	Messages         []models.Message
+	Lifecycle        *harness.RunState
 	Run              *Run
 }
 
@@ -83,7 +84,7 @@ func (s *Server) prepareRunRequest(routeThreadID string, req RunCreateRequest) *
 	}
 }
 
-func (s *Server) buildRunExecution(prepared *preparedRunRequest, req RunCreateRequest) (*harness.Execution, error) {
+func (s *Server) buildRunExecution(ctx context.Context, prepared *preparedRunRequest, req RunCreateRequest) (*harness.Execution, error) {
 	runCfg := parseRunConfig(mergeRunConfig(req.Config, req.Context))
 	s.applyRunConfigMetadata(prepared.ThreadID, runCfg)
 	agentSpec, err := s.resolveRunConfig(runCfg, nil)
@@ -91,13 +92,28 @@ func (s *Server) buildRunExecution(prepared *preparedRunRequest, req RunCreateRe
 		return nil, err
 	}
 	agentSpec.PresentFiles = prepared.Session.PresentFiles
+	lifecycle := &harness.RunState{
+		ThreadID:         prepared.ThreadID,
+		AssistantID:      prepared.AssistantID,
+		Model:            agentSpec.Model,
+		AgentName:        runCfg.AgentName,
+		Spec:             agentSpec,
+		ExistingMessages: append([]models.Message(nil), prepared.ExistingMessages...),
+		Messages:         append([]models.Message(nil), prepared.Messages...),
+		Metadata:         map[string]any{},
+	}
+	if err := s.runtimeView().BeforeRun(ctx, lifecycle); err != nil {
+		return nil, err
+	}
+	prepared.Lifecycle = lifecycle
+	prepared.Messages = append([]models.Message(nil), lifecycle.Messages...)
 	return s.runtimeView().PrepareRun(harness.RunRequest{
 		Agent: harness.AgentRequest{
-			Spec:     agentSpec,
+			Spec:     lifecycle.Spec,
 			Features: harness.FeatureSet{Sandbox: true},
 		},
 		SessionID: prepared.ThreadID,
-		Messages:  prepared.Messages,
+		Messages:  lifecycle.Messages,
 	})
 }
 
@@ -131,7 +147,11 @@ func (s *Server) markRunCanceled(run *Run, threadID string) {
 	s.markThreadStatus(threadID, "interrupted")
 }
 
-func (s *Server) finalizeCompletedRun(prepared *preparedRunRequest, result *agent.RunResult) *completedRun {
+func (s *Server) finalizeCompletedRun(ctx context.Context, prepared *preparedRunRequest, result *agent.RunResult) *completedRun {
+	if prepared.Lifecycle != nil {
+		prepared.Lifecycle.Messages = append([]models.Message(nil), result.Messages...)
+		_ = s.runtimeView().AfterRun(ctx, prepared.Lifecycle, result)
+	}
 	s.saveSession(prepared.ThreadID, result.Messages)
 
 	interrupted := false

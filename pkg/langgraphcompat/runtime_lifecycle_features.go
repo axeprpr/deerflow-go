@@ -1,0 +1,109 @@
+package langgraphcompat
+
+import (
+	"context"
+	"strings"
+
+	"github.com/axeprpr/deerflow-go/pkg/agent"
+	"github.com/axeprpr/deerflow-go/pkg/harness"
+	"github.com/axeprpr/deerflow-go/pkg/models"
+)
+
+func (s *Server) runtimeFeatureAssembly(memoryRuntime *harness.MemoryRuntime) harness.FeatureAssembly {
+	return harness.FeatureAssembly{
+		Clarification: harness.ClarificationFeature{
+			Enabled: s != nil && s.clarify != nil,
+			Manager: s.clarify,
+		},
+		Memory: harness.MemoryFeature{
+			Enabled: memoryRuntime != nil && memoryRuntime.Enabled(),
+		},
+		Summarization: harness.SummarizationFeature{
+			Enabled: true,
+		},
+		Title: harness.TitleFeature{
+			Enabled: false,
+		},
+	}
+}
+
+func (s *Server) runtimeLifecycleHooks(memoryRuntime *harness.MemoryRuntime) *harness.LifecycleHooks {
+	return &harness.LifecycleHooks{
+		BeforeRun: []harness.BeforeRunHook{
+			func(ctx context.Context, state *harness.RunState) error {
+				return s.beforeRunSummarizationFeature(ctx, state)
+			},
+			func(ctx context.Context, state *harness.RunState) error {
+				return s.beforeRunMemoryFeature(ctx, memoryRuntime, state)
+			},
+		},
+		AfterRun: []harness.AfterRunHook{
+			func(_ context.Context, state *harness.RunState, result *agent.RunResult) error {
+				s.afterRunSummarizationFeature(state)
+				return nil
+			},
+			func(_ context.Context, state *harness.RunState, result *agent.RunResult) error {
+				s.afterRunMemoryFeature(memoryRuntime, state, result)
+				return nil
+			},
+		},
+	}
+}
+
+func (s *Server) beforeRunSummarizationFeature(ctx context.Context, state *harness.RunState) error {
+	if s == nil || state == nil || len(state.Messages) == 0 {
+		return nil
+	}
+	existingSummary := s.threadHistorySummary(state.ThreadID)
+	compacted := s.compactConversationHistory(ctx, state.ThreadID, state.Model, existingSummary, state.Messages)
+	state.Messages = append([]models.Message(nil), compacted.Messages...)
+	if compacted.Changed {
+		if summary := strings.TrimSpace(compacted.Summary); summary != "" {
+			state.Metadata[historySummaryMetadataKey] = summary
+		}
+	}
+	return nil
+}
+
+func (s *Server) beforeRunMemoryFeature(ctx context.Context, memoryRuntime *harness.MemoryRuntime, state *harness.RunState) error {
+	if s == nil || state == nil || memoryRuntime == nil || !memoryRuntime.Enabled() {
+		return nil
+	}
+	sessionID := deriveMemorySessionID(state.ThreadID, state.AgentName)
+	state.Metadata["memory_session_id"] = sessionID
+	injected := strings.TrimSpace(memoryRuntime.Inject(ctx, sessionID, state.Spec.SystemPrompt))
+	if injected == "" {
+		return nil
+	}
+	if prompt := strings.TrimSpace(state.Spec.SystemPrompt); prompt != "" {
+		state.Spec.SystemPrompt = strings.TrimSpace(prompt + "\n\n" + injected)
+		return nil
+	}
+	state.Spec.SystemPrompt = injected
+	return nil
+}
+
+func (s *Server) afterRunSummarizationFeature(state *harness.RunState) {
+	if s == nil || state == nil || len(state.Metadata) == 0 {
+		return
+	}
+	summary := strings.TrimSpace(stringValue(state.Metadata[historySummaryMetadataKey]))
+	if summary == "" {
+		return
+	}
+	s.setThreadHistorySummary(state.ThreadID, summary)
+}
+
+func (s *Server) afterRunMemoryFeature(memoryRuntime *harness.MemoryRuntime, state *harness.RunState, result *agent.RunResult) {
+	if s == nil || state == nil || result == nil || memoryRuntime == nil || !memoryRuntime.Enabled() {
+		return
+	}
+	sessionID := strings.TrimSpace(stringValue(state.Metadata["memory_session_id"]))
+	if sessionID == "" {
+		sessionID = deriveMemorySessionID(state.ThreadID, state.AgentName)
+	}
+	if sessionID == "" || len(result.Messages) == 0 {
+		return
+	}
+	memoryRuntime.ScheduleUpdate(sessionID, result.Messages)
+}

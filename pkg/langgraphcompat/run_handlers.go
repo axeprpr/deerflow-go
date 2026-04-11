@@ -38,7 +38,7 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	prepared := s.prepareRunRequest(threadID, req)
-	execution, err := s.buildRunExecution(prepared, req)
+	execution, err := s.buildRunExecution(r.Context(), prepared, req)
 	if err != nil {
 		s.markRunError(prepared.Run, prepared.ThreadID, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -54,7 +54,7 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	completed := s.finalizeCompletedRun(prepared, result)
+	completed := s.finalizeCompletedRun(r.Context(), prepared, result)
 
 	values := map[string]any{}
 	if completed.State != nil {
@@ -106,7 +106,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		"assistant_id": prepared.AssistantID,
 	})
 
-	execution, err := s.buildRunExecution(prepared, req)
+	execution, err := s.buildRunExecution(r.Context(), prepared, req)
 	if err != nil {
 		s.markRunError(prepared.Run, prepared.ThreadID, err)
 		return
@@ -152,7 +152,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		return
 	}
 
-	completed := s.finalizeCompletedRun(prepared, result)
+	completed := s.finalizeCompletedRun(ctx, prepared, result)
 	s.emitFinalMessagesTuple(w, flusher, prepared.Run, filter, prepared.ExistingMessages, result.Messages, result.Usage)
 
 	s.recordAndSendEventFiltered(w, flusher, prepared.Run, filter, "updates", map[string]any{
