@@ -16,22 +16,27 @@ const (
 )
 
 func (s *Server) maybeGenerateThreadTitle(ctx context.Context, threadID string, modelName string, messages []models.Message) {
-	if s == nil {
-		return
-	}
-	cfg := loadTitleConfig()
-	if !cfg.Enabled {
-		return
-	}
-	if !s.shouldGenerateThreadTitle(threadID, messages) {
-		return
-	}
-
-	title := s.generateThreadTitle(ctx, modelName, messages, cfg)
+	title := s.computeThreadTitle(ctx, threadID, modelName, messages)
 	if title == "" {
 		return
 	}
 	s.setThreadMetadata(threadID, "title", title)
+}
+
+func (s *Server) computeThreadTitle(ctx context.Context, threadID string, modelName string, messages []models.Message) string {
+	if s == nil {
+		return ""
+	}
+	cfg := loadTitleConfig()
+	if !cfg.Enabled {
+		return ""
+	}
+	if !s.shouldGenerateThreadTitle(threadID, messages) {
+		return ""
+	}
+
+	title := s.generateThreadTitle(ctx, modelName, messages, cfg)
+	return strings.TrimSpace(title)
 }
 
 func (s *Server) shouldGenerateThreadTitle(threadID string, messages []models.Message) bool {

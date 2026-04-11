@@ -154,8 +154,21 @@ func (s *Server) finalizeCompletedRun(ctx context.Context, prepared *preparedRun
 	}
 	s.saveSession(prepared.ThreadID, result.Messages)
 
+	var interrupt map[string]any
+	if prepared.Lifecycle != nil {
+		if title := strings.TrimSpace(stringValue(prepared.Lifecycle.Metadata["generated_title"])); title != "" {
+			s.setThreadMetadata(prepared.ThreadID, "title", title)
+		}
+		if stored, _ := prepared.Lifecycle.Metadata["clarification_interrupt"].(map[string]any); len(stored) > 0 {
+			interrupt = stored
+		}
+	}
+	if interrupt == nil {
+		interrupt = clarificationInterruptFromMessages(result.Messages)
+	}
+
 	interrupted := false
-	if interrupt := clarificationInterruptFromMessages(result.Messages); interrupt != nil {
+	if interrupt != nil {
 		s.setThreadMetadata(prepared.ThreadID, "interrupts", []any{interrupt})
 		s.markThreadStatus(prepared.ThreadID, "interrupted")
 		prepared.Run.Status = "interrupted"

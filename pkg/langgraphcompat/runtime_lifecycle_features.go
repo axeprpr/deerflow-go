@@ -46,6 +46,10 @@ func (s *Server) runtimeLifecycleHooks(memoryRuntime *harness.MemoryRuntime) *ha
 				s.afterRunMemoryFeature(memoryRuntime, state, result)
 				return nil
 			},
+			func(_ context.Context, state *harness.RunState, result *agent.RunResult) error {
+				s.afterRunClarificationFeature(state, result)
+				return nil
+			},
 		},
 	}
 }
@@ -106,4 +110,24 @@ func (s *Server) afterRunMemoryFeature(memoryRuntime *harness.MemoryRuntime, sta
 		return
 	}
 	memoryRuntime.ScheduleUpdate(sessionID, result.Messages)
+}
+
+func (s *Server) afterRunClarificationFeature(state *harness.RunState, result *agent.RunResult) {
+	if state == nil || result == nil {
+		return
+	}
+	if interrupt := clarificationInterruptFromMessages(result.Messages); interrupt != nil {
+		state.Metadata["clarification_interrupt"] = interrupt
+	}
+}
+
+func (s *Server) afterRunTitleFeature(ctx context.Context, state *harness.RunState, result *agent.RunResult) {
+	if s == nil || state == nil || result == nil {
+		return
+	}
+	title := s.computeThreadTitle(ctx, state.ThreadID, state.Model, result.Messages)
+	if strings.TrimSpace(title) == "" {
+		return
+	}
+	state.Metadata["generated_title"] = title
 }
