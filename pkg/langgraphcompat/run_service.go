@@ -172,57 +172,26 @@ func (s *Server) finalizeCompletedRun(ctx context.Context, prepared *preparedRun
 }
 
 func (s *Server) threadRun(threadID, runID string) *Run {
-	run := s.getRun(strings.TrimSpace(runID))
-	if run == nil {
+	record, found := harnessruntime.NewCoordinationService(s.runtimeCoordinationAdapter()).ThreadRun(threadID, runID)
+	if !found {
 		return nil
 	}
-	if threadID != "" && run.ThreadID != strings.TrimSpace(threadID) {
-		return nil
-	}
-	return run
+	return runFromRecord(record)
 }
 
 func (s *Server) waitForThreadRun(ctx context.Context, threadID, runID string, cancelOnDisconnect bool) (*Run, bool) {
-	for {
-		run := s.threadRun(threadID, runID)
-		if run == nil {
-			return nil, false
-		}
-		switch strings.ToLower(strings.TrimSpace(run.Status)) {
-		case "", "running", "queued", "busy":
-		default:
-			return run, true
-		}
-
-		select {
-		case <-ctx.Done():
-			if cancelOnDisconnect {
-				s.cancelActiveRun(runID)
-			}
-			return nil, true
-		case <-time.After(100 * time.Millisecond):
-		}
+	record, found, completed := harnessruntime.NewCoordinationService(s.runtimeCoordinationAdapter()).Wait(ctx, threadID, runID, cancelOnDisconnect)
+	if !found {
+		return nil, false
 	}
+	if !completed {
+		return nil, true
+	}
+	return runFromRecord(record), true
 }
 
 func (s *Server) cancelThreadRun(threadID, runID string) (map[string]any, bool, bool) {
-	run := s.threadRun(threadID, runID)
-	if run == nil {
-		return nil, false, false
-	}
-	switch strings.ToLower(strings.TrimSpace(run.Status)) {
-	case "", "running", "queued", "busy":
-	default:
-		return nil, true, false
-	}
-	if !s.cancelActiveRun(runID) {
-		return nil, true, false
-	}
-	return map[string]any{
-		"run_id":    runID,
-		"thread_id": threadID,
-		"status":    "interrupted",
-	}, true, true
+	return harnessruntime.NewCoordinationService(s.runtimeCoordinationAdapter()).Cancel(threadID, runID)
 }
 
 func (s *Server) listThreadRunResponses(threadID string) []map[string]any {

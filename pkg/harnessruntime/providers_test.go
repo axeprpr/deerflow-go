@@ -60,6 +60,12 @@ type fakeRunStateRuntime struct {
 	threadStatus string
 }
 
+type fakeCoordinationRuntime struct {
+	record    RunRecord
+	found     bool
+	canceled  bool
+}
+
 type fakeContextRuntime struct{}
 
 type fakeContextBinder struct {
@@ -112,6 +118,15 @@ func (r *fakeRunStateRuntime) SaveRunRecord(record RunRecord) {
 
 func (r *fakeRunStateRuntime) MarkThreadStatus(threadID string, status string) {
 	r.threadStatus = threadID + ":" + status
+}
+
+func (r *fakeCoordinationRuntime) LoadRunRecord(_ string) (RunRecord, bool) {
+	return r.record, r.found
+}
+
+func (r *fakeCoordinationRuntime) CancelRun(_ string) bool {
+	r.canceled = true
+	return true
 }
 
 func (fakeContextRuntime) ClarificationManager() *clarification.Manager {
@@ -489,5 +504,25 @@ func TestContextServiceBuildsAndBindsSpec(t *testing.T) {
 	}
 	if binder.bound.ClarificationManager == nil {
 		t.Fatal("ClarificationManager is nil")
+	}
+}
+
+func TestCoordinationServiceWaitAndCancel(t *testing.T) {
+	t.Parallel()
+
+	runtime := &fakeCoordinationRuntime{
+		record: RunRecord{RunID: "run-1", ThreadID: "thread-1", Status: "success"},
+		found:  true,
+	}
+	service := NewCoordinationService(runtime)
+	record, found, completed := service.Wait(context.Background(), "thread-1", "run-1", false)
+	if !found || !completed || record.RunID != "run-1" {
+		t.Fatalf("wait result = %+v found=%v completed=%v", record, found, completed)
+	}
+
+	runtime.record.Status = "running"
+	resp, found, canceled := service.Cancel("thread-1", "run-1")
+	if !found || !canceled || resp["status"] != "interrupted" || !runtime.canceled {
+		t.Fatalf("cancel result = %#v found=%v canceled=%v runtime=%+v", resp, found, canceled, runtime)
 	}
 }

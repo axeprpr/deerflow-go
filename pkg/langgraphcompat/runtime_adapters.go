@@ -33,6 +33,10 @@ type runtimeContextAdapter struct {
 	server *Server
 }
 
+type runtimeCoordinationAdapter struct {
+	server *Server
+}
+
 func (s *Server) runtimeConversationAdapter() runtimeConversationAdapter {
 	return runtimeConversationAdapter{server: s}
 }
@@ -55,6 +59,10 @@ func (s *Server) runtimeRunStateAdapter() runtimeRunStateAdapter {
 
 func (s *Server) runtimeContextAdapter() runtimeContextAdapter {
 	return runtimeContextAdapter{server: s}
+}
+
+func (s *Server) runtimeCoordinationAdapter() runtimeCoordinationAdapter {
+	return runtimeCoordinationAdapter{server: s}
 }
 
 func (a runtimeConversationAdapter) HistorySummary(threadID string) string {
@@ -142,4 +150,16 @@ func (a runtimeContextAdapter) ClarificationManager() *clarification.Manager {
 
 func (a runtimeContextAdapter) SkillPaths() any {
 	return a.server.runtimeSkillPaths()
+}
+
+func (a runtimeCoordinationAdapter) LoadRunRecord(runID string) (harnessruntime.RunRecord, bool) {
+	run := a.server.getRun(runID)
+	if run == nil {
+		return harnessruntime.RunRecord{}, false
+	}
+	return runRecordFromRun(run), true
+}
+
+func (a runtimeCoordinationAdapter) CancelRun(runID string) bool {
+	return a.server.cancelActiveRun(runID)
 }
