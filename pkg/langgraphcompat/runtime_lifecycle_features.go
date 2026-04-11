@@ -31,49 +31,23 @@ func (s *Server) runtimeFeatureAssembly(memoryRuntime *harness.MemoryRuntime) ha
 func (s *Server) runtimeLifecycleHooks(memoryRuntime *harness.MemoryRuntime) *harness.LifecycleHooks {
 	features := s.runtimeFeatureAssembly(memoryRuntime)
 
+	var conversationRuntime harnessruntime.ConversationRuntime
+	var sessionRuntime harnessruntime.SessionRuntime
+	var titleRuntime harnessruntime.TitleRuntime
+	if s != nil {
+		conversationRuntime = s
+		sessionRuntime = s
+		titleRuntime = s
+	}
+
 	var titleHooks *harness.LifecycleHooks
 	if features.Title.Enabled {
-		titleHooks = harness.TitleLifecycleHooksWithGenerator(harnessruntime.TitleGenerator{
-			Generate: func(ctx context.Context, threadID string, modelName string, messages []models.Message) string {
-				if s == nil {
-					return ""
-				}
-				return s.computeThreadTitle(ctx, threadID, modelName, messages)
-			},
-		}, "generated_title")
+		titleHooks = harness.TitleLifecycleHooksWithGenerator(harnessruntime.NewTitleGenerator(titleRuntime), "generated_title")
 	}
 
 	return harness.MergeLifecycleHooks(
-		harness.SummarizationLifecycleHooksWithSummarizer(harnessruntime.Summarizer{
-			LoadSummary: func(threadID string) string {
-				if s == nil {
-					return ""
-				}
-				return s.threadHistorySummary(threadID)
-			},
-			CompactConversation: func(ctx context.Context, threadID string, modelName string, existingSummary string, messages []models.Message) harness.SummarizationCompaction {
-				if s == nil {
-					return harness.SummarizationCompaction{Messages: append([]models.Message(nil), messages...)}
-				}
-				compacted := s.compactConversationHistory(ctx, threadID, modelName, existingSummary, messages)
-				return harness.SummarizationCompaction{
-					Summary:  compacted.Summary,
-					Messages: compacted.Messages,
-					Changed:  compacted.Changed,
-				}
-			},
-			Persist: func(threadID string, summary string) {
-				if s == nil {
-					return
-				}
-				s.setThreadHistorySummary(threadID, summary)
-			},
-		}, historySummaryMetadataKey),
-		harness.MemoryLifecycleHooksWithResolver(memoryRuntime, harnessruntime.MemorySessionResolver{
-			Resolve: func(threadID string, agentName string) string {
-				return deriveMemorySessionID(threadID, agentName)
-			},
-		}, "memory_session_id"),
+		harness.SummarizationLifecycleHooksWithSummarizer(harnessruntime.NewSummarizer(conversationRuntime), historySummaryMetadataKey),
+		harness.MemoryLifecycleHooksWithResolver(memoryRuntime, harnessruntime.NewMemorySessionResolver(sessionRuntime), "memory_session_id"),
 		harness.ClarificationLifecycleHooks(harness.ClarificationLifecycleConfig{
 			InterruptMetadataKey: "clarification_interrupt",
 		}),
