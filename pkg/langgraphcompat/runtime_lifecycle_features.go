@@ -28,30 +28,58 @@ func (s *Server) runtimeFeatureAssembly(memoryRuntime *harness.MemoryRuntime) ha
 }
 
 func (s *Server) runtimeLifecycleHooks(memoryRuntime *harness.MemoryRuntime) *harness.LifecycleHooks {
-	return &harness.LifecycleHooks{
-		BeforeRun: []harness.BeforeRunHook{
-			func(ctx context.Context, state *harness.RunState) error {
-				return s.beforeRunSummarizationFeature(ctx, state)
+	features := s.runtimeFeatureAssembly(memoryRuntime)
+
+	var titleHooks *harness.LifecycleHooks
+	if features.Title.Enabled {
+		titleHooks = harness.TitleLifecycleHooks(harness.TitleLifecycleConfig{
+			TitleMetadataKey: "generated_title",
+			Generate: func(ctx context.Context, state *harness.RunState, result *agent.RunResult) string {
+				if s == nil || state == nil || result == nil {
+					return ""
+				}
+				return s.computeThreadTitle(ctx, state.ThreadID, state.Model, result.Messages)
 			},
-			func(ctx context.Context, state *harness.RunState) error {
-				return s.beforeRunMemoryFeature(ctx, memoryRuntime, state)
-			},
-		},
-		AfterRun: []harness.AfterRunHook{
-			func(_ context.Context, state *harness.RunState, result *agent.RunResult) error {
-				s.afterRunSummarizationFeature(state)
-				return nil
-			},
-			func(_ context.Context, state *harness.RunState, result *agent.RunResult) error {
-				s.afterRunMemoryFeature(memoryRuntime, state, result)
-				return nil
-			},
-			func(_ context.Context, state *harness.RunState, result *agent.RunResult) error {
-				s.afterRunClarificationFeature(state, result)
-				return nil
-			},
-		},
+		})
 	}
+
+	return harness.MergeLifecycleHooks(
+		harness.SummarizationLifecycleHooks(harness.SummarizationLifecycleConfig{
+			SummaryMetadataKey: historySummaryMetadataKey,
+			Compact: func(ctx context.Context, state *harness.RunState) (harness.SummarizationCompaction, error) {
+				if s == nil || state == nil || len(state.Messages) == 0 {
+					return harness.SummarizationCompaction{Messages: append([]models.Message(nil), state.Messages...)}, nil
+				}
+				existingSummary := s.threadHistorySummary(state.ThreadID)
+				compacted := s.compactConversationHistory(ctx, state.ThreadID, state.Model, existingSummary, state.Messages)
+				return harness.SummarizationCompaction{
+					Summary:  compacted.Summary,
+					Messages: compacted.Messages,
+					Changed:  compacted.Changed,
+				}, nil
+			},
+			Persist: func(threadID string, summary string) {
+				if s == nil {
+					return
+				}
+				s.setThreadHistorySummary(threadID, summary)
+			},
+		}),
+		harness.MemoryLifecycleHooks(harness.MemoryLifecycleConfig{
+			Runtime:    memoryRuntime,
+			SessionKey: "memory_session_id",
+			ResolveSession: func(state *harness.RunState) string {
+				if state == nil {
+					return ""
+				}
+				return deriveMemorySessionID(state.ThreadID, state.AgentName)
+			},
+		}),
+		harness.ClarificationLifecycleHooks(harness.ClarificationLifecycleConfig{
+			InterruptMetadataKey: "clarification_interrupt",
+		}),
+		titleHooks,
+	)
 }
 
 func (s *Server) beforeRunSummarizationFeature(ctx context.Context, state *harness.RunState) error {
@@ -116,7 +144,7 @@ func (s *Server) afterRunClarificationFeature(state *harness.RunState, result *a
 	if state == nil || result == nil {
 		return
 	}
-	if interrupt := clarificationInterruptFromMessages(result.Messages); interrupt != nil {
+	if interrupt := harness.ClarificationInterruptFromMessages(result.Messages); interrupt != nil {
 		state.Metadata["clarification_interrupt"] = interrupt
 	}
 }
