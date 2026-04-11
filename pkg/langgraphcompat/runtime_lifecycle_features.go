@@ -20,6 +20,13 @@ func (s *Server) runtimeFeatureConfig(memoryRuntime *harness.MemoryRuntime) harn
 }
 
 func (s *Server) runtimeLifecycleHooks(memoryRuntime *harness.MemoryRuntime, features harness.FeatureAssembly) *harness.LifecycleHooks {
+	config := harnessruntime.LifecycleConfig{
+		SummaryMetadataKey:   historySummaryMetadataKey,
+		MemorySessionKey:     "memory_session_id",
+		InterruptMetadataKey: "clarification_interrupt",
+		TitleMetadataKey:     "generated_title",
+	}
+
 	var conversationRuntime harnessruntime.ConversationRuntime
 	var sessionRuntime harnessruntime.SessionRuntime
 	var titleRuntime harnessruntime.TitleRuntime
@@ -29,19 +36,12 @@ func (s *Server) runtimeLifecycleHooks(memoryRuntime *harness.MemoryRuntime, fea
 		titleRuntime = s
 	}
 
-	var titleHooks *harness.LifecycleHooks
-	if features.Title.Enabled {
-		titleHooks = harness.TitleLifecycleHooksWithGenerator(harnessruntime.NewTitleGenerator(titleRuntime), "generated_title")
-	}
-
-	return harness.MergeLifecycleHooks(
-		harness.SummarizationLifecycleHooksWithSummarizer(harnessruntime.NewSummarizer(conversationRuntime), historySummaryMetadataKey),
-		harness.MemoryLifecycleHooksWithResolver(memoryRuntime, harnessruntime.NewMemorySessionResolver(sessionRuntime), "memory_session_id"),
-		harness.ClarificationLifecycleHooks(harness.ClarificationLifecycleConfig{
-			InterruptMetadataKey: "clarification_interrupt",
-		}),
-		titleHooks,
-	)
+	return config.BuildHooks(features, harnessruntime.LifecycleProviders{
+		MemoryRuntime:  memoryRuntime,
+		Summarizer:     harnessruntime.NewSummarizer(conversationRuntime),
+		MemoryResolver: harnessruntime.NewMemorySessionResolver(sessionRuntime),
+		TitleGenerator: harnessruntime.NewTitleGenerator(titleRuntime),
+	})
 }
 
 func (s *Server) beforeRunSummarizationFeature(ctx context.Context, state *harness.RunState) error {

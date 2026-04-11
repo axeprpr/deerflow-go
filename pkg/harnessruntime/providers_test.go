@@ -297,3 +297,28 @@ func TestFeatureConfigBuildAssembly(t *testing.T) {
 		t.Fatalf("assembly = %+v", assembly)
 	}
 }
+
+func TestLifecycleConfigBuildHooks(t *testing.T) {
+	t.Parallel()
+
+	features := harness.FeatureAssembly{
+		Summarization: harness.SummarizationFeature{Enabled: true},
+		Memory:        harness.MemoryFeature{Enabled: true},
+		Clarification: harness.ClarificationFeature{Enabled: true},
+		Title:         harness.TitleFeature{Enabled: true},
+	}
+	hooks := LifecycleConfig{
+		SummaryMetadataKey:   "history_summary",
+		MemorySessionKey:     "memory_session_id",
+		InterruptMetadataKey: "clarification_interrupt",
+		TitleMetadataKey:     "generated_title",
+	}.BuildHooks(features, LifecycleProviders{
+		MemoryRuntime:  &harness.MemoryRuntime{},
+		Summarizer:     Summarizer{},
+		MemoryResolver: MemorySessionResolver{},
+		TitleGenerator: TitleGenerator{},
+	})
+	if hooks == nil {
+		t.Fatal("BuildHooks() = nil")
+	}
+}
