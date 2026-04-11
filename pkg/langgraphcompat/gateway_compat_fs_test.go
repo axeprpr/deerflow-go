@@ -104,6 +104,23 @@ func TestUserProfilePutPersistsUSERMD(t *testing.T) {
 	}
 }
 
+func TestUserProfilePutThenGetRoundTripsContent(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	putResp := performCompatRequest(t, handler, http.MethodPut, "/api/user-profile", strings.NewReader(`{"content":"Prefers concise technical answers."}`), map[string]string{"Content-Type": "application/json"})
+	if putResp.Code != http.StatusOK {
+		t.Fatalf("put user profile status=%d body=%s", putResp.Code, putResp.Body.String())
+	}
+
+	getResp := performCompatRequest(t, handler, http.MethodGet, "/api/user-profile", nil, nil)
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("get user profile status=%d body=%s", getResp.Code, getResp.Body.String())
+	}
+	if !strings.Contains(getResp.Body.String(), "Prefers concise technical answers.") {
+		t.Fatalf("user profile body=%s", getResp.Body.String())
+	}
+}
+
 func TestLoadGatewayCompatFilesFallsBackToLegacyDataRoot(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 

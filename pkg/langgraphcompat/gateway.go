@@ -88,6 +88,12 @@ type gatewayPersistedState struct {
 
 const maxSkillArchiveSize int64 = 512 << 20
 
+var forcedDownloadArtifactMIMETypes = map[string]struct{}{
+	"text/html":             {},
+	"application/xhtml+xml": {},
+	"image/svg+xml":         {},
+}
+
 var skillInstallSeq uint64
 var agentNameRE = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
 
@@ -619,6 +625,15 @@ func gatewayMemoryResponseFromDocument(doc pkgmemory.Document) gatewayMemoryResp
 }
 
 func (s *Server) handleMemoryReload(w http.ResponseWriter, r *http.Request) {
+	if mem, ok := s.loadMemoryFromFile(); ok {
+		s.uiStateMu.Lock()
+		s.setMemoryLocked(mem)
+		s.uiStateMu.Unlock()
+		if err := s.persistGatewayState(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
+			return
+		}
+	}
 	s.handleMemoryGet(w, r)
 }
 
@@ -832,6 +847,9 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mimeType := detectArtifactMimeType(absPath)
+	if shouldForceArtifactDownload(mimeType) || strings.EqualFold(r.URL.Query().Get("download"), "true") {
+		w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(absPath)+`"`)
+	}
 	if strings.HasPrefix(mimeType, "text/") && !strings.Contains(strings.ToLower(mimeType), "charset=") {
 		mimeType += "; charset=utf-8"
 	}
@@ -995,6 +1013,12 @@ func (s *Server) artifactAllowed(threadID, absPath string) bool {
 		}
 	}
 	return false
+}
+
+func shouldForceArtifactDownload(mimeType string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(strings.SplitN(mimeType, ";", 2)[0]))
+	_, ok := forcedDownloadArtifactMIMETypes[normalized]
+	return ok
 }
 
 func (s *Server) resolveArtifactPath(threadID, artifactPath string) string {

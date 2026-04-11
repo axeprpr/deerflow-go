@@ -29,8 +29,8 @@ func TestArtifactGetIndexHTMLServesFileWithoutRedirect(t *testing.T) {
 	if got := resp.Header().Get("Location"); got != "" {
 		t.Fatalf("location=%q want empty", got)
 	}
-	if got := resp.Header().Get("Content-Disposition"); got != "" {
-		t.Fatalf("content-disposition=%q want empty", got)
+	if got := resp.Header().Get("Content-Disposition"); !strings.Contains(got, "attachment") || !strings.Contains(got, "index.html") {
+		t.Fatalf("content-disposition=%q want attachment filename", got)
 	}
 	if got := resp.Header().Get("Content-Type"); !strings.Contains(got, "text/html") {
 		t.Fatalf("content-type=%q want html", got)
@@ -69,5 +69,24 @@ func TestArtifactGetIndexHTMLDownloadDoesNotRedirect(t *testing.T) {
 	}
 	if got := resp.Body.String(); got != body {
 		t.Fatalf("body=%q want %q", got, body)
+	}
+}
+
+func TestArtifactGetRejectsPathTraversalOutsideThreadRoot(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-artifact-traversal"
+	s.ensureSession(threadID, nil)
+
+	escapedPath := filepath.Join(s.dataRoot, "escaped.txt")
+	if err := os.WriteFile(escapedPath, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write escaped artifact: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/"+threadID+"/artifacts/%2e%2e/%2e%2e/escaped.txt", nil, nil)
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status=%d headers=%v body=%q", resp.Code, resp.Header(), resp.Body.String())
+	}
+	if body := strings.TrimSpace(resp.Body.String()); body != "404 page not found" {
+		t.Fatalf("body=%q want not found", body)
 	}
 }
