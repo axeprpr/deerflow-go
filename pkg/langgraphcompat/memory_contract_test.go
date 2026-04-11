@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/memory"
 )
 
@@ -230,7 +231,7 @@ func TestMemoryImportPersistsToMemoryStore(t *testing.T) {
 	if err := store.AutoMigrate(context.Background()); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
-	s.memoryStore = store
+	s.memoryRuntime = harness.NewMemoryRuntime(store, nil)
 
 	body := `{
 		"version":"1",
@@ -268,7 +269,7 @@ func TestMemoryReloadPrefersMemoryStoreState(t *testing.T) {
 	if err := store.AutoMigrate(context.Background()); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
-	s.memoryStore = store
+	s.memoryRuntime = harness.NewMemoryRuntime(store, nil)
 
 	if err := store.Save(context.Background(), memory.Document{
 		SessionID: gatewayMemorySessionID,

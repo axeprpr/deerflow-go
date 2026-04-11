@@ -3,7 +3,6 @@ package langgraphcompat
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,7 +27,7 @@ type memoryFactPatchRequest struct {
 }
 
 func (s *Server) bootstrapGatewayMemory(ctx context.Context) error {
-	if s == nil || s.memoryStore == nil {
+	if s == nil || s.memoryRuntime == nil || !s.memoryRuntime.Enabled() {
 		return nil
 	}
 	mem, ok, err := s.loadGatewayMemoryFromStore(ctx)
@@ -272,24 +271,24 @@ func (s *Server) gatewayMemoryUpdateFact(ctx context.Context, factID string, req
 }
 
 func (s *Server) loadGatewayMemoryFromStore(ctx context.Context) (gatewayMemoryResponse, bool, error) {
-	if s == nil || s.memoryStore == nil {
+	if s == nil || s.memoryRuntime == nil || !s.memoryRuntime.Enabled() {
 		return gatewayMemoryResponse{}, false, nil
 	}
-	doc, err := s.memoryStore.Load(ctx, gatewayMemorySessionID)
+	doc, ok, err := s.memoryRuntime.LoadDocument(ctx, gatewayMemorySessionID)
 	if err != nil {
-		if errors.Is(err, pkgmemory.ErrNotFound) {
-			return gatewayMemoryResponse{}, false, nil
-		}
 		return gatewayMemoryResponse{}, false, err
+	}
+	if !ok {
+		return gatewayMemoryResponse{}, false, nil
 	}
 	return gatewayMemoryResponseFromDocument(doc), true, nil
 }
 
 func (s *Server) persistGatewayMemoryToStore(ctx context.Context, mem gatewayMemoryResponse) error {
-	if s == nil || s.memoryStore == nil {
+	if s == nil || s.memoryRuntime == nil || !s.memoryRuntime.Enabled() {
 		return nil
 	}
-	return s.memoryStore.Save(ctx, gatewayMemoryDocument(mem))
+	return s.memoryRuntime.SaveDocument(ctx, gatewayMemoryDocument(mem))
 }
 
 func (s *Server) setAndPersistGatewayMemory(ctx context.Context, mem gatewayMemoryResponse) error {

@@ -58,7 +58,7 @@ type Server struct {
 	userProfile      string
 	memoryCache      gatewayMemoryResponse
 	memoryConfig     gatewayMemoryConfig
-	memoryStore      memory.Storage
+	memoryRuntime    *harness.MemoryRuntime
 	channelMu        sync.Mutex
 	channelService   *gatewayChannelService
 	channelConfig    gatewayChannelsConfig
@@ -249,7 +249,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		if migrateErr := store.AutoMigrate(ctx); migrateErr != nil {
 			logger.Printf("Warning: failed to initialize memory store: %v", migrateErr)
 		} else {
-			s.memoryStore = store
+			s.memoryRuntime = harness.NewMemoryRuntime(store, nil)
 		}
 	} else {
 		logger.Printf("Warning: failed to configure memory store: %v", err)

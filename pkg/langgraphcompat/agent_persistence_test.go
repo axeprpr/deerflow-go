@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/memory"
 )
 
@@ -86,7 +87,7 @@ func TestAgentDeleteClearsScopedMemory(t *testing.T) {
 	if err := store.AutoMigrate(context.Background()); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
-	s.memoryStore = store
+	s.memoryRuntime = harness.NewMemoryRuntime(store, nil)
 
 	createResp := performCompatRequest(t, handler, http.MethodPost, "/api/agents", strings.NewReader(`{
 		"name":"writer-bot",
