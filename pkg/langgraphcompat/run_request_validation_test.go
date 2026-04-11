@@ -1,6 +1,7 @@
 package langgraphcompat
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -23,8 +24,12 @@ func TestStrictLangGraphRunsStreamRequiresAssistantID(t *testing.T) {
 	if resp.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
 	}
-	if !strings.Contains(resp.Body.String(), "assistant_id required") {
-		t.Fatalf("body=%q", resp.Body.String())
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload["detail"] != "assistant_id required" {
+		t.Fatalf("payload=%#v", payload)
 	}
 }
 
@@ -42,8 +47,12 @@ func TestStrictLangGraphRunsStreamRequiresUUIDThreadID(t *testing.T) {
 	if resp.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
 	}
-	if !strings.Contains(resp.Body.String(), "invalid thread_id") {
-		t.Fatalf("body=%q", resp.Body.String())
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload["detail"] != "invalid thread_id" {
+		t.Fatalf("payload=%#v", payload)
 	}
 }
 
@@ -79,7 +88,11 @@ func TestStrictLangGraphRunsCreateRequiresAssistantID(t *testing.T) {
 	if resp.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
 	}
-	if !strings.Contains(resp.Body.String(), "assistant_id required") {
-		t.Fatalf("body=%q", resp.Body.String())
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload["detail"] != "assistant_id required" {
+		t.Fatalf("payload=%#v", payload)
 	}
 }

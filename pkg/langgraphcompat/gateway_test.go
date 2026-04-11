@@ -3040,6 +3040,29 @@ license: MIT
 	}
 }
 
+func TestSkillUpdateMissingSkillUsesUpstreamDetail(t *testing.T) {
+	_, ts := newCompatTestServer(t)
+
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/skills/missing-skill", strings.NewReader(`{"enabled":false}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("put skill: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload["detail"] != "Skill 'missing-skill' not found" {
+		t.Fatalf("payload=%#v", payload)
+	}
+}
+
 func TestLoadGatewayStateAcceptsWrappedStateObject(t *testing.T) {
 	root := t.TempDir()
 	raw := `{

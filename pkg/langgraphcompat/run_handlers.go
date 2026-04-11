@@ -38,7 +38,7 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if err := validateStrictLangGraphRunRequest(r, threadID, req); err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": err.Error()})
 		return
 	}
 	prepared := s.prepareRunRequest(threadID, req)
@@ -87,7 +87,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 		}
 	}
 	if err := validateStrictLangGraphRunRequest(r, routeThreadID, req); err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": err.Error()})
 		return
 	}
 	prepared := s.prepareRunRequest(routeThreadID, req)

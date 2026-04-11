@@ -68,7 +68,7 @@ func (s *Server) setGatewaySkillEnabled(name string, enabled bool) (gatewaySkill
 	skill, ok := s.getSkillsLocked()[name]
 	if !ok {
 		s.uiStateMu.Unlock()
-		return gatewaySkill{}, http.StatusNotFound, "skill not found"
+		return gatewaySkill{}, http.StatusNotFound, fmt.Sprintf("Skill '%s' not found", name)
 	}
 	skill.Enabled = enabled
 	s.skills[name] = skill
