@@ -296,8 +296,7 @@ func (s *Server) runtimeView() *harness.Runtime {
 		DefaultMaxTurns: s.maxTurns,
 		SandboxProvider: s.defaultSandboxProvider(sandboxProvider),
 	}, memoryRuntime,
-		harness.WithFeatureAssembly(s.runtimeFeatureAssembly(memoryRuntime)),
-		harness.WithLifecycle(s.runtimeLifecycleHooks(memoryRuntime)),
+		harness.WithFeatureBuilder(s.runtimeFeatureBuilder(memoryRuntime)),
 	)
 	return s.runtime
 }
