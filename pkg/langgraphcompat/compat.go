@@ -15,6 +15,7 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/checkpoint"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -241,7 +242,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		if migrateErr := store.AutoMigrate(ctx); migrateErr != nil {
 			logger.Printf("Warning: failed to initialize memory store: %v", migrateErr)
 		} else {
-			memoryRuntime = harness.NewMemoryRuntime(store, nil)
+			memoryRuntime = harnessruntime.NewMemoryService(store, nil).Runtime()
 		}
 	} else {
 		logger.Printf("Warning: failed to configure memory store: %v", err)

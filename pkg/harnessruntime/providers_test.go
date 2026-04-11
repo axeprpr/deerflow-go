@@ -6,6 +6,7 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
+	pkgmemory "github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
@@ -175,5 +176,24 @@ func TestConstructorsWrapRuntimeInterfaces(t *testing.T) {
 	})
 	if title != "thread-1:model-1:reply" {
 		t.Fatalf("title = %q", title)
+	}
+}
+
+func TestMemoryServiceBuildsHarnessRuntime(t *testing.T) {
+	t.Parallel()
+
+	store, err := pkgmemory.NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore() error = %v", err)
+	}
+	service := NewMemoryService(store, nil)
+	if !service.Enabled() {
+		t.Fatalf("Enabled() = false, want true")
+	}
+	if service.Runtime() == nil {
+		t.Fatalf("Runtime() = nil")
+	}
+	if service.Store() == nil {
+		t.Fatalf("Store() = nil")
 	}
 }
