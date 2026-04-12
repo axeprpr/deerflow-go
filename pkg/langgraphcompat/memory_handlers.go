@@ -32,7 +32,7 @@ func (s *Server) handleMemoryImport(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMemoryReload(w http.ResponseWriter, r *http.Request) {
 	mem, err := s.gatewayMemoryReload(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to persist state"})
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "Failed to reload memory data."})
 		return
 	}
 	writeJSON(w, http.StatusOK, mem)

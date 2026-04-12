@@ -125,7 +125,9 @@ func (s *Server) gatewayMemoryReload(ctx context.Context) (gatewayMemoryResponse
 		}
 		return s.gatewayMemoryGet(), nil
 	}
-	if mem, ok := s.loadMemoryFromFile(); ok {
+	if mem, ok, err := s.loadMemoryFromFileStrict(); err != nil {
+		return gatewayMemoryResponse{}, err
+	} else if ok {
 		s.uiStateMu.Lock()
 		s.setMemoryLocked(mem)
 		s.uiStateMu.Unlock()
@@ -377,9 +379,20 @@ func gatewayMemoryHasContent(mem gatewayMemoryResponse) bool {
 }
 
 func (s *Server) loadMemoryFromFile() (gatewayMemoryResponse, bool) {
-	data, err := os.ReadFile(s.memoryPath())
+	mem, ok, err := s.loadMemoryFromFileStrict()
 	if err != nil {
 		return gatewayMemoryResponse{}, false
+	}
+	return mem, ok
+}
+
+func (s *Server) loadMemoryFromFileStrict() (gatewayMemoryResponse, bool, error) {
+	data, err := os.ReadFile(s.memoryPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return gatewayMemoryResponse{}, false, nil
+		}
+		return gatewayMemoryResponse{}, false, err
 	}
 	var wrapper map[string]json.RawMessage
 	if err := json.Unmarshal(data, &wrapper); err == nil {
@@ -392,14 +405,14 @@ func (s *Server) loadMemoryFromFile() (gatewayMemoryResponse, bool) {
 	var mem gatewayMemoryResponse
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return gatewayMemoryResponse{}, false
+		return gatewayMemoryResponse{}, false, err
 	}
 	compat := gatewayMemoryResponseFromMap(raw)
 	if err := json.Unmarshal(data, &mem); err != nil {
 		if compat.Version == "" {
-			return gatewayMemoryResponse{}, false
+			return gatewayMemoryResponse{}, false, err
 		}
-		return compat, true
+		return compat, true, nil
 	}
 	if mem.Version == "" {
 		mem.Version = compat.Version
@@ -438,9 +451,9 @@ func (s *Server) loadMemoryFromFile() (gatewayMemoryResponse, bool) {
 		}
 	}
 	if mem.Version == "" {
-		return gatewayMemoryResponse{}, false
+		return gatewayMemoryResponse{}, false, nil
 	}
-	return mem, true
+	return mem, true, nil
 }
 
 func gatewayMemoryResponseFromMap(raw map[string]any) gatewayMemoryResponse {

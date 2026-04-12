@@ -72,6 +72,22 @@ func TestMemoryReloadLoadsPersistedFileState(t *testing.T) {
 	}
 }
 
+func TestMemoryReloadFailureUsesUpstreamDetail(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	if err := os.MkdirAll(s.memoryPath(), 0o755); err != nil {
+		t.Fatalf("mkdir memory path dir: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/memory/reload", nil, nil)
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), `Failed to reload memory data.`) {
+		t.Fatalf("body=%s", resp.Body.String())
+	}
+}
+
 func TestMemoryClearResetsStateAndPersistsDefaultSnapshot(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 
