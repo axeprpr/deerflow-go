@@ -161,9 +161,33 @@ func TestSandboxManagerFromConfigReturnsDeterministicUnsupportedBackendError(t *
 	if err == nil {
 		t.Fatal("Resolve() error = nil, want unsupported backend error")
 	}
-	want := `sandbox backend "remote" is not configured`
+	want := "remote sandbox backend is not configured"
 	if err.Error() != want {
 		t.Fatalf("Resolve() error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestBackendSpecificSandboxManagersExposeConfiguredBackend(t *testing.T) {
+	containerManager, err := NewContainerSandboxManager(SandboxManagerConfig{})
+	if err != nil {
+		t.Fatalf("NewContainerSandboxManager() error = %v", err)
+	}
+	if containerManager.Backend() != SandboxBackendContainer {
+		t.Fatalf("container backend = %q", containerManager.Backend())
+	}
+	remoteManager, err := NewRemoteSandboxManager(SandboxManagerConfig{})
+	if err != nil {
+		t.Fatalf("NewRemoteSandboxManager() error = %v", err)
+	}
+	if remoteManager.Backend() != SandboxBackendRemote {
+		t.Fatalf("remote backend = %q", remoteManager.Backend())
+	}
+	windowsManager, err := NewWindowsRestrictedSandboxManager(SandboxManagerConfig{})
+	if err != nil {
+		t.Fatalf("NewWindowsRestrictedSandboxManager() error = %v", err)
+	}
+	if windowsManager.Backend() != SandboxBackendWindowsRestricted {
+		t.Fatalf("windows backend = %q", windowsManager.Backend())
 	}
 }
 

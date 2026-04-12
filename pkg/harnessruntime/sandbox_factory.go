@@ -14,6 +14,8 @@ type SandboxManagerConfig struct {
 	Backend           SandboxBackend
 	Name              string
 	Root              string
+	Endpoint          string
+	Image             string
 	Policy            harness.SandboxPolicy
 	HeartbeatInterval time.Duration
 	IdleTTL           time.Duration
@@ -21,7 +23,44 @@ type SandboxManagerConfig struct {
 	Leases            SandboxLeaseService
 }
 
-func NewSandboxManagerFromConfig(config SandboxManagerConfig) (*SandboxResourceManager, error) {
+type SandboxLeaseServiceFactory interface {
+	Build(SandboxManagerConfig) (SandboxLeaseService, error)
+}
+
+type SandboxLeaseServiceFactoryFunc func(SandboxManagerConfig) (SandboxLeaseService, error)
+
+func (f SandboxLeaseServiceFactoryFunc) Build(config SandboxManagerConfig) (SandboxLeaseService, error) {
+	return f(config)
+}
+
+type SandboxManagerFactory struct {
+	factories map[SandboxBackend]SandboxLeaseServiceFactory
+}
+
+func DefaultSandboxManagerFactory() SandboxManagerFactory {
+	return SandboxManagerFactory{
+		factories: map[SandboxBackend]SandboxLeaseServiceFactory{
+			SandboxBackendLocalLinux: SandboxLeaseServiceFactoryFunc(func(config SandboxManagerConfig) (SandboxLeaseService, error) {
+				return NewLocalSandboxLeaseServiceWithConfig(config.Name, config.Root, SandboxLeaseConfig{
+					HeartbeatInterval: config.HeartbeatInterval,
+					IdleTTL:           config.IdleTTL,
+					SweepInterval:     config.SweepInterval,
+				}), nil
+			}),
+			SandboxBackendContainer: SandboxLeaseServiceFactoryFunc(func(config SandboxManagerConfig) (SandboxLeaseService, error) {
+				return newUnsupportedSandboxLeaseService(config, "container sandbox backend is not configured"), nil
+			}),
+			SandboxBackendRemote: SandboxLeaseServiceFactoryFunc(func(config SandboxManagerConfig) (SandboxLeaseService, error) {
+				return newUnsupportedSandboxLeaseService(config, "remote sandbox backend is not configured"), nil
+			}),
+			SandboxBackendWindowsRestricted: SandboxLeaseServiceFactoryFunc(func(config SandboxManagerConfig) (SandboxLeaseService, error) {
+				return newUnsupportedSandboxLeaseService(config, "windows restricted sandbox backend is not configured"), nil
+			}),
+		},
+	}
+}
+
+func (f SandboxManagerFactory) Build(config SandboxManagerConfig) (*SandboxResourceManager, error) {
 	backend := config.Backend
 	if backend == "" {
 		backend = SandboxBackendLocalLinux
@@ -29,18 +68,19 @@ func NewSandboxManagerFromConfig(config SandboxManagerConfig) (*SandboxResourceM
 	if config.Leases != nil {
 		return NewSandboxResourceManager(backend, config.Leases), nil
 	}
-	switch backend {
-	case SandboxBackendLocalLinux:
-		return NewLocalSandboxManagerWithConfig(config.Name, config.Root, SandboxLeaseConfig{
-			HeartbeatInterval: config.HeartbeatInterval,
-			IdleTTL:           config.IdleTTL,
-			SweepInterval:     config.SweepInterval,
-		}), nil
-	case SandboxBackendContainer, SandboxBackendRemote, SandboxBackendWindowsRestricted:
-		return NewSandboxResourceManager(backend, unsupportedSandboxLeaseService{backend: backend}), nil
-	default:
+	factory, ok := f.factories[backend]
+	if !ok {
 		return nil, fmt.Errorf("unsupported sandbox backend %q", backend)
 	}
+	leases, err := factory.Build(config)
+	if err != nil {
+		return nil, err
+	}
+	return NewSandboxResourceManager(backend, leases), nil
+}
+
+func NewSandboxManagerFromConfig(config SandboxManagerConfig) (*SandboxResourceManager, error) {
+	return DefaultSandboxManagerFactory().Build(config)
 }
 
 func NewSandboxRuntimeFromConfig(config SandboxManagerConfig) (harness.SandboxRuntime, error) {
@@ -57,6 +97,14 @@ func NewSandboxRuntimeFromConfig(config SandboxManagerConfig) (harness.SandboxRu
 
 type unsupportedSandboxLeaseService struct {
 	backend SandboxBackend
+	detail  string
+}
+
+func newUnsupportedSandboxLeaseService(config SandboxManagerConfig, detail string) unsupportedSandboxLeaseService {
+	return unsupportedSandboxLeaseService{
+		backend: config.Backend,
+		detail:  detail,
+	}
 }
 
 func (s unsupportedSandboxLeaseService) Provider() harness.SandboxProvider {
@@ -64,6 +112,9 @@ func (s unsupportedSandboxLeaseService) Provider() harness.SandboxProvider {
 }
 
 func (s unsupportedSandboxLeaseService) AcquireLease(harness.AgentRequest) (SandboxLease, error) {
+	if s.detail != "" {
+		return SandboxLease{}, fmt.Errorf("%s", s.detail)
+	}
 	return SandboxLease{}, fmt.Errorf("sandbox backend %q is not configured", s.backend)
 }
 

@@ -31,6 +31,21 @@ func NewLocalSandboxManagerWithConfig(name, root string, config SandboxLeaseConf
 	return NewSandboxResourceManager(SandboxBackendLocalLinux, NewLocalSandboxLeaseServiceWithConfig(name, root, config))
 }
 
+func NewContainerSandboxManager(config SandboxManagerConfig) (*SandboxResourceManager, error) {
+	config.Backend = SandboxBackendContainer
+	return NewSandboxManagerFromConfig(config)
+}
+
+func NewRemoteSandboxManager(config SandboxManagerConfig) (*SandboxResourceManager, error) {
+	config.Backend = SandboxBackendRemote
+	return NewSandboxManagerFromConfig(config)
+}
+
+func NewWindowsRestrictedSandboxManager(config SandboxManagerConfig) (*SandboxResourceManager, error) {
+	config.Backend = SandboxBackendWindowsRestricted
+	return NewSandboxManagerFromConfig(config)
+}
+
 func (m *SandboxResourceManager) Backend() SandboxBackend {
 	if m == nil {
 		return ""
