@@ -31,6 +31,8 @@ type DispatchConfig struct {
 	Topology DispatchTopology
 	Executor RunExecutor
 	Queue    DispatchQueue
+	Buffer   int
+	Workers  int
 }
 
 type directRunDispatcher struct {
@@ -52,7 +54,7 @@ func NewRuntimeDispatcher(config DispatchConfig) RunDispatcher {
 	default:
 		queue := config.Queue
 		if queue == nil {
-			queue = NewInProcessRunQueue(config.Executor, 0)
+			queue = NewInProcessRunQueue(config.Executor, config.Buffer, config.Workers)
 		}
 		return NewQueuedRunDispatcher(queue)
 	}
@@ -73,7 +75,7 @@ func (d directRunDispatcher) Dispatch(ctx context.Context, req DispatchRequest) 
 func (d queuedRunDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (*DispatchResult, error) {
 	queue := d.queue
 	if queue == nil {
-		queue = NewInProcessRunQueue(nil, 0)
+		queue = NewInProcessRunQueue(nil, 0, 0)
 	}
 	return queue.Submit(ctx, req)
 }

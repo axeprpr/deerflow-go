@@ -1,6 +1,10 @@
 package harnessruntime
 
-import "github.com/axeprpr/deerflow-go/pkg/harness"
+import (
+	goruntime "runtime"
+
+	"github.com/axeprpr/deerflow-go/pkg/harness"
+)
 
 // RuntimeNodeConfig describes the in-process runtime node shape. It keeps
 // deployment-facing execution choices outside compat protocol code.
@@ -10,6 +14,10 @@ type RuntimeNodeConfig struct {
 }
 
 func DefaultRuntimeNodeConfig(name, root string) RuntimeNodeConfig {
+	workers := goruntime.GOMAXPROCS(0)
+	if workers < 1 {
+		workers = 1
+	}
 	return RuntimeNodeConfig{
 		Sandbox: SandboxManagerConfig{
 			Backend: SandboxBackendLocalLinux,
@@ -19,6 +27,8 @@ func DefaultRuntimeNodeConfig(name, root string) RuntimeNodeConfig {
 		},
 		Dispatch: DispatchConfig{
 			Topology: DispatchTopologyQueued,
+			Buffer:   defaultRunQueueBuffer,
+			Workers:  workers,
 		},
 	}
 }

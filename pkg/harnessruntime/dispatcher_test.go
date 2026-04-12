@@ -2,7 +2,9 @@ package harnessruntime
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 )
@@ -96,5 +98,58 @@ func TestRuntimeDispatcherQueuedTopologyDefaultsToWorkerQueue(t *testing.T) {
 	}
 	if result == nil || result.Lifecycle == nil || result.Lifecycle.ThreadID != "thread-queued" {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+type blockingExecutor struct {
+	started chan string
+	release chan struct{}
+	running atomic.Int32
+}
+
+func (e *blockingExecutor) Execute(_ context.Context, req DispatchRequest) (*DispatchResult, error) {
+	e.running.Add(1)
+	e.started <- req.Plan.ThreadID
+	<-e.release
+	return &DispatchResult{
+		Lifecycle: &harness.RunState{ThreadID: req.Plan.ThreadID},
+		Execution: &harness.Execution{},
+	}, nil
+}
+
+func TestInProcessRunQueueSupportsMultipleWorkers(t *testing.T) {
+	executor := &blockingExecutor{
+		started: make(chan string, 2),
+		release: make(chan struct{}),
+	}
+	queue := NewInProcessRunQueue(executor, 2, 2)
+	defer queue.Close()
+
+	done := make(chan error, 2)
+	go func() {
+		_, err := queue.Submit(context.Background(), DispatchRequest{Plan: RunPlan{ThreadID: "thread-a"}})
+		done <- err
+	}()
+	go func() {
+		_, err := queue.Submit(context.Background(), DispatchRequest{Plan: RunPlan{ThreadID: "thread-b"}})
+		done <- err
+	}()
+
+	deadline := time.After(200 * time.Millisecond)
+	seen := map[string]struct{}{}
+	for len(seen) < 2 {
+		select {
+		case threadID := <-executor.started:
+			seen[threadID] = struct{}{}
+		case <-deadline:
+			t.Fatalf("started workers = %v, want both jobs active", seen)
+		}
+	}
+
+	close(executor.release)
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatalf("Submit() error = %v", err)
+		}
 	}
 }

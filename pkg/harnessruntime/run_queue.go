@@ -6,6 +6,7 @@ import (
 )
 
 const defaultRunQueueBuffer = 32
+const defaultRunQueueWorkers = 1
 
 type dispatchJob struct {
 	ctx  context.Context
@@ -24,13 +25,17 @@ type dispatchResult struct {
 type InProcessRunQueue struct {
 	executor RunExecutor
 	jobs     chan dispatchJob
+	workers  int
 	wg       sync.WaitGroup
 	closeMu  sync.Once
 }
 
-func NewInProcessRunQueue(executor RunExecutor, buffer int) *InProcessRunQueue {
+func NewInProcessRunQueue(executor RunExecutor, buffer int, workers int) *InProcessRunQueue {
 	if buffer <= 0 {
 		buffer = defaultRunQueueBuffer
+	}
+	if workers <= 0 {
+		workers = defaultRunQueueWorkers
 	}
 	if executor == nil {
 		executor = NewRuntimeWorker()
@@ -38,9 +43,12 @@ func NewInProcessRunQueue(executor RunExecutor, buffer int) *InProcessRunQueue {
 	q := &InProcessRunQueue{
 		executor: executor,
 		jobs:     make(chan dispatchJob, buffer),
+		workers:  workers,
 	}
-	q.wg.Add(1)
-	go q.run()
+	q.wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go q.run()
+	}
 	return q
 }
 
