@@ -15,15 +15,25 @@ import (
 type MemoryRuntime struct {
 	store   pkgmemory.Storage
 	service *pkgmemory.Service
+	updater MemoryUpdater
 }
 
 func NewMemoryRuntime(store pkgmemory.Storage, extractor pkgmemory.Extractor) *MemoryRuntime {
+	return NewMemoryRuntimeWithUpdater(store, extractor, nil)
+}
+
+func NewMemoryRuntimeWithUpdater(store pkgmemory.Storage, extractor pkgmemory.Extractor, updater MemoryUpdater) *MemoryRuntime {
 	if store == nil {
 		return &MemoryRuntime{}
 	}
+	service := pkgmemory.NewService(store, extractor)
+	if updater == nil {
+		updater = inlineMemoryUpdater{service: service}
+	}
 	return &MemoryRuntime{
 		store:   store,
-		service: pkgmemory.NewService(store, extractor),
+		service: service,
+		updater: updater,
 	}
 }
 
@@ -36,6 +46,13 @@ func (m *MemoryRuntime) Store() pkgmemory.Storage {
 		return nil
 	}
 	return m.store
+}
+
+func (m *MemoryRuntime) Updater() MemoryUpdater {
+	if m == nil {
+		return nil
+	}
+	return m.updater
 }
 
 func (m *MemoryRuntime) LoadDocument(ctx context.Context, sessionID string) (pkgmemory.Document, bool, error) {
@@ -87,9 +104,27 @@ func (m *MemoryRuntime) ScheduleUpdate(sessionID string, messages []models.Messa
 	if m == nil || m.service == nil || !m.Enabled() {
 		return
 	}
-	m.service.ScheduleUpdate(sessionID, messages)
+	m.ScheduleScopeUpdate(pkgmemory.ParseScopeKey(sessionID), messages)
 }
 
 func (m *MemoryRuntime) ScheduleScopeUpdate(scope pkgmemory.Scope, messages []models.Message) {
-	m.ScheduleUpdate(scope.Key(), messages)
+	if m == nil || m.updater == nil || !m.Enabled() {
+		return
+	}
+	m.updater.Schedule(scope, messages)
+}
+
+type MemoryUpdater interface {
+	Schedule(scope pkgmemory.Scope, messages []models.Message)
+}
+
+type inlineMemoryUpdater struct {
+	service *pkgmemory.Service
+}
+
+func (u inlineMemoryUpdater) Schedule(scope pkgmemory.Scope, messages []models.Message) {
+	if u.service == nil {
+		return
+	}
+	u.service.ScheduleUpdate(scope.Key(), messages)
 }

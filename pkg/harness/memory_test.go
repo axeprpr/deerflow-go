@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	pkgmemory "github.com/axeprpr/deerflow-go/pkg/memory"
+	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
 func TestMemoryRuntimeScopeMethodsUseScopedKeys(t *testing.T) {
@@ -32,3 +33,36 @@ func TestMemoryRuntimeScopeMethodsUseScopedKeys(t *testing.T) {
 		t.Fatalf("session_id = %q, want %q", loaded.SessionID, scope.Key())
 	}
 }
+
+func TestMemoryRuntimeScheduleScopeUpdateUsesUpdater(t *testing.T) {
+	updater := &memoryUpdaterStub{}
+	runtime := NewMemoryRuntimeWithUpdater(&memoryStorageStub{}, nil, updater)
+	scope := pkgmemory.AgentScope("planner")
+
+	runtime.ScheduleScopeUpdate(scope, []models.Message{{Role: models.RoleAI, Content: "done"}})
+
+	if updater.scope.Key() != "agent:planner" {
+		t.Fatalf("scope key = %q, want %q", updater.scope.Key(), "agent:planner")
+	}
+	if len(updater.messages) != 1 || updater.messages[0].Content != "done" {
+		t.Fatalf("messages = %#v", updater.messages)
+	}
+}
+
+type memoryUpdaterStub struct {
+	scope    pkgmemory.Scope
+	messages []models.Message
+}
+
+func (s *memoryUpdaterStub) Schedule(scope pkgmemory.Scope, messages []models.Message) {
+	s.scope = scope
+	s.messages = append([]models.Message(nil), messages...)
+}
+
+type memoryStorageStub struct{}
+
+func (*memoryStorageStub) AutoMigrate(context.Context) error { return nil }
+func (*memoryStorageStub) Load(context.Context, string) (pkgmemory.Document, error) {
+	return pkgmemory.Document{}, pkgmemory.ErrNotFound
+}
+func (*memoryStorageStub) Save(context.Context, pkgmemory.Document) error { return nil }
