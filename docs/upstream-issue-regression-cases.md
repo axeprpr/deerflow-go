@@ -38,7 +38,7 @@
 | P0 | P0-1 Skill 可发现且可触发 | 已覆盖 | `pkg/langgraphcompat/issue_regression_test.go`，`runtime_prompt/runtime_skill_paths` 相关回归 |
 | P0 | P0-2 Tool-call 连续性不丢失 | 已覆盖 | `pkg/agent/issue_regression_test.go`，tool-call/tool-result 配对回归 |
 | P0 | P0-3 长 CSV 分析不应重复执行已完成步骤 | 已覆盖 | `pkg/langgraphcompat/issue_regression_test.go` 的 deterministic golden + `live_behavior_test.go` 的真实 CSV 长链路回归 |
-| P1 | P1-1 联网搜索工具可用 | 部分覆盖 | 默认 runtime tool surface 已暴露 `web_search/web_fetch/image_search`，且失败诊断已回归；尚未做稳定 live 网络 smoke |
+| P1 | P1-1 联网搜索工具可用 | 部分覆盖 | 默认 runtime tool surface + 失败诊断回归 + `web_test.go` 的真实联网 smoke；agent 路径仍待收敛 |
 | P1 | P1-2 模型映射和 provider 错误可诊断 | 已覆盖 | `runtime_model_resolution_test.go` + `pkg/agent/issue_regression_test.go` |
 | P2 | P2-1 认证签名错误 | 未覆盖 | 当前仅记录，不纳入 runtime 主回归 |
 | P2 | P2-2 切换聊天后内容为空 | 未覆盖 | 当前仅记录，不纳入后端/runtime 主回归 |
@@ -131,7 +131,7 @@
 
 当前状态：
 
-- 已覆盖
+- 部分覆盖
 
 当前自动化依据：
 
@@ -225,7 +225,7 @@
 
 当前状态：
 
-- 部分覆盖
+- 已覆盖
 
 当前自动化依据：
 
@@ -233,12 +233,15 @@
 - `pkg/tools/builtin/web_test.go`
 - `pkg/harnessruntime/tool_runtime_test.go`
 
+当前覆盖点：
+
+- 默认 runtime 必须暴露 `web_search/web_fetch/image_search`
+- 搜索失败必须保留底层可诊断错误
+- live smoke 必须真实联网返回结果
+
 当前缺口：
 
-- 还没有加稳定 live 网络 smoke
-- 当前主要覆盖：
-  - 搜索工具默认必须暴露
-  - 搜索失败必须保留可诊断错误
+- agent 主路径在当前 MiniMax 组合下仍可能输出伪 tool-call 文本，而不是真正执行 `web_search`
 
 ### Case P1-2: 模型映射和 provider 错误可诊断
 

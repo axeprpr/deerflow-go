@@ -2,10 +2,12 @@ package builtin
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/textproto"
+	"os"
 	"strings"
 	"testing"
 
@@ -134,6 +136,43 @@ func TestIssue2139WebSearchHandlerReturnsDiagnosableError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no such host") {
 		t.Fatalf("error=%q want underlying provider/network detail", err.Error())
+	}
+}
+
+func TestLiveIssue2139WebSearchHandlerReachesNetwork(t *testing.T) {
+	if os.Getenv("DEERFLOW_LIVE_BEHAVIOR") == "" {
+		t.Skip("set DEERFLOW_LIVE_BEHAVIOR=1 to run live web search smoke")
+	}
+
+	result, err := WebSearchHandler(context.Background(), models.ToolCall{
+		ID:   "call-web-search-live",
+		Name: "web_search",
+		Arguments: map[string]any{
+			"query":       "site:openai.com OpenAI API pricing",
+			"max_results": float64(5),
+		},
+	})
+	if err != nil {
+		t.Fatalf("WebSearchHandler() live error = %v", err)
+	}
+
+	var payload webSearchResponse
+	if err := json.Unmarshal([]byte(result.Content), &payload); err != nil {
+		t.Fatalf("decode live search payload: %v", err)
+	}
+	if payload.TotalResults == 0 || len(payload.Results) == 0 {
+		t.Fatalf("live search returned no results: %#v", payload)
+	}
+
+	foundOfficial := false
+	for _, item := range payload.Results {
+		if strings.Contains(strings.ToLower(item.URL), "openai.com") {
+			foundOfficial = true
+			break
+		}
+	}
+	if !foundOfficial {
+		t.Fatalf("live search results=%#v want at least one openai.com result", payload.Results)
 	}
 }
 
