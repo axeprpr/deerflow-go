@@ -536,6 +536,41 @@ func TestGatewayThreadStreamJoinRouteProxyLangGraphJoinHandler(t *testing.T) {
 	}
 }
 
+func TestGatewayThreadJoinStreamMissingUsesJSONDetail(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/thread-missing/stream", nil, nil)
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, resp.Body.String())
+	}
+	if payload["detail"] != "thread not found" {
+		t.Fatalf("detail=%#v", payload["detail"])
+	}
+}
+
+func TestGatewayThreadRunStreamMissingUsesJSONDetail(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	s.ensureSession("thread-gateway-runs", map[string]any{"agent_name": "writer-bot"})
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/thread-gateway-runs/runs/run-missing/stream", nil, nil)
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, resp.Body.String())
+	}
+	if payload["detail"] != "run not found" {
+		t.Fatalf("detail=%#v", payload["detail"])
+	}
+}
+
 func TestGatewayThreadNestedRoutesRejectInvalidThreadID(t *testing.T) {
 	_, handler := newCompatTestServer(t)
 

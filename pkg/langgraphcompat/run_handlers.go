@@ -74,7 +74,7 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, routeThreadID string) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to read body: %v", err), http.StatusBadRequest)
+		writeDetailError(w, http.StatusBadRequest, fmt.Sprintf("failed to read body: %v", err))
 		return
 	}
 	defer r.Body.Close()
@@ -82,7 +82,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	var req RunCreateRequest
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &req); err != nil {
-			http.Error(w, fmt.Sprintf("invalid request: %v", err), http.StatusBadRequest)
+			writeDetailError(w, http.StatusBadRequest, fmt.Sprintf("invalid request: %v", err))
 			return
 		}
 	}
@@ -94,7 +94,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		writeDetailError(w, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
 	sse := newSSEWriter(w, flusher)
@@ -221,29 +221,31 @@ func (s *Server) handleThreadRunStream(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if err := validateThreadID(threadID); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeDetailError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	selection := harnessruntime.NewQueryService(s.runtimeQueryAdapter()).SelectJoinRun(threadID)
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeDetailError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+
+	if !selection.ThreadFound {
+		writeDetailError(w, http.StatusNotFound, "thread not found")
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
-		return
-	}
 	sse := newSSEWriter(w, flusher)
 	w = sse
 	flusher = sse
 
-	if !selection.ThreadFound {
-		http.Error(w, "thread not found", http.StatusNotFound)
-		return
-	}
 	if !selection.HasRun {
 		fmt.Fprint(w, ": no active run\n\n")
 		flusher.Flush()
@@ -251,7 +253,7 @@ func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) 
 	}
 	run := s.getRun(selection.Run.RunID)
 	if run == nil {
-		http.Error(w, "run not found", http.StatusNotFound)
+		writeDetailError(w, http.StatusNotFound, "run not found")
 		return
 	}
 
@@ -267,11 +269,11 @@ func (s *Server) handleThreadJoinStream(w http.ResponseWriter, r *http.Request) 
 func (s *Server) streamRecordedRun(w http.ResponseWriter, r *http.Request, threadID string, runID string) {
 	run := s.getRun(runID)
 	if run == nil {
-		http.Error(w, "run not found", http.StatusNotFound)
+		writeDetailError(w, http.StatusNotFound, "run not found")
 		return
 	}
 	if threadID != "" && run.ThreadID != threadID {
-		http.Error(w, "run not found", http.StatusNotFound)
+		writeDetailError(w, http.StatusNotFound, "run not found")
 		return
 	}
 
@@ -283,7 +285,7 @@ func (s *Server) streamRecordedRun(w http.ResponseWriter, r *http.Request, threa
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		writeDetailError(w, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
 
