@@ -19,6 +19,9 @@ func (f *Factory) NewAgent(req AgentRequest) (*agent.Agent, error) {
 	if cfg.LLMProvider == nil {
 		cfg.LLMProvider = f.deps.LLMProvider
 	}
+	if cfg.RunPolicy == nil && f.deps.RunPolicy != nil {
+		cfg.RunPolicy = f.deps.RunPolicy
+	}
 	if cfg.Tools == nil {
 		if f.deps.ToolRuntime != nil {
 			cfg.Tools = f.deps.ToolRuntime.Registry()

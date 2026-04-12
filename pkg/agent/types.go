@@ -33,6 +33,7 @@ type AgentConfig struct {
 	Tools                  *tools.Registry
 	DeferredTools          []models.Tool
 	PresentFiles           *tools.PresentFileRegistry
+	RunPolicy              *RunPolicy
 	AgentType              AgentType
 	MaxTurns               int
 	MaxConcurrentSubagents int

@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"crypto/md5"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,15 +24,9 @@ import (
 
 const defaultMaxTurns = 8
 const defaultRequestTimeout = 10 * time.Minute
-const defaultLoopWarnThreshold = 3
-const defaultLoopHardLimit = 5
-const defaultLoopWindowSize = 20
 const defaultMaxConcurrentSubagents = 3
 const minMaxConcurrentSubagents = 2
 const maxMaxConcurrentSubagents = 4
-
-const loopWarningMessage = "[LOOP DETECTED] You are repeating the same tool calls. Stop calling tools and produce your final answer now. If you cannot complete the task, summarize what you accomplished so far."
-const loopHardStopMessage = "[FORCED STOP] Repeated tool calls exceeded the safety limit. Producing final answer with results collected so far."
 
 var messageSeq uint64
 var agentRequestSeq uint64
@@ -53,6 +46,7 @@ type Agent struct {
 	maxTurns               int
 	maxConcurrentSubagents int
 	requestTimeout         time.Duration
+	runPolicy              *RunPolicy
 	guardrailProvider      guardrails.Provider
 	guardrailFailClosed    bool
 	guardrailPassport      string
@@ -103,6 +97,7 @@ func New(cfg AgentConfig) *Agent {
 		maxTurns:               maxTurns,
 		maxConcurrentSubagents: clampMaxConcurrentSubagents(cfg.MaxConcurrentSubagents),
 		requestTimeout:         requestTimeout,
+		runPolicy:              resolveRunPolicy(cfg.RunPolicy),
 		guardrailProvider:      guardrailProvider,
 		guardrailFailClosed:    guardrailFailClosed,
 		guardrailPassport:      guardrailPassport,
@@ -182,8 +177,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 	runMessages := append([]models.Message(nil), messages...)
 	runMessages = patchDanglingToolCalls(runMessages)
 	usage := &Usage{}
-	loopHistory := make([]string, 0, defaultLoopWindowSize)
-	loopWarned := make(map[string]struct{})
+	loopState := newToolLoopState()
 
 	for turn := 0; turn < a.maxTurns; turn++ {
 		req := llm.ChatRequest{
@@ -204,7 +198,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			stopReason  string
 		)
 
-		if len(req.Tools) > 0 && prefersStructuredToolCalls(a.llm) {
+		if len(req.Tools) > 0 && a.runPolicy.ToolTurns.UseStructuredToolCalls(a.llm, req) {
 			resp, chatErr := a.llm.Chat(ctx, req)
 			if chatErr != nil {
 				err := normalizeRunError(ctx, chatErr, a.requestTimeout)
@@ -311,7 +305,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 
 		if len(toolCalls) == 0 {
 			if strings.TrimSpace(assistantMessage.Content) == "" {
-				if retryPrompt := recoverableToolRetryPrompt(runMessages); retryPrompt != "" && turn+1 < a.maxTurns {
+				if retryPrompt := a.runPolicy.Retry.RecoverableToolRetryPrompt(runMessages); retryPrompt != "" && turn+1 < a.maxTurns {
 					runMessages = append(runMessages, models.Message{
 						ID:        newMessageID("human"),
 						SessionID: sessionID,
@@ -336,10 +330,9 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			}, nil
 		}
 
-		warning, hardStop, nextLoopHistory := detectToolCallLoop(loopHistory, toolCalls, loopWarned)
-		loopHistory = nextLoopHistory
-		if warning != "" || hardStop {
-			if hardStop {
+		decision := a.runPolicy.Loop.Evaluate(loopState, toolCalls)
+		if decision.Warning != "" || decision.HardStop {
+			if decision.HardStop {
 				finalOutput := strings.TrimSpace(assistantMessage.Content)
 				if finalOutput != "" {
 					finalOutput += "\n\n"
@@ -385,7 +378,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 				ID:        newMessageID("human"),
 				SessionID: sessionID,
 				Role:      models.RoleHuman,
-				Content:   warning,
+				Content:   decision.Warning,
 				CreatedAt: time.Now().UTC(),
 			})
 			continue
@@ -865,33 +858,6 @@ func shouldPauseAfterToolCall(call models.ToolCall, result models.ToolResult) bo
 	}
 }
 
-func detectToolCallLoop(history []string, calls []models.ToolCall, warned map[string]struct{}) (string, bool, []string) {
-	callHash := hashToolCalls(calls)
-	if callHash == "" {
-		return "", false, history
-	}
-	history = append(history, callHash)
-	if len(history) > defaultLoopWindowSize {
-		history = history[len(history)-defaultLoopWindowSize:]
-	}
-	count := 0
-	for _, previous := range history {
-		if previous == callHash {
-			count++
-		}
-	}
-	if count >= defaultLoopHardLimit {
-		return "", true, history
-	}
-	if count >= defaultLoopWarnThreshold {
-		if _, ok := warned[callHash]; !ok {
-			warned[callHash] = struct{}{}
-			return loopWarningMessage, false, history
-		}
-	}
-	return "", false, history
-}
-
 func clampMaxConcurrentSubagents(value int) int {
 	if value <= 0 {
 		return defaultMaxConcurrentSubagents
@@ -931,53 +897,6 @@ func truncateTaskToolCalls(calls []models.ToolCall, limit int) []models.ToolCall
 		keptTasks++
 	}
 	return truncated
-}
-
-func hashToolCalls(calls []models.ToolCall) string {
-	if len(calls) == 0 {
-		return ""
-	}
-	type normalizedToolCall struct {
-		Name string         `json:"name"`
-		Args map[string]any `json:"args,omitempty"`
-	}
-	normalized := make([]normalizedToolCall, 0, len(calls))
-	for _, call := range calls {
-		call, ok := models.NormalizeToolCall(call)
-		if !ok {
-			continue
-		}
-		normalized = append(normalized, normalizedToolCall{
-			Name: call.Name,
-			Args: call.Arguments,
-		})
-	}
-	if len(normalized) == 0 {
-		return ""
-	}
-	sort.Slice(normalized, func(i, j int) bool {
-		if normalized[i].Name != normalized[j].Name {
-			return normalized[i].Name < normalized[j].Name
-		}
-		return marshalLoopArgs(normalized[i].Args) < marshalLoopArgs(normalized[j].Args)
-	})
-	raw, err := json.Marshal(normalized)
-	if err != nil {
-		return ""
-	}
-	sum := md5.Sum(raw)
-	return fmt.Sprintf("%x", sum[:6])
-}
-
-func marshalLoopArgs(args map[string]any) string {
-	if len(args) == 0 {
-		return ""
-	}
-	raw, err := json.Marshal(args)
-	if err != nil {
-		return ""
-	}
-	return string(raw)
 }
 
 func (a *Agent) BuildSystemPrompt(ctx context.Context, sessionID string) string {

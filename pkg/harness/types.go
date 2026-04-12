@@ -30,6 +30,7 @@ type FeatureSet struct {
 type AgentSpec struct {
 	DeferredTools          []models.Tool
 	PresentFiles           *tools.PresentFileRegistry
+	RunPolicy              *agent.RunPolicy
 	AgentType              agent.AgentType
 	MaxTurns               int
 	MaxConcurrentSubagents int
@@ -49,6 +50,7 @@ func (s AgentSpec) AgentConfig() agent.AgentConfig {
 	return agent.AgentConfig{
 		DeferredTools:          append([]models.Tool(nil), s.DeferredTools...),
 		PresentFiles:           s.PresentFiles,
+		RunPolicy:              s.RunPolicy,
 		AgentType:              s.AgentType,
 		MaxTurns:               s.MaxTurns,
 		MaxConcurrentSubagents: s.MaxConcurrentSubagents,
@@ -78,6 +80,7 @@ type RuntimeDeps struct {
 	Tools           *tools.Registry
 	ToolRuntime     ToolRuntime
 	DefaultMaxTurns int
+	RunPolicy       *agent.RunPolicy
 	SandboxRuntime  SandboxRuntime
 	SandboxProvider SandboxProvider
 }

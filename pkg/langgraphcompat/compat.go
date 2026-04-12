@@ -244,6 +244,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		Tools:           registry,
 		ToolRuntime:     toolRuntime,
 		DefaultMaxTurns: s.maxTurns,
+		RunPolicy:       harnessruntime.NewDefaultRunPolicy(),
 		SandboxRuntime:  sandboxRuntime,
 		SandboxProvider: s.defaultSandboxProvider(nil),
 	}, memoryRuntime)
@@ -292,6 +293,7 @@ func (s *Server) runtimeView() *harness.Runtime {
 		Tools:           s.tools,
 		ToolRuntime:     toolRuntime,
 		DefaultMaxTurns: s.maxTurns,
+		RunPolicy:       harnessruntime.NewDefaultRunPolicy(),
 		SandboxRuntime:  s.defaultSandboxRuntime(sandboxRuntime),
 		SandboxProvider: s.defaultSandboxProvider(nil),
 	}, memoryRuntime,
