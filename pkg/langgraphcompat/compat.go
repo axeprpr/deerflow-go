@@ -52,6 +52,7 @@ type Server struct {
 	threadStateStore harnessruntime.ThreadStateStore
 	runDispatcher    harnessruntime.RunDispatcher
 	sandboxManager   *harnessruntime.SandboxResourceManager
+	runtimeNode      harnessruntime.RuntimeNodeConfig
 	dataRoot         string
 	uiStateMu        sync.RWMutex
 	models           map[string]gatewayModel
@@ -183,15 +184,12 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	provider := llm.NewProvider("siliconflow")
 
 	clarifyManager := clarification.NewManager(32)
-	sandboxManager, err := harnessruntime.NewSandboxManagerFromConfig(harnessruntime.SandboxManagerConfig{
-		Backend: harnessruntime.SandboxBackendLocalLinux,
-		Name:    "langgraph",
-		Root:    filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox"),
-	})
+	runtimeNode := harnessruntime.DefaultRuntimeNodeConfig("langgraph", filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox"))
+	sandboxManager, err := runtimeNode.BuildSandboxManager()
 	if err != nil {
 		return nil, err
 	}
-	sandboxRuntime := sandboxManager.Runtime(harness.FeatureSandboxPolicy{})
+	sandboxRuntime := sandboxManager.Runtime(runtimeNode.Sandbox.Policy)
 	toolRuntime := harnessruntime.NewDefaultToolRuntime(provider, clarifyManager, sandboxRuntime)
 	registry := toolRuntime.Registry()
 	sandboxRoot := filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
@@ -217,25 +215,24 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	}
 
 	s := &Server{
-		logger:       logger,
-		llmProvider:  provider,
-		tools:        registry,
-		sandboxName:  "langgraph",
-		sandboxRoot:  sandboxRoot,
-		subagents:    subagentPool,
-		clarify:      clarifyManager,
-		clarifyAPI:   clarification.NewAPI(clarifyManager),
-		defaultModel: defaultModel,
-		maxTurns:     100,
-		store:        store,
-		startedAt:    time.Now().UTC(),
-		sessions:     make(map[string]*Session),
-		runs:         make(map[string]*Run),
-		runRegistry:  newRunRegistry(),
-		runDispatcher: harnessruntime.NewRuntimeDispatcher(harnessruntime.DispatchConfig{
-			Topology: harnessruntime.DispatchTopologyQueued,
-		}),
+		logger:         logger,
+		llmProvider:    provider,
+		tools:          registry,
+		sandboxName:    "langgraph",
+		sandboxRoot:    sandboxRoot,
+		subagents:      subagentPool,
+		clarify:        clarifyManager,
+		clarifyAPI:     clarification.NewAPI(clarifyManager),
+		defaultModel:   defaultModel,
+		maxTurns:       100,
+		store:          store,
+		startedAt:      time.Now().UTC(),
+		sessions:       make(map[string]*Session),
+		runs:           make(map[string]*Run),
+		runRegistry:    newRunRegistry(),
+		runDispatcher:  runtimeNode.BuildDispatcher(),
 		sandboxManager: sandboxManager,
+		runtimeNode:    runtimeNode,
 		dataRoot:       dataRootAbs,
 		models:         defaultGatewayModels(defaultModel),
 		skills:         nil,
@@ -329,7 +326,7 @@ func (s *Server) defaultSandboxRuntime(existing harness.SandboxRuntime) harness.
 		return existing
 	}
 	if s != nil && s.sandboxManager != nil {
-		return s.sandboxManager.Runtime(harness.FeatureSandboxPolicy{})
+		return s.sandboxManager.Runtime(s.runtimeNode.Sandbox.Policy)
 	}
 	root := strings.TrimSpace(s.sandboxRoot)
 	if root == "" {
@@ -339,18 +336,16 @@ func (s *Server) defaultSandboxRuntime(existing harness.SandboxRuntime) harness.
 	if name == "" {
 		name = "langgraph"
 	}
-	manager, err := harnessruntime.NewSandboxManagerFromConfig(harnessruntime.SandboxManagerConfig{
-		Backend: harnessruntime.SandboxBackendLocalLinux,
-		Name:    name,
-		Root:    root,
-	})
+	config := harnessruntime.DefaultRuntimeNodeConfig(name, root)
+	manager, err := config.BuildSandboxManager()
 	if err != nil {
 		return nil
 	}
 	if s != nil {
 		s.sandboxManager = manager
+		s.runtimeNode.Sandbox = config.Sandbox
 	}
-	return manager.Runtime(harness.FeatureSandboxPolicy{})
+	return manager.Runtime(config.Sandbox.Policy)
 }
 
 func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
@@ -360,9 +355,18 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 	if s.runDispatcher != nil {
 		return s.runDispatcher
 	}
-	s.runDispatcher = harnessruntime.NewRuntimeDispatcher(harnessruntime.DispatchConfig{
-		Topology: harnessruntime.DispatchTopologyQueued,
-	})
+	if s.runtimeNode.Dispatch.Topology == "" {
+		root := strings.TrimSpace(s.sandboxRoot)
+		if root == "" {
+			root = filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
+		}
+		name := strings.TrimSpace(s.sandboxName)
+		if name == "" {
+			name = "langgraph"
+		}
+		s.runtimeNode = harnessruntime.DefaultRuntimeNodeConfig(name, root)
+	}
+	s.runDispatcher = s.runtimeNode.BuildDispatcher()
 	return s.runDispatcher
 }
 
