@@ -4,13 +4,16 @@ import "github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 
 func runFromRecord(record harnessruntime.RunRecord) *Run {
 	return &Run{
-		RunID:       record.RunID,
-		ThreadID:    record.ThreadID,
-		AssistantID: record.AssistantID,
-		Status:      record.Status,
-		Error:       record.Error,
-		CreatedAt:   record.CreatedAt,
-		UpdatedAt:   record.UpdatedAt,
+		RunID:           record.RunID,
+		ThreadID:        record.ThreadID,
+		AssistantID:     record.AssistantID,
+		Attempt:         record.Attempt,
+		ResumeFromEvent: record.ResumeFromEvent,
+		ResumeReason:    record.ResumeReason,
+		Status:          record.Status,
+		Error:           record.Error,
+		CreatedAt:       record.CreatedAt,
+		UpdatedAt:       record.UpdatedAt,
 	}
 }
 
@@ -28,13 +31,16 @@ func runRecordFromRun(run *Run) harnessruntime.RunRecord {
 		return harnessruntime.RunRecord{}
 	}
 	return harnessruntime.RunRecord{
-		RunID:       run.RunID,
-		ThreadID:    run.ThreadID,
-		AssistantID: run.AssistantID,
-		Status:      run.Status,
-		Error:       run.Error,
-		CreatedAt:   run.CreatedAt,
-		UpdatedAt:   run.UpdatedAt,
+		RunID:           run.RunID,
+		ThreadID:        run.ThreadID,
+		AssistantID:     run.AssistantID,
+		Attempt:         run.Attempt,
+		ResumeFromEvent: run.ResumeFromEvent,
+		ResumeReason:    run.ResumeReason,
+		Status:          run.Status,
+		Error:           run.Error,
+		CreatedAt:       run.CreatedAt,
+		UpdatedAt:       run.UpdatedAt,
 	}
 }
 
@@ -59,6 +65,9 @@ func applyRunRecord(run *Run, record harnessruntime.RunRecord) {
 	run.RunID = record.RunID
 	run.ThreadID = record.ThreadID
 	run.AssistantID = record.AssistantID
+	run.Attempt = record.Attempt
+	run.ResumeFromEvent = record.ResumeFromEvent
+	run.ResumeReason = record.ResumeReason
 	run.Status = record.Status
 	run.Error = record.Error
 	run.CreatedAt = record.CreatedAt

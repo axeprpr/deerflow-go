@@ -114,14 +114,17 @@ type ThreadState struct {
 }
 
 type Run struct {
-	RunID       string
-	ThreadID    string
-	AssistantID string
-	Status      string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	Events      []StreamEvent
-	Error       string
+	RunID           string
+	ThreadID        string
+	AssistantID     string
+	Attempt         int
+	ResumeFromEvent int
+	ResumeReason    string
+	Status          string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	Events          []StreamEvent
+	Error           string
 }
 
 // LangGraph API types

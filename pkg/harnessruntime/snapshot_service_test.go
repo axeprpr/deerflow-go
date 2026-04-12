@@ -67,3 +67,29 @@ func TestSnapshotStoreServiceAppendsEvents(t *testing.T) {
 		t.Fatalf("NextEventIndex = %d, want 2", got)
 	}
 }
+
+func TestSnapshotStoreServicePreservesRecoveryMetadata(t *testing.T) {
+	runtime := &fakeSnapshotRuntime{}
+	service := NewSnapshotStoreService(runtime)
+	service.SaveRecord(RunRecord{
+		RunID:           "run-1",
+		ThreadID:        "thread-1",
+		Attempt:         3,
+		ResumeFromEvent: 9,
+		ResumeReason:    "resume-after-crash",
+	})
+
+	record, ok := service.LoadRecord("run-1")
+	if !ok {
+		t.Fatal("LoadRecord() missing saved record")
+	}
+	if record.Attempt != 3 {
+		t.Fatalf("Attempt = %d, want 3", record.Attempt)
+	}
+	if record.ResumeFromEvent != 9 {
+		t.Fatalf("ResumeFromEvent = %d, want 9", record.ResumeFromEvent)
+	}
+	if record.ResumeReason != "resume-after-crash" {
+		t.Fatalf("ResumeReason = %q", record.ResumeReason)
+	}
+}

@@ -10,13 +10,16 @@ import (
 )
 
 type RunRecord struct {
-	RunID       string
-	ThreadID    string
-	AssistantID string
-	Status      string
-	Error       string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	RunID           string
+	ThreadID        string
+	AssistantID     string
+	Attempt         int
+	ResumeFromEvent int
+	ResumeReason    string
+	Status          string
+	Error           string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 type SessionSnapshot struct {
@@ -33,12 +36,12 @@ type PreflightRuntime interface {
 }
 
 type PreflightInput struct {
-	RouteThreadID     string
-	RequestedThreadID string
+	RouteThreadID      string
+	RequestedThreadID  string
 	RequestedThreadIDX string
-	AssistantID       string
-	AssistantIDX      string
-	NewMessages       []models.Message
+	AssistantID        string
+	AssistantIDX       string
+	NewMessages        []models.Message
 }
 
 type PreflightResult struct {
@@ -101,6 +104,7 @@ func (s PreflightService) Prepare(input PreflightInput) PreflightResult {
 		RunID:       runID,
 		ThreadID:    threadID,
 		AssistantID: assistantID,
+		Attempt:     1,
 		Status:      "running",
 		CreatedAt:   now,
 		UpdatedAt:   now,
