@@ -80,9 +80,6 @@ func TestCoordinatorUsesInjectedDispatcher(t *testing.T) {
 	if !dispatcher.called {
 		t.Fatal("dispatcher was not called")
 	}
-	if dispatcher.req.Runtime != nil {
-		t.Fatalf("dispatcher runtime = %#v, want nil", dispatcher.req.Runtime)
-	}
 	if dispatcher.plan.ThreadID != "thread-1" || dispatcher.plan.AssistantID != "lead_agent" {
 		t.Fatalf("dispatcher plan = %#v", dispatcher.plan)
 	}
@@ -114,9 +111,6 @@ func TestCoordinatorSubmitUsesInjectedDispatcher(t *testing.T) {
 	}
 	if !dispatcher.called {
 		t.Fatal("dispatcher was not called")
-	}
-	if dispatcher.req.Runtime != nil {
-		t.Fatalf("dispatcher runtime = %#v, want nil", dispatcher.req.Runtime)
 	}
 	if prepared == nil || prepared.Execution == nil || prepared.Lifecycle == nil {
 		t.Fatalf("prepared = %#v", prepared)

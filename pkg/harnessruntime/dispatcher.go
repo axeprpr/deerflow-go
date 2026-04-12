@@ -7,8 +7,7 @@ import (
 )
 
 type DispatchRequest struct {
-	Runtime *harness.Runtime
-	Plan    RunPlan
+	Plan RunPlan
 }
 
 type DispatchResult struct {
@@ -30,6 +29,7 @@ const (
 type DispatchConfig struct {
 	Topology DispatchTopology
 	Executor RunExecutor
+	Runtime  func() *harness.Runtime
 	Queue    DispatchQueue
 	Buffer   int
 	Workers  int
@@ -48,13 +48,17 @@ func NewInProcessRunDispatcher() RunDispatcher {
 }
 
 func NewRuntimeDispatcher(config DispatchConfig) RunDispatcher {
+	executor := config.Executor
+	if executor == nil && config.Runtime != nil {
+		executor = NewRuntimeWorkerSource(config.Runtime)
+	}
 	switch config.Topology {
 	case DispatchTopologyDirect:
-		return directRunDispatcher{executor: config.Executor}
+		return directRunDispatcher{executor: executor}
 	default:
 		queue := config.Queue
 		if queue == nil {
-			queue = NewInProcessRunQueue(config.Executor, config.Buffer, config.Workers)
+			queue = NewInProcessRunQueue(executor, config.Buffer, config.Workers)
 		}
 		return NewQueuedRunDispatcher(queue)
 	}
