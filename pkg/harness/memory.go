@@ -41,6 +41,13 @@ func (m *MemoryRuntime) Enabled() bool {
 	return m != nil && m.store != nil
 }
 
+func (m *MemoryRuntime) SetUpdater(updater MemoryUpdater) {
+	if m == nil || updater == nil {
+		return
+	}
+	m.updater = updater
+}
+
 func (m *MemoryRuntime) Store() pkgmemory.Storage {
 	if m == nil {
 		return nil
@@ -87,6 +94,17 @@ func (m *MemoryRuntime) SaveDocument(ctx context.Context, doc pkgmemory.Document
 func (m *MemoryRuntime) SaveScopeDocument(ctx context.Context, scope pkgmemory.Scope, doc pkgmemory.Document) error {
 	doc.SessionID = scope.Key()
 	return m.SaveDocument(ctx, doc)
+}
+
+func (m *MemoryRuntime) Update(ctx context.Context, sessionID string, messages []models.Message) error {
+	if m == nil || m.service == nil || !m.Enabled() {
+		return nil
+	}
+	return m.service.Update(ctx, sessionID, messages)
+}
+
+func (m *MemoryRuntime) UpdateScope(ctx context.Context, scope pkgmemory.Scope, messages []models.Message) error {
+	return m.Update(ctx, scope.Key(), messages)
 }
 
 func (m *MemoryRuntime) Inject(ctx context.Context, sessionID, currentContext string) string {

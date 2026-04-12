@@ -9,11 +9,21 @@ import (
 // not wire MemoryRuntime directly.
 type MemoryService struct {
 	runtime *harness.MemoryRuntime
+	queue   *InProcessMemoryUpdateQueue
 }
 
 func NewMemoryService(store pkgmemory.Storage, extractor pkgmemory.Extractor) *MemoryService {
+	runtime := harness.NewMemoryRuntime(store, extractor)
+	service := &MemoryService{
+		runtime: runtime,
+	}
+	if runtime != nil && runtime.Enabled() {
+		service.queue = NewInProcessMemoryUpdateQueue(NewRuntimeMemoryUpdateExecutor(runtime), 0, 0)
+		runtime.SetUpdater(NewQueuedMemoryUpdater(service.queue))
+	}
 	return &MemoryService{
-		runtime: harness.NewMemoryRuntime(store, extractor),
+		runtime: service.runtime,
+		queue:   service.queue,
 	}
 }
 
@@ -37,4 +47,11 @@ func (s *MemoryService) Store() pkgmemory.Storage {
 
 func (s *MemoryService) ScopeKey(scope pkgmemory.Scope) string {
 	return scope.Key()
+}
+
+func (s *MemoryService) Close() error {
+	if s == nil || s.queue == nil {
+		return nil
+	}
+	return s.queue.Close()
 }

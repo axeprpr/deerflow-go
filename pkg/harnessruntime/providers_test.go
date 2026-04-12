@@ -332,6 +332,9 @@ func TestMemoryServiceBuildsHarnessRuntime(t *testing.T) {
 	if service.Store() == nil {
 		t.Fatalf("Store() = nil")
 	}
+	if service.Runtime().Updater() == nil {
+		t.Fatalf("Updater() = nil")
+	}
 }
 
 func TestCompletionServiceAppliesTitleAndInterruptState(t *testing.T) {
