@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -33,12 +34,12 @@ func (s *Server) handleGatewayThreadDelete(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := os.RemoveAll(s.threadRoot(threadID)); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to delete local thread data"})
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "Failed to delete local thread data."})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success": true,
-		"message": "local thread data deleted",
+		"message": "Deleted local thread data for " + threadID,
 	})
 }
 
@@ -59,7 +60,7 @@ func (s *Server) handleUploadsCreate(w http.ResponseWriter, r *http.Request) {
 
 	files := r.MultipartForm.File["files"]
 	if len(files) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "no files uploaded"})
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "No files provided"})
 		return
 	}
 
@@ -73,7 +74,7 @@ func (s *Server) handleUploadsCreate(w http.ResponseWriter, r *http.Request) {
 	for _, fh := range files {
 		info, err := s.saveUploadedFile(threadID, uploadDir, fh)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": err.Error()})
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "Failed to upload " + fh.Filename + ": " + err.Error()})
 			return
 		}
 		infos = append(infos, info)
@@ -82,7 +83,7 @@ func (s *Server) handleUploadsCreate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success": true,
 		"files":   infos,
-		"message": "files uploaded",
+		"message": "Successfully uploaded " + strconv.Itoa(len(infos)) + " file(s)",
 	})
 }
 
@@ -103,21 +104,30 @@ func (s *Server) handleUploadsList(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUploadsDelete(w http.ResponseWriter, r *http.Request) {
 	threadID := strings.TrimSpace(r.PathValue("thread_id"))
-	filename := sanitizeFilename(r.PathValue("filename"))
+	rawFilename := strings.TrimSpace(r.PathValue("filename"))
+	filename := sanitizeFilename(rawFilename)
 	if threadID == "" || filename == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid request"})
 		return
 	}
+	if rawFilename != filename || strings.Contains(rawFilename, "/") || strings.Contains(rawFilename, "\\") || strings.Contains(rawFilename, "..") {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "Invalid path"})
+		return
+	}
 
 	target := filepath.Join(s.uploadsDir(threadID), filename)
-	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to delete file"})
+	if err := os.Remove(target); err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusNotFound, map[string]any{"detail": "File not found: " + filename})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "Failed to delete " + filename + ": " + err.Error()})
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success": true,
-		"message": "file deleted",
+		"message": "Deleted " + filename,
 	})
 }
 

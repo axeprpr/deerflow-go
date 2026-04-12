@@ -502,6 +502,13 @@ func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("upload status=%d body=%s", resp.StatusCode, string(b))
 	}
+	var uploadPayload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&uploadPayload); err != nil {
+		t.Fatalf("decode upload response: %v", err)
+	}
+	if uploadPayload["message"] != "Successfully uploaded 1 file(s)" {
+		t.Fatalf("upload payload=%#v", uploadPayload)
+	}
 
 	listResp, err := http.Get(ts.URL + "/api/threads/" + threadID + "/uploads/list")
 	if err != nil {
@@ -534,6 +541,46 @@ func TestUploadsAndArtifactsEndpoints(t *testing.T) {
 	artifactBody, _ := io.ReadAll(artifactResp.Body)
 	if string(artifactBody) != "hello artifact" {
 		t.Fatalf("artifact body=%q", string(artifactBody))
+	}
+}
+
+func TestUploadsCreateFailureUsesUpstreamDetail(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-upload-fail"
+	s.ensureSession(threadID, nil)
+
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(filepath.Join(uploadDir, "hello.txt"), 0o755); err != nil {
+		t.Fatalf("mkdir blocking dir: %v", err)
+	}
+
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	part, err := w.CreateFormFile("files", "hello.txt")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write([]byte("hello artifact")); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/threads/"+threadID+"/uploads", &body)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("upload request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(b), `Failed to upload hello.txt:`) {
+		t.Fatalf("body=%s", string(b))
 	}
 }
 
@@ -646,8 +693,66 @@ func TestGatewayThreadDeleteRemovesLocalData(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d", resp.StatusCode)
 	}
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode delete response: %v", err)
+	}
+	if payload["message"] != "Deleted local thread data for "+threadID {
+		t.Fatalf("payload=%#v", payload)
+	}
 	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
 		t.Fatalf("expected file removed, stat err=%v", err)
+	}
+}
+
+func TestUploadsDeleteMissingUsesUpstreamDetail(t *testing.T) {
+	_, ts := newCompatTestServer(t)
+	threadID := "thread-delete-missing-upload"
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/threads/"+threadID+"/uploads/missing.txt", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("delete request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(b), `File not found: missing.txt`) {
+		t.Fatalf("body=%s", string(b))
+	}
+}
+
+func TestUploadsDeleteFailureUsesUpstreamDetail(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	threadID := "thread-delete-upload-fail"
+	uploadDir := s.uploadsDir(threadID)
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
+		t.Fatalf("mkdir uploads: %v", err)
+	}
+	target := filepath.Join(uploadDir, "stuck.txt")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("mkdir target dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "nested"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write nested file: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/threads/"+threadID+"/uploads/stuck.txt", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("delete request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	b, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(b), `Failed to delete stuck.txt:`) {
+		t.Fatalf("body=%s", string(b))
 	}
 }
 
