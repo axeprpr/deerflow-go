@@ -402,6 +402,18 @@ func (s *Server) loadPersistedRuns() {
 		if persisted.AssistantID == "" {
 			persisted.AssistantID = stringValue(raw["assistantId"])
 		}
+		if persisted.Attempt == 0 {
+			persisted.Attempt = intValue(firstNonNil(raw["attempt"], raw["Attempt"]))
+			if persisted.Attempt == 0 {
+				persisted.Attempt = 1
+			}
+		}
+		if persisted.ResumeFromEvent == 0 {
+			persisted.ResumeFromEvent = intValue(firstNonNil(raw["resumeFromEvent"], raw["resume_from_event"], raw["ResumeFromEvent"]))
+		}
+		if persisted.ResumeReason == "" {
+			persisted.ResumeReason = stringValue(firstNonNil(raw["resumeReason"], raw["resume_reason"], raw["ResumeReason"]))
+		}
 		if persisted.CreatedAt.IsZero() {
 			persisted.CreatedAt = timeValue(firstNonNil(raw["createdAt"], raw["created_at"]))
 		}
@@ -416,13 +428,16 @@ func (s *Server) loadPersistedRuns() {
 		}
 		snapshot := harnessruntime.RunSnapshot{
 			Record: harnessruntime.RunRecord{
-				RunID:       persisted.RunID,
-				ThreadID:    persisted.ThreadID,
-				AssistantID: persisted.AssistantID,
-				Status:      persisted.Status,
-				CreatedAt:   persisted.CreatedAt,
-				UpdatedAt:   persisted.UpdatedAt,
-				Error:       persisted.Error,
+				RunID:           persisted.RunID,
+				ThreadID:        persisted.ThreadID,
+				AssistantID:     persisted.AssistantID,
+				Attempt:         persisted.Attempt,
+				ResumeFromEvent: persisted.ResumeFromEvent,
+				ResumeReason:    persisted.ResumeReason,
+				Status:          persisted.Status,
+				CreatedAt:       persisted.CreatedAt,
+				UpdatedAt:       persisted.UpdatedAt,
+				Error:           persisted.Error,
 			},
 			Events: persisted.Events,
 		}

@@ -20,14 +20,17 @@ type persistedThreadSession struct {
 }
 
 type persistedThreadRun struct {
-	RunID       string                    `json:"run_id"`
-	ThreadID    string                    `json:"thread_id"`
-	AssistantID string                    `json:"assistant_id"`
-	Status      string                    `json:"status"`
-	CreatedAt   time.Time                 `json:"created_at"`
-	UpdatedAt   time.Time                 `json:"updated_at"`
-	Events      []harnessruntime.RunEvent `json:"events"`
-	Error       string                    `json:"error,omitempty"`
+	RunID           string                    `json:"run_id"`
+	ThreadID        string                    `json:"thread_id"`
+	AssistantID     string                    `json:"assistant_id"`
+	Attempt         int                       `json:"attempt,omitempty"`
+	ResumeFromEvent int                       `json:"resume_from_event,omitempty"`
+	ResumeReason    string                    `json:"resume_reason,omitempty"`
+	Status          string                    `json:"status"`
+	CreatedAt       time.Time                 `json:"created_at"`
+	UpdatedAt       time.Time                 `json:"updated_at"`
+	Events          []harnessruntime.RunEvent `json:"events"`
+	Error           string                    `json:"error,omitempty"`
 }
 
 func (s *Server) threadStatePath(threadID string) string {
@@ -77,14 +80,17 @@ func (s *Server) persistRunSnapshot(snapshot harnessruntime.RunSnapshot) error {
 		return err
 	}
 	data, err := json.MarshalIndent(persistedThreadRun{
-		RunID:       run.RunID,
-		ThreadID:    run.ThreadID,
-		AssistantID: run.AssistantID,
-		Status:      run.Status,
-		CreatedAt:   run.CreatedAt,
-		UpdatedAt:   run.UpdatedAt,
-		Events:      snapshot.Events,
-		Error:       run.Error,
+		RunID:           run.RunID,
+		ThreadID:        run.ThreadID,
+		AssistantID:     run.AssistantID,
+		Attempt:         run.Attempt,
+		ResumeFromEvent: run.ResumeFromEvent,
+		ResumeReason:    run.ResumeReason,
+		Status:          run.Status,
+		CreatedAt:       run.CreatedAt,
+		UpdatedAt:       run.UpdatedAt,
+		Events:          snapshot.Events,
+		Error:           run.Error,
 	}, "", "  ")
 	if err != nil {
 		return err

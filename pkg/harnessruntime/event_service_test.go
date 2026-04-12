@@ -49,3 +49,30 @@ func TestEventLogServiceFallsBackWithoutRuntime(t *testing.T) {
 		t.Fatalf("event.ID = %q, want run-1:1", event.ID)
 	}
 }
+
+func TestEventLogServiceRecordWithContextPreservesRecoveryMetadata(t *testing.T) {
+	runtime := &fakeEventLogRuntime{nextIndex: 2}
+	service := NewEventLogService(runtime)
+
+	event := service.RecordWithContext(RunEventContext{
+		Attempt:         3,
+		ResumeFromEvent: 7,
+		ResumeReason:    "replay",
+	}, "run-1", "thread-1", "updates", map[string]any{"ok": true})
+
+	if event.Attempt != 3 {
+		t.Fatalf("event.Attempt = %d, want 3", event.Attempt)
+	}
+	if event.ResumeFromEvent != 7 {
+		t.Fatalf("event.ResumeFromEvent = %d, want 7", event.ResumeFromEvent)
+	}
+	if event.ResumeReason != "replay" {
+		t.Fatalf("event.ResumeReason = %q, want replay", event.ResumeReason)
+	}
+	if len(runtime.events) != 1 {
+		t.Fatalf("events = %d, want 1", len(runtime.events))
+	}
+	if runtime.events[0].Attempt != 3 || runtime.events[0].ResumeFromEvent != 7 || runtime.events[0].ResumeReason != "replay" {
+		t.Fatalf("saved event = %#v", runtime.events[0])
+	}
+}

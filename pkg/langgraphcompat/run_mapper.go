@@ -76,20 +76,26 @@ func applyRunRecord(run *Run, record harnessruntime.RunRecord) {
 
 func streamEventFromRuntimeEvent(event harnessruntime.RunEvent) StreamEvent {
 	return StreamEvent{
-		ID:       event.ID,
-		Event:    event.Event,
-		Data:     event.Data,
-		RunID:    event.RunID,
-		ThreadID: event.ThreadID,
+		ID:              event.ID,
+		Event:           event.Event,
+		Data:            event.Data,
+		RunID:           event.RunID,
+		ThreadID:        event.ThreadID,
+		Attempt:         event.Attempt,
+		ResumeFromEvent: event.ResumeFromEvent,
+		ResumeReason:    event.ResumeReason,
 	}
 }
 
 func runtimeEventFromStreamEvent(event StreamEvent) harnessruntime.RunEvent {
 	return harnessruntime.RunEvent{
-		ID:       event.ID,
-		Event:    event.Event,
-		Data:     event.Data,
-		RunID:    event.RunID,
-		ThreadID: event.ThreadID,
+		ID:              event.ID,
+		Event:           event.Event,
+		Data:            event.Data,
+		RunID:           event.RunID,
+		ThreadID:        event.ThreadID,
+		Attempt:         event.Attempt,
+		ResumeFromEvent: event.ResumeFromEvent,
+		ResumeReason:    event.ResumeReason,
 	}
 }

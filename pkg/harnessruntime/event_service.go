@@ -2,12 +2,21 @@ package harnessruntime
 
 import "fmt"
 
+type RunEventContext struct {
+	Attempt         int
+	ResumeFromEvent int
+	ResumeReason    string
+}
+
 type RunEvent struct {
-	ID       string
-	Event    string
-	Data     any
-	RunID    string
-	ThreadID string
+	ID              string
+	Event           string
+	Data            any
+	RunID           string
+	ThreadID        string
+	Attempt         int
+	ResumeFromEvent int
+	ResumeReason    string
 }
 
 type EventLogService struct {
@@ -19,11 +28,18 @@ func NewEventLogService(store RunEventRecorder) EventLogService {
 }
 
 func (s EventLogService) Record(runID string, threadID string, eventType string, data any) RunEvent {
+	return s.RecordWithContext(RunEventContext{}, runID, threadID, eventType, data)
+}
+
+func (s EventLogService) RecordWithContext(ctx RunEventContext, runID string, threadID string, eventType string, data any) RunEvent {
 	event := RunEvent{
-		Event:    eventType,
-		Data:     data,
-		RunID:    runID,
-		ThreadID: threadID,
+		Event:           eventType,
+		Data:            data,
+		RunID:           runID,
+		ThreadID:        threadID,
+		Attempt:         ctx.Attempt,
+		ResumeFromEvent: ctx.ResumeFromEvent,
+		ResumeReason:    ctx.ResumeReason,
 	}
 	if s.store == nil {
 		event.ID = fmt.Sprintf("%s:%d", runID, 1)

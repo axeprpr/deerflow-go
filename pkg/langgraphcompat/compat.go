@@ -170,11 +170,14 @@ type ToolCall struct {
 }
 
 type StreamEvent struct {
-	ID       string
-	Event    string
-	Data     any
-	RunID    string
-	ThreadID string
+	ID              string
+	Event           string
+	Data            any
+	RunID           string
+	ThreadID        string
+	Attempt         int    `json:"-"`
+	ResumeFromEvent int    `json:"-"`
+	ResumeReason    string `json:"-"`
 }
 
 type ServerOption func(*Server)

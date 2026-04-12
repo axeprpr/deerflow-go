@@ -50,7 +50,11 @@ func (s *Server) recordRunEvent(run *Run, eventType string, data any) StreamEven
 	if run == nil {
 		return StreamEvent{}
 	}
-	event := harnessruntime.NewEventLogService(s.runtimeEventAdapter()).Record(run.RunID, run.ThreadID, eventType, data)
+	event := harnessruntime.NewEventLogService(s.runtimeEventAdapter()).RecordWithContext(harnessruntime.RunEventContext{
+		Attempt:         run.Attempt,
+		ResumeFromEvent: run.ResumeFromEvent,
+		ResumeReason:    run.ResumeReason,
+	}, run.RunID, run.ThreadID, eventType, data)
 	return streamEventFromRuntimeEvent(event)
 }
 

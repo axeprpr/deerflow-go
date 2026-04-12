@@ -18,18 +18,24 @@ func TestLocalRunSnapshotStorePersistsAndLoadsSnapshots(t *testing.T) {
 
 	snapshot := harnessruntime.RunSnapshot{
 		Record: harnessruntime.RunRecord{
-			RunID:       "run-1",
-			ThreadID:    "thread-1",
-			AssistantID: "lead_agent",
-			Status:      "running",
-			CreatedAt:   time.Now().UTC().Add(-time.Minute),
-			UpdatedAt:   time.Now().UTC().Add(-time.Minute),
+			RunID:           "run-1",
+			ThreadID:        "thread-1",
+			AssistantID:     "lead_agent",
+			Attempt:         2,
+			ResumeFromEvent: 9,
+			ResumeReason:    "resume-after-reconnect",
+			Status:          "running",
+			CreatedAt:       time.Now().UTC().Add(-time.Minute),
+			UpdatedAt:       time.Now().UTC().Add(-time.Minute),
 		},
 		Events: []harnessruntime.RunEvent{{
-			ID:       "run-1:1",
-			Event:    "metadata",
-			RunID:    "run-1",
-			ThreadID: "thread-1",
+			ID:              "run-1:1",
+			Event:           "metadata",
+			RunID:           "run-1",
+			ThreadID:        "thread-1",
+			Attempt:         2,
+			ResumeFromEvent: 9,
+			ResumeReason:    "resume-after-reconnect",
 		}},
 	}
 
@@ -42,8 +48,14 @@ func TestLocalRunSnapshotStorePersistsAndLoadsSnapshots(t *testing.T) {
 	if loaded.Record.RunID != "run-1" || loaded.Record.ThreadID != "thread-1" {
 		t.Fatalf("loaded record = %#v", loaded.Record)
 	}
+	if loaded.Record.Attempt != 2 || loaded.Record.ResumeFromEvent != 9 || loaded.Record.ResumeReason != "resume-after-reconnect" {
+		t.Fatalf("loaded recovery metadata = %#v", loaded.Record)
+	}
 	if len(loaded.Events) != 1 || loaded.Events[0].Event != "metadata" {
 		t.Fatalf("loaded events = %#v", loaded.Events)
+	}
+	if loaded.Events[0].Attempt != 2 || loaded.Events[0].ResumeFromEvent != 9 || loaded.Events[0].ResumeReason != "resume-after-reconnect" {
+		t.Fatalf("loaded event recovery metadata = %#v", loaded.Events[0])
 	}
 
 	data, err := os.ReadFile(server.runStatePath("run-1"))
@@ -52,6 +64,9 @@ func TestLocalRunSnapshotStorePersistsAndLoadsSnapshots(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"run_id": "run-1"`) {
 		t.Fatalf("persisted run file missing run id: %s", string(data))
+	}
+	if !strings.Contains(string(data), `"attempt": 2`) {
+		t.Fatalf("persisted run file missing attempt: %s", string(data))
 	}
 }
 
