@@ -104,6 +104,10 @@ func clearSessionCheckpoint(session *Session) {
 }
 
 func (s *Server) markThreadStatus(threadID string, status string) {
+	if store := s.ensureThreadStateStore(); store != nil {
+		store.MarkThreadStatus(threadID, status)
+		return
+	}
 	s.sessionsMu.Lock()
 	defer s.sessionsMu.Unlock()
 	if session, exists := s.sessions[threadID]; exists {
@@ -114,6 +118,10 @@ func (s *Server) markThreadStatus(threadID string, status string) {
 }
 
 func (s *Server) setThreadMetadata(threadID string, key string, value any) {
+	if store := s.ensureThreadStateStore(); store != nil {
+		store.SetThreadMetadata(threadID, key, value)
+		return
+	}
 	s.sessionsMu.Lock()
 	defer s.sessionsMu.Unlock()
 	if session, exists := s.sessions[threadID]; exists {
@@ -127,6 +135,10 @@ func (s *Server) setThreadMetadata(threadID string, key string, value any) {
 }
 
 func (s *Server) deleteThreadMetadata(threadID string, key string) {
+	if store := s.ensureThreadStateStore(); store != nil {
+		store.ClearThreadMetadata(threadID, key)
+		return
+	}
 	s.sessionsMu.Lock()
 	defer s.sessionsMu.Unlock()
 	if session, exists := s.sessions[threadID]; exists {

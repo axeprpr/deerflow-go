@@ -49,6 +49,7 @@ type Server struct {
 	runRegistry      *runRegistry
 	snapshotStore    harnessruntime.RunSnapshotStore
 	eventStore       harnessruntime.RunEventStore
+	threadStateStore harnessruntime.ThreadStateStore
 	dataRoot         string
 	uiStateMu        sync.RWMutex
 	models           map[string]gatewayModel
@@ -233,6 +234,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	}
 	s.snapshotStore = newCompatRunStateStore(s)
 	s.eventStore = s.snapshotStore.(harnessruntime.RunEventStore)
+	s.threadStateStore = newCompatThreadStateStore(s)
 	var memoryRuntime *harness.MemoryRuntime
 	if store, err := memory.NewFileStore(filepath.Join(dataRootAbs, "memory")); err == nil {
 		if migrateErr := store.AutoMigrate(ctx); migrateErr != nil {
