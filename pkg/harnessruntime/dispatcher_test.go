@@ -102,6 +102,19 @@ func TestRuntimeDispatcherQueuedTopologyDefaultsToWorkerQueue(t *testing.T) {
 	}
 }
 
+func TestRuntimeDispatcherRemoteTopologyRequiresEndpoint(t *testing.T) {
+	dispatcher := NewRuntimeDispatcher(DispatchConfig{
+		Topology: DispatchTopologyRemote,
+	})
+
+	_, err := dispatcher.Dispatch(context.Background(), DispatchRequest{
+		Plan: WorkerExecutionPlan{ThreadID: "thread-remote"},
+	})
+	if err == nil || err.Error() != "remote worker endpoint is required" {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+}
+
 func TestRuntimeDispatcherUsesEnvelopeCodec(t *testing.T) {
 	executor := &fakeExecutor{}
 	codec := &fakePlanCodec{}

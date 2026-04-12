@@ -24,10 +24,12 @@ type DispatchTopology string
 const (
 	DispatchTopologyDirect DispatchTopology = "direct"
 	DispatchTopologyQueued DispatchTopology = "queued"
+	DispatchTopologyRemote DispatchTopology = "remote"
 )
 
 type DispatchConfig struct {
 	Topology  DispatchTopology
+	Endpoint  string
 	Executor  RunExecutor
 	Runtime   func() *harness.Runtime
 	Specs     WorkerSpecRuntime
@@ -47,22 +49,9 @@ func NewInProcessRunDispatcher() RunDispatcher {
 }
 
 func NewRuntimeDispatcher(config DispatchConfig) RunDispatcher {
-	executor := config.Executor
-	if executor == nil && config.Runtime != nil {
-		executor = NewRuntimeWorkerSource(config.Runtime, config.Specs)
-	}
+	config.Topology = normalizeDispatchTopology(config)
 	codec := DispatchEnvelopeCodec{Plans: config.Codec}
-	transport := config.Transport
-	switch config.Topology {
-	case DispatchTopologyDirect:
-		if transport == nil {
-			transport = NewDirectWorkerTransport(executor, codec)
-		}
-	default:
-		if transport == nil {
-			transport = NewInProcessRunQueueWithCodec(executor, config.Buffer, config.Workers, config.Codec)
-		}
-	}
+	transport := buildWorkerTransport(config)
 	return transportRunDispatcher{transport: transport, codec: codec}
 }
 
