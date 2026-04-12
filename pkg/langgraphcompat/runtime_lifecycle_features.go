@@ -11,21 +11,17 @@ import (
 )
 
 func (s *Server) runtimeProfileConfig(memoryRuntime *harness.MemoryRuntime) harnessruntime.ProfileConfig {
-	return harnessruntime.ProfileConfig{
-		Features: harnessruntime.FeatureConfig{
-			ClarificationEnabled: s != nil && s.clarify != nil,
-			MemoryEnabled:        memoryRuntime != nil && memoryRuntime.Enabled(),
-			SummarizationEnabled: true,
-			TitleEnabled:         false,
-		},
-		Lifecycle: harnessruntime.LifecycleConfig{
-			SummaryMetadataKey:   historySummaryMetadataKey,
-			MemorySessionKey:     "memory_session_id",
-			InterruptMetadataKey: "clarification_interrupt",
-			TitleMetadataKey:     "generated_title",
-		},
-		RunPolicy: harnessruntime.NewDefaultRunPolicy(),
-	}
+	config := harnessruntime.ProfilePreset(s.runtimeExecutionMode(), harnessruntime.ProfilePresetOptions{
+		ClarificationEnabled: s != nil && s.clarify != nil,
+		MemoryEnabled:        memoryRuntime != nil && memoryRuntime.Enabled(),
+		TitleEnabled:         false,
+	})
+	config.Lifecycle.SummaryMetadataKey = historySummaryMetadataKey
+	return config
+}
+
+func (s *Server) runtimeExecutionMode() harnessruntime.ExecutionMode {
+	return harnessruntime.ExecutionModeInteractive
 }
 
 func (s *Server) beforeRunSummarizationFeature(ctx context.Context, state *harness.RunState) error {
