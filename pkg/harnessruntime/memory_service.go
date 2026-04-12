@@ -1,8 +1,8 @@
 package harnessruntime
 
 import (
-	pkgmemory "github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
+	pkgmemory "github.com/axeprpr/deerflow-go/pkg/memory"
 )
 
 // MemoryService owns runtime-facing memory construction so compat layers do
@@ -33,4 +33,8 @@ func (s *MemoryService) Store() pkgmemory.Storage {
 		return nil
 	}
 	return s.runtime.Store()
+}
+
+func (s *MemoryService) ScopeKey(scope pkgmemory.Scope) string {
+	return scope.Key()
 }

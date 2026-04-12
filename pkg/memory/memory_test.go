@@ -68,6 +68,34 @@ func TestMerge(t *testing.T) {
 	}
 }
 
+func TestScopeKeyPreservesLegacySessionIDs(t *testing.T) {
+	t.Parallel()
+
+	scope := SessionScope("thread-1")
+	if got := scope.Key(); got != "thread-1" {
+		t.Fatalf("Key() = %q, want %q", got, "thread-1")
+	}
+	parsed := ParseScopeKey("thread-1")
+	if parsed.Type != ScopeSession || parsed.ID != "thread-1" || parsed.Namespace != "" {
+		t.Fatalf("ParseScopeKey() = %+v", parsed)
+	}
+}
+
+func TestScopeKeyEncodesNonSessionScopes(t *testing.T) {
+	t.Parallel()
+
+	scope := GroupScope("workspace/a")
+	scope.Namespace = "project"
+	key := scope.Key()
+	if !strings.HasPrefix(key, "__scope__:") {
+		t.Fatalf("Key() = %q", key)
+	}
+	parsed := ParseScopeKey(key)
+	if parsed.Type != ScopeGroup || parsed.ID != "workspace/a" || parsed.Namespace != "project" {
+		t.Fatalf("ParseScopeKey() = %+v", parsed)
+	}
+}
+
 func TestServiceUpdateAndInject(t *testing.T) {
 	t.Parallel()
 

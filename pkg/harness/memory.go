@@ -56,11 +56,20 @@ func (m *MemoryRuntime) LoadDocument(ctx context.Context, sessionID string) (pkg
 	return doc, true, nil
 }
 
+func (m *MemoryRuntime) LoadScopeDocument(ctx context.Context, scope pkgmemory.Scope) (pkgmemory.Document, bool, error) {
+	return m.LoadDocument(ctx, scope.Key())
+}
+
 func (m *MemoryRuntime) SaveDocument(ctx context.Context, doc pkgmemory.Document) error {
 	if !m.Enabled() {
 		return nil
 	}
 	return m.store.Save(ctx, doc)
+}
+
+func (m *MemoryRuntime) SaveScopeDocument(ctx context.Context, scope pkgmemory.Scope, doc pkgmemory.Document) error {
+	doc.SessionID = scope.Key()
+	return m.SaveDocument(ctx, doc)
 }
 
 func (m *MemoryRuntime) Inject(ctx context.Context, sessionID, currentContext string) string {
@@ -70,9 +79,17 @@ func (m *MemoryRuntime) Inject(ctx context.Context, sessionID, currentContext st
 	return m.service.InjectWithContext(ctx, sessionID, currentContext)
 }
 
+func (m *MemoryRuntime) InjectScope(ctx context.Context, scope pkgmemory.Scope, currentContext string) string {
+	return m.Inject(ctx, scope.Key(), currentContext)
+}
+
 func (m *MemoryRuntime) ScheduleUpdate(sessionID string, messages []models.Message) {
 	if m == nil || m.service == nil || !m.Enabled() {
 		return
 	}
 	m.service.ScheduleUpdate(sessionID, messages)
+}
+
+func (m *MemoryRuntime) ScheduleScopeUpdate(scope pkgmemory.Scope, messages []models.Message) {
+	m.ScheduleUpdate(scope.Key(), messages)
 }

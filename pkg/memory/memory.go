@@ -112,6 +112,10 @@ func (s *Service) Load(ctx context.Context, sessionID string) (Document, error) 
 	return s.storage.Load(ctx, sessionID)
 }
 
+func (s *Service) LoadScope(ctx context.Context, scope Scope) (Document, error) {
+	return s.Load(ctx, scope.Key())
+}
+
 func (s *Service) Update(ctx context.Context, sessionID string, messages []models.Message) error {
 	if s == nil {
 		return errors.New("memory service is nil")
@@ -148,6 +152,10 @@ func (s *Service) Update(ctx context.Context, sessionID string, messages []model
 	return s.storage.Save(ctx, merged)
 }
 
+func (s *Service) UpdateScope(ctx context.Context, scope Scope, messages []models.Message) error {
+	return s.Update(ctx, scope.Key(), messages)
+}
+
 // ScheduleUpdate runs memory extraction in the background and never propagates errors.
 func (s *Service) ScheduleUpdate(sessionID string, messages []models.Message) {
 	if s == nil || s.storage == nil || s.extractor == nil || len(messages) == 0 {
@@ -174,6 +182,10 @@ func (s *Service) Inject(ctx context.Context, sessionID string) string {
 	return s.InjectWithContext(ctx, sessionID, "")
 }
 
+func (s *Service) InjectScope(ctx context.Context, scope Scope) string {
+	return s.InjectScopeWithContext(ctx, scope, "")
+}
+
 func (s *Service) InjectWithContext(ctx context.Context, sessionID string, currentContext string) string {
 	if s == nil || s.storage == nil || strings.TrimSpace(sessionID) == "" {
 		return ""
@@ -187,6 +199,10 @@ func (s *Service) InjectWithContext(ctx context.Context, sessionID string, curre
 		return ""
 	}
 	return BuildInjectionWithContext(doc, currentContext, 2000)
+}
+
+func (s *Service) InjectScopeWithContext(ctx context.Context, scope Scope, currentContext string) string {
+	return s.InjectWithContext(ctx, scope.Key(), currentContext)
 }
 
 func Merge(current Document, update Update, sessionID string, now time.Time) Document {
