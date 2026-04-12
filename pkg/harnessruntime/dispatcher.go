@@ -20,19 +20,22 @@ type RunDispatcher interface {
 	Dispatch(context.Context, DispatchRequest) (*DispatchResult, error)
 }
 
-type InProcessRunDispatcher struct{}
-
-func NewInProcessRunDispatcher() RunDispatcher {
-	return InProcessRunDispatcher{}
+type queuedRunDispatcher struct {
+	queue DispatchQueue
 }
 
-func (InProcessRunDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (*DispatchResult, error) {
-	prepared, err := NewOrchestrator(req.Runtime).Prepare(ctx, req.Plan)
-	if err != nil {
-		return nil, err
+func NewInProcessRunDispatcher() RunDispatcher {
+	return NewQueuedRunDispatcher(nil)
+}
+
+func NewQueuedRunDispatcher(queue DispatchQueue) RunDispatcher {
+	return queuedRunDispatcher{queue: queue}
+}
+
+func (d queuedRunDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (*DispatchResult, error) {
+	queue := d.queue
+	if queue == nil {
+		queue = NewInlineDispatchQueue(nil)
 	}
-	return &DispatchResult{
-		Lifecycle: prepared.Lifecycle,
-		Execution: prepared.Execution,
-	}, nil
+	return queue.Submit(ctx, req)
 }
