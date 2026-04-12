@@ -39,7 +39,7 @@ func (d *fakeDispatcher) Dispatch(_ context.Context, req DispatchRequest) (*Disp
 			Messages:         append([]models.Message(nil), req.Plan.Messages...),
 			Metadata:         map[string]any{},
 		},
-		Execution: &harness.Execution{},
+		Handle: NewStaticExecutionHandle(&harness.Execution{}),
 	}, nil
 }
 
@@ -123,8 +123,11 @@ func TestCoordinatorSubmitUsesInjectedDispatcher(t *testing.T) {
 	if !dispatcher.called {
 		t.Fatal("dispatcher was not called")
 	}
-	if prepared == nil || prepared.Execution == nil || prepared.Lifecycle == nil {
+	if prepared == nil || prepared.Handle == nil || prepared.Lifecycle == nil {
 		t.Fatalf("prepared = %#v", prepared)
+	}
+	if _, err := prepared.Handle.Resolve(); err != nil {
+		t.Fatalf("prepared.Handle.Resolve() error = %v", err)
 	}
 	if dispatcher.plan.ThreadID != "thread-1" || dispatcher.plan.AssistantID != "lead_agent" {
 		t.Fatalf("dispatcher plan = %#v", dispatcher.plan)

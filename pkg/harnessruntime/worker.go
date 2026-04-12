@@ -42,6 +42,6 @@ func (w RuntimeWorker) execute(ctx context.Context, req DispatchRequest) (*Dispa
 	}
 	return &DispatchResult{
 		Lifecycle: prepared.Lifecycle,
-		Execution: prepared.Execution,
+		Handle:    NewStaticExecutionHandle(prepared.Execution),
 	}, nil
 }

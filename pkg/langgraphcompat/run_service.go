@@ -2,6 +2,7 @@ package langgraphcompat
 
 import (
 	"context"
+	"errors"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
@@ -109,7 +110,10 @@ func (s *Server) buildRunExecution(ctx context.Context, prepared *preparedRunReq
 	}
 	prepared.Lifecycle = orchestrated.Lifecycle
 	prepared.Messages = append([]models.Message(nil), orchestrated.Lifecycle.Messages...)
-	return orchestrated.Execution, nil
+	if orchestrated.Handle == nil {
+		return nil, errors.New("execution handle is unavailable")
+	}
+	return orchestrated.Handle.Resolve()
 }
 
 func (s *Server) bindRunContext(ctx context.Context, threadID string, taskSink func(subagent.TaskEvent), clarificationSink func(*clarification.Clarification)) context.Context {

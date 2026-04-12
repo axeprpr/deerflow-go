@@ -32,7 +32,7 @@ type PreparedRun struct {
 	Messages         []models.Message
 	Lifecycle        *harness.RunState
 	Run              RunRecord
-	Execution        *harness.Execution
+	Execution        ExecutionHandle
 }
 
 type CompletionResult struct {
@@ -78,7 +78,7 @@ func (c Coordinator) Prepare(ctx context.Context, input PreflightInput, plan Run
 		Messages:         append([]models.Message(nil), orchestrated.Lifecycle.Messages...),
 		Lifecycle:        orchestrated.Lifecycle,
 		Run:              preflight.Run,
-		Execution:        orchestrated.Execution,
+		Execution:        orchestrated.Handle,
 	}, nil
 }
 
