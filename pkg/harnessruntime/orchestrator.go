@@ -2,6 +2,7 @@ package harnessruntime
 
 import (
 	"context"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -10,6 +11,11 @@ import (
 type RunPlan struct {
 	ThreadID         string
 	AssistantID      string
+	RunID            string
+	SubmittedAt      time.Time
+	Attempt          int
+	ResumeFromEvent  int
+	ResumeReason     string
 	Model            string
 	AgentName        string
 	Spec             harness.AgentSpec
@@ -20,6 +26,11 @@ type RunPlan struct {
 type WorkerExecutionPlan struct {
 	ThreadID         string
 	AssistantID      string
+	RunID            string
+	SubmittedAt      time.Time
+	Attempt          int
+	ResumeFromEvent  int
+	ResumeReason     string
 	Model            string
 	AgentName        string
 	Spec             harness.AgentSpec
@@ -44,6 +55,11 @@ func NewWorkerExecutionPlan(plan RunPlan) WorkerExecutionPlan {
 	return WorkerExecutionPlan{
 		ThreadID:         plan.ThreadID,
 		AssistantID:      plan.AssistantID,
+		RunID:            plan.RunID,
+		SubmittedAt:      plan.SubmittedAt,
+		Attempt:          plan.Attempt,
+		ResumeFromEvent:  plan.ResumeFromEvent,
+		ResumeReason:     plan.ResumeReason,
 		Model:            plan.Model,
 		AgentName:        plan.AgentName,
 		Spec:             plan.Spec,
@@ -66,6 +82,21 @@ func (o Orchestrator) PrepareExecution(ctx context.Context, plan WorkerExecution
 		ExistingMessages: append([]models.Message(nil), plan.ExistingMessages...),
 		Messages:         append([]models.Message(nil), plan.Messages...),
 		Metadata:         map[string]any{},
+	}
+	if plan.RunID != "" {
+		lifecycle.Metadata["run_id"] = plan.RunID
+	}
+	if !plan.SubmittedAt.IsZero() {
+		lifecycle.Metadata["submitted_at"] = plan.SubmittedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if plan.Attempt > 0 {
+		lifecycle.Metadata["submission_attempt"] = plan.Attempt
+	}
+	if plan.ResumeFromEvent > 0 {
+		lifecycle.Metadata["resume_from_event_index"] = plan.ResumeFromEvent
+	}
+	if plan.ResumeReason != "" {
+		lifecycle.Metadata["resume_reason"] = plan.ResumeReason
 	}
 	if o.runtime != nil {
 		if err := o.runtime.BeforeRun(ctx, lifecycle); err != nil {

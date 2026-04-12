@@ -92,6 +92,9 @@ func (s *Server) buildRunExecution(ctx context.Context, prepared *preparedRunReq
 	orchestrated, err := s.runtimeCoordinator().Submit(ctx, harnessruntime.RunPlan{
 		ThreadID:         prepared.ThreadID,
 		AssistantID:      prepared.AssistantID,
+		RunID:            prepared.Run.RunID,
+		SubmittedAt:      prepared.Run.CreatedAt,
+		Attempt:          1,
 		Model:            agentSpec.Model,
 		AgentName:        runCfg.AgentName,
 		Spec:             agentSpec,

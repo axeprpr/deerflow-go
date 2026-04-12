@@ -442,12 +442,17 @@ func TestOrchestratorPrepareBuildsLifecycleAndExecution(t *testing.T) {
 
 	orchestrator := NewOrchestrator(nil)
 	prepared, err := orchestrator.Prepare(context.Background(), RunPlan{
-		ThreadID:    "thread-1",
-		AssistantID: "lead_agent",
-		Model:       "model-1",
-		AgentName:   "lead_agent",
-		Spec:        harness.AgentSpec{},
-		Messages:    []models.Message{{Role: models.RoleHuman, Content: "hello"}},
+		ThreadID:        "thread-1",
+		AssistantID:     "lead_agent",
+		RunID:           "run-1",
+		SubmittedAt:     time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
+		Attempt:         2,
+		ResumeFromEvent: 5,
+		ResumeReason:    "replay",
+		Model:           "model-1",
+		AgentName:       "lead_agent",
+		Spec:            harness.AgentSpec{},
+		Messages:        []models.Message{{Role: models.RoleHuman, Content: "hello"}},
 	})
 	if err != nil {
 		t.Fatalf("Prepare() error = %v", err)
@@ -457,6 +462,18 @@ func TestOrchestratorPrepareBuildsLifecycleAndExecution(t *testing.T) {
 	}
 	if prepared.Lifecycle.ThreadID != "thread-1" || prepared.Lifecycle.AssistantID != "lead_agent" {
 		t.Fatalf("lifecycle = %+v", prepared.Lifecycle)
+	}
+	if got := prepared.Lifecycle.Metadata["run_id"]; got != "run-1" {
+		t.Fatalf("run_id metadata = %#v", got)
+	}
+	if got := prepared.Lifecycle.Metadata["submission_attempt"]; got != 2 {
+		t.Fatalf("submission_attempt metadata = %#v", got)
+	}
+	if got := prepared.Lifecycle.Metadata["resume_from_event_index"]; got != 5 {
+		t.Fatalf("resume_from_event_index metadata = %#v", got)
+	}
+	if got := prepared.Lifecycle.Metadata["resume_reason"]; got != "replay" {
+		t.Fatalf("resume_reason metadata = %#v", got)
 	}
 }
 
