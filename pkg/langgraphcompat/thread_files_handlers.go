@@ -5,11 +5,11 @@ import "net/http"
 func (s *Server) handleThreadFiles(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+		writeDetailError(w, http.StatusBadRequest, "thread ID required")
 		return
 	}
 	if err := validateThreadID(threadID); err != nil {
-		http.Error(w, err.Error(), threadIDStatusCode(r))
+		writeDetailError(w, threadIDStatusCode(r), err.Error())
 		return
 	}
 
@@ -17,7 +17,7 @@ func (s *Server) handleThreadFiles(w http.ResponseWriter, r *http.Request) {
 	session, exists := s.sessions[threadID]
 	s.sessionsMu.RUnlock()
 	if !exists {
-		http.Error(w, "thread not found", http.StatusNotFound)
+		writeDetailError(w, http.StatusNotFound, "thread not found")
 		return
 	}
 

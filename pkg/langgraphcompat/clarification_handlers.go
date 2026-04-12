@@ -5,11 +5,11 @@ import "net/http"
 func (s *Server) handleThreadClarificationCreate(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+		writeDetailError(w, http.StatusBadRequest, "thread ID required")
 		return
 	}
 	if s.getThreadState(threadID) == nil {
-		http.Error(w, "thread not found", http.StatusNotFound)
+		writeDetailError(w, http.StatusNotFound, "thread not found")
 		return
 	}
 	s.clarifyAPI.HandleCreate(w, r, threadID)
@@ -18,11 +18,11 @@ func (s *Server) handleThreadClarificationCreate(w http.ResponseWriter, r *http.
 func (s *Server) handleThreadClarificationsList(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+		writeDetailError(w, http.StatusBadRequest, "thread ID required")
 		return
 	}
 	if s.getThreadState(threadID) == nil {
-		http.Error(w, "thread not found", http.StatusNotFound)
+		writeDetailError(w, http.StatusNotFound, "thread not found")
 		return
 	}
 	s.clarifyAPI.HandleList(w, r, threadID)
@@ -31,7 +31,7 @@ func (s *Server) handleThreadClarificationsList(w http.ResponseWriter, r *http.R
 func (s *Server) handleThreadClarificationGet(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+		writeDetailError(w, http.StatusBadRequest, "thread ID required")
 		return
 	}
 	s.clarifyAPI.HandleGet(w, r, threadID, r.PathValue("id"))
@@ -40,7 +40,7 @@ func (s *Server) handleThreadClarificationGet(w http.ResponseWriter, r *http.Req
 func (s *Server) handleThreadClarificationResolve(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+		writeDetailError(w, http.StatusBadRequest, "thread ID required")
 		return
 	}
 	s.clarifyAPI.HandleResolve(w, r, threadID, r.PathValue("id"))

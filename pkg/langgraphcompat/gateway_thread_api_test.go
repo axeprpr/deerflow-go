@@ -504,3 +504,54 @@ func TestGatewayThreadNestedRoutesRejectInvalidThreadID(t *testing.T) {
 		t.Fatalf("body=%q", resp.Body.String())
 	}
 }
+
+func TestGatewayThreadStateMissingUsesJSONDetail(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/thread-missing/state", nil, nil)
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, resp.Body.String())
+	}
+	if payload["detail"] != "thread not found" {
+		t.Fatalf("detail=%#v", payload["detail"])
+	}
+}
+
+func TestGatewayThreadFilesMissingUsesJSONDetail(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/thread-missing/files", nil, nil)
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, resp.Body.String())
+	}
+	if payload["detail"] != "thread not found" {
+		t.Fatalf("detail=%#v", payload["detail"])
+	}
+}
+
+func TestGatewayThreadClarificationsMissingUsesJSONDetail(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/thread-missing/clarifications", nil, nil)
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, resp.Body.String())
+	}
+	if payload["detail"] != "thread not found" {
+		t.Fatalf("detail=%#v", payload["detail"])
+	}
+}

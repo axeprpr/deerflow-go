@@ -10,17 +10,17 @@ import (
 func (s *Server) handleThreadStateGet(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+		writeDetailError(w, http.StatusBadRequest, "thread ID required")
 		return
 	}
 	if err := validateThreadID(threadID); err != nil {
-		http.Error(w, err.Error(), threadIDStatusCode(r))
+		writeDetailError(w, threadIDStatusCode(r), err.Error())
 		return
 	}
 
 	state := s.getThreadState(threadID)
 	if state == nil {
-		http.Error(w, "thread not found", http.StatusNotFound)
+		writeDetailError(w, http.StatusNotFound, "thread not found")
 		return
 	}
 
@@ -38,24 +38,24 @@ func (s *Server) handleThreadStatePatch(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleThreadStateWrite(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+		writeDetailError(w, http.StatusBadRequest, "thread ID required")
 		return
 	}
 	if err := validateThreadID(threadID); err != nil {
-		http.Error(w, err.Error(), threadIDStatusCode(r))
+		writeDetailError(w, threadIDStatusCode(r), err.Error())
 		return
 	}
 
 	var req map[string]any
 	defer r.Body.Close()
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		writeDetailError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 
 	state, code, detail := s.updateThreadState(threadID, req)
 	if detail != "" {
-		http.Error(w, detail, code)
+		writeDetailError(w, code, detail)
 		return
 	}
 	writeJSON(w, http.StatusOK, state)
@@ -64,18 +64,18 @@ func (s *Server) handleThreadStateWrite(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleThreadHistory(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+		writeDetailError(w, http.StatusBadRequest, "thread ID required")
 		return
 	}
 	if err := validateThreadID(threadID); err != nil {
-		http.Error(w, err.Error(), threadIDStatusCode(r))
+		writeDetailError(w, threadIDStatusCode(r), err.Error())
 		return
 	}
 
 	limit, limitProvided := decodeThreadHistoryRequest(r)
 	history, code, detail := s.threadHistorySlice(threadID, limit, limitProvided)
 	if detail != "" {
-		http.Error(w, detail, code)
+		writeDetailError(w, code, detail)
 		return
 	}
 	writeJSON(w, http.StatusOK, history)

@@ -32,6 +32,25 @@ func TestThreadStatePatchUpdatesTitleFromValues(t *testing.T) {
 	}
 }
 
+func TestThreadStateWriteInvalidJSONUsesJSONDetail(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	resp := performCompatRequest(t, handler, http.MethodPatch, "/threads/thread-invalid-json/state", strings.NewReader(`{`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, resp.Body.String())
+	}
+	if payload["detail"] != "invalid JSON" {
+		t.Fatalf("detail=%#v", payload["detail"])
+	}
+}
+
 func TestThreadStatePostMergesValuesAndMetadata(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	s.ensureSession("thread-state-post", map[string]any{"title": "Old title", "agent_type": "writer"})

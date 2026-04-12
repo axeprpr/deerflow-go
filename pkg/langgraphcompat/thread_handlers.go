@@ -8,17 +8,17 @@ import (
 func (s *Server) handleThreadGet(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+		writeDetailError(w, http.StatusBadRequest, "thread ID required")
 		return
 	}
 	if err := validateThreadID(threadID); err != nil {
-		http.Error(w, err.Error(), threadIDStatusCode(r))
+		writeDetailError(w, threadIDStatusCode(r), err.Error())
 		return
 	}
 
 	thread, exists := s.findThreadResponse(threadID)
 	if !exists {
-		http.Error(w, "thread not found", http.StatusNotFound)
+		writeDetailError(w, http.StatusNotFound, "thread not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, thread)
@@ -36,7 +36,7 @@ func (s *Server) handleThreadCreate(w http.ResponseWriter, r *http.Request) {
 		if detail == "invalid thread_id" && code == 0 {
 			code = threadIDStatusCode(r)
 		}
-		http.Error(w, detail, code)
+		writeDetailError(w, code, detail)
 		return
 	}
 	writeJSON(w, http.StatusCreated, thread)
@@ -45,24 +45,24 @@ func (s *Server) handleThreadCreate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleThreadUpdate(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+		writeDetailError(w, http.StatusBadRequest, "thread ID required")
 		return
 	}
 	if err := validateThreadID(threadID); err != nil {
-		http.Error(w, err.Error(), threadIDStatusCode(r))
+		writeDetailError(w, threadIDStatusCode(r), err.Error())
 		return
 	}
 
 	var req map[string]any
 	defer r.Body.Close()
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		writeDetailError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 
 	thread, code, detail := s.updateThread(threadID, req)
 	if detail != "" {
-		http.Error(w, detail, code)
+		writeDetailError(w, code, detail)
 		return
 	}
 	writeJSON(w, http.StatusOK, thread)
@@ -71,17 +71,17 @@ func (s *Server) handleThreadUpdate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+		writeDetailError(w, http.StatusBadRequest, "thread ID required")
 		return
 	}
 	if err := validateThreadID(threadID); err != nil {
-		http.Error(w, err.Error(), threadIDStatusCode(r))
+		writeDetailError(w, threadIDStatusCode(r), err.Error())
 		return
 	}
 
 	code, detail := s.deleteThread(threadID)
 	if detail != "" {
-		http.Error(w, detail, code)
+		writeDetailError(w, code, detail)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
