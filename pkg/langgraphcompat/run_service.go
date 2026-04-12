@@ -28,6 +28,20 @@ type completedRun struct {
 	Interrupted bool
 }
 
+func (s *Server) runtimeCoordinator() harnessruntime.Coordinator {
+	return harnessruntime.NewCoordinator(harnessruntime.CoordinatorDeps{
+		Runtime:      s.runtimeView(),
+		Preflight:    s.runtimePreflightAdapter(),
+		Context:      s.runtimeContextAdapter(),
+		RunState:     s.runtimeRunStateAdapter(),
+		Completion:   s.runtimeCompletionAdapter(),
+		Coordination: s.runtimeCoordinationAdapter(),
+		Query:        s.runtimeQueryAdapter(),
+		TitleKey:     "generated_title",
+		InterruptKey: "clarification_interrupt",
+	})
+}
+
 func (s *Server) prepareRunRequest(routeThreadID string, req RunCreateRequest) *preparedRunRequest {
 	preflightService := harnessruntime.NewPreflightService(s.runtimePreflightAdapter())
 	threadID, _ := preflightService.Resolve(harnessruntime.PreflightInput{
@@ -92,44 +106,35 @@ func (s *Server) buildRunExecution(ctx context.Context, prepared *preparedRunReq
 }
 
 func (s *Server) bindRunContext(ctx context.Context, threadID string, taskSink func(subagent.TaskEvent), clarificationSink func(*clarification.Clarification)) context.Context {
-	return harnessruntime.NewContextService(s.runtimeContextAdapter(), s.runtimeView()).Bind(ctx, threadID, harness.RunHooks{
-		TaskSink:          taskSink,
-		ClarificationSink: clarificationSink,
-	})
+	return s.runtimeCoordinator().BindContext(ctx, threadID, taskSink, clarificationSink)
 }
 
 func (s *Server) markRunError(run *Run, threadID string, err error) {
-	record := harnessruntime.NewRunStateService(s.runtimeRunStateAdapter()).MarkError(runRecordFromRun(run), err)
+	record := s.runtimeCoordinator().MarkError(runRecordFromRun(run), err)
 	applyRunRecord(run, record)
 }
 
 func (s *Server) markRunCanceled(run *Run, threadID string) {
-	record := harnessruntime.NewRunStateService(s.runtimeRunStateAdapter()).MarkCanceled(runRecordFromRun(run))
+	record := s.runtimeCoordinator().MarkCanceled(runRecordFromRun(run))
 	applyRunRecord(run, record)
 }
 
 func (s *Server) finalizeCompletedRun(ctx context.Context, prepared *preparedRunRequest, result *agent.RunResult) *completedRun {
-	if prepared.Lifecycle != nil {
-		prepared.Lifecycle.Messages = append([]models.Message(nil), result.Messages...)
-		_ = s.runtimeView().AfterRun(ctx, prepared.Lifecycle, result)
-	}
 	s.saveSession(prepared.ThreadID, result.Messages)
-
-	outcome := harnessruntime.NewCompletionService(s.runtimeCompletionAdapter(), "generated_title", "clarification_interrupt").Apply(prepared.ThreadID, prepared.Lifecycle, result)
-	record := harnessruntime.NewRunStateService(s.runtimeRunStateAdapter()).Finalize(runRecordFromRun(prepared.Run), outcome)
-	applyRunRecord(prepared.Run, record)
+	completion := s.runtimeCoordinator().Finalize(ctx, prepared.ThreadID, prepared.Lifecycle, result, runRecordFromRun(prepared.Run))
+	applyRunRecord(prepared.Run, completion.Run)
 
 	state := s.getThreadState(prepared.ThreadID)
 
 	return &completedRun{
 		Result:      result,
 		State:       state,
-		Interrupted: outcome.Interrupted,
+		Interrupted: completion.Interrupted,
 	}
 }
 
 func (s *Server) threadRun(threadID, runID string) *Run {
-	record, found := harnessruntime.NewQueryService(s.runtimeQueryAdapter()).Run(threadID, runID)
+	record, found := s.runtimeCoordinator().Run(threadID, runID)
 	if !found {
 		return nil
 	}
@@ -137,7 +142,7 @@ func (s *Server) threadRun(threadID, runID string) *Run {
 }
 
 func (s *Server) waitForThreadRun(ctx context.Context, threadID, runID string, cancelOnDisconnect bool) (*Run, bool) {
-	record, found, completed := harnessruntime.NewCoordinationService(s.runtimeCoordinationAdapter()).Wait(ctx, threadID, runID, cancelOnDisconnect)
+	record, found, completed := s.runtimeCoordinator().Wait(ctx, threadID, runID, cancelOnDisconnect)
 	if !found {
 		return nil, false
 	}
@@ -148,11 +153,11 @@ func (s *Server) waitForThreadRun(ctx context.Context, threadID, runID string, c
 }
 
 func (s *Server) cancelThreadRun(threadID, runID string) (map[string]any, bool, bool) {
-	return harnessruntime.NewCoordinationService(s.runtimeCoordinationAdapter()).Cancel(threadID, runID)
+	return s.runtimeCoordinator().Cancel(threadID, runID)
 }
 
 func (s *Server) listThreadRunResponses(threadID string) []map[string]any {
-	records := harnessruntime.NewQueryService(s.runtimeQueryAdapter()).ListThreadRuns(threadID)
+	records := s.runtimeCoordinator().ListThreadRuns(threadID)
 	runs := make([]map[string]any, 0, len(records))
 	for _, record := range records {
 		runs = append(runs, runRecordResponse(record))
