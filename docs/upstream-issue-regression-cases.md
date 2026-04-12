@@ -31,6 +31,18 @@
 - 运行时：自定义 ReAct + `harness/harnessruntime`
 - 接口约束：原版 UI 主接口必须保持一致
 
+## 当前覆盖状态
+
+| 优先级 | Case | 状态 | 当前依据 |
+| --- | --- | --- | --- |
+| P0 | P0-1 Skill 可发现且可触发 | 已覆盖 | `pkg/langgraphcompat/issue_regression_test.go`，`runtime_prompt/runtime_skill_paths` 相关回归 |
+| P0 | P0-2 Tool-call 连续性不丢失 | 已覆盖 | `pkg/agent/issue_regression_test.go`，tool-call/tool-result 配对回归 |
+| P0 | P0-3 长 CSV 分析不应重复执行已完成步骤 | 已覆盖 | `pkg/langgraphcompat/issue_regression_test.go` 的 deterministic golden + `live_behavior_test.go` 的真实 CSV 长链路回归 |
+| P1 | P1-1 联网搜索工具可用 | 部分覆盖 | 默认 runtime tool surface 已暴露 `web_search/web_fetch/image_search`，且失败诊断已回归；尚未做稳定 live 网络 smoke |
+| P1 | P1-2 模型映射和 provider 错误可诊断 | 已覆盖 | `runtime_model_resolution_test.go` + `pkg/agent/issue_regression_test.go` |
+| P2 | P2-1 认证签名错误 | 未覆盖 | 当前仅记录，不纳入 runtime 主回归 |
+| P2 | P2-2 切换聊天后内容为空 | 未覆盖 | 当前仅记录，不纳入后端/runtime 主回归 |
+
 ## P0 用例
 
 ### Case P0-1: Skill 可发现且可触发
@@ -74,6 +86,16 @@
 
 - 最高
 
+当前状态：
+
+- 已覆盖
+
+当前自动化依据：
+
+- `pkg/langgraphcompat/issue_regression_test.go`
+- `pkg/langgraphcompat/runtime_prompt_test.go`
+- `pkg/langgraphcompat/runtime_skill_paths` 相关回归
+
 ### Case P0-2: Tool-call 连续性不丢失
 
 来源：
@@ -106,6 +128,15 @@
 当前优先级：
 
 - 最高
+
+当前状态：
+
+- 已覆盖
+
+当前自动化依据：
+
+- `pkg/agent/issue_regression_test.go`
+- 已有 tool-call streaming / replay / continuation 相关回归
 
 ### Case P0-3: 长 CSV 分析不应重复执行已完成步骤
 
@@ -146,6 +177,20 @@
 
 - 最高
 
+当前状态：
+
+- 已覆盖
+
+当前自动化依据：
+
+- `pkg/langgraphcompat/issue_regression_test.go`
+- `pkg/langgraphcompat/live_behavior_test.go`
+
+当前覆盖说明：
+
+- deterministic golden 会先触发长历史 compaction，再验证下一轮只补写剩余的 `orders-summary.json`
+- live 回归继续覆盖真实上传 CSV、真实线程执行、稳定 artifact 生成，以及“不重复成功写同一路径”
+
 ## P1 用例
 
 ### Case P1-1: 联网搜索工具可用
@@ -178,6 +223,23 @@
 
 - 中
 
+当前状态：
+
+- 部分覆盖
+
+当前自动化依据：
+
+- `pkg/langgraphcompat/issue_regression_test.go`
+- `pkg/tools/builtin/web_test.go`
+- `pkg/harnessruntime/tool_runtime_test.go`
+
+当前缺口：
+
+- 还没有加稳定 live 网络 smoke
+- 当前主要覆盖：
+  - 搜索工具默认必须暴露
+  - 搜索失败必须保留可诊断错误
+
 ### Case P1-2: 模型映射和 provider 错误可诊断
 
 来源：
@@ -207,6 +269,21 @@
 
 - 中
 
+当前状态：
+
+- 已覆盖
+
+当前自动化依据：
+
+- `pkg/langgraphcompat/runtime_model_resolution_test.go`
+- `pkg/agent/issue_regression_test.go`
+
+当前覆盖点：
+
+- alias -> provider model 解析
+- `reasoning_effort` 能力裁剪
+- provider 原始错误诊断不得塌成泛化“network error”
+
 ## P2 用例
 
 ### Case P2-1: 认证签名错误
@@ -225,6 +302,10 @@
 - 记录
 - 不纳入当前 runtime 主回归集
 
+当前状态：
+
+- 未覆盖
+
 ### Case P2-2: 切换聊天后内容为空
 
 来源：
@@ -240,6 +321,10 @@
 
 - 记录
 - 不纳入当前后端主回归集
+
+当前状态：
+
+- 未覆盖
 
 ## 建议执行顺序
 
