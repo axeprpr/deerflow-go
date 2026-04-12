@@ -2221,6 +2221,30 @@ func TestModelsSkillsMCPConfigEndpoints(t *testing.T) {
 	}
 }
 
+func TestMCPConfigPutFailureUsesUpstreamDetail(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+
+	if err := os.MkdirAll(s.gatewayStatePath(), 0o755); err != nil {
+		t.Fatalf("mkdir gateway state dir: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/mcp/config", strings.NewReader(`{"mcp_servers":{"foo":{"enabled":true,"description":"x"}}}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("mcp put request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(body))
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `Failed to update MCP configuration:`) {
+		t.Fatalf("body=%s", string(body))
+	}
+}
+
 func TestGatewayModelStatePersistence(t *testing.T) {
 	root := t.TempDir()
 	s := &Server{

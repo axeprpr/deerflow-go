@@ -115,7 +115,7 @@ func (s *Server) updateGatewayMCPConfig(raw map[string]any) (gatewayMCPConfig, i
 	s.mcpConfig = req
 	s.uiStateMu.Unlock()
 	if err := s.persistGatewayState(); err != nil {
-		return gatewayMCPConfig{}, http.StatusInternalServerError, "failed to persist state"
+		return gatewayMCPConfig{}, http.StatusInternalServerError, fmt.Sprintf("Failed to update MCP configuration: %v", err)
 	}
 	return req, http.StatusOK, ""
 }
