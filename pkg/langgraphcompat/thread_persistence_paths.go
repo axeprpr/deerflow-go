@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
@@ -19,14 +20,14 @@ type persistedThreadSession struct {
 }
 
 type persistedThreadRun struct {
-	RunID       string        `json:"run_id"`
-	ThreadID    string        `json:"thread_id"`
-	AssistantID string        `json:"assistant_id"`
-	Status      string        `json:"status"`
-	CreatedAt   time.Time     `json:"created_at"`
-	UpdatedAt   time.Time     `json:"updated_at"`
-	Events      []StreamEvent `json:"events"`
-	Error       string        `json:"error,omitempty"`
+	RunID       string                    `json:"run_id"`
+	ThreadID    string                    `json:"thread_id"`
+	AssistantID string                    `json:"assistant_id"`
+	Status      string                    `json:"status"`
+	CreatedAt   time.Time                 `json:"created_at"`
+	UpdatedAt   time.Time                 `json:"updated_at"`
+	Events      []harnessruntime.RunEvent `json:"events"`
+	Error       string                    `json:"error,omitempty"`
 }
 
 func (s *Server) threadStatePath(threadID string) string {
@@ -63,6 +64,11 @@ func (s *Server) persistSessionFile(session *Session) error {
 }
 
 func (s *Server) persistRunFile(run *Run) error {
+	return s.persistRunSnapshot(runSnapshotFromRun(run))
+}
+
+func (s *Server) persistRunSnapshot(snapshot harnessruntime.RunSnapshot) error {
+	run := runFromSnapshot(snapshot)
 	if run == nil {
 		return nil
 	}
@@ -77,7 +83,7 @@ func (s *Server) persistRunFile(run *Run) error {
 		Status:      run.Status,
 		CreatedAt:   run.CreatedAt,
 		UpdatedAt:   run.UpdatedAt,
-		Events:      run.Events,
+		Events:      snapshot.Events,
 		Error:       run.Error,
 	}, "", "  ")
 	if err != nil {

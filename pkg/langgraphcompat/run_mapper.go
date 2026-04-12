@@ -14,6 +14,15 @@ func runFromRecord(record harnessruntime.RunRecord) *Run {
 	}
 }
 
+func runFromSnapshot(snapshot harnessruntime.RunSnapshot) *Run {
+	run := runFromRecord(snapshot.Record)
+	run.Events = make([]StreamEvent, 0, len(snapshot.Events))
+	for _, event := range snapshot.Events {
+		run.Events = append(run.Events, streamEventFromRuntimeEvent(event))
+	}
+	return run
+}
+
 func runRecordFromRun(run *Run) harnessruntime.RunRecord {
 	if run == nil {
 		return harnessruntime.RunRecord{}
@@ -27,6 +36,20 @@ func runRecordFromRun(run *Run) harnessruntime.RunRecord {
 		CreatedAt:   run.CreatedAt,
 		UpdatedAt:   run.UpdatedAt,
 	}
+}
+
+func runSnapshotFromRun(run *Run) harnessruntime.RunSnapshot {
+	if run == nil {
+		return harnessruntime.RunSnapshot{}
+	}
+	snapshot := harnessruntime.RunSnapshot{
+		Record: runRecordFromRun(run),
+		Events: make([]harnessruntime.RunEvent, 0, len(run.Events)),
+	}
+	for _, event := range run.Events {
+		snapshot.Events = append(snapshot.Events, runtimeEventFromStreamEvent(event))
+	}
+	return snapshot
 }
 
 func applyRunRecord(run *Run, record harnessruntime.RunRecord) {

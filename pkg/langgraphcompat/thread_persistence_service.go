@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
@@ -336,7 +337,7 @@ func normalizePersistedThreadMetadata(metadata map[string]any) map[string]any {
 	return metadata
 }
 
-func normalizePersistedRunEvents(events []StreamEvent, rawItems []any) []StreamEvent {
+func normalizePersistedRunEvents(events []harnessruntime.RunEvent, rawItems []any) []harnessruntime.RunEvent {
 	if len(events) == 0 || len(events) != len(rawItems) {
 		return events
 	}
@@ -422,7 +423,7 @@ func (s *Server) loadPersistedRuns() {
 			Status:      persisted.Status,
 			CreatedAt:   persisted.CreatedAt,
 			UpdatedAt:   persisted.UpdatedAt,
-			Events:      persisted.Events,
+			Events:      runFromSnapshot(harnessruntime.RunSnapshot{Record: harnessruntime.RunRecord{RunID: persisted.RunID, ThreadID: persisted.ThreadID, AssistantID: persisted.AssistantID, Status: persisted.Status, CreatedAt: persisted.CreatedAt, UpdatedAt: persisted.UpdatedAt, Error: persisted.Error}, Events: persisted.Events}).Events,
 			Error:       persisted.Error,
 		}
 	}
