@@ -9,9 +9,9 @@ const defaultRunQueueBuffer = 32
 const defaultRunQueueWorkers = 1
 
 type dispatchJob struct {
-	ctx  context.Context
-	req  DispatchRequest
-	resp chan dispatchResult
+	ctx     context.Context
+	payload []byte
+	resp    chan dispatchResult
 }
 
 type dispatchResult struct {
@@ -24,6 +24,7 @@ type dispatchResult struct {
 // without changing coordinator call sites.
 type InProcessRunQueue struct {
 	executor RunExecutor
+	codec    WorkerPlanMarshaler
 	jobs     chan dispatchJob
 	workers  int
 	wg       sync.WaitGroup
@@ -31,6 +32,10 @@ type InProcessRunQueue struct {
 }
 
 func NewInProcessRunQueue(executor RunExecutor, buffer int, workers int) *InProcessRunQueue {
+	return NewInProcessRunQueueWithCodec(executor, buffer, workers, nil)
+}
+
+func NewInProcessRunQueueWithCodec(executor RunExecutor, buffer int, workers int, codec WorkerPlanMarshaler) *InProcessRunQueue {
 	if buffer <= 0 {
 		buffer = defaultRunQueueBuffer
 	}
@@ -40,8 +45,12 @@ func NewInProcessRunQueue(executor RunExecutor, buffer int, workers int) *InProc
 	if executor == nil {
 		executor = NewRuntimeWorker()
 	}
+	if codec == nil {
+		codec = WorkerPlanCodec{}
+	}
 	q := &InProcessRunQueue{
 		executor: executor,
+		codec:    codec,
 		jobs:     make(chan dispatchJob, buffer),
 		workers:  workers,
 	}
@@ -56,11 +65,19 @@ func (q *InProcessRunQueue) Submit(ctx context.Context, req DispatchRequest) (*D
 	if q == nil || q.jobs == nil {
 		return NewRuntimeWorker().Execute(ctx, req)
 	}
+	codec := q.codec
+	if codec == nil {
+		codec = WorkerPlanCodec{}
+	}
+	payload, err := codec.Encode(req.Plan)
+	if err != nil {
+		return nil, err
+	}
 	resp := make(chan dispatchResult, 1)
 	job := dispatchJob{
-		ctx:  ctx,
-		req:  req,
-		resp: resp,
+		ctx:     ctx,
+		payload: payload,
+		resp:    resp,
 	}
 	select {
 	case q.jobs <- job:
@@ -89,7 +106,17 @@ func (q *InProcessRunQueue) Close() error {
 func (q *InProcessRunQueue) run() {
 	defer q.wg.Done()
 	for job := range q.jobs {
-		result, err := q.executor.Execute(job.ctx, job.req)
+		codec := q.codec
+		if codec == nil {
+			codec = WorkerPlanCodec{}
+		}
+		plan, err := codec.Decode(job.payload)
+		if err != nil {
+			job.resp <- dispatchResult{err: err}
+			close(job.resp)
+			continue
+		}
+		result, err := q.executor.Execute(job.ctx, DispatchRequest{Plan: plan})
 		job.resp <- dispatchResult{result: result, err: err}
 		close(job.resp)
 	}

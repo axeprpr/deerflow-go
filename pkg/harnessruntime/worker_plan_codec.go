@@ -2,6 +2,11 @@ package harnessruntime
 
 import "encoding/json"
 
+type WorkerPlanMarshaler interface {
+	Encode(WorkerExecutionPlan) ([]byte, error)
+	Decode([]byte) (WorkerExecutionPlan, error)
+}
+
 type WorkerPlanCodec struct{}
 
 func (WorkerPlanCodec) Encode(plan WorkerExecutionPlan) ([]byte, error) {

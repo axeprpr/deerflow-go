@@ -31,6 +31,7 @@ type DispatchConfig struct {
 	Executor RunExecutor
 	Runtime  func() *harness.Runtime
 	Specs    WorkerSpecRuntime
+	Codec    WorkerPlanMarshaler
 	Queue    DispatchQueue
 	Buffer   int
 	Workers  int
@@ -59,7 +60,7 @@ func NewRuntimeDispatcher(config DispatchConfig) RunDispatcher {
 	default:
 		queue := config.Queue
 		if queue == nil {
-			queue = NewInProcessRunQueue(executor, config.Buffer, config.Workers)
+			queue = NewInProcessRunQueueWithCodec(executor, config.Buffer, config.Workers, config.Codec)
 		}
 		return NewQueuedRunDispatcher(queue)
 	}
@@ -80,7 +81,7 @@ func (d directRunDispatcher) Dispatch(ctx context.Context, req DispatchRequest) 
 func (d queuedRunDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (*DispatchResult, error) {
 	queue := d.queue
 	if queue == nil {
-		queue = NewInProcessRunQueue(nil, 0, 0)
+		queue = NewInProcessRunQueueWithCodec(nil, 0, 0, nil)
 	}
 	return queue.Submit(ctx, req)
 }

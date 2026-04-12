@@ -2,6 +2,7 @@ package harnessruntime
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -107,6 +108,30 @@ type blockingExecutor struct {
 	running atomic.Int32
 }
 
+type fakePlanCodec struct {
+	encoded bool
+	decoded bool
+	fail    error
+	last    WorkerExecutionPlan
+}
+
+func (c *fakePlanCodec) Encode(plan WorkerExecutionPlan) ([]byte, error) {
+	if c.fail != nil {
+		return nil, c.fail
+	}
+	c.encoded = true
+	c.last = plan
+	return []byte(plan.ThreadID), nil
+}
+
+func (c *fakePlanCodec) Decode(data []byte) (WorkerExecutionPlan, error) {
+	if c.fail != nil {
+		return WorkerExecutionPlan{}, c.fail
+	}
+	c.decoded = true
+	return c.last, nil
+}
+
 func (e *blockingExecutor) Execute(_ context.Context, req DispatchRequest) (*DispatchResult, error) {
 	e.running.Add(1)
 	e.started <- req.Plan.ThreadID
@@ -151,5 +176,37 @@ func TestInProcessRunQueueSupportsMultipleWorkers(t *testing.T) {
 		if err := <-done; err != nil {
 			t.Fatalf("Submit() error = %v", err)
 		}
+	}
+}
+
+func TestInProcessRunQueueUsesWorkerPlanCodec(t *testing.T) {
+	executor := &fakeExecutor{}
+	codec := &fakePlanCodec{}
+	queue := NewInProcessRunQueueWithCodec(executor, 1, 1, codec)
+	defer queue.Close()
+
+	_, err := queue.Submit(context.Background(), DispatchRequest{
+		Plan: WorkerExecutionPlan{ThreadID: "thread-codec"},
+	})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if !codec.encoded || !codec.decoded {
+		t.Fatalf("codec usage = encode:%v decode:%v", codec.encoded, codec.decoded)
+	}
+	if !executor.called || executor.req.Plan.ThreadID != "thread-codec" {
+		t.Fatalf("executor req = %#v", executor.req)
+	}
+}
+
+func TestInProcessRunQueueReturnsCodecErrors(t *testing.T) {
+	queue := NewInProcessRunQueueWithCodec(&fakeExecutor{}, 1, 1, &fakePlanCodec{fail: errors.New("boom")})
+	defer queue.Close()
+
+	_, err := queue.Submit(context.Background(), DispatchRequest{
+		Plan: WorkerExecutionPlan{ThreadID: "thread-codec"},
+	})
+	if err == nil || err.Error() != "boom" {
+		t.Fatalf("Submit() error = %v, want boom", err)
 	}
 }
