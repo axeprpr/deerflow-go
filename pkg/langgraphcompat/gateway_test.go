@@ -9870,6 +9870,48 @@ func TestRecordedRunStreamModeFiltersReplayEvents(t *testing.T) {
 	}
 }
 
+func TestRecordedRunStreamResumesAfterReplayOffset(t *testing.T) {
+	s, ts := newCompatTestServer(t)
+	run := &Run{
+		RunID:           "run-replay-resume",
+		ThreadID:        "thread-replay-resume",
+		AssistantID:     "lead_agent",
+		Attempt:         2,
+		ResumeFromEvent: 1,
+		ResumeReason:    "join-resume",
+		Status:          "success",
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
+		Events: []StreamEvent{
+			{ID: "run-replay-resume:1", Event: "metadata", Data: map[string]any{"run_id": "run-replay-resume", "thread_id": "thread-replay-resume", "assistant_id": "lead_agent"}},
+			{ID: "run-replay-resume:2", Event: "values", Data: map[string]any{"title": "done"}},
+			{ID: "run-replay-resume:3", Event: "end", Data: map[string]any{"run_id": "run-replay-resume"}},
+		},
+	}
+	s.saveRun(run)
+
+	resp, err := http.Get(ts.URL + "/threads/thread-replay-resume/runs/run-replay-resume/stream")
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	text := string(body)
+	if strings.Contains(text, "event: metadata") {
+		t.Fatalf("unexpected replay of prior metadata event: %s", text)
+	}
+	if !strings.Contains(text, "event: values") || !strings.Contains(text, "event: end") {
+		t.Fatalf("missing resumed events: %s", text)
+	}
+}
+
 func TestRecordedRunStreamReplaysMetadataPayload(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	run := &Run{
@@ -11956,9 +11998,9 @@ func TestSkillInstallFromArchive(t *testing.T) {
 		t.Fatalf("status=%d body=%s", resp.StatusCode, string(b))
 	}
 	var payload struct {
-		Success   bool                   `json:"success"`
-		SkillName string                 `json:"skill_name"`
-		Message   string                 `json:"message"`
+		Success   bool   `json:"success"`
+		SkillName string `json:"skill_name"`
+		Message   string `json:"message"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode install response: %v", err)

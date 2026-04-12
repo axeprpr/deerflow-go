@@ -107,7 +107,7 @@ func (s runReplayStreamer) Replay(run *Run) bool {
 	if run == nil {
 		return false
 	}
-	events, replayedEnd := harnessruntime.NewEventFeedService(s.server.runtimeEventAdapter()).Replay(run.RunID)
+	events, replayedEnd := harnessruntime.NewEventFeedService(s.server.runtimeEventAdapter()).ReplayFrom(run.RunID, run.ResumeFromEvent)
 	for _, event := range events {
 		if !s.filter.allows(event.Event) {
 			continue

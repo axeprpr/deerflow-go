@@ -37,6 +37,27 @@ func TestEventFeedServiceReplayDetectsEnd(t *testing.T) {
 	}
 }
 
+func TestEventFeedServiceReplayFromSkipsAlreadyReplayedEvents(t *testing.T) {
+	service := NewEventFeedService(fakeEventFeedRuntime{
+		events: []RunEvent{
+			{ID: "run-1:1", Event: "metadata"},
+			{ID: "run-1:2", Event: "values"},
+			{ID: "run-1:3", Event: "end"},
+		},
+	})
+
+	events, replayedEnd := service.ReplayFrom("run-1", 1)
+	if len(events) != 2 {
+		t.Fatalf("len(events) = %d, want 2", len(events))
+	}
+	if events[0].ID != "run-1:2" || events[1].ID != "run-1:3" {
+		t.Fatalf("events = %#v", events)
+	}
+	if !replayedEnd {
+		t.Fatal("replayedEnd = false, want true")
+	}
+}
+
 func TestEventFeedServiceSubscribe(t *testing.T) {
 	ch := make(chan RunEvent, 1)
 	ch <- RunEvent{ID: "1", Event: "values"}
