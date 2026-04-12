@@ -27,6 +27,7 @@ type DispatchRuntimeConfig struct {
 	Runtime   func() *harness.Runtime
 	Specs     WorkerSpecRuntime
 	Codec     WorkerPlanMarshaler
+	Results   DispatchResultMarshaler
 	Transport WorkerTransport
 }
 
@@ -54,7 +55,7 @@ func buildWorkerTransport(config WorkerTransportConfig, runtime DispatchRuntimeC
 	case WorkerTransportBackendRemote:
 		return remoteWorkerTransport{endpoint: config.Endpoint}
 	default:
-		return NewInProcessRunQueueWithCodec(executor, config.Buffer, config.Workers, runtime.Codec)
+		return NewInProcessRunQueueWithCodec(executor, config.Buffer, config.Workers, runtime.Codec, runtime.Results)
 	}
 }
 

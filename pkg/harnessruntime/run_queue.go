@@ -25,6 +25,7 @@ type dispatchResult struct {
 type InProcessRunQueue struct {
 	executor RunExecutor
 	codec    DispatchEnvelopeCodec
+	results  DispatchResultMarshaler
 	jobs     chan dispatchJob
 	workers  int
 	wg       sync.WaitGroup
@@ -32,10 +33,10 @@ type InProcessRunQueue struct {
 }
 
 func NewInProcessRunQueue(executor RunExecutor, buffer int, workers int) *InProcessRunQueue {
-	return NewInProcessRunQueueWithCodec(executor, buffer, workers, nil)
+	return NewInProcessRunQueueWithCodec(executor, buffer, workers, nil, nil)
 }
 
-func NewInProcessRunQueueWithCodec(executor RunExecutor, buffer int, workers int, codec WorkerPlanMarshaler) *InProcessRunQueue {
+func NewInProcessRunQueueWithCodec(executor RunExecutor, buffer int, workers int, codec WorkerPlanMarshaler, results DispatchResultMarshaler) *InProcessRunQueue {
 	if buffer <= 0 {
 		buffer = defaultRunQueueBuffer
 	}
@@ -48,6 +49,7 @@ func NewInProcessRunQueueWithCodec(executor RunExecutor, buffer int, workers int
 	q := &InProcessRunQueue{
 		executor: executor,
 		codec:    DispatchEnvelopeCodec{Plans: codec},
+		results:  defaultDispatchResultCodec(results),
 		jobs:     make(chan dispatchJob, buffer),
 		workers:  workers,
 	}
@@ -106,6 +108,14 @@ func (q *InProcessRunQueue) run() {
 			continue
 		}
 		result, err := q.executor.Execute(job.ctx, req)
+		if err == nil {
+			payload, marshalErr := q.results.Encode(result)
+			if marshalErr != nil {
+				err = marshalErr
+			} else {
+				result, err = q.results.Decode(payload)
+			}
+		}
 		job.resp <- dispatchResult{result: result, err: err}
 		close(job.resp)
 	}

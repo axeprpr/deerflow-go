@@ -216,7 +216,7 @@ func TestInProcessRunQueueSupportsMultipleWorkers(t *testing.T) {
 func TestInProcessRunQueueUsesWorkerPlanCodec(t *testing.T) {
 	executor := &fakeExecutor{}
 	codec := &fakePlanCodec{last: WorkerExecutionPlan{ThreadID: "thread-codec"}}
-	queue := NewInProcessRunQueueWithCodec(executor, 1, 1, codec)
+	queue := NewInProcessRunQueueWithCodec(executor, 1, 1, codec, nil)
 	defer queue.Close()
 
 	_, err := queue.Submit(context.Background(), WorkerDispatchEnvelope{Payload: []byte("thread-codec")})
@@ -232,7 +232,7 @@ func TestInProcessRunQueueUsesWorkerPlanCodec(t *testing.T) {
 }
 
 func TestInProcessRunQueueReturnsCodecErrors(t *testing.T) {
-	queue := NewInProcessRunQueueWithCodec(&fakeExecutor{}, 1, 1, &fakePlanCodec{fail: errors.New("boom")})
+	queue := NewInProcessRunQueueWithCodec(&fakeExecutor{}, 1, 1, &fakePlanCodec{fail: errors.New("boom")}, nil)
 	defer queue.Close()
 
 	_, err := queue.Submit(context.Background(), WorkerDispatchEnvelope{Payload: []byte("thread-codec")})
@@ -243,7 +243,7 @@ func TestInProcessRunQueueReturnsCodecErrors(t *testing.T) {
 
 func TestInProcessRunQueuePreservesDispatchEnvelopeMetadata(t *testing.T) {
 	executor := &fakeExecutor{}
-	queue := NewInProcessRunQueueWithCodec(executor, 1, 1, nil)
+	queue := NewInProcessRunQueueWithCodec(executor, 1, 1, nil, nil)
 	defer queue.Close()
 
 	_, err := queue.Submit(context.Background(), WorkerDispatchEnvelope{
