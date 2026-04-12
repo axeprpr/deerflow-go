@@ -41,3 +41,13 @@ func applyRunRecord(run *Run, record harnessruntime.RunRecord) {
 	run.CreatedAt = record.CreatedAt
 	run.UpdatedAt = record.UpdatedAt
 }
+
+func streamEventFromRuntimeEvent(event harnessruntime.RunEvent) StreamEvent {
+	return StreamEvent{
+		ID:       event.ID,
+		Event:    event.Event,
+		Data:     event.Data,
+		RunID:    event.RunID,
+		ThreadID: event.ThreadID,
+	}
+}

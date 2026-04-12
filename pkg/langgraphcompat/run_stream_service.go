@@ -1,13 +1,13 @@
 package langgraphcompat
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
 )
@@ -44,6 +44,14 @@ func (s *Server) newRunReplayStreamer(w http.ResponseWriter, flusher http.Flushe
 		flusher: flusher,
 		filter:  filter,
 	}
+}
+
+func (s *Server) recordRunEvent(run *Run, eventType string, data any) StreamEvent {
+	if run == nil {
+		return StreamEvent{}
+	}
+	event := harnessruntime.NewEventLogService(s.runtimeEventAdapter()).Record(run.RunID, run.ThreadID, eventType, data)
+	return streamEventFromRuntimeEvent(event)
 }
 
 func (e runStreamEmitter) Metadata(threadID string, assistantID string) {
@@ -134,26 +142,12 @@ func (s runReplayStreamer) Join(run *Run) {
 }
 
 func (s *Server) recordAndSendEvent(w http.ResponseWriter, flusher http.Flusher, run *Run, eventType string, data any) {
-	event := StreamEvent{
-		ID:       fmt.Sprintf("%s:%d", run.RunID, s.nextRunEventIndex(run.RunID)),
-		Event:    eventType,
-		Data:     data,
-		RunID:    run.RunID,
-		ThreadID: run.ThreadID,
-	}
-	s.appendRunEvent(run.RunID, event)
+	event := s.recordRunEvent(run, eventType, data)
 	s.sendSSEEvent(w, flusher, event)
 }
 
 func (s *Server) recordAndSendEventFiltered(w http.ResponseWriter, flusher http.Flusher, run *Run, filter streamModeFilter, eventType string, data any) {
-	event := StreamEvent{
-		ID:       fmt.Sprintf("%s:%d", run.RunID, s.nextRunEventIndex(run.RunID)),
-		Event:    eventType,
-		Data:     data,
-		RunID:    run.RunID,
-		ThreadID: run.ThreadID,
-	}
-	s.appendRunEvent(run.RunID, event)
+	event := s.recordRunEvent(run, eventType, data)
 	if filter.allows(eventType) {
 		s.sendSSEEvent(w, flusher, event)
 	}

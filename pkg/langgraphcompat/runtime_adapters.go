@@ -41,6 +41,10 @@ type runtimeQueryAdapter struct {
 	server *Server
 }
 
+type runtimeEventAdapter struct {
+	server *Server
+}
+
 func (s *Server) runtimeConversationAdapter() runtimeConversationAdapter {
 	return runtimeConversationAdapter{server: s}
 }
@@ -71,6 +75,10 @@ func (s *Server) runtimeCoordinationAdapter() runtimeCoordinationAdapter {
 
 func (s *Server) runtimeQueryAdapter() runtimeQueryAdapter {
 	return runtimeQueryAdapter{server: s}
+}
+
+func (s *Server) runtimeEventAdapter() runtimeEventAdapter {
+	return runtimeEventAdapter{server: s}
 }
 
 func (a runtimeConversationAdapter) HistorySummary(threadID string) string {
@@ -199,4 +207,12 @@ func (a runtimeQueryAdapter) HasThread(threadID string) bool {
 	defer a.server.sessionsMu.RUnlock()
 	_, exists := a.server.sessions[threadID]
 	return exists
+}
+
+func (a runtimeEventAdapter) NextRunEventIndex(runID string) int {
+	return a.server.nextRunEventIndex(runID)
+}
+
+func (a runtimeEventAdapter) AppendRunEvent(runID string, event harnessruntime.RunEvent) {
+	a.server.appendRunEvent(runID, streamEventFromRuntimeEvent(event))
 }
