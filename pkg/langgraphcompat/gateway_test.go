@@ -12078,6 +12078,60 @@ func TestAgentCreateInvalidNameUsesUpstreamDetail(t *testing.T) {
 	}
 }
 
+func TestAgentCreateFailureUsesUpstreamDetailPrefix(t *testing.T) {
+	root := t.TempDir()
+	badCompatRoot := filepath.Join(root, "compat-file")
+	if err := os.WriteFile(badCompatRoot, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write compat root sentinel: %v", err)
+	}
+	t.Setenv(compatRootEnv, badCompatRoot)
+
+	s := &Server{
+		dataRoot: root,
+		agents:   map[string]gatewayAgent{},
+	}
+
+	_, status, detail := s.createGatewayAgent(gatewayAgent{
+		Name:        "writer",
+		Description: "Writes clearly",
+		Soul:        "hello",
+	})
+	if status != http.StatusInternalServerError {
+		t.Fatalf("status=%d detail=%q", status, detail)
+	}
+	if !strings.Contains(detail, "Failed to create agent:") {
+		t.Fatalf("detail=%q", detail)
+	}
+}
+
+func TestAgentUpdateFailureUsesUpstreamDetailPrefix(t *testing.T) {
+	root := t.TempDir()
+	badCompatRoot := filepath.Join(root, "compat-file")
+	if err := os.WriteFile(badCompatRoot, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write compat root sentinel: %v", err)
+	}
+	t.Setenv(compatRootEnv, badCompatRoot)
+
+	s := &Server{
+		dataRoot: root,
+		agents: map[string]gatewayAgent{
+			"writer": {
+				Name:        "writer",
+				Description: "Writes clearly",
+				Soul:        "hello",
+			},
+		},
+	}
+
+	_, status, detail := s.updateGatewayAgent("writer", map[string]any{"description": "updated"})
+	if status != http.StatusInternalServerError {
+		t.Fatalf("status=%d detail=%q", status, detail)
+	}
+	if !strings.Contains(detail, "Failed to update agent:") {
+		t.Fatalf("detail=%q", detail)
+	}
+}
+
 func TestUserProfileAcceptsNullContent(t *testing.T) {
 	s, ts := newCompatTestServer(t)
 	s.setUserProfileLocked("existing profile")

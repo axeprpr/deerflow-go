@@ -251,10 +251,10 @@ func (s *Server) createGatewayAgent(agentReq gatewayAgent) (gatewayAgent, int, s
 	s.uiStateMu.Unlock()
 
 	if err := s.persistAgentFiles(name, agentReq); err != nil {
-		return gatewayAgent{}, http.StatusInternalServerError, "failed to persist agent files"
+		return gatewayAgent{}, http.StatusInternalServerError, fmt.Sprintf("Failed to create agent: %v", err)
 	}
 	if err := s.persistGatewayState(); err != nil {
-		return gatewayAgent{}, http.StatusInternalServerError, "failed to persist state"
+		return gatewayAgent{}, http.StatusInternalServerError, fmt.Sprintf("Failed to create agent: %v", err)
 	}
 	return agentReq, http.StatusCreated, ""
 }
@@ -303,10 +303,10 @@ func (s *Server) updateGatewayAgent(name string, req map[string]any) (gatewayAge
 	s.uiStateMu.Unlock()
 
 	if err := s.persistAgentFiles(normalized, agent); err != nil {
-		return gatewayAgent{}, http.StatusInternalServerError, "failed to persist agent files"
+		return gatewayAgent{}, http.StatusInternalServerError, fmt.Sprintf("Failed to update agent: %v", err)
 	}
 	if err := s.persistGatewayState(); err != nil {
-		return gatewayAgent{}, http.StatusInternalServerError, "failed to persist state"
+		return gatewayAgent{}, http.StatusInternalServerError, fmt.Sprintf("Failed to update agent: %v", err)
 	}
 	return agent, http.StatusOK, ""
 }
@@ -327,7 +327,7 @@ func (s *Server) deleteGatewayAgent(ctx context.Context, name string) (int, stri
 	s.uiStateMu.Unlock()
 
 	if err := os.RemoveAll(s.agentDir(normalized)); err != nil {
-		return http.StatusInternalServerError, "failed to delete agent files"
+		return http.StatusInternalServerError, fmt.Sprintf("Failed to delete agent: %v", err)
 	}
 	if s.runtime != nil && s.runtime.Memory() != nil && s.runtime.Memory().Store() != nil {
 		if deleter, ok := any(s.runtime.Memory().Store()).(interface {
@@ -337,7 +337,7 @@ func (s *Server) deleteGatewayAgent(ctx context.Context, name string) (int, stri
 		}
 	}
 	if err := s.persistGatewayState(); err != nil {
-		return http.StatusInternalServerError, "failed to persist state"
+		return http.StatusInternalServerError, fmt.Sprintf("Failed to delete agent: %v", err)
 	}
 	return http.StatusNoContent, ""
 }
