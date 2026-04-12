@@ -25,7 +25,7 @@ func TestNewDefaultToolRuntimeBuildsExpectedRegistry(t *testing.T) {
 		got = append(got, tool.Name)
 	}
 
-	want := []string{"ls", "read_file", "glob", "grep", "write_file", "str_replace", "bash", "ask_clarification", "task"}
+	want := []string{"ls", "read_file", "glob", "grep", "write_file", "str_replace", "web_search", "web_fetch", "image_search", "bash", "ask_clarification", "task"}
 	if len(got) != len(want) {
 		t.Fatalf("tools=%v want=%v", got, want)
 	}

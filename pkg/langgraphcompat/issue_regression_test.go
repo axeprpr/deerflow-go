@@ -3,6 +3,9 @@ package langgraphcompat
 import (
 	"strings"
 	"testing"
+
+	"github.com/axeprpr/deerflow-go/pkg/clarification"
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 )
 
 func TestIssue2143And2125CustomSkillUsesMountedSkillPath(t *testing.T) {
@@ -35,5 +38,18 @@ description: Query scenic spot analytics data
 	paths := s.runtimeSkillPaths()
 	if got := paths["scenic-spot-analytics"]; got != "/mnt/skills/custom/scenic-spot-analytics/SKILL.md" {
 		t.Fatalf("runtimeSkillPaths[scenic-spot-analytics]=%q", got)
+	}
+}
+
+func TestIssue2139DefaultRuntimeExposesWebSearchTools(t *testing.T) {
+	runtime := harnessruntime.NewDefaultToolRuntime(nil, clarification.NewManager(4), nil)
+	if runtime == nil || runtime.Registry() == nil {
+		t.Fatal("runtime tool registry is not available")
+	}
+
+	for _, name := range []string{"web_search", "web_fetch", "image_search"} {
+		if runtime.Registry().Get(name) == nil {
+			t.Fatalf("default runtime tool surface missing %s", name)
+		}
 	}
 }

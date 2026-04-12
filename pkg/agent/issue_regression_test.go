@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/axeprpr/deerflow-go/pkg/llm"
@@ -101,6 +103,29 @@ func TestIssue2123ToolCallsRemainPairedWithToolResults(t *testing.T) {
 	}
 }
 
+func TestIssue2124ProviderErrorsRemainDiagnosable(t *testing.T) {
+	runAgent := New(AgentConfig{
+		LLMProvider: issue2124FailingProvider{err: errors.New("provider returned 403: code 30001 insufficient balance")},
+		MaxTurns:    2,
+	})
+
+	_, err := runAgent.Run(context.Background(), "issue-2124", []models.Message{{
+		ID:        "m1",
+		SessionID: "issue-2124",
+		Role:      models.RoleHuman,
+		Content:   "hi",
+	}})
+	if err == nil {
+		t.Fatal("Run() error = nil want provider failure")
+	}
+	if !strings.Contains(err.Error(), "403") || !strings.Contains(err.Error(), "30001") {
+		t.Fatalf("error=%q want provider diagnostic details", err.Error())
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "network error") {
+		t.Fatalf("error=%q should not collapse into generic network error", err.Error())
+	}
+}
+
 func assertLastToolRoundTrip(t *testing.T, messages []models.Message, callID, toolName string) {
 	t.Helper()
 	if len(messages) < 2 {
@@ -120,4 +145,19 @@ func assertLastToolRoundTrip(t *testing.T, messages []models.Message, callID, to
 	if toolMsg.ToolResult.CallID != callID || toolMsg.ToolResult.ToolName != toolName {
 		t.Fatalf("tool result=%#v want %s/%s", toolMsg.ToolResult, toolName, callID)
 	}
+}
+
+type issue2124FailingProvider struct {
+	err error
+}
+
+func (p issue2124FailingProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, p.err
+}
+
+func (p issue2124FailingProvider) Stream(context.Context, llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	ch := make(chan llm.StreamChunk, 1)
+	ch <- llm.StreamChunk{Err: p.err, Done: true}
+	close(ch)
+	return ch, nil
 }

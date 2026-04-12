@@ -19,6 +19,9 @@ func NewDefaultToolRuntime(provider llm.LLMProvider, clarify *clarification.Mana
 	for _, tool := range builtin.FileTools() {
 		_ = registry.Register(tool)
 	}
+	for _, tool := range builtin.WebTools() {
+		_ = registry.Register(tool)
+	}
 	_ = registry.Register(builtin.BashTool())
 	if clarify != nil {
 		_ = registry.Register(clarification.AskClarificationTool(clarify))

@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/textproto"
@@ -105,6 +106,34 @@ func TestWebSearchHandler(t *testing.T) {
 	}
 	if !strings.Contains(result.Content, `"content":"Snippet One"`) || !strings.Contains(result.Content, `"content":"Snippet Two"`) {
 		t.Fatalf("content=%q missing legacy content field", result.Content)
+	}
+}
+
+func TestIssue2139WebSearchHandlerReturnsDiagnosableError(t *testing.T) {
+	restore := stubHTTPClient(t, func(r *http.Request) (*http.Response, error) {
+		return nil, errors.New("dial tcp: lookup html.duckduckgo.com: no such host")
+	})
+	defer restore()
+
+	oldBaseURL := duckDuckGoSearchBaseURL
+	duckDuckGoSearchBaseURL = "https://search.local/html/"
+	defer func() { duckDuckGoSearchBaseURL = oldBaseURL }()
+
+	_, err := WebSearchHandler(context.Background(), models.ToolCall{
+		ID:   "call-web-search-error",
+		Name: "web_search",
+		Arguments: map[string]any{
+			"query": "today openai api pricing",
+		},
+	})
+	if err == nil {
+		t.Fatal("WebSearchHandler() error = nil want diagnostic failure")
+	}
+	if !strings.Contains(err.Error(), "web search failed:") {
+		t.Fatalf("error=%q want wrapped search failure prefix", err.Error())
+	}
+	if !strings.Contains(err.Error(), "no such host") {
+		t.Fatalf("error=%q want underlying provider/network detail", err.Error())
 	}
 }
 
