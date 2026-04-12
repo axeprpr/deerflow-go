@@ -151,7 +151,8 @@ func TestSandboxManagerFromConfigSupportsLocalBackend(t *testing.T) {
 
 func TestSandboxManagerFromConfigReturnsDeterministicUnsupportedBackendError(t *testing.T) {
 	manager, err := NewSandboxManagerFromConfig(SandboxManagerConfig{
-		Backend: SandboxBackendRemote,
+		Backend:  SandboxBackendRemote,
+		Endpoint: "https://sandbox.internal",
 	})
 	if err != nil {
 		t.Fatalf("NewSandboxManagerFromConfig() error = %v", err)
@@ -168,14 +169,18 @@ func TestSandboxManagerFromConfigReturnsDeterministicUnsupportedBackendError(t *
 }
 
 func TestBackendSpecificSandboxManagersExposeConfiguredBackend(t *testing.T) {
-	containerManager, err := NewContainerSandboxManager(SandboxManagerConfig{})
+	containerManager, err := NewContainerSandboxManager(SandboxManagerConfig{
+		Image: "ghcr.io/example/sandbox:latest",
+	})
 	if err != nil {
 		t.Fatalf("NewContainerSandboxManager() error = %v", err)
 	}
 	if containerManager.Backend() != SandboxBackendContainer {
 		t.Fatalf("container backend = %q", containerManager.Backend())
 	}
-	remoteManager, err := NewRemoteSandboxManager(SandboxManagerConfig{})
+	remoteManager, err := NewRemoteSandboxManager(SandboxManagerConfig{
+		Endpoint: "https://sandbox.internal",
+	})
 	if err != nil {
 		t.Fatalf("NewRemoteSandboxManager() error = %v", err)
 	}
@@ -188,6 +193,19 @@ func TestBackendSpecificSandboxManagersExposeConfiguredBackend(t *testing.T) {
 	}
 	if windowsManager.Backend() != SandboxBackendWindowsRestricted {
 		t.Fatalf("windows backend = %q", windowsManager.Backend())
+	}
+}
+
+func TestSandboxManagerFromConfigValidatesBackendRequirements(t *testing.T) {
+	if _, err := NewSandboxManagerFromConfig(SandboxManagerConfig{
+		Backend: SandboxBackendRemote,
+	}); err == nil || err.Error() != "remote sandbox backend requires endpoint" {
+		t.Fatalf("remote error = %v", err)
+	}
+	if _, err := NewSandboxManagerFromConfig(SandboxManagerConfig{
+		Backend: SandboxBackendContainer,
+	}); err == nil || err.Error() != "container sandbox backend requires image" {
+		t.Fatalf("container error = %v", err)
 	}
 }
 

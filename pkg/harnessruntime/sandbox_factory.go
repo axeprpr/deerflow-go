@@ -2,6 +2,7 @@ package harnessruntime
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
@@ -21,6 +22,39 @@ type SandboxManagerConfig struct {
 	IdleTTL           time.Duration
 	SweepInterval     time.Duration
 	Leases            SandboxLeaseService
+}
+
+func (c SandboxManagerConfig) Normalized() SandboxManagerConfig {
+	if c.Backend == "" {
+		c.Backend = SandboxBackendLocalLinux
+	}
+	c.Name = strings.TrimSpace(c.Name)
+	c.Root = strings.TrimSpace(c.Root)
+	c.Endpoint = strings.TrimSpace(c.Endpoint)
+	c.Image = strings.TrimSpace(c.Image)
+	return c
+}
+
+func (c SandboxManagerConfig) Validate() error {
+	config := c.Normalized()
+	switch config.Backend {
+	case SandboxBackendLocalLinux:
+		return nil
+	case SandboxBackendContainer:
+		if config.Image == "" {
+			return fmt.Errorf("container sandbox backend requires image")
+		}
+		return nil
+	case SandboxBackendRemote:
+		if config.Endpoint == "" {
+			return fmt.Errorf("remote sandbox backend requires endpoint")
+		}
+		return nil
+	case SandboxBackendWindowsRestricted:
+		return nil
+	default:
+		return fmt.Errorf("unsupported sandbox backend %q", config.Backend)
+	}
 }
 
 type SandboxLeaseServiceFactory interface {
@@ -61,10 +95,11 @@ func DefaultSandboxManagerFactory() SandboxManagerFactory {
 }
 
 func (f SandboxManagerFactory) Build(config SandboxManagerConfig) (*SandboxResourceManager, error) {
-	backend := config.Backend
-	if backend == "" {
-		backend = SandboxBackendLocalLinux
+	config = config.Normalized()
+	if err := config.Validate(); err != nil {
+		return nil, err
 	}
+	backend := config.Backend
 	if config.Leases != nil {
 		return NewSandboxResourceManager(backend, config.Leases), nil
 	}
