@@ -54,6 +54,7 @@ func (s *Server) recordRunEvent(run *Run, eventType string, data any) StreamEven
 		Attempt:         run.Attempt,
 		ResumeFromEvent: run.ResumeFromEvent,
 		ResumeReason:    run.ResumeReason,
+		Outcome:         run.Outcome,
 	}, run.RunID, run.ThreadID, eventType, data)
 	return streamEventFromRuntimeEvent(event)
 }

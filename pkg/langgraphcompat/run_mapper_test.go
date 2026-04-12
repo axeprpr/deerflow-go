@@ -41,3 +41,19 @@ func TestApplyRunRecordMutatesCompatRun(t *testing.T) {
 		t.Fatalf("run = %+v", run)
 	}
 }
+
+func TestRunEventMapperRoundTripPreservesOutcome(t *testing.T) {
+	event := harnessruntime.RunEvent{
+		ID:       "run-1:3",
+		Event:    "end",
+		RunID:    "run-1",
+		ThreadID: "thread-1",
+		Outcome:  harnessruntime.RunOutcomeDescriptor{RunStatus: "success"},
+	}
+
+	stream := streamEventFromRuntimeEvent(event)
+	roundTrip := runtimeEventFromStreamEvent(stream)
+	if roundTrip.Outcome.RunStatus != "success" {
+		t.Fatalf("roundTrip outcome = %+v", roundTrip.Outcome)
+	}
+}

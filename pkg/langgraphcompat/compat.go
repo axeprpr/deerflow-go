@@ -176,9 +176,10 @@ type StreamEvent struct {
 	Data            any
 	RunID           string
 	ThreadID        string
-	Attempt         int    `json:"-"`
-	ResumeFromEvent int    `json:"-"`
-	ResumeReason    string `json:"-"`
+	Attempt         int                                 `json:"-"`
+	ResumeFromEvent int                                 `json:"-"`
+	ResumeReason    string                              `json:"-"`
+	Outcome         harnessruntime.RunOutcomeDescriptor `json:"-"`
 }
 
 type ServerOption func(*Server)

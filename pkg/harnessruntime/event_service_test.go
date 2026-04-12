@@ -58,6 +58,7 @@ func TestEventLogServiceRecordWithContextPreservesRecoveryMetadata(t *testing.T)
 		Attempt:         3,
 		ResumeFromEvent: 7,
 		ResumeReason:    "replay",
+		Outcome:         RunOutcomeDescriptor{RunStatus: "interrupted", Interrupted: true},
 	}, "run-1", "thread-1", "updates", map[string]any{"ok": true})
 
 	if event.Attempt != 3 {
@@ -69,10 +70,16 @@ func TestEventLogServiceRecordWithContextPreservesRecoveryMetadata(t *testing.T)
 	if event.ResumeReason != "replay" {
 		t.Fatalf("event.ResumeReason = %q, want replay", event.ResumeReason)
 	}
+	if event.Outcome.RunStatus != "interrupted" || !event.Outcome.Interrupted {
+		t.Fatalf("event.Outcome = %+v", event.Outcome)
+	}
 	if len(runtime.events) != 1 {
 		t.Fatalf("events = %d, want 1", len(runtime.events))
 	}
 	if runtime.events[0].Attempt != 3 || runtime.events[0].ResumeFromEvent != 7 || runtime.events[0].ResumeReason != "replay" {
 		t.Fatalf("saved event = %#v", runtime.events[0])
+	}
+	if runtime.events[0].Outcome.RunStatus != "interrupted" || !runtime.events[0].Outcome.Interrupted {
+		t.Fatalf("saved outcome = %+v", runtime.events[0].Outcome)
 	}
 }

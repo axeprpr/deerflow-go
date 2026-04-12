@@ -6,6 +6,7 @@ type RunEventContext struct {
 	Attempt         int
 	ResumeFromEvent int
 	ResumeReason    string
+	Outcome         RunOutcomeDescriptor
 }
 
 type RunEvent struct {
@@ -17,6 +18,7 @@ type RunEvent struct {
 	Attempt         int
 	ResumeFromEvent int
 	ResumeReason    string
+	Outcome         RunOutcomeDescriptor
 }
 
 type EventLogService struct {
@@ -40,6 +42,7 @@ func (s EventLogService) RecordWithContext(ctx RunEventContext, runID string, th
 		Attempt:         ctx.Attempt,
 		ResumeFromEvent: ctx.ResumeFromEvent,
 		ResumeReason:    ctx.ResumeReason,
+		Outcome:         ctx.Outcome,
 	}
 	if s.store == nil {
 		event.ID = fmt.Sprintf("%s:%d", runID, 1)

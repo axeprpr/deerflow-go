@@ -87,6 +87,7 @@ func streamEventFromRuntimeEvent(event harnessruntime.RunEvent) StreamEvent {
 		Attempt:         event.Attempt,
 		ResumeFromEvent: event.ResumeFromEvent,
 		ResumeReason:    event.ResumeReason,
+		Outcome:         event.Outcome,
 	}
 }
 
@@ -100,5 +101,6 @@ func runtimeEventFromStreamEvent(event StreamEvent) harnessruntime.RunEvent {
 		Attempt:         event.Attempt,
 		ResumeFromEvent: event.ResumeFromEvent,
 		ResumeReason:    event.ResumeReason,
+		Outcome:         event.Outcome,
 	}
 }
