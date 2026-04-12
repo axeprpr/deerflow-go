@@ -12,6 +12,7 @@ func runFromRecord(record harnessruntime.RunRecord) *Run {
 		ResumeReason:    record.ResumeReason,
 		Status:          record.Status,
 		Error:           record.Error,
+		Outcome:         record.Outcome,
 		CreatedAt:       record.CreatedAt,
 		UpdatedAt:       record.UpdatedAt,
 	}
@@ -39,6 +40,7 @@ func runRecordFromRun(run *Run) harnessruntime.RunRecord {
 		ResumeReason:    run.ResumeReason,
 		Status:          run.Status,
 		Error:           run.Error,
+		Outcome:         run.Outcome,
 		CreatedAt:       run.CreatedAt,
 		UpdatedAt:       run.UpdatedAt,
 	}
@@ -70,6 +72,7 @@ func applyRunRecord(run *Run, record harnessruntime.RunRecord) {
 	run.ResumeReason = record.ResumeReason
 	run.Status = record.Status
 	run.Error = record.Error
+	run.Outcome = record.Outcome
 	run.CreatedAt = record.CreatedAt
 	run.UpdatedAt = record.UpdatedAt
 }

@@ -121,6 +121,7 @@ type Run struct {
 	ResumeFromEvent int
 	ResumeReason    string
 	Status          string
+	Outcome         harnessruntime.RunOutcomeDescriptor
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	Events          []StreamEvent

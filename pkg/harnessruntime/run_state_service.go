@@ -25,6 +25,7 @@ func (s RunStateService) MarkError(record RunRecord, err error) RunRecord {
 	outcome := NewOutcomeService().Describe(record, RunOutcome{RunStatus: "error"}, err.Error())
 	record.Status = outcome.RunStatus
 	record.Error = outcome.Error
+	record.Outcome = outcome
 	record.UpdatedAt = s.now()
 	if s.runtime != nil {
 		s.runtime.SaveRunRecord(record)
@@ -37,6 +38,7 @@ func (s RunStateService) MarkCanceled(record RunRecord) RunRecord {
 	outcome := NewOutcomeService().Describe(record, RunOutcome{RunStatus: "interrupted", Interrupted: true}, "")
 	record.Status = outcome.RunStatus
 	record.Error = outcome.Error
+	record.Outcome = outcome
 	record.UpdatedAt = s.now()
 	if s.runtime != nil {
 		s.runtime.SaveRunRecord(record)
@@ -48,6 +50,7 @@ func (s RunStateService) MarkCanceled(record RunRecord) RunRecord {
 func (s RunStateService) Finalize(record RunRecord, outcome CompletionOutcome) RunRecord {
 	record.Status = outcome.Descriptor.RunStatus
 	record.Error = outcome.Descriptor.Error
+	record.Outcome = outcome.Descriptor
 	record.UpdatedAt = s.now()
 	if s.runtime != nil {
 		s.runtime.SaveRunRecord(record)

@@ -18,6 +18,7 @@ type RunRecord struct {
 	ResumeReason    string
 	Status          string
 	Error           string
+	Outcome         RunOutcomeDescriptor
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
@@ -106,8 +107,12 @@ func (s PreflightService) Prepare(input PreflightInput) PreflightResult {
 		AssistantID: assistantID,
 		Attempt:     1,
 		Status:      "running",
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		Outcome: RunOutcomeDescriptor{
+			RunStatus: "running",
+			Attempt:   1,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 	if s.runtime != nil {
 		s.runtime.SaveRunRecord(record)

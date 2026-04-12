@@ -14,6 +14,7 @@ func TestRunMapperRoundTrip(t *testing.T) {
 		ThreadID:    "thread-1",
 		AssistantID: "lead_agent",
 		Status:      "running",
+		Outcome:     harnessruntime.RunOutcomeDescriptor{RunStatus: "running"},
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -32,10 +33,11 @@ func TestApplyRunRecordMutatesCompatRun(t *testing.T) {
 		ThreadID:    "thread-1",
 		AssistantID: "lead_agent",
 		Status:      "success",
+		Outcome:     harnessruntime.RunOutcomeDescriptor{RunStatus: "success"},
 	}
 
 	applyRunRecord(run, record)
-	if run.RunID != "run-1" || run.ThreadID != "thread-1" || run.Status != "success" {
+	if run.RunID != "run-1" || run.ThreadID != "thread-1" || run.Status != "success" || run.Outcome.RunStatus != "success" {
 		t.Fatalf("run = %+v", run)
 	}
 }

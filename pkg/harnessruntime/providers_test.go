@@ -535,12 +535,12 @@ func TestRunStateServiceTransitionsRecords(t *testing.T) {
 
 	record := RunRecord{RunID: "run-1", ThreadID: "thread-1", Status: "running"}
 	record = service.MarkError(record, context.DeadlineExceeded)
-	if record.Status != "error" || runtime.threadStatus != "thread-1:error" {
+	if record.Status != "error" || record.Outcome.RunStatus != "error" || runtime.threadStatus != "thread-1:error" {
 		t.Fatalf("error record = %+v runtime=%+v", record, runtime)
 	}
 
 	record = service.MarkCanceled(record)
-	if record.Status != "interrupted" || runtime.threadStatus != "thread-1:interrupted" {
+	if record.Status != "interrupted" || !record.Outcome.Interrupted || runtime.threadStatus != "thread-1:interrupted" {
 		t.Fatalf("canceled record = %+v runtime=%+v", record, runtime)
 	}
 
@@ -548,7 +548,7 @@ func TestRunStateServiceTransitionsRecords(t *testing.T) {
 		RunOutcome: RunOutcome{RunStatus: "success"},
 		Descriptor: RunOutcomeDescriptor{RunStatus: "success"},
 	})
-	if record.Status != "success" || runtime.saved.Status != "success" {
+	if record.Status != "success" || record.Outcome.RunStatus != "success" || runtime.saved.Status != "success" {
 		t.Fatalf("finalized record = %+v runtime=%+v", record, runtime)
 	}
 }
