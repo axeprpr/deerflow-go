@@ -39,3 +39,19 @@ func TestNewLocalSandboxRuntimeDefersSandboxCreationUntilEnabled(t *testing.T) {
 		t.Fatalf("sandbox dir missing after enabled resolve: %v", err)
 	}
 }
+
+func TestNewLocalSandboxLeaseServiceAcquiresLease(t *testing.T) {
+	tmp := t.TempDir()
+	leases := NewLocalSandboxLeaseService("runtime-lease", tmp)
+
+	lease, err := leases.AcquireLease(harness.AgentRequest{Features: harness.FeatureSet{Sandbox: true}})
+	if err != nil {
+		t.Fatalf("AcquireLease() error = %v", err)
+	}
+	if lease.Sandbox == nil {
+		t.Fatal("AcquireLease() returned nil sandbox")
+	}
+	if lease.Heartbeat == nil || lease.Release == nil {
+		t.Fatalf("lease callbacks = %#v", lease)
+	}
+}

@@ -13,6 +13,7 @@ import (
 
 type CoordinatorDeps struct {
 	Runtime        *harness.Runtime
+	Dispatcher     RunDispatcher
 	Preflight      PreflightRuntime
 	Context        ContextRuntime
 	RunState       RunStateRuntime
@@ -41,6 +42,7 @@ type CompletionResult struct {
 
 type Coordinator struct {
 	runtime      *harness.Runtime
+	dispatcher   RunDispatcher
 	preflight    PreflightService
 	context      ContextService
 	runState     RunStateService
@@ -52,6 +54,7 @@ type Coordinator struct {
 func NewCoordinator(deps CoordinatorDeps) Coordinator {
 	return Coordinator{
 		runtime:      deps.Runtime,
+		dispatcher:   deps.Dispatcher,
 		preflight:    NewPreflightService(deps.Preflight),
 		context:      NewContextService(deps.Context, deps.Runtime),
 		runState:     NewRunStateService(deps.RunState),
@@ -63,7 +66,11 @@ func NewCoordinator(deps CoordinatorDeps) Coordinator {
 
 func (c Coordinator) Prepare(ctx context.Context, input PreflightInput, plan RunPlan) (*PreparedRun, error) {
 	preflight := c.preflight.Prepare(input)
-	orchestrated, err := NewOrchestrator(c.runtime).Prepare(ctx, RunPlan{
+	dispatcher := c.dispatcher
+	if dispatcher == nil {
+		dispatcher = NewInProcessRunDispatcher()
+	}
+	orchestrated, err := dispatcher.Prepare(ctx, c.runtime, RunPlan{
 		ThreadID:         preflight.ThreadID,
 		AssistantID:      preflight.AssistantID,
 		Model:            plan.Model,
@@ -129,4 +136,3 @@ func (c Coordinator) Wait(ctx context.Context, threadID, runID string, cancelOnD
 func (c Coordinator) Cancel(threadID, runID string) (map[string]any, bool, bool) {
 	return c.coordination.Cancel(threadID, runID)
 }
-
