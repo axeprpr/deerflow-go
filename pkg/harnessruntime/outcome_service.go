@@ -5,6 +5,15 @@ type RunOutcome struct {
 	RunStatus   string
 }
 
+type RunOutcomeDescriptor struct {
+	RunStatus       string
+	Interrupted     bool
+	Error           string
+	Attempt         int
+	ResumeFromEvent int
+	ResumeReason    string
+}
+
 type OutcomeService struct{}
 
 func NewOutcomeService() OutcomeService {
@@ -21,5 +30,16 @@ func (OutcomeService) Resolve(interrupted bool) RunOutcome {
 	return RunOutcome{
 		Interrupted: false,
 		RunStatus:   "success",
+	}
+}
+
+func (s OutcomeService) Describe(record RunRecord, outcome RunOutcome, errText string) RunOutcomeDescriptor {
+	return RunOutcomeDescriptor{
+		RunStatus:       outcome.RunStatus,
+		Interrupted:     outcome.Interrupted,
+		Error:           errText,
+		Attempt:         record.Attempt,
+		ResumeFromEvent: record.ResumeFromEvent,
+		ResumeReason:    record.ResumeReason,
 	}
 }

@@ -22,6 +22,7 @@ type CompletionService struct {
 
 type CompletionOutcome struct {
 	RunOutcome
+	Descriptor RunOutcomeDescriptor
 }
 
 func NewCompletionService(runtime CompletionRuntime, titleMetadataKey string, interruptMetadataKey string) CompletionService {
@@ -58,14 +59,26 @@ func (s CompletionService) Apply(threadID string, state *harness.RunState, resul
 			s.runtime.SetThreadInterrupts(threadID, []any{interrupt})
 			s.runtime.MarkThreadStatus(threadID, "interrupted")
 		}
-		return CompletionOutcome{RunOutcome: outcomes.Resolve(true)}
+		outcome := outcomes.Resolve(true)
+		return CompletionOutcome{
+			RunOutcome: outcome,
+			Descriptor: outcomes.Describe(RunRecord{
+				ThreadID: threadID,
+			}, outcome, ""),
+		}
 	}
 
 	if s.runtime != nil {
 		s.runtime.ClearThreadInterrupts(threadID)
 		s.runtime.MarkThreadStatus(threadID, "idle")
 	}
-	return CompletionOutcome{RunOutcome: outcomes.Resolve(false)}
+	outcome := outcomes.Resolve(false)
+	return CompletionOutcome{
+		RunOutcome: outcome,
+		Descriptor: outcomes.Describe(RunRecord{
+			ThreadID: threadID,
+		}, outcome, ""),
+	}
 }
 
 func metadataString(state *harness.RunState, key string) string {

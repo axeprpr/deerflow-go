@@ -39,6 +39,7 @@ type PreparedRun struct {
 type CompletionResult struct {
 	Run         RunRecord
 	Interrupted bool
+	Outcome     RunOutcomeDescriptor
 }
 
 type Coordinator struct {
@@ -115,9 +116,11 @@ func (c Coordinator) Finalize(ctx context.Context, threadID string, state *harne
 		_ = c.runtime.AfterRun(ctx, state, result)
 	}
 	outcome := c.completion.Apply(threadID, state, result)
+	outcome.Descriptor = NewOutcomeService().Describe(record, outcome.RunOutcome, "")
 	return CompletionResult{
 		Run:         c.runState.Finalize(record, outcome),
 		Interrupted: outcome.Interrupted,
+		Outcome:     outcome.Descriptor,
 	}
 }
 

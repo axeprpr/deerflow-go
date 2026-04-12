@@ -392,6 +392,17 @@ func TestOutcomeServiceMapsInterruptedState(t *testing.T) {
 	if got := outcomes.Resolve(false); got.Interrupted || got.RunStatus != "success" {
 		t.Fatalf("success outcome = %+v", got)
 	}
+	desc := outcomes.Describe(RunRecord{
+		Attempt:         2,
+		ResumeFromEvent: 5,
+		ResumeReason:    "retry",
+	}, outcomes.Resolve(true), "boom")
+	if desc.RunStatus != "interrupted" || !desc.Interrupted || desc.Error != "boom" {
+		t.Fatalf("descriptor = %+v", desc)
+	}
+	if desc.Attempt != 2 || desc.ResumeFromEvent != 5 || desc.ResumeReason != "retry" {
+		t.Fatalf("descriptor recovery = %+v", desc)
+	}
 }
 
 func TestFeatureConfigBuildAssembly(t *testing.T) {
@@ -533,7 +544,10 @@ func TestRunStateServiceTransitionsRecords(t *testing.T) {
 		t.Fatalf("canceled record = %+v runtime=%+v", record, runtime)
 	}
 
-	record = service.Finalize(record, CompletionOutcome{RunOutcome: RunOutcome{RunStatus: "success"}})
+	record = service.Finalize(record, CompletionOutcome{
+		RunOutcome: RunOutcome{RunStatus: "success"},
+		Descriptor: RunOutcomeDescriptor{RunStatus: "success"},
+	})
 	if record.Status != "success" || runtime.saved.Status != "success" {
 		t.Fatalf("finalized record = %+v runtime=%+v", record, runtime)
 	}
