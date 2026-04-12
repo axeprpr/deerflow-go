@@ -121,6 +121,41 @@ func TestUserProfilePutThenGetRoundTripsContent(t *testing.T) {
 	}
 }
 
+func TestUserProfileGetFailureUsesUpstreamDetail(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	if err := os.MkdirAll(s.userProfilePath(), 0o755); err != nil {
+		t.Fatalf("mkdir USER.md dir: %v", err)
+	}
+	if err := s.loadGatewayCompatFiles(); err != nil {
+		t.Fatalf("loadGatewayCompatFiles: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/user-profile", nil, nil)
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), `Failed to read user profile:`) {
+		t.Fatalf("body=%s", resp.Body.String())
+	}
+}
+
+func TestUserProfilePutFailureUsesUpstreamDetail(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	if err := os.MkdirAll(s.userProfilePath(), 0o755); err != nil {
+		t.Fatalf("mkdir USER.md dir: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodPut, "/api/user-profile", strings.NewReader(`{"content":"Prefers direct answers."}`), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), `Failed to update user profile:`) {
+		t.Fatalf("body=%s", resp.Body.String())
+	}
+}
+
 func TestLoadGatewayCompatFilesFallsBackToLegacyDataRoot(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 

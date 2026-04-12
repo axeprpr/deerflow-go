@@ -342,15 +342,29 @@ func (s *Server) deleteGatewayAgent(ctx context.Context, name string) (int, stri
 	return http.StatusNoContent, ""
 }
 
-func (s *Server) gatewayUserProfileContent() *string {
+func (s *Server) gatewayUserProfileContent() (*string, int, string) {
 	s.refreshGatewayCompatFilesIfManaged()
+	for _, path := range s.userProfilePaths() {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, http.StatusInternalServerError, fmt.Sprintf("Failed to read user profile: %v", err)
+		}
+		content := strings.TrimSpace(string(data))
+		if content == "" {
+			return nil, http.StatusOK, ""
+		}
+		return &content, http.StatusOK, ""
+	}
 	s.uiStateMu.RLock()
 	content := s.getUserProfileLocked()
 	s.uiStateMu.RUnlock()
 	if strings.TrimSpace(content) == "" {
-		return nil
+		return nil, http.StatusOK, ""
 	}
-	return &content
+	return &content, http.StatusOK, ""
 }
 
 func (s *Server) updateGatewayUserProfile(content string) (int, string) {
@@ -358,10 +372,10 @@ func (s *Server) updateGatewayUserProfile(content string) (int, string) {
 	s.setUserProfileLocked(content)
 	s.uiStateMu.Unlock()
 	if err := s.persistUserProfileFile(content); err != nil {
-		return http.StatusInternalServerError, "failed to persist user profile"
+		return http.StatusInternalServerError, fmt.Sprintf("Failed to update user profile: %v", err)
 	}
 	if err := s.persistGatewayState(); err != nil {
-		return http.StatusInternalServerError, "failed to persist state"
+		return http.StatusInternalServerError, fmt.Sprintf("Failed to update user profile: %v", err)
 	}
 	return http.StatusOK, ""
 }

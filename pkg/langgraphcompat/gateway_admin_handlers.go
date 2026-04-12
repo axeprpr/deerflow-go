@@ -162,7 +162,11 @@ func (s *Server) handleAgentDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUserProfileGet(w http.ResponseWriter, r *http.Request) {
-	content := s.gatewayUserProfileContent()
+	content, status, detail := s.gatewayUserProfileContent()
+	if detail != "" {
+		writeJSON(w, status, map[string]any{"detail": detail})
+		return
+	}
 	if content == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"content": nil})
 		return
