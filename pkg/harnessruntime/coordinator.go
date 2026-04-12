@@ -82,12 +82,15 @@ func (c Coordinator) Prepare(ctx context.Context, input PreflightInput, plan Run
 	}, nil
 }
 
-func (c Coordinator) Submit(ctx context.Context, plan RunPlan) (*PreparedExecution, error) {
+func (c Coordinator) Submit(ctx context.Context, plan RunPlan) (*DispatchResult, error) {
 	dispatcher := c.dispatcher
 	if dispatcher == nil {
 		dispatcher = NewInProcessRunDispatcher()
 	}
-	return dispatcher.Prepare(ctx, c.runtime, plan)
+	return dispatcher.Dispatch(ctx, DispatchRequest{
+		Runtime: c.runtime,
+		Plan:    plan,
+	})
 }
 
 func (c Coordinator) BindContext(ctx context.Context, threadID string, taskSink func(subagent.TaskEvent), clarificationSink func(*clarification.Clarification)) context.Context {

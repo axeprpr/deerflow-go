@@ -11,21 +11,23 @@ import (
 
 type fakeDispatcher struct {
 	called bool
+	req    DispatchRequest
 	plan   RunPlan
 }
 
-func (d *fakeDispatcher) Prepare(_ context.Context, _ *harness.Runtime, plan RunPlan) (*PreparedExecution, error) {
+func (d *fakeDispatcher) Dispatch(_ context.Context, req DispatchRequest) (*DispatchResult, error) {
 	d.called = true
-	d.plan = plan
-	return &PreparedExecution{
+	d.req = req
+	d.plan = req.Plan
+	return &DispatchResult{
 		Lifecycle: &harness.RunState{
-			ThreadID:         plan.ThreadID,
-			AssistantID:      plan.AssistantID,
-			Model:            plan.Model,
-			AgentName:        plan.AgentName,
-			Spec:             plan.Spec,
-			ExistingMessages: append([]models.Message(nil), plan.ExistingMessages...),
-			Messages:         append([]models.Message(nil), plan.Messages...),
+			ThreadID:         req.Plan.ThreadID,
+			AssistantID:      req.Plan.AssistantID,
+			Model:            req.Plan.Model,
+			AgentName:        req.Plan.AgentName,
+			Spec:             req.Plan.Spec,
+			ExistingMessages: append([]models.Message(nil), req.Plan.ExistingMessages...),
+			Messages:         append([]models.Message(nil), req.Plan.Messages...),
 			Metadata:         map[string]any{},
 		},
 		Execution: &harness.Execution{},
@@ -78,6 +80,9 @@ func TestCoordinatorUsesInjectedDispatcher(t *testing.T) {
 	if !dispatcher.called {
 		t.Fatal("dispatcher was not called")
 	}
+	if dispatcher.req.Runtime != nil {
+		t.Fatalf("dispatcher runtime = %#v, want nil", dispatcher.req.Runtime)
+	}
 	if dispatcher.plan.ThreadID != "thread-1" || dispatcher.plan.AssistantID != "lead_agent" {
 		t.Fatalf("dispatcher plan = %#v", dispatcher.plan)
 	}
@@ -109,6 +114,9 @@ func TestCoordinatorSubmitUsesInjectedDispatcher(t *testing.T) {
 	}
 	if !dispatcher.called {
 		t.Fatal("dispatcher was not called")
+	}
+	if dispatcher.req.Runtime != nil {
+		t.Fatalf("dispatcher runtime = %#v, want nil", dispatcher.req.Runtime)
 	}
 	if prepared == nil || prepared.Execution == nil || prepared.Lifecycle == nil {
 		t.Fatalf("prepared = %#v", prepared)
