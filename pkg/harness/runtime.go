@@ -14,6 +14,7 @@ type Runtime struct {
 	runner          *Runner
 	memory          *MemoryRuntime
 	sandboxProvider SandboxProvider
+	toolRuntime     ToolRuntime
 	features        FeatureAssembly
 	lifecycle       *LifecycleHooks
 }
@@ -54,6 +55,7 @@ func NewRuntime(deps RuntimeDeps, memory *MemoryRuntime, opts ...RuntimeOption) 
 		runner:          NewRunner(factory),
 		memory:          memory,
 		sandboxProvider: deps.SandboxProvider,
+		toolRuntime:     deps.ToolRuntime,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -114,4 +116,11 @@ func (r *Runtime) SandboxProvider() SandboxProvider {
 		return nil
 	}
 	return r.sandboxProvider
+}
+
+func (r *Runtime) ToolRuntime() ToolRuntime {
+	if r == nil {
+		return nil
+	}
+	return r.toolRuntime
 }

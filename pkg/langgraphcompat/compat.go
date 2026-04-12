@@ -22,7 +22,6 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/sandbox"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
-	"github.com/axeprpr/deerflow-go/pkg/tools/builtin"
 )
 
 // LangGraph API-compatible server wrapper for deerflow-go
@@ -178,17 +177,11 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	// Create LLM provider
 	provider := llm.NewProvider("siliconflow")
 
-	// Create tool registry with built-in tools
-	registry := tools.NewRegistry()
 	clarifyManager := clarification.NewManager(32)
-	for _, tool := range builtin.FileTools() {
-		registry.Register(tool)
-	}
-	registry.Register(builtin.BashTool())
-	registry.Register(clarification.AskClarificationTool(clarifyManager))
+	toolRuntime := harnessruntime.NewDefaultToolRuntime(provider, clarifyManager)
+	registry := toolRuntime.Registry()
 	sandboxRoot := filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
-	subagentPool := agent.NewSubagentPool(provider, registry, nil, 2, 2*time.Minute)
-	registry.Register(tools.TaskTool(subagentPool))
+	subagentPool := toolRuntime.Subagents()
 
 	// Create checkpoint store
 	var store checkpoint.Store
@@ -248,6 +241,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	s.runtime = harness.NewRuntime(harness.RuntimeDeps{
 		LLMProvider:     provider,
 		Tools:           registry,
+		ToolRuntime:     toolRuntime,
 		DefaultMaxTurns: s.maxTurns,
 		SandboxProvider: s.defaultSandboxProvider(nil),
 	}, memoryRuntime)

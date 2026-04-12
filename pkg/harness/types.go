@@ -76,6 +76,7 @@ type Middleware interface {
 type RuntimeDeps struct {
 	LLMProvider     llm.LLMProvider
 	Tools           *tools.Registry
+	ToolRuntime     ToolRuntime
 	DefaultMaxTurns int
 	SandboxProvider SandboxProvider
 }

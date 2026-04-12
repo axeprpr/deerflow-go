@@ -20,7 +20,11 @@ func (f *Factory) NewAgent(req AgentRequest) (*agent.Agent, error) {
 		cfg.LLMProvider = f.deps.LLMProvider
 	}
 	if cfg.Tools == nil {
-		cfg.Tools = f.deps.Tools
+		if f.deps.ToolRuntime != nil {
+			cfg.Tools = f.deps.ToolRuntime.Registry()
+		} else {
+			cfg.Tools = f.deps.Tools
+		}
 	}
 	if cfg.MaxTurns <= 0 && f.deps.DefaultMaxTurns > 0 {
 		cfg.MaxTurns = f.deps.DefaultMaxTurns
