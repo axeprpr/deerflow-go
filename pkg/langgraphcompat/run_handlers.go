@@ -25,7 +25,7 @@ func (s *Server) handleThreadRunsStream(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) {
 	threadID := r.PathValue("thread_id")
 	if threadID == "" {
-		http.Error(w, "thread ID required", http.StatusBadRequest)
+		writeDetailError(w, http.StatusBadRequest, "thread ID required")
 		return
 	}
 
@@ -33,7 +33,7 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 	if r.Body != nil {
 		defer r.Body.Close()
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
-			http.Error(w, fmt.Sprintf("invalid request: %v", err), http.StatusBadRequest)
+			writeDetailError(w, http.StatusBadRequest, fmt.Sprintf("invalid request: %v", err))
 			return
 		}
 	}
@@ -45,7 +45,7 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 	execution, err := s.buildRunExecution(r.Context(), prepared, req)
 	if err != nil {
 		s.markRunError(prepared.Run, prepared.ThreadID, err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDetailError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -54,7 +54,7 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 	result, err := execution.Run(ctx)
 	if err != nil {
 		s.markRunError(prepared.Run, prepared.ThreadID, err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeDetailError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -166,7 +166,7 @@ func (s *Server) handleRunStream(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRunGet(w http.ResponseWriter, r *http.Request) {
 	run := s.threadRun("", r.PathValue("run_id"))
 	if run == nil {
-		http.Error(w, "run not found", http.StatusNotFound)
+		writeDetailError(w, http.StatusNotFound, "run not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, runResponse(run))
@@ -175,7 +175,7 @@ func (s *Server) handleRunGet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleThreadScopedRunGet(w http.ResponseWriter, r *http.Request) {
 	run := s.threadRun(r.PathValue("thread_id"), r.PathValue("run_id"))
 	if run == nil {
-		http.Error(w, "run not found", http.StatusNotFound)
+		writeDetailError(w, http.StatusNotFound, "run not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, runResponse(run))
@@ -188,7 +188,7 @@ func (s *Server) handleThreadRunJoin(w http.ResponseWriter, r *http.Request) {
 
 	run, found := s.waitForThreadRun(r.Context(), threadID, runID, cancelOnDisconnect)
 	if !found {
-		http.Error(w, "run not found", http.StatusNotFound)
+		writeDetailError(w, http.StatusNotFound, "run not found")
 		return
 	}
 	if run == nil {
@@ -200,11 +200,11 @@ func (s *Server) handleThreadRunJoin(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleThreadRunCancel(w http.ResponseWriter, r *http.Request) {
 	resp, found, canceled := s.cancelThreadRun(r.PathValue("thread_id"), r.PathValue("run_id"))
 	if !found {
-		http.Error(w, "run not found", http.StatusNotFound)
+		writeDetailError(w, http.StatusNotFound, "run not found")
 		return
 	}
 	if !canceled {
-		http.Error(w, "run is not cancellable", http.StatusConflict)
+		writeDetailError(w, http.StatusConflict, "run is not cancellable")
 		return
 	}
 	writeJSON(w, http.StatusAccepted, resp)

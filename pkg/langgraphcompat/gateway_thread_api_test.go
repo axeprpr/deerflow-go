@@ -474,6 +474,49 @@ func TestGatewayThreadRunRoutesProxyLangGraphRunHandlers(t *testing.T) {
 	}
 }
 
+func TestGatewayThreadRunGetMissingUsesJSONDetail(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	resp := performCompatRequest(t, handler, http.MethodGet, "/api/threads/thread-gateway-runs/runs/run-missing", nil, nil)
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, resp.Body.String())
+	}
+	if payload["detail"] != "run not found" {
+		t.Fatalf("detail=%#v", payload["detail"])
+	}
+}
+
+func TestGatewayThreadRunCancelConflictUsesJSONDetail(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	s.ensureSession("thread-gateway-runs", map[string]any{"agent_name": "writer-bot"})
+	run := &Run{
+		RunID:     "run-gateway-finished",
+		ThreadID:  "thread-gateway-runs",
+		Status:    "success",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	s.saveRun(run)
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/threads/thread-gateway-runs/runs/run-gateway-finished/cancel", nil, nil)
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, resp.Body.String())
+	}
+	if payload["detail"] != "run is not cancellable" {
+		t.Fatalf("detail=%#v", payload["detail"])
+	}
+}
+
 func TestGatewayThreadStreamJoinRouteProxyLangGraphJoinHandler(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 	s.ensureSession("thread-gateway-stream", map[string]any{"agent_name": "writer-bot"})
