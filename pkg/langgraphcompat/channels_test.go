@@ -39,7 +39,7 @@ func TestChannelsRestartReturns503WithoutConfig(t *testing.T) {
 	if resp.Code != http.StatusServiceUnavailable {
 		t.Fatalf("restart status=%d body=%s", resp.Code, resp.Body.String())
 	}
-	if !strings.Contains(resp.Body.String(), "channel service is not running") {
+	if !strings.Contains(resp.Body.String(), "Channel service is not running") {
 		t.Fatalf("body=%q want service unavailable message", resp.Body.String())
 	}
 }
@@ -106,7 +106,7 @@ channels:
 	if !restartPayload.Success {
 		t.Fatalf("success=%v want true", restartPayload.Success)
 	}
-	if !strings.Contains(restartPayload.Message, "restarted successfully") {
+	if restartPayload.Message != "Channel feishu restarted successfully" {
 		t.Fatalf("message=%q want restart success", restartPayload.Message)
 	}
 
@@ -184,8 +184,8 @@ channels:
 	if payload.Success {
 		t.Fatalf("success=%v want false", payload.Success)
 	}
-	if !strings.Contains(payload.Message, "not enabled") {
-		t.Fatalf("message=%q want disabled explanation", payload.Message)
+	if payload.Message != "Failed to restart channel slack" {
+		t.Fatalf("message=%q want failed restart message", payload.Message)
 	}
 }
 
@@ -335,8 +335,8 @@ channels:
 	if payload.Success {
 		t.Fatalf("success=%v want false", payload.Success)
 	}
-	if !strings.Contains(payload.Message, "app_id and app_secret") {
-		t.Fatalf("message=%q want feishu credential error", payload.Message)
+	if payload.Message != "Failed to restart channel feishu" {
+		t.Fatalf("message=%q want failed restart message", payload.Message)
 	}
 }
 

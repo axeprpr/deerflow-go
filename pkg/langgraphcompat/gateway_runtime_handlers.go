@@ -17,6 +17,10 @@ func (s *Server) handleChannelsGet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleChannelRestart(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.PathValue("name"))
 	status, success, message := s.restartGatewayChannel(name)
+	if status != http.StatusOK {
+		writeJSON(w, status, map[string]any{"detail": message})
+		return
+	}
 	writeJSON(w, status, map[string]any{
 		"success": success,
 		"message": message,

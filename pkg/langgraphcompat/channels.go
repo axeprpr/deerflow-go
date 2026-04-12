@@ -196,14 +196,17 @@ func resolveGatewayConfigPath() (string, bool) {
 func (s *Server) restartGatewayChannel(name string) (int, bool, string) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if !isSupportedGatewayChannel(name) {
-		return 200, false, "channel is not supported"
+		return 200, false, fmt.Sprintf("Failed to restart channel %s", name)
 	}
 	svc := s.ensureGatewayChannelService()
 	if !svc.available() {
-		return 503, false, "channel service is not running"
+		return 503, false, "Channel service is not running"
 	}
-	success, message := svc.restart(name)
-	return 200, success, message
+	success, _ := svc.restart(name)
+	if success {
+		return 200, true, fmt.Sprintf("Channel %s restarted successfully", name)
+	}
+	return 200, false, fmt.Sprintf("Failed to restart channel %s", name)
 }
 
 func (s *Server) stopGatewayChannels() {
