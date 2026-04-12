@@ -103,15 +103,12 @@ func (s runReplayStreamer) Replay(run *Run) bool {
 	if run == nil {
 		return false
 	}
-	replayedEnd := false
-	for _, event := range run.Events {
+	events, replayedEnd := harnessruntime.NewEventFeedService(s.server.runtimeEventAdapter()).Replay(run.RunID)
+	for _, event := range events {
 		if !s.filter.allows(event.Event) {
 			continue
 		}
-		s.server.sendSSEEvent(s.w, s.flusher, event)
-		if event.Event == "end" {
-			replayedEnd = true
-		}
+		s.server.sendSSEEvent(s.w, s.flusher, streamEventFromRuntimeEvent(event))
 	}
 	s.flusher.Flush()
 	return replayedEnd
@@ -121,7 +118,7 @@ func (s runReplayStreamer) Join(run *Run) {
 	if run == nil {
 		return
 	}
-	sub, unsubscribe := s.server.ensureRunRegistry().subscribe(run.RunID, 16)
+	sub, unsubscribe := harnessruntime.NewEventFeedService(s.server.runtimeEventAdapter()).Subscribe(run.RunID, 16)
 	defer unsubscribe()
 	for {
 		select {
@@ -130,7 +127,7 @@ func (s runReplayStreamer) Join(run *Run) {
 				return
 			}
 			if s.filter.allows(event.Event) {
-				s.server.sendSSEEvent(s.w, s.flusher, event)
+				s.server.sendSSEEvent(s.w, s.flusher, streamEventFromRuntimeEvent(event))
 			}
 			if event.Event == "end" {
 				return

@@ -2,6 +2,7 @@ package langgraphcompat
 
 import (
 	"context"
+	"sync"
 
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
@@ -215,4 +216,47 @@ func (a runtimeEventAdapter) NextRunEventIndex(runID string) int {
 
 func (a runtimeEventAdapter) AppendRunEvent(runID string, event harnessruntime.RunEvent) {
 	a.server.appendRunEvent(runID, streamEventFromRuntimeEvent(event))
+}
+
+func (a runtimeEventAdapter) LoadRunEvents(runID string) []harnessruntime.RunEvent {
+	run := a.server.getRun(runID)
+	if run == nil {
+		return nil
+	}
+	events := make([]harnessruntime.RunEvent, 0, len(run.Events))
+	for _, event := range run.Events {
+		events = append(events, runtimeEventFromStreamEvent(event))
+	}
+	return events
+}
+
+func (a runtimeEventAdapter) SubscribeRunEvents(runID string, buffer int) (<-chan harnessruntime.RunEvent, func()) {
+	source, unsubscribe := a.server.ensureRunRegistry().subscribe(runID, buffer)
+	out := make(chan harnessruntime.RunEvent, buffer)
+	done := make(chan struct{})
+	var once sync.Once
+	go func() {
+		defer close(out)
+		for {
+			select {
+			case <-done:
+				return
+			case event, ok := <-source:
+				if !ok {
+					return
+				}
+				select {
+				case out <- runtimeEventFromStreamEvent(event):
+				case <-done:
+					return
+				}
+			}
+		}
+	}()
+	return out, func() {
+		once.Do(func() {
+			close(done)
+			unsubscribe()
+		})
+	}
 }

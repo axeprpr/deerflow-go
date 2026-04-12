@@ -51,3 +51,13 @@ func streamEventFromRuntimeEvent(event harnessruntime.RunEvent) StreamEvent {
 		ThreadID: event.ThreadID,
 	}
 }
+
+func runtimeEventFromStreamEvent(event StreamEvent) harnessruntime.RunEvent {
+	return harnessruntime.RunEvent{
+		ID:       event.ID,
+		Event:    event.Event,
+		Data:     event.Data,
+		RunID:    event.RunID,
+		ThreadID: event.ThreadID,
+	}
+}
