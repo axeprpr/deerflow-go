@@ -59,6 +59,50 @@ func TestFactoryDoesNotResolveSandboxWhenFeatureDisabled(t *testing.T) {
 	}
 }
 
+func TestRuntimeUsesProfileResolverForPerRequestExecutionMode(t *testing.T) {
+	tmp := t.TempDir()
+	var resolved int
+
+	runtime := NewRuntime(RuntimeDeps{
+		ProfileResolver: testProfileResolver{root: tmp, resolved: &resolved},
+	}, nil)
+
+	runAgent, err := runtime.NewAgent(AgentRequest{
+		Spec:     AgentSpec{ExecutionMode: "background"},
+		Features: FeatureSet{Sandbox: true},
+	})
+	if err != nil {
+		t.Fatalf("NewAgent() error = %v", err)
+	}
+	if runAgent == nil {
+		t.Fatal("NewAgent() returned nil agent")
+	}
+	if resolved != 1 {
+		t.Fatalf("resolved=%d want=1", resolved)
+	}
+}
+
+type testProfileResolver struct {
+	root     string
+	resolved *int
+}
+
+func (r testProfileResolver) ResolveProfile(base RuntimeProfile, req AgentRequest) RuntimeProfile {
+	if req.Spec.ExecutionMode != "background" {
+		return base
+	}
+	base.SandboxRuntime = NewStaticSandboxRuntime(
+		testSandboxProvider(func() (*sandbox.Sandbox, error) {
+			if r.resolved != nil {
+				(*r.resolved)++
+			}
+			return sandbox.New("harness-profile-resolver", r.root)
+		}),
+		FeatureSandboxPolicy{},
+	)
+	return base
+}
+
 type testSandboxProvider func() (*sandbox.Sandbox, error)
 
 func (p testSandboxProvider) Acquire() (*sandbox.Sandbox, error) { return p() }

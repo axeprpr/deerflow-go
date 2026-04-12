@@ -31,6 +31,7 @@ type AgentSpec struct {
 	DeferredTools          []models.Tool
 	PresentFiles           *tools.PresentFileRegistry
 	RunPolicy              *agent.RunPolicy
+	ExecutionMode          string
 	AgentType              agent.AgentType
 	MaxTurns               int
 	MaxConcurrentSubagents int
@@ -81,6 +82,7 @@ type RuntimeDeps struct {
 	ToolRuntime     ToolRuntime
 	DefaultMaxTurns int
 	RunPolicy       *agent.RunPolicy
+	ProfileResolver ProfileResolver
 	SandboxRuntime  SandboxRuntime
 	SandboxProvider SandboxProvider
 }

@@ -15,6 +15,7 @@ type Runtime struct {
 	memory         *MemoryRuntime
 	sandboxRuntime SandboxRuntime
 	toolRuntime    ToolRuntime
+	profileResolver ProfileResolver
 	profile        RuntimeProfile
 	features       FeatureAssembly
 	lifecycle      *LifecycleHooks
@@ -74,6 +75,7 @@ func NewRuntime(deps RuntimeDeps, memory *MemoryRuntime, opts ...RuntimeOption) 
 		memory:         memory,
 		sandboxRuntime: sandboxRuntime,
 		toolRuntime:    deps.ToolRuntime,
+		profileResolver: deps.ProfileResolver,
 		profile: RuntimeProfile{
 			RunPolicy:      deps.RunPolicy,
 			ToolRuntime:    deps.ToolRuntime,
@@ -119,7 +121,22 @@ func (r *Runtime) NewAgent(req AgentRequest) (*agent.Agent, error) {
 	if r == nil || r.factory == nil {
 		return agent.New(req.Spec.AgentConfig()), nil
 	}
-	return r.factory.NewAgent(req)
+	if r.profileResolver == nil {
+		return r.factory.NewAgent(req)
+	}
+	profile := r.profileResolver.ResolveProfile(r.profile, req)
+	deps := r.factory.deps
+	if profile.RunPolicy != nil {
+		deps.RunPolicy = profile.RunPolicy
+	}
+	if profile.ToolRuntime != nil {
+		deps.ToolRuntime = profile.ToolRuntime
+	}
+	if profile.SandboxRuntime != nil {
+		deps.SandboxRuntime = profile.SandboxRuntime
+		deps.SandboxProvider = profile.SandboxRuntime.Provider()
+	}
+	return NewFactory(deps).NewAgent(req)
 }
 
 func (r *Runtime) PrepareRun(req RunRequest) (*Execution, error) {

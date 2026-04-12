@@ -102,6 +102,7 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 	resolvedModel, catalogModel := s.resolveConfiguredModel(cfg.ModelName)
 	agentSpec := harness.AgentSpec{
 		AgentType:       cfg.AgentType,
+		ExecutionMode:   cfg.ExecutionMode,
 		MaxTurns:        s.maxTurns,
 		Model:           resolvedModel,
 		ReasoningEffort: cfg.ReasoningEffort,

@@ -23,6 +23,10 @@ type ProfileBuilder interface {
 	BuildProfile() RuntimeProfile
 }
 
+type ProfileResolver interface {
+	ResolveProfile(base RuntimeProfile, req AgentRequest) RuntimeProfile
+}
+
 type StaticFeatureBuilder struct {
 	bundle FeatureBundle
 }
