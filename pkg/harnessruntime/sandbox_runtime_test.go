@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/sandbox"
@@ -61,7 +62,13 @@ func TestNewLocalSandboxLeaseServiceAcquiresLease(t *testing.T) {
 }
 
 func TestLocalSandboxLeaseServiceReleasesProviderOnLastLease(t *testing.T) {
-	service := &localSandboxLeaseService{provider: &fakeSandboxProvider{}}
+	service := &localSandboxLeaseService{
+		provider:          &fakeSandboxProvider{},
+		heartbeatInterval: defaultSandboxHeartbeatInterval,
+		idleTTL:           defaultSandboxIdleTTL,
+		sweepInterval:     defaultSandboxSweepInterval,
+		stopCh:            make(chan struct{}),
+	}
 
 	lease1, err := service.AcquireLease(harness.AgentRequest{Features: harness.FeatureSet{Sandbox: true}})
 	if err != nil {
@@ -85,9 +92,37 @@ func TestLocalSandboxLeaseServiceReleasesProviderOnLastLease(t *testing.T) {
 	if err := lease2.Release(); err != nil {
 		t.Fatalf("lease2.Release() error = %v", err)
 	}
-	if provider.closes != 1 {
-		t.Fatalf("closes = %d, want 1 after last release", provider.closes)
+	if provider.closes != 0 {
+		t.Fatalf("closes = %d, want 0 before idle eviction", provider.closes)
 	}
+}
+
+func TestLocalSandboxLeaseServiceEvictsIdleProvider(t *testing.T) {
+	service := NewLocalSandboxLeaseServiceWithConfig("runtime-lease", t.TempDir(), SandboxLeaseConfig{
+		HeartbeatInterval: 5 * time.Millisecond,
+		IdleTTL:           10 * time.Millisecond,
+		SweepInterval:     5 * time.Millisecond,
+	}).(*localSandboxLeaseService)
+
+	provider := &fakeSandboxProvider{}
+	service.provider = provider
+
+	lease, err := service.AcquireLease(harness.AgentRequest{Features: harness.FeatureSet{Sandbox: true}})
+	if err != nil {
+		t.Fatalf("AcquireLease() error = %v", err)
+	}
+	if err := lease.Release(); err != nil {
+		t.Fatalf("Release() error = %v", err)
+	}
+
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if provider.closes > 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("provider closes = %d, want > 0 after idle eviction", provider.closes)
 }
 
 func TestLocalSandboxManagerExposesBackendAndRuntime(t *testing.T) {

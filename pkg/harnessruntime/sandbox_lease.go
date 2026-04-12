@@ -9,6 +9,14 @@ import (
 )
 
 const defaultSandboxHeartbeatInterval = 30 * time.Second
+const defaultSandboxIdleTTL = 2 * time.Minute
+const defaultSandboxSweepInterval = 30 * time.Second
+
+type SandboxLeaseConfig struct {
+	HeartbeatInterval time.Duration
+	IdleTTL           time.Duration
+	SweepInterval     time.Duration
+}
 
 type SandboxLease struct {
 	Sandbox           *sandbox.Sandbox
@@ -80,15 +88,49 @@ func (r leaseBackedSandboxRuntime) Close() error {
 }
 
 type localSandboxLeaseService struct {
-	provider harness.SandboxProvider
-	mu       sync.Mutex
-	refs     int
+	provider          harness.SandboxProvider
+	heartbeatInterval time.Duration
+	idleTTL           time.Duration
+	sweepInterval     time.Duration
+	mu                sync.Mutex
+	refs              int
+	lastTouched       time.Time
+	closed            bool
+	stopCh            chan struct{}
+	wg                sync.WaitGroup
 }
 
 func NewLocalSandboxLeaseService(name, root string) SandboxLeaseService {
-	return &localSandboxLeaseService{
-		provider: harness.NewLocalSandboxProvider(name, root),
+	return NewLocalSandboxLeaseServiceWithConfig(name, root, SandboxLeaseConfig{})
+}
+
+func NewLocalSandboxLeaseServiceWithConfig(name, root string, config SandboxLeaseConfig) SandboxLeaseService {
+	normalized := normalizeSandboxLeaseConfig(config)
+	service := &localSandboxLeaseService{
+		provider:          harness.NewLocalSandboxProvider(name, root),
+		heartbeatInterval: normalized.HeartbeatInterval,
+		idleTTL:           normalized.IdleTTL,
+		sweepInterval:     normalized.SweepInterval,
+		stopCh:            make(chan struct{}),
 	}
+	if normalized.IdleTTL > 0 && normalized.SweepInterval > 0 {
+		service.wg.Add(1)
+		go service.runJanitor()
+	}
+	return service
+}
+
+func normalizeSandboxLeaseConfig(config SandboxLeaseConfig) SandboxLeaseConfig {
+	if config.HeartbeatInterval <= 0 {
+		config.HeartbeatInterval = defaultSandboxHeartbeatInterval
+	}
+	if config.IdleTTL <= 0 {
+		config.IdleTTL = defaultSandboxIdleTTL
+	}
+	if config.SweepInterval <= 0 {
+		config.SweepInterval = defaultSandboxSweepInterval
+	}
+	return config
 }
 
 func (s *localSandboxLeaseService) Provider() harness.SandboxProvider {
@@ -103,24 +145,43 @@ func (s *localSandboxLeaseService) AcquireLease(req harness.AgentRequest) (Sandb
 	if err != nil {
 		return SandboxLease{}, err
 	}
+	s.touch()
 	s.mu.Lock()
 	s.refs++
 	s.mu.Unlock()
 	return SandboxLease{
 		Sandbox:           sb,
-		HeartbeatInterval: defaultSandboxHeartbeatInterval,
-		Heartbeat: func() error {
-			return nil
-		},
-		Release: s.release,
+		HeartbeatInterval: s.heartbeatInterval,
+		Heartbeat:         s.heartbeat,
+		Release:           s.release,
 	}, nil
 }
 
 func (s *localSandboxLeaseService) Close() error {
-	if s.provider == nil {
+	if s == nil || s.provider == nil {
 		return nil
 	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil
+	}
+	s.closed = true
+	close(s.stopCh)
+	s.mu.Unlock()
+	s.wg.Wait()
 	return s.provider.Close()
+}
+
+func (s *localSandboxLeaseService) heartbeat() error {
+	s.touch()
+	return nil
+}
+
+func (s *localSandboxLeaseService) touch() {
+	s.mu.Lock()
+	s.lastTouched = time.Now().UTC()
+	s.mu.Unlock()
 }
 
 func (s *localSandboxLeaseService) release() error {
@@ -131,10 +192,41 @@ func (s *localSandboxLeaseService) release() error {
 	if s.refs > 0 {
 		s.refs--
 	}
-	remaining := s.refs
-	s.mu.Unlock()
-	if remaining > 0 {
-		return nil
+	if s.refs == 0 {
+		s.lastTouched = time.Now().UTC()
 	}
-	return s.provider.Close()
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *localSandboxLeaseService) runJanitor() {
+	defer s.wg.Done()
+	ticker := time.NewTicker(s.sweepInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.evictIdle()
+		case <-s.stopCh:
+			return
+		}
+	}
+}
+
+func (s *localSandboxLeaseService) evictIdle() {
+	if s.provider == nil || s.idleTTL <= 0 {
+		return
+	}
+	s.mu.Lock()
+	if s.closed || s.refs > 0 {
+		s.mu.Unlock()
+		return
+	}
+	lastTouched := s.lastTouched
+	s.mu.Unlock()
+	if lastTouched.IsZero() || time.Since(lastTouched) < s.idleTTL {
+		return
+	}
+	_ = s.provider.Close()
+	s.touch()
 }

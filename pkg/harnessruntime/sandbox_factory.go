@@ -2,6 +2,7 @@ package harnessruntime
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 )
@@ -10,11 +11,14 @@ import (
 // It intentionally lives below compat so future distributed deployments can
 // swap backend/lease implementations without changing HTTP wiring.
 type SandboxManagerConfig struct {
-	Backend SandboxBackend
-	Name    string
-	Root    string
-	Policy  harness.SandboxPolicy
-	Leases  SandboxLeaseService
+	Backend           SandboxBackend
+	Name              string
+	Root              string
+	Policy            harness.SandboxPolicy
+	HeartbeatInterval time.Duration
+	IdleTTL           time.Duration
+	SweepInterval     time.Duration
+	Leases            SandboxLeaseService
 }
 
 func NewSandboxManagerFromConfig(config SandboxManagerConfig) (*SandboxResourceManager, error) {
@@ -27,7 +31,11 @@ func NewSandboxManagerFromConfig(config SandboxManagerConfig) (*SandboxResourceM
 	}
 	switch backend {
 	case SandboxBackendLocalLinux:
-		return NewLocalSandboxManager(config.Name, config.Root), nil
+		return NewLocalSandboxManagerWithConfig(config.Name, config.Root, SandboxLeaseConfig{
+			HeartbeatInterval: config.HeartbeatInterval,
+			IdleTTL:           config.IdleTTL,
+			SweepInterval:     config.SweepInterval,
+		}), nil
 	case SandboxBackendContainer, SandboxBackendRemote, SandboxBackendWindowsRestricted:
 		return NewSandboxResourceManager(backend, unsupportedSandboxLeaseService{backend: backend}), nil
 	default:

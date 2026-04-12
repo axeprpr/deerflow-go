@@ -24,7 +24,11 @@ func NewSandboxResourceManager(backend SandboxBackend, leases SandboxLeaseServic
 }
 
 func NewLocalSandboxManager(name, root string) *SandboxResourceManager {
-	return NewSandboxResourceManager(SandboxBackendLocalLinux, NewLocalSandboxLeaseService(name, root))
+	return NewLocalSandboxManagerWithConfig(name, root, SandboxLeaseConfig{})
+}
+
+func NewLocalSandboxManagerWithConfig(name, root string, config SandboxLeaseConfig) *SandboxResourceManager {
+	return NewSandboxResourceManager(SandboxBackendLocalLinux, NewLocalSandboxLeaseServiceWithConfig(name, root, config))
 }
 
 func (m *SandboxResourceManager) Backend() SandboxBackend {
