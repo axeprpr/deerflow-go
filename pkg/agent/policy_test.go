@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"context"
 	"testing"
 
+	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
@@ -48,3 +50,68 @@ func TestDefaultRetryPolicyUsesRecoverableToolPrompt(t *testing.T) {
 		t.Fatal("prompt is empty")
 	}
 }
+
+func TestDefaultToolExecutionPolicyPausesAfterAskClarification(t *testing.T) {
+	policy := resolveRunPolicy(nil)
+	if !policy.ToolExec.ShouldPauseAfterToolCall(
+		models.ToolCall{Name: "ask_clarification"},
+		models.ToolResult{Status: models.CallStatusCompleted},
+	) {
+		t.Fatal("expected ask_clarification to pause")
+	}
+}
+
+func TestDefaultToolTurnRecoveryPolicyUsesChatFallback(t *testing.T) {
+	policy := resolveRunPolicy(nil)
+	events := make([]AgentEvent, 0, 2)
+	result, recovered, err := policy.Recovery.Recover(
+		t.Context(),
+		toolRecoveryLLMProvider{
+			response: llm.ChatResponse{
+				Message: models.Message{
+					Content: "hello world",
+					ToolCalls: []models.ToolCall{{
+						ID:   "call-1",
+						Name: "read_file",
+					}},
+				},
+				Usage: llm.Usage{InputTokens: 1, OutputTokens: 2, TotalTokens: 3},
+				Stop:  "tool_calls",
+			},
+		},
+		llm.ChatRequest{Tools: []models.Tool{{Name: "read_file"}}},
+		ToolTurnRecoveryState{MessageID: "ai-1", PartialText: "", HasPartialToolCalls: true},
+		assertiveError("stream failed"),
+		func(evt AgentEvent) { events = append(events, evt) },
+	)
+	if err != nil {
+		t.Fatalf("Recover() error = %v", err)
+	}
+	if !recovered {
+		t.Fatal("recovered = false")
+	}
+	if result.Text != "hello world" || len(result.ToolCalls) != 1 || result.StopReason != "tool_calls" {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(events) != 2 {
+		t.Fatalf("len(events) = %d, want 2", len(events))
+	}
+}
+
+type toolRecoveryLLMProvider struct {
+	response llm.ChatResponse
+}
+
+func (p toolRecoveryLLMProvider) Chat(_ context.Context, _ llm.ChatRequest) (llm.ChatResponse, error) {
+	return p.response, nil
+}
+
+func (p toolRecoveryLLMProvider) Stream(context.Context, llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	ch := make(chan llm.StreamChunk)
+	close(ch)
+	return ch, nil
+}
+
+type assertiveError string
+
+func (e assertiveError) Error() string { return string(e) }

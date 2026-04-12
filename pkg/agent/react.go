@@ -220,7 +220,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 		} else {
 			stream, streamErr := a.llm.Stream(ctx, req)
 			if streamErr != nil {
-				if recovered, recoverErr := a.recoverToolTurnWithChat(ctx, req, aiMessageID, textBuilder.String(), len(toolCalls) > 0, &textBuilder, &toolCalls, &streamUsage, &stopReason, emit, streamErr); recovered {
+				if recovered, recoverErr := a.recoverToolTurn(ctx, req, aiMessageID, textBuilder.String(), len(toolCalls) > 0, &textBuilder, &toolCalls, &streamUsage, &stopReason, emit, streamErr); recovered {
 					goto llmTurnComplete
 				} else if recoverErr != nil {
 					err := normalizeRunError(ctx, recoverErr, a.requestTimeout)
@@ -234,7 +234,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 
 			for chunk := range stream {
 				if chunk.Err != nil {
-					if recovered, recoverErr := a.recoverToolTurnWithChat(ctx, req, aiMessageID, textBuilder.String(), len(toolCalls) > 0, &textBuilder, &toolCalls, &streamUsage, &stopReason, emit, chunk.Err); recovered {
+					if recovered, recoverErr := a.recoverToolTurn(ctx, req, aiMessageID, textBuilder.String(), len(toolCalls) > 0, &textBuilder, &toolCalls, &streamUsage, &stopReason, emit, chunk.Err); recovered {
 						break
 					} else if recoverErr != nil {
 						err := normalizeRunError(ctx, recoverErr, a.requestTimeout)
@@ -408,7 +408,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 	return nil, err
 }
 
-func (a *Agent) recoverToolTurnWithChat(
+func (a *Agent) recoverToolTurn(
 	ctx context.Context,
 	req llm.ChatRequest,
 	aiMessageID string,
@@ -421,42 +421,26 @@ func (a *Agent) recoverToolTurnWithChat(
 	emit func(AgentEvent),
 	streamErr error,
 ) (bool, error) {
-	if len(req.Tools) == 0 || ctx.Err() != nil {
-		return false, nil
+	recovery, recovered, err := a.runPolicy.Recovery.Recover(
+		ctx,
+		a.llm,
+		req,
+		ToolTurnRecoveryState{
+			MessageID:           aiMessageID,
+			PartialText:         partialText,
+			HasPartialToolCalls: hasPartialToolCalls,
+		},
+		streamErr,
+		emit,
+	)
+	if err != nil || !recovered {
+		return recovered, err
 	}
-	if strings.TrimSpace(partialText) == "" && !hasPartialToolCalls {
-		return false, nil
-	}
-
-	resp, err := a.llm.Chat(ctx, req)
-	if err != nil {
-		return false, fmt.Errorf("tool stream failed: %w (chat fallback failed: %v)", streamErr, err)
-	}
-
-	if content := resp.Message.Content; content != "" {
-		switch {
-		case partialText == "":
-			emit(AgentEvent{Type: AgentEventChunk, MessageID: aiMessageID, Text: content})
-			emit(AgentEvent{Type: AgentEventTextChunk, MessageID: aiMessageID, Text: content})
-		case strings.HasPrefix(content, partialText):
-			suffix := strings.TrimPrefix(content, partialText)
-			if suffix != "" {
-				emit(AgentEvent{Type: AgentEventChunk, MessageID: aiMessageID, Text: suffix})
-				emit(AgentEvent{Type: AgentEventTextChunk, MessageID: aiMessageID, Text: suffix})
-			}
-		}
-		textBuilder.Reset()
-		textBuilder.WriteString(content)
-	} else {
-		textBuilder.Reset()
-	}
-
-	*toolCalls = append((*toolCalls)[:0], resp.Message.ToolCalls...)
-	if resp.Usage != (llm.Usage{}) {
-		usage := resp.Usage
-		*streamUsage = &usage
-	}
-	*stopReason = resp.Stop
+	textBuilder.Reset()
+	textBuilder.WriteString(recovery.Text)
+	*toolCalls = append((*toolCalls)[:0], recovery.ToolCalls...)
+	*streamUsage = recovery.Usage
+	*stopReason = recovery.StopReason
 	return true, nil
 }
 
@@ -664,7 +648,7 @@ func (a *Agent) executeSingleToolCall(
 		Result:    &result,
 		ToolEvent: newToolEventFromResult(completedCall, result),
 	})
-	if shouldPauseAfterToolCall(call, result) {
+	if a.runPolicy.ToolExec.ShouldPauseAfterToolCall(call, result) {
 		return result, true, nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -847,15 +831,6 @@ func resolveGuardrails(cfg AgentConfig) (guardrails.Provider, bool, string) {
 	}
 	envCfg := guardrails.LoadConfigFromEnv()
 	return envCfg.BuildProvider(), envCfg.FailClosed, envCfg.Passport
-}
-
-func shouldPauseAfterToolCall(call models.ToolCall, result models.ToolResult) bool {
-	switch strings.TrimSpace(call.Name) {
-	case "ask_clarification":
-		return result.Status != models.CallStatusFailed
-	default:
-		return false
-	}
 }
 
 func clampMaxConcurrentSubagents(value int) int {
