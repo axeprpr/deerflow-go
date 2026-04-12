@@ -33,8 +33,23 @@ type RunEventReplayFeed interface {
 	SubscribeRunEvents(runID string, buffer int) (<-chan RunEvent, func())
 }
 
+type ThreadRuntimeState struct {
+	ThreadID  string
+	Status    string
+	Metadata  map[string]any
+	CreatedAt string
+	UpdatedAt string
+}
+
+type ThreadRuntimeStateStore interface {
+	LoadThreadRuntimeState(threadID string) (ThreadRuntimeState, bool)
+	ListThreadRuntimeStates() []ThreadRuntimeState
+	SaveThreadRuntimeState(state ThreadRuntimeState)
+}
+
 // ThreadStateStore persists thread existence, status, and runtime metadata.
 type ThreadStateStore interface {
+	ThreadRuntimeStateStore
 	HasThread(threadID string) bool
 	MarkThreadStatus(threadID string, status string)
 	SetThreadMetadata(threadID string, key string, value any)
