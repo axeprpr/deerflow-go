@@ -78,6 +78,7 @@ type RuntimeDeps struct {
 	Tools           *tools.Registry
 	ToolRuntime     ToolRuntime
 	DefaultMaxTurns int
+	SandboxRuntime  SandboxRuntime
 	SandboxProvider SandboxProvider
 }
 

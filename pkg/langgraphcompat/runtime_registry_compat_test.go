@@ -23,7 +23,7 @@ func newRuntimeToolRegistry(t *testing.T) *tools.Registry {
 	}
 	mustRegisterTool(t, registry, builtin.BashTool())
 	mustRegisterTool(t, registry, clarification.AskClarificationTool(manager))
-	mustRegisterTool(t, registry, tools.TaskTool(agent.NewSubagentPool(noopLLMProvider{}, registry, nil, 2, 2*time.Minute)))
+	mustRegisterTool(t, registry, tools.TaskTool(agent.NewSubagentPool(noopLLMProvider{}, registry, nil, nil, 2, 2*time.Minute)))
 	return registry
 }
 

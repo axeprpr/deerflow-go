@@ -178,7 +178,8 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	provider := llm.NewProvider("siliconflow")
 
 	clarifyManager := clarification.NewManager(32)
-	toolRuntime := harnessruntime.NewDefaultToolRuntime(provider, clarifyManager)
+	sandboxRuntime := harnessruntime.NewLocalSandboxRuntime("langgraph", filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox"))
+	toolRuntime := harnessruntime.NewDefaultToolRuntime(provider, clarifyManager, sandboxRuntime)
 	registry := toolRuntime.Registry()
 	sandboxRoot := filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
 	subagentPool := toolRuntime.Subagents()
@@ -243,6 +244,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		Tools:           registry,
 		ToolRuntime:     toolRuntime,
 		DefaultMaxTurns: s.maxTurns,
+		SandboxRuntime:  sandboxRuntime,
 		SandboxProvider: s.defaultSandboxProvider(nil),
 	}, memoryRuntime)
 	s.skills = s.discoverGatewaySkills(nil)
@@ -276,25 +278,29 @@ func (s *Server) runtimeView() *harness.Runtime {
 		return nil
 	}
 	var (
-		memoryRuntime   *harness.MemoryRuntime
-		sandboxProvider harness.SandboxProvider
+		memoryRuntime  *harness.MemoryRuntime
+		sandboxRuntime harness.SandboxRuntime
+		toolRuntime    harness.ToolRuntime
 	)
 	if s.runtime != nil {
 		memoryRuntime = s.runtime.Memory()
-		sandboxProvider = s.runtime.SandboxProvider()
+		sandboxRuntime = s.runtime.SandboxRuntime()
+		toolRuntime = s.runtime.ToolRuntime()
 	}
 	s.runtime = harness.NewRuntime(harness.RuntimeDeps{
 		LLMProvider:     s.llmProvider,
 		Tools:           s.tools,
+		ToolRuntime:     toolRuntime,
 		DefaultMaxTurns: s.maxTurns,
-		SandboxProvider: s.defaultSandboxProvider(sandboxProvider),
+		SandboxRuntime:  s.defaultSandboxRuntime(sandboxRuntime),
+		SandboxProvider: s.defaultSandboxProvider(nil),
 	}, memoryRuntime,
 		harness.WithFeatureBuilder(s.runtimeFeatureBuilder(memoryRuntime)),
 	)
 	return s.runtime
 }
 
-func (s *Server) defaultSandboxProvider(existing harness.SandboxProvider) harness.SandboxProvider {
+func (s *Server) defaultSandboxRuntime(existing harness.SandboxRuntime) harness.SandboxRuntime {
 	if existing != nil {
 		return existing
 	}
@@ -306,7 +312,18 @@ func (s *Server) defaultSandboxProvider(existing harness.SandboxProvider) harnes
 	if name == "" {
 		name = "langgraph"
 	}
-	return harness.NewLocalSandboxProvider(name, root)
+	return harnessruntime.NewLocalSandboxRuntime(name, root)
+}
+
+func (s *Server) defaultSandboxProvider(existing harness.SandboxProvider) harness.SandboxProvider {
+	if existing != nil {
+		return existing
+	}
+	runtime := s.defaultSandboxRuntime(nil)
+	if runtime == nil {
+		return nil
+	}
+	return runtime.Provider()
 }
 
 func (s *Server) newAgent(spec harness.AgentSpec) *agent.Agent {

@@ -29,12 +29,20 @@ func (f *Factory) NewAgent(req AgentRequest) (*agent.Agent, error) {
 	if cfg.MaxTurns <= 0 && f.deps.DefaultMaxTurns > 0 {
 		cfg.MaxTurns = f.deps.DefaultMaxTurns
 	}
-	if cfg.Sandbox == nil && f.deps.SandboxProvider != nil && req.Features.Sandbox {
-		sb, err := f.deps.SandboxProvider.Acquire()
-		if err != nil {
-			return nil, err
+	if cfg.Sandbox == nil {
+		if f.deps.SandboxRuntime != nil {
+			sb, err := f.deps.SandboxRuntime.Resolve(req)
+			if err != nil {
+				return nil, err
+			}
+			cfg.Sandbox = sb
+		} else if f.deps.SandboxProvider != nil && req.Features.Sandbox {
+			sb, err := f.deps.SandboxProvider.Acquire()
+			if err != nil {
+				return nil, err
+			}
+			cfg.Sandbox = sb
 		}
-		cfg.Sandbox = sb
 	}
 	return agent.New(cfg), nil
 }

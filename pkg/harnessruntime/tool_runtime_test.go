@@ -9,7 +9,7 @@ import (
 )
 
 func TestNewDefaultToolRuntimeBuildsExpectedRegistry(t *testing.T) {
-	runtime := NewDefaultToolRuntime(noopLLMProvider{}, clarification.NewManager(4))
+	runtime := NewDefaultToolRuntime(noopLLMProvider{}, clarification.NewManager(4), nil)
 	if runtime == nil {
 		t.Fatal("runtime=nil")
 	}

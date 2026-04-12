@@ -116,8 +116,10 @@ func (e *SubagentExecutor) Execute(ctx context.Context, task *subagent.Task, emi
 	}, nil
 }
 
-func NewSubagentPool(provider llm.LLMProvider, registry *tools.Registry, sb *sandbox.Sandbox, maxConcurrent int, timeout time.Duration) *subagent.Pool {
-	return subagent.NewPool(NewSubagentExecutor(provider, registry, sb), subagent.PoolConfig{
+func NewSubagentPool(provider llm.LLMProvider, registry *tools.Registry, sb *sandbox.Sandbox, sandboxProvider func() (*sandbox.Sandbox, error), maxConcurrent int, timeout time.Duration) *subagent.Pool {
+	executor := NewSubagentExecutor(provider, registry, sb)
+	executor.SetSandboxProvider(sandboxProvider)
+	return subagent.NewPool(executor, subagent.PoolConfig{
 		MaxConcurrent: maxConcurrent,
 		Timeout:       timeout,
 	})

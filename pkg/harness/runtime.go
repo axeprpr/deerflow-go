@@ -10,13 +10,13 @@ import (
 // compat/app layers do not own agent assembly, durable memory, or sandbox
 // lifecycle separately.
 type Runtime struct {
-	factory         *Factory
-	runner          *Runner
-	memory          *MemoryRuntime
-	sandboxProvider SandboxProvider
-	toolRuntime     ToolRuntime
-	features        FeatureAssembly
-	lifecycle       *LifecycleHooks
+	factory        *Factory
+	runner         *Runner
+	memory         *MemoryRuntime
+	sandboxRuntime SandboxRuntime
+	toolRuntime    ToolRuntime
+	features       FeatureAssembly
+	lifecycle      *LifecycleHooks
 }
 
 type RuntimeOption func(*Runtime)
@@ -49,13 +49,17 @@ func WithFeatureBuilder(builder FeatureBuilder) RuntimeOption {
 }
 
 func NewRuntime(deps RuntimeDeps, memory *MemoryRuntime, opts ...RuntimeOption) *Runtime {
+	sandboxRuntime := deps.SandboxRuntime
+	if sandboxRuntime == nil && deps.SandboxProvider != nil {
+		sandboxRuntime = NewStaticSandboxRuntime(deps.SandboxProvider, FeatureSandboxPolicy{})
+	}
 	factory := NewFactory(deps)
 	runtime := &Runtime{
-		factory:         factory,
-		runner:          NewRunner(factory),
-		memory:          memory,
-		sandboxProvider: deps.SandboxProvider,
-		toolRuntime:     deps.ToolRuntime,
+		factory:        factory,
+		runner:         NewRunner(factory),
+		memory:         memory,
+		sandboxRuntime: sandboxRuntime,
+		toolRuntime:    deps.ToolRuntime,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -115,7 +119,17 @@ func (r *Runtime) SandboxProvider() SandboxProvider {
 	if r == nil {
 		return nil
 	}
-	return r.sandboxProvider
+	if r.sandboxRuntime == nil {
+		return nil
+	}
+	return r.sandboxRuntime.Provider()
+}
+
+func (r *Runtime) SandboxRuntime() SandboxRuntime {
+	if r == nil {
+		return nil
+	}
+	return r.sandboxRuntime
 }
 
 func (r *Runtime) ToolRuntime() ToolRuntime {

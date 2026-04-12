@@ -14,6 +14,66 @@ type SandboxProvider interface {
 	Close() error
 }
 
+// SandboxPolicy decides whether a given agent request should acquire a sandbox.
+// This keeps enablement decisions in runtime-owned code instead of factory
+// callsites.
+type SandboxPolicy interface {
+	Enabled(AgentRequest) bool
+}
+
+type FeatureSandboxPolicy struct{}
+
+func (FeatureSandboxPolicy) Enabled(req AgentRequest) bool {
+	return req.Features.Sandbox
+}
+
+// SandboxRuntime owns sandbox enablement and acquisition behind one runtime
+// boundary so compat layers do not wire provider access directly.
+type SandboxRuntime interface {
+	Provider() SandboxProvider
+	Resolve(AgentRequest) (*sandbox.Sandbox, error)
+	Close() error
+}
+
+type StaticSandboxRuntime struct {
+	provider SandboxProvider
+	policy   SandboxPolicy
+}
+
+func NewStaticSandboxRuntime(provider SandboxProvider, policy SandboxPolicy) *StaticSandboxRuntime {
+	if policy == nil {
+		policy = FeatureSandboxPolicy{}
+	}
+	return &StaticSandboxRuntime{
+		provider: provider,
+		policy:   policy,
+	}
+}
+
+func (r *StaticSandboxRuntime) Provider() SandboxProvider {
+	if r == nil {
+		return nil
+	}
+	return r.provider
+}
+
+func (r *StaticSandboxRuntime) Resolve(req AgentRequest) (*sandbox.Sandbox, error) {
+	if r == nil || r.provider == nil {
+		return nil, nil
+	}
+	if r.policy != nil && !r.policy.Enabled(req) {
+		return nil, nil
+	}
+	return r.provider.Acquire()
+}
+
+func (r *StaticSandboxRuntime) Close() error {
+	if r == nil || r.provider == nil {
+		return nil
+	}
+	return r.provider.Close()
+}
+
 type LocalSandboxProvider struct {
 	name string
 	root string
@@ -56,4 +116,3 @@ func (p *LocalSandboxProvider) Close() error {
 	p.sandbox = nil
 	return err
 }
-
