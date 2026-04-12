@@ -50,6 +50,8 @@ type Server struct {
 	snapshotStore    harnessruntime.RunSnapshotStore
 	eventStore       harnessruntime.RunEventStore
 	threadStateStore harnessruntime.ThreadStateStore
+	runDispatcher    harnessruntime.RunDispatcher
+	sandboxManager   *harnessruntime.SandboxResourceManager
 	dataRoot         string
 	uiStateMu        sync.RWMutex
 	models           map[string]gatewayModel
@@ -181,7 +183,15 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	provider := llm.NewProvider("siliconflow")
 
 	clarifyManager := clarification.NewManager(32)
-	sandboxRuntime := harnessruntime.NewLocalSandboxRuntime("langgraph", filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox"))
+	sandboxManager, err := harnessruntime.NewSandboxManagerFromConfig(harnessruntime.SandboxManagerConfig{
+		Backend: harnessruntime.SandboxBackendLocalLinux,
+		Name:    "langgraph",
+		Root:    filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox"),
+	})
+	if err != nil {
+		return nil, err
+	}
+	sandboxRuntime := sandboxManager.Runtime(harness.FeatureSandboxPolicy{})
 	toolRuntime := harnessruntime.NewDefaultToolRuntime(provider, clarifyManager, sandboxRuntime)
 	registry := toolRuntime.Registry()
 	sandboxRoot := filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
@@ -207,30 +217,34 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	}
 
 	s := &Server{
-		logger:        logger,
-		llmProvider:   provider,
-		tools:         registry,
-		sandboxName:   "langgraph",
-		sandboxRoot:   sandboxRoot,
-		subagents:     subagentPool,
-		clarify:       clarifyManager,
-		clarifyAPI:    clarification.NewAPI(clarifyManager),
-		defaultModel:  defaultModel,
-		maxTurns:      100,
-		store:         store,
-		startedAt:     time.Now().UTC(),
-		sessions:      make(map[string]*Session),
-		runs:          make(map[string]*Run),
-		runRegistry:   newRunRegistry(),
-		dataRoot:      dataRootAbs,
-		models:        defaultGatewayModels(defaultModel),
-		skills:        nil,
-		mcpConfig:     defaultGatewayMCPConfig(),
-		agents:        map[string]gatewayAgent{},
-		memoryCache:   defaultGatewayMemory(),
-		memoryConfig:  defaultGatewayMemoryConfig(dataRootAbs),
-		channelConfig: gatewayChannelsConfig{},
-		channels:      defaultGatewayChannelsStatus(),
+		logger:       logger,
+		llmProvider:  provider,
+		tools:        registry,
+		sandboxName:  "langgraph",
+		sandboxRoot:  sandboxRoot,
+		subagents:    subagentPool,
+		clarify:      clarifyManager,
+		clarifyAPI:   clarification.NewAPI(clarifyManager),
+		defaultModel: defaultModel,
+		maxTurns:     100,
+		store:        store,
+		startedAt:    time.Now().UTC(),
+		sessions:     make(map[string]*Session),
+		runs:         make(map[string]*Run),
+		runRegistry:  newRunRegistry(),
+		runDispatcher: harnessruntime.NewRuntimeDispatcher(harnessruntime.DispatchConfig{
+			Topology: harnessruntime.DispatchTopologyQueued,
+		}),
+		sandboxManager: sandboxManager,
+		dataRoot:       dataRootAbs,
+		models:         defaultGatewayModels(defaultModel),
+		skills:         nil,
+		mcpConfig:      defaultGatewayMCPConfig(),
+		agents:         map[string]gatewayAgent{},
+		memoryCache:    defaultGatewayMemory(),
+		memoryConfig:   defaultGatewayMemoryConfig(dataRootAbs),
+		channelConfig:  gatewayChannelsConfig{},
+		channels:       defaultGatewayChannelsStatus(),
 	}
 	s.snapshotStore = newCompatRunStateStore(s)
 	s.eventStore = s.snapshotStore.(harnessruntime.RunEventStore)
@@ -314,6 +328,9 @@ func (s *Server) defaultSandboxRuntime(existing harness.SandboxRuntime) harness.
 	if existing != nil {
 		return existing
 	}
+	if s != nil && s.sandboxManager != nil {
+		return s.sandboxManager.Runtime(harness.FeatureSandboxPolicy{})
+	}
 	root := strings.TrimSpace(s.sandboxRoot)
 	if root == "" {
 		root = filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
@@ -322,7 +339,31 @@ func (s *Server) defaultSandboxRuntime(existing harness.SandboxRuntime) harness.
 	if name == "" {
 		name = "langgraph"
 	}
-	return harnessruntime.NewLocalSandboxRuntime(name, root)
+	manager, err := harnessruntime.NewSandboxManagerFromConfig(harnessruntime.SandboxManagerConfig{
+		Backend: harnessruntime.SandboxBackendLocalLinux,
+		Name:    name,
+		Root:    root,
+	})
+	if err != nil {
+		return nil
+	}
+	if s != nil {
+		s.sandboxManager = manager
+	}
+	return manager.Runtime(harness.FeatureSandboxPolicy{})
+}
+
+func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
+	if s == nil {
+		return harnessruntime.NewInProcessRunDispatcher()
+	}
+	if s.runDispatcher != nil {
+		return s.runDispatcher
+	}
+	s.runDispatcher = harnessruntime.NewRuntimeDispatcher(harnessruntime.DispatchConfig{
+		Topology: harnessruntime.DispatchTopologyQueued,
+	})
+	return s.runDispatcher
 }
 
 func (s *Server) defaultSandboxProvider(existing harness.SandboxProvider) harness.SandboxProvider {
@@ -418,8 +459,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	s.closeGatewayMCPClients()
 	s.stopGatewayChannels()
-	if s.runtime != nil && s.runtime.SandboxProvider() != nil {
-		if err := s.runtime.SandboxProvider().Close(); err != nil && shutdownErr == nil {
+	if closer, ok := s.runDispatcher.(interface{ Close() error }); ok {
+		if err := closer.Close(); err != nil && shutdownErr == nil {
+			shutdownErr = err
+		}
+	}
+	if s.sandboxManager != nil {
+		if err := s.sandboxManager.Close(); err != nil && shutdownErr == nil {
 			shutdownErr = err
 		}
 	}

@@ -31,6 +31,7 @@ type completedRun struct {
 func (s *Server) runtimeCoordinator() harnessruntime.Coordinator {
 	return harnessruntime.NewCoordinator(harnessruntime.CoordinatorDeps{
 		Runtime:      s.runtimeView(),
+		Dispatcher:   s.defaultRunDispatcher(),
 		Preflight:    s.runtimePreflightAdapter(),
 		Context:      s.runtimeContextAdapter(),
 		RunState:     s.runtimeRunStateAdapter(),

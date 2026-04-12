@@ -63,6 +63,27 @@ func TestNewServerDefaultsMainRunMaxTurnsToUpstreamRecursionLimit(t *testing.T) 
 	}
 }
 
+func TestNewServerUsesStableRuntimeBoundaries(t *testing.T) {
+	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
+
+	s, err := NewServer(":0", "", "test-model")
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	if s.sandboxManager == nil {
+		t.Fatal("sandboxManager = nil")
+	}
+	if s.runDispatcher == nil {
+		t.Fatal("runDispatcher = nil")
+	}
+	if s.defaultRunDispatcher() != s.runDispatcher {
+		t.Fatal("defaultRunDispatcher() did not reuse stable dispatcher")
+	}
+	if s.defaultSandboxRuntime(nil) == nil {
+		t.Fatal("defaultSandboxRuntime() = nil")
+	}
+}
+
 func TestNewServerDoesNotServeFrontendAtRoot(t *testing.T) {
 	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
 
