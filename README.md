@@ -6,27 +6,77 @@ The goal is not a line-by-line port of upstream DeerFlow. The goal is a compatib
 
 ## Architecture
 
-Upstream DeerFlow is layered as:
+Upstream DeerFlow:
 
-- `frontend`: Next.js UI
-- `gateway`: FastAPI `/api/*`
-- `harness/runtime`: Python LangGraph/LangChain agent execution
+```mermaid
+flowchart TD
+    UI[Next.js Frontend]
+    Gateway[FastAPI Gateway]
+    API[Gateway API Layer<br/>/api/* + LangGraph-facing routes]
+    Runtime[Python Harness Runtime]
+    Factory[Agent Factory / create_agent]
+    Workflow[LangGraph / LangChain Workflow]
+    Middleware[Middleware Pipeline<br/>clarification / memory / title / summarization / loop detection]
+    Memory[Memory Subsystem]
+    Sandbox[SandboxProvider]
+    Tools[Tools / Skills / MCP / Channels]
+    LLM[Model Providers]
+    State[Threads / Runs / Checkpoints / Artifacts]
 
-`deerflow-go` collapses those backend layers into one Go service:
+    UI --> Gateway
+    Gateway --> API
+    API --> Runtime
+    Gateway --> State
+    Runtime --> Factory
+    Factory --> Workflow
+    Workflow --> Middleware
+    Middleware --> Memory
+    Middleware --> Sandbox
+    Workflow --> Tools
+    Workflow --> LLM
+    Workflow --> State
+```
 
-- `frontend`: still uses upstream DeerFlow UI
-- `compat layer`: exposes `/api/*` and `/api/langgraph/*`
-- `runtime`: custom Go agent loop, tool system, memory, checkpointing, and sandbox
+`deerflow-go`:
 
-This keeps the frontend and protocol shape close to upstream while removing the original multi-service Python runtime.
+```mermaid
+flowchart TD
+    UI[Upstream DeerFlow Frontend]
+    Compat[pkg/langgraphcompat<br/>HTTP / SSE protocol compatibility]
+    CompatState[Compat State / Persistence View]
+    Harness[pkg/harness<br/>factory / runner / lifecycle / boundaries]
+    Runtime[pkg/harnessruntime<br/>orchestrator / completion / query / event / snapshot / profile]
+    Agent[pkg/agent<br/>custom ReAct loop]
+    ToolRuntime[Tool Runtime]
+    SandboxRuntime[Sandbox Runtime]
+    Providers[pkg/llm]
+    Tools[pkg/tools]
+    Memory[pkg/memory]
+    Sandbox[pkg/sandbox]
+
+    UI --> Compat
+    Compat <--> CompatState
+    Compat --> Harness
+    Harness --> Runtime
+    Harness --> Agent
+    Runtime --> ToolRuntime
+    Runtime --> SandboxRuntime
+    Runtime --> CompatState
+    Agent --> Providers
+    Agent --> Tools
+    ToolRuntime --> Tools
+    Runtime --> Memory
+    SandboxRuntime --> Sandbox
+```
 
 ## Layers
 
-The repository is organized around four main layers:
+The repository is organized around five main layers:
 
 - `cmd/langgraph`: process entrypoint and server bootstrap
 - `pkg/langgraphcompat`: DeerFlow-compatible HTTP, thread/run lifecycle, gateway state, uploads, artifacts, and SSE
-- `pkg/agent`, `pkg/llm`, `pkg/tools`: Go-native runtime loop, model adapters, and tool execution
+- `pkg/harness`, `pkg/harnessruntime`: runtime assembly, lifecycle, profiles, orchestration, events, and snapshots
+- `pkg/agent`, `pkg/llm`, `pkg/tools`: Go-native agent loop, model adapters, and tool execution
 - `pkg/memory`, `pkg/sandbox`: durable memory and execution isolation
 
 Reference documents:
