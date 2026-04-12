@@ -41,7 +41,7 @@ func (s *Server) handleMemoryReload(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMemoryClear(w http.ResponseWriter, r *http.Request) {
 	mem, err := s.gatewayMemoryClear(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to clear memory data"})
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "Failed to clear memory data."})
 		return
 	}
 	writeJSON(w, http.StatusOK, mem)
@@ -72,7 +72,11 @@ func (s *Server) handleMemoryFactDelete(w http.ResponseWriter, r *http.Request) 
 	factID := strings.TrimSpace(r.PathValue("fact_id"))
 	mem, err := s.gatewayMemoryDeleteFact(r.Context(), factID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Memory fact '%s' not found", factID)})
+		if err.Error() == fmt.Sprintf("Memory fact '%s' not found", factID) {
+			writeJSON(w, http.StatusNotFound, map[string]any{"detail": fmt.Sprintf("Memory fact '%s' not found.", factID)})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "Failed to delete memory fact."})
 		return
 	}
 	writeJSON(w, http.StatusOK, mem)

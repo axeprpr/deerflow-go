@@ -221,6 +221,60 @@ func TestMemoryFactCreateAndPatchLifecycle(t *testing.T) {
 	}
 }
 
+func TestMemoryFactDeleteMissingUsesUpstreamDetail(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	resp := performCompatRequest(t, handler, http.MethodDelete, "/api/memory/facts/missing-fact", nil, nil)
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), `Memory fact 'missing-fact' not found.`) {
+		t.Fatalf("body=%s", resp.Body.String())
+	}
+}
+
+func TestMemoryFactDeletePersistFailureUsesUpstreamDetail(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	s.uiStateMu.Lock()
+	mem := defaultGatewayMemory()
+	mem.Facts = []memoryFact{{
+		ID:       "fact-delete",
+		Content:  "Delete me",
+		Category: "context",
+	}}
+	s.setMemoryLocked(mem)
+	s.uiStateMu.Unlock()
+
+	if err := os.MkdirAll(s.memoryPath(), 0o755); err != nil {
+		t.Fatalf("mkdir memory path dir: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodDelete, "/api/memory/facts/fact-delete", nil, nil)
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), `Failed to delete memory fact.`) {
+		t.Fatalf("body=%s", resp.Body.String())
+	}
+}
+
+func TestMemoryClearFailureUsesUpstreamDetail(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	if err := os.MkdirAll(s.memoryPath(), 0o755); err != nil {
+		t.Fatalf("mkdir memory path dir: %v", err)
+	}
+
+	resp := performCompatRequest(t, handler, http.MethodDelete, "/api/memory", nil, nil)
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), `Failed to clear memory data.`) {
+		t.Fatalf("body=%s", resp.Body.String())
+	}
+}
+
 func TestMemoryImportPersistsToMemoryStore(t *testing.T) {
 	s, handler := newCompatTestServer(t)
 
