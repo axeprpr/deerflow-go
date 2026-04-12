@@ -210,3 +210,23 @@ func TestInProcessRunQueueReturnsCodecErrors(t *testing.T) {
 		t.Fatalf("Submit() error = %v, want boom", err)
 	}
 }
+
+func TestInProcessRunQueuePreservesDispatchEnvelopeMetadata(t *testing.T) {
+	executor := &fakeExecutor{}
+	queue := NewInProcessRunQueueWithCodec(executor, 1, 1, nil)
+	defer queue.Close()
+
+	_, err := queue.Submit(context.Background(), DispatchRequest{
+		Plan: WorkerExecutionPlan{
+			RunID:    "run-1",
+			ThreadID: "thread-1",
+			Attempt:  3,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if !executor.called || executor.req.Plan.RunID != "run-1" || executor.req.Plan.Attempt != 3 {
+		t.Fatalf("executor req = %#v", executor.req)
+	}
+}
