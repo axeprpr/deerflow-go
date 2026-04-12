@@ -55,6 +55,9 @@ func TestNewLocalSandboxLeaseServiceAcquiresLease(t *testing.T) {
 	if lease.Heartbeat == nil || lease.Release == nil {
 		t.Fatalf("lease callbacks = %#v", lease)
 	}
+	if lease.HeartbeatInterval <= 0 {
+		t.Fatalf("heartbeat interval = %s, want > 0", lease.HeartbeatInterval)
+	}
 }
 
 func TestLocalSandboxLeaseServiceReleasesProviderOnLastLease(t *testing.T) {

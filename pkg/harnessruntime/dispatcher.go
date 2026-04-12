@@ -20,16 +20,50 @@ type RunDispatcher interface {
 	Dispatch(context.Context, DispatchRequest) (*DispatchResult, error)
 }
 
+type DispatchTopology string
+
+const (
+	DispatchTopologyDirect DispatchTopology = "direct"
+	DispatchTopologyQueued DispatchTopology = "queued"
+)
+
+type DispatchConfig struct {
+	Topology DispatchTopology
+	Executor RunExecutor
+	Queue    DispatchQueue
+}
+
+type directRunDispatcher struct {
+	executor RunExecutor
+}
+
 type queuedRunDispatcher struct {
 	queue DispatchQueue
 }
 
 func NewInProcessRunDispatcher() RunDispatcher {
-	return NewQueuedRunDispatcher(nil)
+	return NewRuntimeDispatcher(DispatchConfig{Topology: DispatchTopologyQueued})
+}
+
+func NewRuntimeDispatcher(config DispatchConfig) RunDispatcher {
+	switch config.Topology {
+	case DispatchTopologyDirect:
+		return directRunDispatcher{executor: config.Executor}
+	default:
+		return NewQueuedRunDispatcher(config.Queue)
+	}
 }
 
 func NewQueuedRunDispatcher(queue DispatchQueue) RunDispatcher {
 	return queuedRunDispatcher{queue: queue}
+}
+
+func (d directRunDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (*DispatchResult, error) {
+	executor := d.executor
+	if executor == nil {
+		executor = NewRuntimeWorker()
+	}
+	return executor.Execute(ctx, req)
 }
 
 func (d queuedRunDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (*DispatchResult, error) {

@@ -1,13 +1,16 @@
 package harness
 
 import (
+	"time"
+
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 )
 
 type PreparedAgent struct {
-	Agent     *agent.Agent
-	Heartbeat func() error
-	Release   func() error
+	Agent             *agent.Agent
+	Heartbeat         func() error
+	Release           func() error
+	HeartbeatInterval time.Duration
 }
 
 // Factory owns runtime assembly. Compat and HTTP layers should depend on this
@@ -56,6 +59,7 @@ func (f *Factory) PrepareAgent(req AgentRequest) (*PreparedAgent, error) {
 			cfg.Sandbox = binding.Sandbox
 			prepared.Heartbeat = binding.Heartbeat
 			prepared.Release = binding.Release
+			prepared.HeartbeatInterval = binding.HeartbeatInterval
 		} else if f.deps.SandboxRuntime != nil {
 			sb, err := f.deps.SandboxRuntime.Resolve(req)
 			if err != nil {

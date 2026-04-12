@@ -2,15 +2,19 @@ package harnessruntime
 
 import (
 	"sync"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/sandbox"
 )
 
+const defaultSandboxHeartbeatInterval = 30 * time.Second
+
 type SandboxLease struct {
-	Sandbox   *sandbox.Sandbox
-	Heartbeat func() error
-	Release   func() error
+	Sandbox           *sandbox.Sandbox
+	Heartbeat         func() error
+	Release           func() error
+	HeartbeatInterval time.Duration
 }
 
 type SandboxLeaseService interface {
@@ -61,9 +65,10 @@ func (r leaseBackedSandboxRuntime) Bind(req harness.AgentRequest) (harness.Sandb
 		return harness.SandboxBinding{}, err
 	}
 	return harness.SandboxBinding{
-		Sandbox:   lease.Sandbox,
-		Heartbeat: lease.Heartbeat,
-		Release:   lease.Release,
+		Sandbox:           lease.Sandbox,
+		Heartbeat:         lease.Heartbeat,
+		Release:           lease.Release,
+		HeartbeatInterval: lease.HeartbeatInterval,
 	}, nil
 }
 
@@ -102,7 +107,8 @@ func (s *localSandboxLeaseService) AcquireLease(req harness.AgentRequest) (Sandb
 	s.refs++
 	s.mu.Unlock()
 	return SandboxLease{
-		Sandbox: sb,
+		Sandbox:           sb,
+		HeartbeatInterval: defaultSandboxHeartbeatInterval,
 		Heartbeat: func() error {
 			return nil
 		},

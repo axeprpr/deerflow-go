@@ -18,11 +18,12 @@ type RunRequest struct {
 // Execution owns one prepared agent run. Compat layers may observe Events, but
 // they should not construct agents or call agent.Run directly.
 type Execution struct {
-	agent     *agent.Agent
-	sessionID string
-	messages  []models.Message
-	heartbeat func() error
-	release   func() error
+	agent             *agent.Agent
+	sessionID         string
+	messages          []models.Message
+	heartbeat         func() error
+	release           func() error
+	heartbeatInterval time.Duration
 }
 
 func (e *Execution) Events() <-chan agent.AgentEvent {
@@ -49,8 +50,12 @@ func (e *Execution) Run(ctx context.Context) (*agent.RunResult, error) {
 	if e.heartbeat != nil {
 		done := make(chan struct{})
 		defer close(done)
+		interval := e.heartbeatInterval
+		if interval <= 0 {
+			interval = 30 * time.Second
+		}
 		go func() {
-			ticker := time.NewTicker(30 * time.Second)
+			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
 			for {
 				select {
@@ -89,10 +94,11 @@ func (r *Runner) Prepare(req RunRequest) (*Execution, error) {
 		return nil, err
 	}
 	return &Execution{
-		agent:     prepared.Agent,
-		sessionID: req.SessionID,
-		messages:  append([]models.Message(nil), req.Messages...),
-		heartbeat: prepared.Heartbeat,
-		release:   prepared.Release,
+		agent:             prepared.Agent,
+		sessionID:         req.SessionID,
+		messages:          append([]models.Message(nil), req.Messages...),
+		heartbeat:         prepared.Heartbeat,
+		release:           prepared.Release,
+		heartbeatInterval: prepared.HeartbeatInterval,
 	}, nil
 }

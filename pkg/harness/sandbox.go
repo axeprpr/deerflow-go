@@ -2,14 +2,16 @@ package harness
 
 import (
 	"sync"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/sandbox"
 )
 
 type SandboxBinding struct {
-	Sandbox   *sandbox.Sandbox
-	Heartbeat func() error
-	Release   func() error
+	Sandbox           *sandbox.Sandbox
+	Heartbeat         func() error
+	Release           func() error
+	HeartbeatInterval time.Duration
 }
 
 // SandboxProvider mirrors upstream's provider boundary. The current local

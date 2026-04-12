@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -56,6 +57,7 @@ func TestRunnerRunExecutesManagedSandboxCallbacks(t *testing.T) {
 		SandboxRuntime: runnerManagedSandboxRuntime{
 			bind: func(AgentRequest) (SandboxBinding, error) {
 				return SandboxBinding{
+					HeartbeatInterval: time.Millisecond,
 					Heartbeat: func() error {
 						heartbeats++
 						return nil
