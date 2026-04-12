@@ -85,3 +85,35 @@ func TestCoordinatorUsesInjectedDispatcher(t *testing.T) {
 		t.Fatalf("prepared run id = %q, want run-1", prepared.Run.RunID)
 	}
 }
+
+func TestCoordinatorSubmitUsesInjectedDispatcher(t *testing.T) {
+	dispatcher := &fakeDispatcher{}
+	coordinator := NewCoordinator(CoordinatorDeps{
+		Dispatcher: dispatcher,
+	})
+
+	prepared, err := coordinator.Submit(context.Background(), RunPlan{
+		ThreadID:    "thread-1",
+		AssistantID: "lead_agent",
+		Model:       "model-1",
+		AgentName:   "lead_agent",
+		Spec:        harness.AgentSpec{},
+		Messages: []models.Message{{
+			Role:      models.RoleHuman,
+			Content:   "new",
+			SessionID: "thread-1",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if !dispatcher.called {
+		t.Fatal("dispatcher was not called")
+	}
+	if prepared == nil || prepared.Execution == nil || prepared.Lifecycle == nil {
+		t.Fatalf("prepared = %#v", prepared)
+	}
+	if dispatcher.plan.ThreadID != "thread-1" || dispatcher.plan.AssistantID != "lead_agent" {
+		t.Fatalf("dispatcher plan = %#v", dispatcher.plan)
+	}
+}

@@ -12,16 +12,16 @@ import (
 )
 
 type CoordinatorDeps struct {
-	Runtime        *harness.Runtime
-	Dispatcher     RunDispatcher
-	Preflight      PreflightRuntime
-	Context        ContextRuntime
-	RunState       RunStateRuntime
-	Completion     CompletionRuntime
-	Coordination   CoordinationRuntime
-	Query          QueryRuntime
-	TitleKey       string
-	InterruptKey   string
+	Runtime      *harness.Runtime
+	Dispatcher   RunDispatcher
+	Preflight    PreflightRuntime
+	Context      ContextRuntime
+	RunState     RunStateRuntime
+	Completion   CompletionRuntime
+	Coordination CoordinationRuntime
+	Query        QueryRuntime
+	TitleKey     string
+	InterruptKey string
 }
 
 type PreparedRun struct {
@@ -66,19 +66,7 @@ func NewCoordinator(deps CoordinatorDeps) Coordinator {
 
 func (c Coordinator) Prepare(ctx context.Context, input PreflightInput, plan RunPlan) (*PreparedRun, error) {
 	preflight := c.preflight.Prepare(input)
-	dispatcher := c.dispatcher
-	if dispatcher == nil {
-		dispatcher = NewInProcessRunDispatcher()
-	}
-	orchestrated, err := dispatcher.Prepare(ctx, c.runtime, RunPlan{
-		ThreadID:         preflight.ThreadID,
-		AssistantID:      preflight.AssistantID,
-		Model:            plan.Model,
-		AgentName:        plan.AgentName,
-		Spec:             plan.Spec,
-		ExistingMessages: preflight.ExistingMessages,
-		Messages:         preflight.Messages,
-	})
+	orchestrated, err := c.Submit(ctx, plan.WithMessages(preflight.ThreadID, preflight.AssistantID, preflight.ExistingMessages, preflight.Messages))
 	if err != nil {
 		return nil, err
 	}
@@ -92,6 +80,14 @@ func (c Coordinator) Prepare(ctx context.Context, input PreflightInput, plan Run
 		Run:              preflight.Run,
 		Execution:        orchestrated.Execution,
 	}, nil
+}
+
+func (c Coordinator) Submit(ctx context.Context, plan RunPlan) (*PreparedExecution, error) {
+	dispatcher := c.dispatcher
+	if dispatcher == nil {
+		dispatcher = NewInProcessRunDispatcher()
+	}
+	return dispatcher.Prepare(ctx, c.runtime, plan)
 }
 
 func (c Coordinator) BindContext(ctx context.Context, threadID string, taskSink func(subagent.TaskEvent), clarificationSink func(*clarification.Clarification)) context.Context {
@@ -135,4 +131,12 @@ func (c Coordinator) Wait(ctx context.Context, threadID, runID string, cancelOnD
 
 func (c Coordinator) Cancel(threadID, runID string) (map[string]any, bool, bool) {
 	return c.coordination.Cancel(threadID, runID)
+}
+
+func (p RunPlan) WithMessages(threadID, assistantID string, existingMessages, messages []models.Message) RunPlan {
+	p.ThreadID = threadID
+	p.AssistantID = assistantID
+	p.ExistingMessages = append([]models.Message(nil), existingMessages...)
+	p.Messages = append([]models.Message(nil), messages...)
+	return p
 }

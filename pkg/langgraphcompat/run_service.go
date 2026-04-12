@@ -88,7 +88,7 @@ func (s *Server) buildRunExecution(ctx context.Context, prepared *preparedRunReq
 		return nil, err
 	}
 	agentSpec.PresentFiles = prepared.PresentFiles
-	orchestrated, err := harnessruntime.NewOrchestrator(s.runtimeView()).Prepare(ctx, harnessruntime.RunPlan{
+	orchestrated, err := s.runtimeCoordinator().Submit(ctx, harnessruntime.RunPlan{
 		ThreadID:         prepared.ThreadID,
 		AssistantID:      prepared.AssistantID,
 		Model:            agentSpec.Model,
