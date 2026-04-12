@@ -10,32 +10,22 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
-func (s *Server) runtimeFeatureConfig(memoryRuntime *harness.MemoryRuntime) harnessruntime.FeatureConfig {
-	return harnessruntime.FeatureConfig{
-		ClarificationEnabled: s != nil && s.clarify != nil,
-		MemoryEnabled:        memoryRuntime != nil && memoryRuntime.Enabled(),
-		SummarizationEnabled: true,
-		TitleEnabled:         false,
+func (s *Server) runtimeProfileConfig(memoryRuntime *harness.MemoryRuntime) harnessruntime.ProfileConfig {
+	return harnessruntime.ProfileConfig{
+		Features: harnessruntime.FeatureConfig{
+			ClarificationEnabled: s != nil && s.clarify != nil,
+			MemoryEnabled:        memoryRuntime != nil && memoryRuntime.Enabled(),
+			SummarizationEnabled: true,
+			TitleEnabled:         false,
+		},
+		Lifecycle: harnessruntime.LifecycleConfig{
+			SummaryMetadataKey:   historySummaryMetadataKey,
+			MemorySessionKey:     "memory_session_id",
+			InterruptMetadataKey: "clarification_interrupt",
+			TitleMetadataKey:     "generated_title",
+		},
+		RunPolicy: harnessruntime.NewDefaultRunPolicy(),
 	}
-}
-
-func (s *Server) runtimeLifecycleHooks(memoryRuntime *harness.MemoryRuntime, features harness.FeatureAssembly) *harness.LifecycleHooks {
-	config := harnessruntime.LifecycleConfig{
-		SummaryMetadataKey:   historySummaryMetadataKey,
-		MemorySessionKey:     "memory_session_id",
-		InterruptMetadataKey: "clarification_interrupt",
-		TitleMetadataKey:     "generated_title",
-	}
-
-	conversationAdapter := s.runtimeConversationAdapter()
-	memoryAdapter := s.runtimeMemoryAdapter()
-
-	return config.BuildHooks(features, harnessruntime.LifecycleProviders{
-		MemoryRuntime:  memoryRuntime,
-		Summarizer:     harnessruntime.NewSummarizer(conversationAdapter),
-		MemoryResolver: harnessruntime.NewMemorySessionResolver(memoryAdapter),
-		TitleGenerator: harnessruntime.NewTitleGenerator(conversationAdapter),
-	})
 }
 
 func (s *Server) beforeRunSummarizationFeature(ctx context.Context, state *harness.RunState) error {

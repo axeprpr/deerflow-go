@@ -40,3 +40,41 @@ func TestWithFeatureBuilderAppliesBundle(t *testing.T) {
 		t.Fatalf("lifecycle metadata = %#v", state.Metadata)
 	}
 }
+
+func TestWithProfileBuilderAppliesProfile(t *testing.T) {
+	policy := agent.DefaultRunPolicy()
+	var afterCalled bool
+	runtime := NewRuntime(RuntimeDeps{}, nil,
+		WithProfileBuilder(NewStaticProfileBuilder(RuntimeProfile{
+			RunPolicy: policy,
+			Features: FeatureAssembly{
+				Memory: MemoryFeature{Enabled: true},
+				Title:  TitleFeature{Enabled: true},
+			},
+			Lifecycle: &LifecycleHooks{
+				AfterRun: []AfterRunHook{
+					func(_ context.Context, state *RunState, _ *agent.RunResult) error {
+						afterCalled = true
+						state.Metadata["profile"] = "ok"
+						return nil
+					},
+				},
+			},
+		})),
+	)
+
+	if runtime.Profile().RunPolicy != policy {
+		t.Fatal("runtime profile run policy not retained")
+	}
+	features := runtime.Features()
+	if !features.Memory.Enabled || !features.Title.Enabled {
+		t.Fatalf("features = %#v", features)
+	}
+	state := &RunState{Metadata: map[string]any{}}
+	if err := runtime.AfterRun(context.Background(), state, &agent.RunResult{}); err != nil {
+		t.Fatalf("AfterRun() error = %v", err)
+	}
+	if !afterCalled || state.Metadata["profile"] != "ok" {
+		t.Fatalf("metadata = %#v", state.Metadata)
+	}
+}

@@ -15,6 +15,7 @@ type Runtime struct {
 	memory         *MemoryRuntime
 	sandboxRuntime SandboxRuntime
 	toolRuntime    ToolRuntime
+	profile        RuntimeProfile
 	features       FeatureAssembly
 	lifecycle      *LifecycleHooks
 }
@@ -25,6 +26,7 @@ func WithFeatureAssembly(features FeatureAssembly) RuntimeOption {
 	return func(r *Runtime) {
 		if r != nil {
 			r.features = features
+			r.profile.Features = features
 		}
 	}
 }
@@ -33,6 +35,7 @@ func WithLifecycle(hooks *LifecycleHooks) RuntimeOption {
 	return func(r *Runtime) {
 		if r != nil {
 			r.lifecycle = hooks
+			r.profile.Lifecycle = hooks
 		}
 	}
 }
@@ -45,6 +48,17 @@ func WithFeatureBuilder(builder FeatureBuilder) RuntimeOption {
 		bundle := builder.Build()
 		r.features = bundle.Assembly
 		r.lifecycle = bundle.Lifecycle
+		r.profile.Features = bundle.Assembly
+		r.profile.Lifecycle = bundle.Lifecycle
+	}
+}
+
+func WithProfileBuilder(builder ProfileBuilder) RuntimeOption {
+	return func(r *Runtime) {
+		if r == nil || builder == nil {
+			return
+		}
+		r.applyProfile(builder.BuildProfile())
 	}
 }
 
@@ -60,6 +74,9 @@ func NewRuntime(deps RuntimeDeps, memory *MemoryRuntime, opts ...RuntimeOption) 
 		memory:         memory,
 		sandboxRuntime: sandboxRuntime,
 		toolRuntime:    deps.ToolRuntime,
+		profile: RuntimeProfile{
+			RunPolicy: deps.RunPolicy,
+		},
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -67,6 +84,18 @@ func NewRuntime(deps RuntimeDeps, memory *MemoryRuntime, opts ...RuntimeOption) 
 		}
 	}
 	return runtime
+}
+
+func (r *Runtime) applyProfile(profile RuntimeProfile) {
+	if r == nil {
+		return
+	}
+	r.profile = profile
+	r.features = profile.Features
+	r.lifecycle = profile.Lifecycle
+	if profile.RunPolicy != nil && r.factory != nil {
+		r.factory.deps.RunPolicy = profile.RunPolicy
+	}
 }
 
 func (r *Runtime) NewAgent(req AgentRequest) (*agent.Agent, error) {
@@ -91,7 +120,7 @@ func (r *Runtime) Features() FeatureAssembly {
 	if r == nil {
 		return FeatureAssembly{}
 	}
-	return r.features
+	return r.profile.Features
 }
 
 func (r *Runtime) BeforeRun(ctx context.Context, state *RunState) error {
@@ -106,6 +135,13 @@ func (r *Runtime) AfterRun(ctx context.Context, state *RunState, result *agent.R
 		return nil
 	}
 	return r.lifecycle.After(ctx, state, result)
+}
+
+func (r *Runtime) Profile() RuntimeProfile {
+	if r == nil {
+		return RuntimeProfile{}
+	}
+	return r.profile
 }
 
 func (r *Runtime) Memory() *MemoryRuntime {

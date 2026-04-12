@@ -1,27 +1,34 @@
 package langgraphcompat
 
-import "github.com/axeprpr/deerflow-go/pkg/harness"
+import (
+	"github.com/axeprpr/deerflow-go/pkg/harness"
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
+)
 
-type serverRuntimeFeatureBuilder struct {
+type serverRuntimeProfileBuilder struct {
 	server        *Server
 	memoryRuntime *harness.MemoryRuntime
 }
 
-func (s *Server) runtimeFeatureBuilder(memoryRuntime *harness.MemoryRuntime) harness.FeatureBuilder {
-	return serverRuntimeFeatureBuilder{
+func (s *Server) runtimeProfileBuilder(memoryRuntime *harness.MemoryRuntime) harness.ProfileBuilder {
+	return serverRuntimeProfileBuilder{
 		server:        s,
 		memoryRuntime: memoryRuntime,
 	}
 }
 
-func (b serverRuntimeFeatureBuilder) Build() harness.FeatureBundle {
+func (b serverRuntimeProfileBuilder) BuildProfile() harness.RuntimeProfile {
 	if b.server == nil {
-		return harness.FeatureBundle{}
+		return harness.RuntimeProfile{}
 	}
-	config := b.server.runtimeFeatureConfig(b.memoryRuntime)
-	assembly := config.BuildAssembly(b.server.clarify)
-	return harness.FeatureBundle{
-		Assembly:  assembly,
-		Lifecycle: b.server.runtimeLifecycleHooks(b.memoryRuntime, assembly),
-	}
+	config := b.server.runtimeProfileConfig(b.memoryRuntime)
+	return config.BuildProfile(harnessruntime.ProfileProviders{
+		ClarificationManager: b.server.clarify,
+		Lifecycle: harnessruntime.LifecycleProviders{
+			MemoryRuntime:  b.memoryRuntime,
+			Summarizer:     harnessruntime.NewSummarizer(b.server.runtimeConversationAdapter()),
+			MemoryResolver: harnessruntime.NewMemorySessionResolver(b.server.runtimeMemoryAdapter()),
+			TitleGenerator: harnessruntime.NewTitleGenerator(b.server.runtimeConversationAdapter()),
+		},
+	})
 }
