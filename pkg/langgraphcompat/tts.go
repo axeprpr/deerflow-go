@@ -43,13 +43,13 @@ type gatewayTTSConfig struct {
 func (s *Server) handleTTS(w http.ResponseWriter, r *http.Request) {
 	var req gatewayTTSRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "invalid request body"})
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "Invalid request body"})
 		return
 	}
 
 	input := strings.TrimSpace(firstNonEmpty(req.Text, req.Input))
 	if input == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "text is required"})
+		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": "Text is required"})
 		return
 	}
 

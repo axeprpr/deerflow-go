@@ -76,7 +76,7 @@ func wrapAuth(next http.Handler, cfg AuthConfig) http.Handler {
 		}
 
 		writeJSONAuth(w, http.StatusUnauthorized, map[string]any{
-			"detail": "invalid token",
+			"detail": "Invalid token",
 		})
 	})
 }

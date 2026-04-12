@@ -23,7 +23,7 @@ func (s *Server) handleMemoryImport(w http.ResponseWriter, r *http.Request) {
 	}
 	mem, err := s.gatewayMemoryImport(r.Context(), payload)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "failed to import memory data"})
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"detail": "Failed to import memory data."})
 		return
 	}
 	writeJSON(w, http.StatusOK, mem)
