@@ -26,10 +26,10 @@ func (e *fakeExecutor) Execute(_ context.Context, req DispatchRequest) (*Dispatc
 
 func TestInlineDispatchQueueUsesInjectedExecutor(t *testing.T) {
 	executor := &fakeExecutor{}
-	queue := NewInlineDispatchQueue(executor)
+	queue := NewDirectWorkerTransport(executor, DispatchEnvelopeCodec{})
 
-	result, err := queue.Submit(context.Background(), DispatchRequest{
-		Plan: WorkerExecutionPlan{ThreadID: "thread-1"},
+	result, err := queue.Submit(context.Background(), WorkerDispatchEnvelope{
+		Payload: mustEncodePlan(t, WorkerExecutionPlan{ThreadID: "thread-1"}),
 	})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
@@ -44,7 +44,7 @@ func TestInlineDispatchQueueUsesInjectedExecutor(t *testing.T) {
 
 func TestQueuedRunDispatcherUsesQueue(t *testing.T) {
 	executor := &fakeExecutor{}
-	dispatcher := NewQueuedRunDispatcher(NewInlineDispatchQueue(executor))
+	dispatcher := NewQueuedRunDispatcher(NewDirectWorkerTransport(executor, DispatchEnvelopeCodec{}))
 
 	result, err := dispatcher.Dispatch(context.Background(), DispatchRequest{
 		Plan: WorkerExecutionPlan{ThreadID: "thread-1"},
@@ -102,6 +102,29 @@ func TestRuntimeDispatcherQueuedTopologyDefaultsToWorkerQueue(t *testing.T) {
 	}
 }
 
+func TestRuntimeDispatcherUsesEnvelopeCodec(t *testing.T) {
+	executor := &fakeExecutor{}
+	codec := &fakePlanCodec{}
+	dispatcher := NewRuntimeDispatcher(DispatchConfig{
+		Topology: DispatchTopologyDirect,
+		Executor: executor,
+		Codec:    codec,
+	})
+
+	_, err := dispatcher.Dispatch(context.Background(), DispatchRequest{
+		Plan: WorkerExecutionPlan{ThreadID: "thread-codec"},
+	})
+	if err != nil {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+	if !codec.encoded || !codec.decoded {
+		t.Fatalf("codec usage = encode:%v decode:%v", codec.encoded, codec.decoded)
+	}
+	if !executor.called || executor.req.Plan.ThreadID != "thread-codec" {
+		t.Fatalf("executor req = %#v", executor.req)
+	}
+}
+
 type blockingExecutor struct {
 	started chan string
 	release chan struct{}
@@ -152,11 +175,11 @@ func TestInProcessRunQueueSupportsMultipleWorkers(t *testing.T) {
 
 	done := make(chan error, 2)
 	go func() {
-		_, err := queue.Submit(context.Background(), DispatchRequest{Plan: WorkerExecutionPlan{ThreadID: "thread-a"}})
+		_, err := queue.Submit(context.Background(), WorkerDispatchEnvelope{Payload: mustEncodePlan(t, WorkerExecutionPlan{ThreadID: "thread-a"})})
 		done <- err
 	}()
 	go func() {
-		_, err := queue.Submit(context.Background(), DispatchRequest{Plan: WorkerExecutionPlan{ThreadID: "thread-b"}})
+		_, err := queue.Submit(context.Background(), WorkerDispatchEnvelope{Payload: mustEncodePlan(t, WorkerExecutionPlan{ThreadID: "thread-b"})})
 		done <- err
 	}()
 
@@ -181,17 +204,15 @@ func TestInProcessRunQueueSupportsMultipleWorkers(t *testing.T) {
 
 func TestInProcessRunQueueUsesWorkerPlanCodec(t *testing.T) {
 	executor := &fakeExecutor{}
-	codec := &fakePlanCodec{}
+	codec := &fakePlanCodec{last: WorkerExecutionPlan{ThreadID: "thread-codec"}}
 	queue := NewInProcessRunQueueWithCodec(executor, 1, 1, codec)
 	defer queue.Close()
 
-	_, err := queue.Submit(context.Background(), DispatchRequest{
-		Plan: WorkerExecutionPlan{ThreadID: "thread-codec"},
-	})
+	_, err := queue.Submit(context.Background(), WorkerDispatchEnvelope{Payload: []byte("thread-codec")})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if !codec.encoded || !codec.decoded {
+	if codec.encoded || !codec.decoded {
 		t.Fatalf("codec usage = encode:%v decode:%v", codec.encoded, codec.decoded)
 	}
 	if !executor.called || executor.req.Plan.ThreadID != "thread-codec" {
@@ -203,9 +224,7 @@ func TestInProcessRunQueueReturnsCodecErrors(t *testing.T) {
 	queue := NewInProcessRunQueueWithCodec(&fakeExecutor{}, 1, 1, &fakePlanCodec{fail: errors.New("boom")})
 	defer queue.Close()
 
-	_, err := queue.Submit(context.Background(), DispatchRequest{
-		Plan: WorkerExecutionPlan{ThreadID: "thread-codec"},
-	})
+	_, err := queue.Submit(context.Background(), WorkerDispatchEnvelope{Payload: []byte("thread-codec")})
 	if err == nil || err.Error() != "boom" {
 		t.Fatalf("Submit() error = %v, want boom", err)
 	}
@@ -216,12 +235,15 @@ func TestInProcessRunQueuePreservesDispatchEnvelopeMetadata(t *testing.T) {
 	queue := NewInProcessRunQueueWithCodec(executor, 1, 1, nil)
 	defer queue.Close()
 
-	_, err := queue.Submit(context.Background(), DispatchRequest{
-		Plan: WorkerExecutionPlan{
+	_, err := queue.Submit(context.Background(), WorkerDispatchEnvelope{
+		RunID:    "run-1",
+		ThreadID: "thread-1",
+		Attempt:  3,
+		Payload: mustEncodePlan(t, WorkerExecutionPlan{
 			RunID:    "run-1",
 			ThreadID: "thread-1",
 			Attempt:  3,
-		},
+		}),
 	})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
@@ -229,4 +251,13 @@ func TestInProcessRunQueuePreservesDispatchEnvelopeMetadata(t *testing.T) {
 	if !executor.called || executor.req.Plan.RunID != "run-1" || executor.req.Plan.Attempt != 3 {
 		t.Fatalf("executor req = %#v", executor.req)
 	}
+}
+
+func mustEncodePlan(t *testing.T, plan WorkerExecutionPlan) []byte {
+	t.Helper()
+	payload, err := (WorkerPlanCodec{}).Encode(plan)
+	if err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+	return payload
 }

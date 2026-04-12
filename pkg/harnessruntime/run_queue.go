@@ -58,13 +58,13 @@ func NewInProcessRunQueueWithCodec(executor RunExecutor, buffer int, workers int
 	return q
 }
 
-func (q *InProcessRunQueue) Submit(ctx context.Context, req DispatchRequest) (*DispatchResult, error) {
+func (q *InProcessRunQueue) Submit(ctx context.Context, envelope WorkerDispatchEnvelope) (*DispatchResult, error) {
 	if q == nil || q.jobs == nil {
+		req, err := q.codec.Decode(envelope)
+		if err != nil {
+			return nil, err
+		}
 		return NewRuntimeWorker().Execute(ctx, req)
-	}
-	envelope, err := q.codec.Encode(req)
-	if err != nil {
-		return nil, err
 	}
 	resp := make(chan dispatchResult, 1)
 	job := dispatchJob{

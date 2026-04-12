@@ -2,22 +2,27 @@ package harnessruntime
 
 import "context"
 
-type DispatchQueue interface {
-	Submit(context.Context, DispatchRequest) (*DispatchResult, error)
+type WorkerTransport interface {
+	Submit(context.Context, WorkerDispatchEnvelope) (*DispatchResult, error)
 }
 
-type InlineDispatchQueue struct {
+type directWorkerTransport struct {
 	executor RunExecutor
+	codec    DispatchEnvelopeCodec
 }
 
-func NewInlineDispatchQueue(executor RunExecutor) DispatchQueue {
-	return InlineDispatchQueue{executor: executor}
+func NewDirectWorkerTransport(executor RunExecutor, codec DispatchEnvelopeCodec) WorkerTransport {
+	return directWorkerTransport{executor: executor, codec: codec}
 }
 
-func (q InlineDispatchQueue) Submit(ctx context.Context, req DispatchRequest) (*DispatchResult, error) {
-	executor := q.executor
+func (t directWorkerTransport) Submit(ctx context.Context, env WorkerDispatchEnvelope) (*DispatchResult, error) {
+	executor := t.executor
 	if executor == nil {
 		executor = NewRuntimeWorker()
+	}
+	req, err := t.codec.Decode(env)
+	if err != nil {
+		return nil, err
 	}
 	return executor.Execute(ctx, req)
 }

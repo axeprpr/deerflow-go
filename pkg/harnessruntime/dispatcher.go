@@ -27,22 +27,19 @@ const (
 )
 
 type DispatchConfig struct {
-	Topology DispatchTopology
-	Executor RunExecutor
-	Runtime  func() *harness.Runtime
-	Specs    WorkerSpecRuntime
-	Codec    WorkerPlanMarshaler
-	Queue    DispatchQueue
-	Buffer   int
-	Workers  int
+	Topology  DispatchTopology
+	Executor  RunExecutor
+	Runtime   func() *harness.Runtime
+	Specs     WorkerSpecRuntime
+	Codec     WorkerPlanMarshaler
+	Transport WorkerTransport
+	Buffer    int
+	Workers   int
 }
 
-type directRunDispatcher struct {
-	executor RunExecutor
-}
-
-type queuedRunDispatcher struct {
-	queue DispatchQueue
+type transportRunDispatcher struct {
+	transport WorkerTransport
+	codec     DispatchEnvelopeCodec
 }
 
 func NewInProcessRunDispatcher() RunDispatcher {
@@ -54,34 +51,33 @@ func NewRuntimeDispatcher(config DispatchConfig) RunDispatcher {
 	if executor == nil && config.Runtime != nil {
 		executor = NewRuntimeWorkerSource(config.Runtime, config.Specs)
 	}
+	codec := DispatchEnvelopeCodec{Plans: config.Codec}
+	transport := config.Transport
 	switch config.Topology {
 	case DispatchTopologyDirect:
-		return directRunDispatcher{executor: executor}
-	default:
-		queue := config.Queue
-		if queue == nil {
-			queue = NewInProcessRunQueueWithCodec(executor, config.Buffer, config.Workers, config.Codec)
+		if transport == nil {
+			transport = NewDirectWorkerTransport(executor, codec)
 		}
-		return NewQueuedRunDispatcher(queue)
+	default:
+		if transport == nil {
+			transport = NewInProcessRunQueueWithCodec(executor, config.Buffer, config.Workers, config.Codec)
+		}
 	}
+	return transportRunDispatcher{transport: transport, codec: codec}
 }
 
-func NewQueuedRunDispatcher(queue DispatchQueue) RunDispatcher {
-	return queuedRunDispatcher{queue: queue}
+func NewQueuedRunDispatcher(transport WorkerTransport) RunDispatcher {
+	return transportRunDispatcher{transport: transport, codec: DispatchEnvelopeCodec{}}
 }
 
-func (d directRunDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (*DispatchResult, error) {
-	executor := d.executor
-	if executor == nil {
-		executor = NewRuntimeWorker()
+func (d transportRunDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (*DispatchResult, error) {
+	transport := d.transport
+	if transport == nil {
+		transport = NewDirectWorkerTransport(nil, d.codec)
 	}
-	return executor.Execute(ctx, req)
-}
-
-func (d queuedRunDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (*DispatchResult, error) {
-	queue := d.queue
-	if queue == nil {
-		queue = NewInProcessRunQueueWithCodec(nil, 0, 0, nil)
+	envelope, err := d.codec.Encode(req)
+	if err != nil {
+		return nil, err
 	}
-	return queue.Submit(ctx, req)
+	return transport.Submit(ctx, envelope)
 }
