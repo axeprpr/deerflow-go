@@ -100,6 +100,38 @@ func TestLocalSandboxManagerExposesBackendAndRuntime(t *testing.T) {
 	}
 }
 
+func TestSandboxManagerFromConfigSupportsLocalBackend(t *testing.T) {
+	manager, err := NewSandboxManagerFromConfig(SandboxManagerConfig{
+		Backend: SandboxBackendLocalLinux,
+		Name:    "runtime-test",
+		Root:    t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("NewSandboxManagerFromConfig() error = %v", err)
+	}
+	if manager == nil || manager.Backend() != SandboxBackendLocalLinux {
+		t.Fatalf("manager = %#v", manager)
+	}
+}
+
+func TestSandboxManagerFromConfigReturnsDeterministicUnsupportedBackendError(t *testing.T) {
+	manager, err := NewSandboxManagerFromConfig(SandboxManagerConfig{
+		Backend: SandboxBackendRemote,
+	})
+	if err != nil {
+		t.Fatalf("NewSandboxManagerFromConfig() error = %v", err)
+	}
+	runtime := manager.Runtime(harness.FeatureSandboxPolicy{})
+	_, err = runtime.Resolve(harness.AgentRequest{Features: harness.FeatureSet{Sandbox: true}})
+	if err == nil {
+		t.Fatal("Resolve() error = nil, want unsupported backend error")
+	}
+	want := `sandbox backend "remote" is not configured`
+	if err.Error() != want {
+		t.Fatalf("Resolve() error = %q, want %q", err.Error(), want)
+	}
+}
+
 type fakeSandboxProvider struct {
 	acquires int
 	closes   int

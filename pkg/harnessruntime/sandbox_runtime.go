@@ -6,5 +6,14 @@ import "github.com/axeprpr/deerflow-go/pkg/harness"
 // The current implementation still uses the local singleton provider, but the
 // enablement and acquisition policy now belongs to the runtime layer.
 func NewLocalSandboxRuntime(name, root string) harness.SandboxRuntime {
-	return NewLocalSandboxManager(name, root).Runtime(harness.FeatureSandboxPolicy{})
+	runtime, err := NewSandboxRuntimeFromConfig(SandboxManagerConfig{
+		Backend: SandboxBackendLocalLinux,
+		Name:    name,
+		Root:    root,
+		Policy:  harness.FeatureSandboxPolicy{},
+	})
+	if err != nil {
+		return nil
+	}
+	return runtime
 }
