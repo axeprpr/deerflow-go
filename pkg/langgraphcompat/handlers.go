@@ -822,12 +822,6 @@ func parseRunConfig(raw map[string]any) runConfig {
 			stringFromAny(raw["mode"]),
 			stringFromAny(configurable["mode"]),
 		),
-		ExecutionMode: firstNonEmpty(
-			stringFromAny(raw["execution_mode"]),
-			stringFromAny(raw["executionMode"]),
-			stringFromAny(configurable["execution_mode"]),
-			stringFromAny(configurable["executionMode"]),
-		),
 		ReasoningEffort: firstNonEmpty(
 			stringFromAny(raw["reasoning_effort"]),
 			stringFromAny(raw["reasoningEffort"]),
@@ -915,9 +909,6 @@ func (s *Server) applyRunConfigMetadata(threadID string, cfg runConfig) {
 	}
 	if cfg.Mode != "" {
 		s.setThreadMetadata(threadID, "mode", cfg.Mode)
-	}
-	if cfg.ExecutionMode != "" {
-		s.setThreadMetadata(threadID, "execution_mode", cfg.ExecutionMode)
 	}
 	if cfg.ReasoningEffort != "" {
 		s.setThreadMetadata(threadID, "reasoning_effort", cfg.ReasoningEffort)
