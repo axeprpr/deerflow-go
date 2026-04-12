@@ -4,6 +4,12 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 )
 
+type PreparedAgent struct {
+	Agent     *agent.Agent
+	Heartbeat func() error
+	Release   func() error
+}
+
 // Factory owns runtime assembly. Compat and HTTP layers should depend on this
 // boundary instead of constructing agents directly.
 type Factory struct {
@@ -15,6 +21,14 @@ func NewFactory(deps RuntimeDeps) *Factory {
 }
 
 func (f *Factory) NewAgent(req AgentRequest) (*agent.Agent, error) {
+	prepared, err := f.PrepareAgent(req)
+	if err != nil {
+		return nil, err
+	}
+	return prepared.Agent, nil
+}
+
+func (f *Factory) PrepareAgent(req AgentRequest) (*PreparedAgent, error) {
 	cfg := req.Spec.AgentConfig()
 	if cfg.LLMProvider == nil {
 		cfg.LLMProvider = f.deps.LLMProvider
@@ -32,8 +46,17 @@ func (f *Factory) NewAgent(req AgentRequest) (*agent.Agent, error) {
 	if cfg.MaxTurns <= 0 && f.deps.DefaultMaxTurns > 0 {
 		cfg.MaxTurns = f.deps.DefaultMaxTurns
 	}
+	prepared := &PreparedAgent{}
 	if cfg.Sandbox == nil {
-		if f.deps.SandboxRuntime != nil {
+		if managed, ok := f.deps.SandboxRuntime.(ManagedSandboxRuntime); ok {
+			binding, err := managed.Bind(req)
+			if err != nil {
+				return nil, err
+			}
+			cfg.Sandbox = binding.Sandbox
+			prepared.Heartbeat = binding.Heartbeat
+			prepared.Release = binding.Release
+		} else if f.deps.SandboxRuntime != nil {
 			sb, err := f.deps.SandboxRuntime.Resolve(req)
 			if err != nil {
 				return nil, err
@@ -47,5 +70,6 @@ func (f *Factory) NewAgent(req AgentRequest) (*agent.Agent, error) {
 			cfg.Sandbox = sb
 		}
 	}
-	return agent.New(cfg), nil
+	prepared.Agent = agent.New(cfg)
+	return prepared, nil
 }

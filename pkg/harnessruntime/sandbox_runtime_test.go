@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
+	"github.com/axeprpr/deerflow-go/pkg/sandbox"
 )
 
 func TestNewLocalSandboxRuntimeDefersSandboxCreationUntilEnabled(t *testing.T) {
@@ -54,4 +55,49 @@ func TestNewLocalSandboxLeaseServiceAcquiresLease(t *testing.T) {
 	if lease.Heartbeat == nil || lease.Release == nil {
 		t.Fatalf("lease callbacks = %#v", lease)
 	}
+}
+
+func TestLocalSandboxLeaseServiceReleasesProviderOnLastLease(t *testing.T) {
+	service := &localSandboxLeaseService{provider: &fakeSandboxProvider{}}
+
+	lease1, err := service.AcquireLease(harness.AgentRequest{Features: harness.FeatureSet{Sandbox: true}})
+	if err != nil {
+		t.Fatalf("AcquireLease() error = %v", err)
+	}
+	lease2, err := service.AcquireLease(harness.AgentRequest{Features: harness.FeatureSet{Sandbox: true}})
+	if err != nil {
+		t.Fatalf("AcquireLease() error = %v", err)
+	}
+
+	provider := service.provider.(*fakeSandboxProvider)
+	if provider.closes != 0 {
+		t.Fatalf("closes = %d, want 0 before release", provider.closes)
+	}
+	if err := lease1.Release(); err != nil {
+		t.Fatalf("lease1.Release() error = %v", err)
+	}
+	if provider.closes != 0 {
+		t.Fatalf("closes = %d, want 0 after first release", provider.closes)
+	}
+	if err := lease2.Release(); err != nil {
+		t.Fatalf("lease2.Release() error = %v", err)
+	}
+	if provider.closes != 1 {
+		t.Fatalf("closes = %d, want 1 after last release", provider.closes)
+	}
+}
+
+type fakeSandboxProvider struct {
+	acquires int
+	closes   int
+}
+
+func (p *fakeSandboxProvider) Acquire() (*sandbox.Sandbox, error) {
+	p.acquires++
+	return &sandbox.Sandbox{}, nil
+}
+
+func (p *fakeSandboxProvider) Close() error {
+	p.closes++
+	return nil
 }

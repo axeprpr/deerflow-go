@@ -6,6 +6,12 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/sandbox"
 )
 
+type SandboxBinding struct {
+	Sandbox   *sandbox.Sandbox
+	Heartbeat func() error
+	Release   func() error
+}
+
 // SandboxProvider mirrors upstream's provider boundary. The current local
 // implementation keeps the existing singleton behavior, but runtime assembly no
 // longer depends on compat-owned sandbox fields directly.
@@ -39,6 +45,11 @@ type SandboxRuntime interface {
 	Provider() SandboxProvider
 	Resolve(AgentRequest) (*sandbox.Sandbox, error)
 	Close() error
+}
+
+type ManagedSandboxRuntime interface {
+	SandboxRuntime
+	Bind(AgentRequest) (SandboxBinding, error)
 }
 
 type StaticSandboxRuntime struct {
@@ -78,6 +89,14 @@ func (r *StaticSandboxRuntime) Close() error {
 		return nil
 	}
 	return r.provider.Close()
+}
+
+func (r *StaticSandboxRuntime) Bind(req AgentRequest) (SandboxBinding, error) {
+	sb, err := r.Resolve(req)
+	if err != nil {
+		return SandboxBinding{}, err
+	}
+	return SandboxBinding{Sandbox: sb}, nil
 }
 
 type LocalSandboxProvider struct {

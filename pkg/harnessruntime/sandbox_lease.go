@@ -1,6 +1,8 @@
 package harnessruntime
 
 import (
+	"sync"
+
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/sandbox"
 )
@@ -40,17 +42,29 @@ func (r leaseBackedSandboxRuntime) Provider() harness.SandboxProvider {
 }
 
 func (r leaseBackedSandboxRuntime) Resolve(req harness.AgentRequest) (*sandbox.Sandbox, error) {
-	if r.leases == nil {
-		return nil, nil
-	}
-	if r.policy != nil && !r.policy.Enabled(req) {
-		return nil, nil
-	}
-	lease, err := r.leases.AcquireLease(req)
+	binding, err := r.Bind(req)
 	if err != nil {
 		return nil, err
 	}
-	return lease.Sandbox, nil
+	return binding.Sandbox, nil
+}
+
+func (r leaseBackedSandboxRuntime) Bind(req harness.AgentRequest) (harness.SandboxBinding, error) {
+	if r.leases == nil {
+		return harness.SandboxBinding{}, nil
+	}
+	if r.policy != nil && !r.policy.Enabled(req) {
+		return harness.SandboxBinding{}, nil
+	}
+	lease, err := r.leases.AcquireLease(req)
+	if err != nil {
+		return harness.SandboxBinding{}, err
+	}
+	return harness.SandboxBinding{
+		Sandbox:   lease.Sandbox,
+		Heartbeat: lease.Heartbeat,
+		Release:   lease.Release,
+	}, nil
 }
 
 func (r leaseBackedSandboxRuntime) Close() error {
@@ -62,19 +76,21 @@ func (r leaseBackedSandboxRuntime) Close() error {
 
 type localSandboxLeaseService struct {
 	provider harness.SandboxProvider
+	mu       sync.Mutex
+	refs     int
 }
 
 func NewLocalSandboxLeaseService(name, root string) SandboxLeaseService {
-	return localSandboxLeaseService{
+	return &localSandboxLeaseService{
 		provider: harness.NewLocalSandboxProvider(name, root),
 	}
 }
 
-func (s localSandboxLeaseService) Provider() harness.SandboxProvider {
+func (s *localSandboxLeaseService) Provider() harness.SandboxProvider {
 	return s.provider
 }
 
-func (s localSandboxLeaseService) AcquireLease(req harness.AgentRequest) (SandboxLease, error) {
+func (s *localSandboxLeaseService) AcquireLease(req harness.AgentRequest) (SandboxLease, error) {
 	if s.provider == nil {
 		return SandboxLease{}, nil
 	}
@@ -82,21 +98,37 @@ func (s localSandboxLeaseService) AcquireLease(req harness.AgentRequest) (Sandbo
 	if err != nil {
 		return SandboxLease{}, err
 	}
+	s.mu.Lock()
+	s.refs++
+	s.mu.Unlock()
 	return SandboxLease{
 		Sandbox: sb,
 		Heartbeat: func() error {
 			return nil
 		},
-		Release: func() error {
-			return nil
-		},
+		Release: s.release,
 	}, nil
 }
 
-func (s localSandboxLeaseService) Close() error {
+func (s *localSandboxLeaseService) Close() error {
 	if s.provider == nil {
 		return nil
 	}
 	return s.provider.Close()
 }
 
+func (s *localSandboxLeaseService) release() error {
+	if s.provider == nil {
+		return nil
+	}
+	s.mu.Lock()
+	if s.refs > 0 {
+		s.refs--
+	}
+	remaining := s.refs
+	s.mu.Unlock()
+	if remaining > 0 {
+		return nil
+	}
+	return s.provider.Close()
+}

@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -20,6 +21,8 @@ type Execution struct {
 	agent     *agent.Agent
 	sessionID string
 	messages  []models.Message
+	heartbeat func() error
+	release   func() error
 }
 
 func (e *Execution) Events() <-chan agent.AgentEvent {
@@ -32,6 +35,34 @@ func (e *Execution) Events() <-chan agent.AgentEvent {
 func (e *Execution) Run(ctx context.Context) (*agent.RunResult, error) {
 	if e == nil || e.agent == nil {
 		return nil, nil
+	}
+	if e.release != nil {
+		defer func() {
+			_ = e.release()
+		}()
+	}
+	if e.heartbeat != nil {
+		if err := e.heartbeat(); err != nil {
+			return nil, err
+		}
+	}
+	if e.heartbeat != nil {
+		done := make(chan struct{})
+		defer close(done)
+		go func() {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					_ = e.heartbeat()
+				}
+			}
+		}()
 	}
 	return e.agent.Run(ctx, e.sessionID, e.messages)
 }
@@ -53,13 +84,15 @@ func (r *Runner) Prepare(req RunRequest) (*Execution, error) {
 			messages:  append([]models.Message(nil), req.Messages...),
 		}, nil
 	}
-	runAgent, err := r.factory.NewAgent(req.Agent)
+	prepared, err := r.factory.PrepareAgent(req.Agent)
 	if err != nil {
 		return nil, err
 	}
 	return &Execution{
-		agent:     runAgent,
+		agent:     prepared.Agent,
 		sessionID: req.SessionID,
 		messages:  append([]models.Message(nil), req.Messages...),
+		heartbeat: prepared.Heartbeat,
+		release:   prepared.Release,
 	}, nil
 }
