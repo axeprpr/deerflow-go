@@ -373,6 +373,7 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 		s.runtimeNode = harnessruntime.DefaultRuntimeNodeConfig(name, root)
 	}
 	s.runtimeNode.Dispatch.Runtime = s.runtimeView
+	s.runtimeNode.Dispatch.Specs = s.runtimeWorkerSpecAdapter()
 	s.runDispatcher = s.runtimeNode.BuildDispatcher()
 	return s.runDispatcher
 }

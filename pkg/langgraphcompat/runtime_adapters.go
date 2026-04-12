@@ -51,6 +51,10 @@ type runtimeSnapshotAdapter struct {
 	server *Server
 }
 
+type runtimeWorkerSpecAdapter struct {
+	server *Server
+}
+
 func (s *Server) runtimeConversationAdapter() runtimeConversationAdapter {
 	return runtimeConversationAdapter{server: s}
 }
@@ -89,6 +93,10 @@ func (s *Server) runtimeEventAdapter() runtimeEventAdapter {
 
 func (s *Server) runtimeSnapshotAdapter() runtimeSnapshotAdapter {
 	return runtimeSnapshotAdapter{server: s}
+}
+
+func (s *Server) runtimeWorkerSpecAdapter() runtimeWorkerSpecAdapter {
+	return runtimeWorkerSpecAdapter{server: s}
 }
 
 func (a runtimeConversationAdapter) HistorySummary(threadID string) string {
@@ -295,4 +303,17 @@ func (a runtimeSnapshotAdapter) SaveRunSnapshot(snapshot harnessruntime.RunSnaps
 	if store := a.server.ensureSnapshotStore(); store != nil {
 		store.SaveRunSnapshot(snapshot)
 	}
+}
+
+func (a runtimeWorkerSpecAdapter) ResolveWorkerAgentSpec(threadID string, spec harnessruntime.PortableAgentSpec) harness.AgentSpec {
+	resolved := spec.AgentSpec()
+	if a.server == nil {
+		return resolved
+	}
+	session := a.server.ensureSession(threadID, nil)
+	resolved.PresentFiles = session.PresentFiles
+	if len(a.server.mcpDeferredTools) > 0 {
+		resolved.DeferredTools = append([]models.Tool(nil), a.server.mcpDeferredTools...)
+	}
+	return resolved
 }

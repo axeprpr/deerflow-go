@@ -88,7 +88,6 @@ func (s *Server) buildRunExecution(ctx context.Context, prepared *preparedRunReq
 	if err != nil {
 		return nil, err
 	}
-	agentSpec.PresentFiles = prepared.PresentFiles
 	prepared.Run.Attempt = 1
 	orchestrated, err := s.runtimeCoordinator().Submit(ctx, harnessruntime.RunPlan{
 		ThreadID:         prepared.ThreadID,
@@ -101,6 +100,7 @@ func (s *Server) buildRunExecution(ctx context.Context, prepared *preparedRunReq
 		Model:            agentSpec.Model,
 		AgentName:        runCfg.AgentName,
 		Spec:             agentSpec,
+		Features:         harness.FeatureSet{Sandbox: true},
 		ExistingMessages: prepared.ExistingMessages,
 		Messages:         prepared.Messages,
 	})

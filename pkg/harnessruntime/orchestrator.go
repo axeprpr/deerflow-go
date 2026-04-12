@@ -19,6 +19,7 @@ type RunPlan struct {
 	Model            string
 	AgentName        string
 	Spec             harness.AgentSpec
+	Features         harness.FeatureSet
 	ExistingMessages []models.Message
 	Messages         []models.Message
 }
@@ -33,7 +34,8 @@ type WorkerExecutionPlan struct {
 	ResumeReason     string
 	Model            string
 	AgentName        string
-	Spec             harness.AgentSpec
+	Spec             PortableAgentSpec
+	Features         harness.FeatureSet
 	ExistingMessages []models.Message
 	Messages         []models.Message
 }
@@ -45,10 +47,11 @@ type PreparedExecution struct {
 
 type Orchestrator struct {
 	runtime *harness.Runtime
+	specs   WorkerSpecRuntime
 }
 
-func NewOrchestrator(runtime *harness.Runtime) Orchestrator {
-	return Orchestrator{runtime: runtime}
+func NewOrchestrator(runtime *harness.Runtime, specs WorkerSpecRuntime) Orchestrator {
+	return Orchestrator{runtime: runtime, specs: specs}
 }
 
 func NewWorkerExecutionPlan(plan RunPlan) WorkerExecutionPlan {
@@ -62,7 +65,8 @@ func NewWorkerExecutionPlan(plan RunPlan) WorkerExecutionPlan {
 		ResumeReason:     plan.ResumeReason,
 		Model:            plan.Model,
 		AgentName:        plan.AgentName,
-		Spec:             plan.Spec,
+		Spec:             PortableAgentSpecFromAgentSpec(plan.Spec),
+		Features:         plan.Features,
 		ExistingMessages: append([]models.Message(nil), plan.ExistingMessages...),
 		Messages:         append([]models.Message(nil), plan.Messages...),
 	}
@@ -73,12 +77,16 @@ func (o Orchestrator) Prepare(ctx context.Context, plan RunPlan) (*PreparedExecu
 }
 
 func (o Orchestrator) PrepareExecution(ctx context.Context, plan WorkerExecutionPlan) (*PreparedExecution, error) {
+	spec := plan.Spec.AgentSpec()
+	if o.specs != nil {
+		spec = o.specs.ResolveWorkerAgentSpec(plan.ThreadID, plan.Spec)
+	}
 	lifecycle := &harness.RunState{
 		ThreadID:         plan.ThreadID,
 		AssistantID:      plan.AssistantID,
 		Model:            plan.Model,
 		AgentName:        plan.AgentName,
-		Spec:             plan.Spec,
+		Spec:             spec,
 		ExistingMessages: append([]models.Message(nil), plan.ExistingMessages...),
 		Messages:         append([]models.Message(nil), plan.Messages...),
 		Metadata:         map[string]any{},
@@ -110,7 +118,7 @@ func (o Orchestrator) PrepareExecution(ctx context.Context, plan WorkerExecution
 		execution, err = o.runtime.PrepareRun(harness.RunRequest{
 			Agent: harness.AgentRequest{
 				Spec:     lifecycle.Spec,
-				Features: harness.FeatureSet{Sandbox: true},
+				Features: plan.Features,
 			},
 			SessionID: plan.ThreadID,
 			Messages:  lifecycle.Messages,
@@ -119,7 +127,7 @@ func (o Orchestrator) PrepareExecution(ctx context.Context, plan WorkerExecution
 		execution, err = harness.NewRunner(nil).Prepare(harness.RunRequest{
 			Agent: harness.AgentRequest{
 				Spec:     lifecycle.Spec,
-				Features: harness.FeatureSet{Sandbox: true},
+				Features: plan.Features,
 			},
 			SessionID: plan.ThreadID,
 			Messages:  lifecycle.Messages,

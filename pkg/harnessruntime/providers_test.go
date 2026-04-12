@@ -440,7 +440,7 @@ func TestLifecycleConfigBuildHooks(t *testing.T) {
 func TestOrchestratorPrepareBuildsLifecycleAndExecution(t *testing.T) {
 	t.Parallel()
 
-	orchestrator := NewOrchestrator(nil)
+	orchestrator := NewOrchestrator(nil, nil)
 	prepared, err := orchestrator.Prepare(context.Background(), RunPlan{
 		ThreadID:        "thread-1",
 		AssistantID:     "lead_agent",
@@ -452,6 +452,7 @@ func TestOrchestratorPrepareBuildsLifecycleAndExecution(t *testing.T) {
 		Model:           "model-1",
 		AgentName:       "lead_agent",
 		Spec:            harness.AgentSpec{},
+		Features:        harness.FeatureSet{Sandbox: true},
 		Messages:        []models.Message{{Role: models.RoleHuman, Content: "hello"}},
 	})
 	if err != nil {

@@ -13,14 +13,15 @@ type RunExecutor interface {
 
 type RuntimeWorker struct {
 	runtime func() *harness.Runtime
+	specs   WorkerSpecRuntime
 }
 
 func NewRuntimeWorker() RunExecutor {
 	return RuntimeWorker{}
 }
 
-func NewRuntimeWorkerSource(source func() *harness.Runtime) RunExecutor {
-	return RuntimeWorker{runtime: source}
+func NewRuntimeWorkerSource(source func() *harness.Runtime, specs WorkerSpecRuntime) RunExecutor {
+	return RuntimeWorker{runtime: source, specs: specs}
 }
 
 func (w RuntimeWorker) Execute(ctx context.Context, req DispatchRequest) (*DispatchResult, error) {
@@ -35,7 +36,7 @@ func (w RuntimeWorker) execute(ctx context.Context, req DispatchRequest) (*Dispa
 	if runtime == nil {
 		return nil, errors.New("runtime is required")
 	}
-	prepared, err := NewOrchestrator(runtime).PrepareExecution(ctx, req.Plan)
+	prepared, err := NewOrchestrator(runtime, w.specs).PrepareExecution(ctx, req.Plan)
 	if err != nil {
 		return nil, err
 	}

@@ -4,7 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/models"
+	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
 func TestRuntimeConversationAdapterSummaryAccessors(t *testing.T) {
@@ -60,5 +62,30 @@ func TestRuntimeConversationAdapterCompactConversationUsesExistingImplementation
 	}
 	if len(compacted.Messages) != defaultSummaryKeepMessages {
 		t.Fatalf("kept messages = %d, want %d", len(compacted.Messages), defaultSummaryKeepMessages)
+	}
+}
+
+func TestRuntimeWorkerSpecAdapterRehydratesThreadScopedState(t *testing.T) {
+	server := &Server{
+		sessions:         map[string]*Session{},
+		runs:             map[string]*Run{},
+		mcpDeferredTools: []models.Tool{{Name: "web_search"}},
+	}
+	session := server.ensureSession("thread-1", nil)
+	session.PresentFiles = tools.NewPresentFileRegistry()
+
+	got := server.runtimeWorkerSpecAdapter().ResolveWorkerAgentSpec("thread-1", harnessruntime.PortableAgentSpec{
+		Model:        "model-1",
+		SystemPrompt: "system",
+	})
+
+	if got.PresentFiles != session.PresentFiles {
+		t.Fatalf("PresentFiles not rehydrated from session")
+	}
+	if len(got.DeferredTools) != 1 || got.DeferredTools[0].Name != "web_search" {
+		t.Fatalf("DeferredTools = %#v", got.DeferredTools)
+	}
+	if got.Model != "model-1" || got.SystemPrompt != "system" {
+		t.Fatalf("resolved spec = %#v", got)
 	}
 }

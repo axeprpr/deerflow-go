@@ -23,7 +23,8 @@ func (d *fakeDispatcher) Dispatch(_ context.Context, req DispatchRequest) (*Disp
 		AssistantID:      req.Plan.AssistantID,
 		Model:            req.Plan.Model,
 		AgentName:        req.Plan.AgentName,
-		Spec:             req.Plan.Spec,
+		Spec:             req.Plan.Spec.AgentSpec(),
+		Features:         req.Plan.Features,
 		ExistingMessages: append([]models.Message(nil), req.Plan.ExistingMessages...),
 		Messages:         append([]models.Message(nil), req.Plan.Messages...),
 	}
@@ -33,7 +34,7 @@ func (d *fakeDispatcher) Dispatch(_ context.Context, req DispatchRequest) (*Disp
 			AssistantID:      req.Plan.AssistantID,
 			Model:            req.Plan.Model,
 			AgentName:        req.Plan.AgentName,
-			Spec:             req.Plan.Spec,
+			Spec:             req.Plan.Spec.AgentSpec(),
 			ExistingMessages: append([]models.Message(nil), req.Plan.ExistingMessages...),
 			Messages:         append([]models.Message(nil), req.Plan.Messages...),
 			Metadata:         map[string]any{},
@@ -81,6 +82,7 @@ func TestCoordinatorUsesInjectedDispatcher(t *testing.T) {
 		Model:     "model-1",
 		AgentName: "lead_agent",
 		Spec:      harness.AgentSpec{},
+		Features:  harness.FeatureSet{Sandbox: true},
 	})
 	if err != nil {
 		t.Fatalf("Prepare() error = %v", err)
@@ -108,6 +110,7 @@ func TestCoordinatorSubmitUsesInjectedDispatcher(t *testing.T) {
 		Model:       "model-1",
 		AgentName:   "lead_agent",
 		Spec:        harness.AgentSpec{},
+		Features:    harness.FeatureSet{Sandbox: true},
 		Messages: []models.Message{{
 			Role:      models.RoleHuman,
 			Content:   "new",

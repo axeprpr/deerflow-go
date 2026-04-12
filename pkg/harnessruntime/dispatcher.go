@@ -30,6 +30,7 @@ type DispatchConfig struct {
 	Topology DispatchTopology
 	Executor RunExecutor
 	Runtime  func() *harness.Runtime
+	Specs    WorkerSpecRuntime
 	Queue    DispatchQueue
 	Buffer   int
 	Workers  int
@@ -50,7 +51,7 @@ func NewInProcessRunDispatcher() RunDispatcher {
 func NewRuntimeDispatcher(config DispatchConfig) RunDispatcher {
 	executor := config.Executor
 	if executor == nil && config.Runtime != nil {
-		executor = NewRuntimeWorkerSource(config.Runtime)
+		executor = NewRuntimeWorkerSource(config.Runtime, config.Specs)
 	}
 	switch config.Topology {
 	case DispatchTopologyDirect:
