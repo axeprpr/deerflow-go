@@ -59,6 +59,19 @@ Target architecture:
 - separate storage, update scheduling, and prompt injection
 - remove gateway-centric memory ownership
 
+Memory scope model:
+
+- `session`
+  - thread-scoped working memory for the current conversation
+- `user`
+  - durable cross-thread memory for one user
+- `group`
+  - shared project/workspace memory across related threads
+- `agent`
+  - optional agent-scoped memory for specialized assistants
+- separate `ephemeral`, `durable`, and `derived` records
+- store memory under explicit `scope_type + scope_id + namespace`
+
 ### Phase 6: Preserve Two Deployment Modes
 
 Single-node mode:
@@ -77,6 +90,14 @@ Distributed mode:
 - shared artifact storage
 - sandbox manager as an independent service
 
+Windows and Electron strategy:
+
+- support Electron as a first-class client
+- keep full public API compatibility so Electron can reuse the same gateway contract
+- prefer `Windows client + remote Linux runtime` as the first supported Windows path
+- add an optional Windows local restricted mode later
+- do not block Electron delivery on a full-strength Windows sandbox
+
 ### Phase 7: Strengthen Execution Modes
 
 - keep public UI requests on the default compatible mode
@@ -86,6 +107,23 @@ Distributed mode:
   - run policy
   - recovery policy
 - do not leak non-upstream request fields into public UI contracts
+
+Sandbox backend plan:
+
+- `local-linux`
+  - fast single-node backend for development and self-hosted servers
+- `container`
+  - stronger isolation backend for multi-tenant server execution
+- `remote`
+  - lease-based sandbox service for distributed worker fleets
+- `windows-restricted`
+  - limited local backend for Electron/Windows scenarios
+- expose a common boundary:
+  - `acquire`
+  - `exec`
+  - `read/write`
+  - `heartbeat`
+  - `release`
 
 ### Immediate Next Steps
 
