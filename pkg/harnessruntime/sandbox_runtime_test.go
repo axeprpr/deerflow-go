@@ -87,6 +87,16 @@ func TestLocalSandboxLeaseServiceReleasesProviderOnLastLease(t *testing.T) {
 	}
 }
 
+func TestLocalSandboxManagerExposesBackendAndRuntime(t *testing.T) {
+	manager := NewLocalSandboxManager("runtime-test", t.TempDir())
+	if manager.Backend() != SandboxBackendLocalLinux {
+		t.Fatalf("backend = %q, want %q", manager.Backend(), SandboxBackendLocalLinux)
+	}
+	if manager.Runtime(harness.FeatureSandboxPolicy{}) == nil {
+		t.Fatal("Runtime() = nil")
+	}
+}
+
 type fakeSandboxProvider struct {
 	acquires int
 	closes   int

@@ -60,16 +60,31 @@ func (r modeSandboxRuntimeWrapper) Provider() harness.SandboxProvider {
 }
 
 func (r modeSandboxRuntimeWrapper) Resolve(req harness.AgentRequest) (*tools.Sandbox, error) {
+	binding, err := r.Bind(req)
+	if err != nil {
+		return nil, err
+	}
+	return binding.Sandbox, nil
+}
+
+func (r modeSandboxRuntimeWrapper) Bind(req harness.AgentRequest) (harness.SandboxBinding, error) {
 	if r.base == nil {
-		return nil, nil
+		return harness.SandboxBinding{}, nil
 	}
 	if r.policy != nil && !r.policy.Enabled(req) {
-		return nil, nil
+		return harness.SandboxBinding{}, nil
 	}
 	if r.policy != nil {
 		req.Features.Sandbox = true
 	}
-	return r.base.Resolve(req)
+	if managed, ok := r.base.(harness.ManagedSandboxRuntime); ok {
+		return managed.Bind(req)
+	}
+	sb, err := r.base.Resolve(req)
+	if err != nil {
+		return harness.SandboxBinding{}, err
+	}
+	return harness.SandboxBinding{Sandbox: sb}, nil
 }
 
 func (r modeSandboxRuntimeWrapper) Close() error {
