@@ -88,7 +88,7 @@ func (c Coordinator) Submit(ctx context.Context, plan RunPlan) (*DispatchResult,
 		dispatcher = NewInProcessRunDispatcher()
 	}
 	return dispatcher.Dispatch(ctx, DispatchRequest{
-		Plan: plan,
+		Plan: NewWorkerExecutionPlan(plan),
 	})
 }
 

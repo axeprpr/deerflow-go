@@ -18,7 +18,15 @@ type fakeDispatcher struct {
 func (d *fakeDispatcher) Dispatch(_ context.Context, req DispatchRequest) (*DispatchResult, error) {
 	d.called = true
 	d.req = req
-	d.plan = req.Plan
+	d.plan = RunPlan{
+		ThreadID:         req.Plan.ThreadID,
+		AssistantID:      req.Plan.AssistantID,
+		Model:            req.Plan.Model,
+		AgentName:        req.Plan.AgentName,
+		Spec:             req.Plan.Spec,
+		ExistingMessages: append([]models.Message(nil), req.Plan.ExistingMessages...),
+		Messages:         append([]models.Message(nil), req.Plan.Messages...),
+	}
 	return &DispatchResult{
 		Lifecycle: &harness.RunState{
 			ThreadID:         req.Plan.ThreadID,

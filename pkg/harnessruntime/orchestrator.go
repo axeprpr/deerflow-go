@@ -17,6 +17,16 @@ type RunPlan struct {
 	Messages         []models.Message
 }
 
+type WorkerExecutionPlan struct {
+	ThreadID         string
+	AssistantID      string
+	Model            string
+	AgentName        string
+	Spec             harness.AgentSpec
+	ExistingMessages []models.Message
+	Messages         []models.Message
+}
+
 type PreparedExecution struct {
 	Lifecycle *harness.RunState
 	Execution *harness.Execution
@@ -30,7 +40,23 @@ func NewOrchestrator(runtime *harness.Runtime) Orchestrator {
 	return Orchestrator{runtime: runtime}
 }
 
+func NewWorkerExecutionPlan(plan RunPlan) WorkerExecutionPlan {
+	return WorkerExecutionPlan{
+		ThreadID:         plan.ThreadID,
+		AssistantID:      plan.AssistantID,
+		Model:            plan.Model,
+		AgentName:        plan.AgentName,
+		Spec:             plan.Spec,
+		ExistingMessages: append([]models.Message(nil), plan.ExistingMessages...),
+		Messages:         append([]models.Message(nil), plan.Messages...),
+	}
+}
+
 func (o Orchestrator) Prepare(ctx context.Context, plan RunPlan) (*PreparedExecution, error) {
+	return o.PrepareExecution(ctx, NewWorkerExecutionPlan(plan))
+}
+
+func (o Orchestrator) PrepareExecution(ctx context.Context, plan WorkerExecutionPlan) (*PreparedExecution, error) {
 	lifecycle := &harness.RunState{
 		ThreadID:         plan.ThreadID,
 		AssistantID:      plan.AssistantID,

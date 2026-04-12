@@ -28,7 +28,7 @@ func TestInlineDispatchQueueUsesInjectedExecutor(t *testing.T) {
 	queue := NewInlineDispatchQueue(executor)
 
 	result, err := queue.Submit(context.Background(), DispatchRequest{
-		Plan: RunPlan{ThreadID: "thread-1"},
+		Plan: WorkerExecutionPlan{ThreadID: "thread-1"},
 	})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
@@ -46,7 +46,7 @@ func TestQueuedRunDispatcherUsesQueue(t *testing.T) {
 	dispatcher := NewQueuedRunDispatcher(NewInlineDispatchQueue(executor))
 
 	result, err := dispatcher.Dispatch(context.Background(), DispatchRequest{
-		Plan: RunPlan{ThreadID: "thread-1"},
+		Plan: WorkerExecutionPlan{ThreadID: "thread-1"},
 	})
 	if err != nil {
 		t.Fatalf("Dispatch() error = %v", err)
@@ -67,7 +67,7 @@ func TestRuntimeDispatcherSupportsDirectTopology(t *testing.T) {
 	})
 
 	result, err := dispatcher.Dispatch(context.Background(), DispatchRequest{
-		Plan: RunPlan{ThreadID: "thread-1"},
+		Plan: WorkerExecutionPlan{ThreadID: "thread-1"},
 	})
 	if err != nil {
 		t.Fatalf("Dispatch() error = %v", err)
@@ -88,7 +88,7 @@ func TestRuntimeDispatcherQueuedTopologyDefaultsToWorkerQueue(t *testing.T) {
 	})
 
 	result, err := dispatcher.Dispatch(context.Background(), DispatchRequest{
-		Plan: RunPlan{ThreadID: "thread-queued"},
+		Plan: WorkerExecutionPlan{ThreadID: "thread-queued"},
 	})
 	if err != nil {
 		t.Fatalf("Dispatch() error = %v", err)
@@ -127,11 +127,11 @@ func TestInProcessRunQueueSupportsMultipleWorkers(t *testing.T) {
 
 	done := make(chan error, 2)
 	go func() {
-		_, err := queue.Submit(context.Background(), DispatchRequest{Plan: RunPlan{ThreadID: "thread-a"}})
+		_, err := queue.Submit(context.Background(), DispatchRequest{Plan: WorkerExecutionPlan{ThreadID: "thread-a"}})
 		done <- err
 	}()
 	go func() {
-		_, err := queue.Submit(context.Background(), DispatchRequest{Plan: RunPlan{ThreadID: "thread-b"}})
+		_, err := queue.Submit(context.Background(), DispatchRequest{Plan: WorkerExecutionPlan{ThreadID: "thread-b"}})
 		done <- err
 	}()
 

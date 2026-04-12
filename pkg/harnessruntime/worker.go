@@ -35,7 +35,7 @@ func (w RuntimeWorker) execute(ctx context.Context, req DispatchRequest) (*Dispa
 	if runtime == nil {
 		return nil, errors.New("runtime is required")
 	}
-	prepared, err := NewOrchestrator(runtime).Prepare(ctx, req.Plan)
+	prepared, err := NewOrchestrator(runtime).PrepareExecution(ctx, req.Plan)
 	if err != nil {
 		return nil, err
 	}

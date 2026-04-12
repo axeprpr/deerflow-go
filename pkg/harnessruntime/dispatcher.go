@@ -7,7 +7,7 @@ import (
 )
 
 type DispatchRequest struct {
-	Plan RunPlan
+	Plan WorkerExecutionPlan
 }
 
 type DispatchResult struct {
