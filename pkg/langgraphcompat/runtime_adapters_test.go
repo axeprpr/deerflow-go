@@ -26,6 +26,10 @@ func TestRuntimeMemoryAdapterResolveMemorySessionID(t *testing.T) {
 	if got := adapter.ResolveMemorySessionID("thread-1", "planner"); got != "agent:planner" {
 		t.Fatalf("ResolveMemorySessionID() = %q, want %q", got, "agent:planner")
 	}
+	scope := adapter.ResolveMemoryScope("thread-1", "planner")
+	if scope.Key() != "agent:planner" {
+		t.Fatalf("ResolveMemoryScope().Key() = %q, want %q", scope.Key(), "agent:planner")
+	}
 }
 
 func TestRuntimeConversationAdapterCompactConversationUsesExistingImplementation(t *testing.T) {

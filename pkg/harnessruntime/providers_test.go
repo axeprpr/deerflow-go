@@ -34,6 +34,13 @@ func (fakeSessionRuntime) ResolveMemorySessionID(threadID string, agentName stri
 	return threadID + "/" + agentName
 }
 
+func (fakeSessionRuntime) ResolveMemoryScope(threadID string, agentName string) pkgmemory.Scope {
+	if agentName != "" {
+		return pkgmemory.AgentScope(agentName)
+	}
+	return pkgmemory.SessionScope(threadID)
+}
+
 type fakeTitleRuntime struct{}
 
 func (fakeTitleRuntime) ComputeThreadTitle(_ context.Context, threadID string, modelName string, messages []models.Message) string {
@@ -48,11 +55,11 @@ type fakeCompletionRuntime struct {
 }
 
 type fakePreflightRuntime struct {
-	snapshot          SessionSnapshot
-	saved             RunRecord
-	metadata          map[string]any
-	clearedKey        string
-	threadStatus      string
+	snapshot     SessionSnapshot
+	saved        RunRecord
+	metadata     map[string]any
+	clearedKey   string
+	threadStatus string
 }
 
 type fakeRunStateRuntime struct {
@@ -61,9 +68,9 @@ type fakeRunStateRuntime struct {
 }
 
 type fakeCoordinationRuntime struct {
-	record    RunRecord
-	found     bool
-	canceled  bool
+	record   RunRecord
+	found    bool
+	canceled bool
 }
 
 type fakeContextRuntime struct{}
@@ -221,6 +228,24 @@ func TestMemorySessionResolverUsesThreadAndAgentNames(t *testing.T) {
 	}
 }
 
+func TestMemoryScopeResolverUsesThreadAndAgentNames(t *testing.T) {
+	t.Parallel()
+
+	resolver := MemoryScopeResolver{
+		Resolve: func(threadID string, agentName string) pkgmemory.Scope {
+			return pkgmemory.GroupScope(threadID + ":" + agentName)
+		},
+	}
+
+	scope := resolver.ResolveMemoryScope(&harness.RunState{
+		ThreadID:  "thread-1",
+		AgentName: "lead_agent",
+	})
+	if scope.Type != pkgmemory.ScopeGroup || scope.ID != "thread-1:lead_agent" {
+		t.Fatalf("scope = %+v", scope)
+	}
+}
+
 func TestTitleGeneratorUsesRunResultMessages(t *testing.T) {
 	t.Parallel()
 
@@ -270,6 +295,13 @@ func TestConstructorsWrapRuntimeInterfaces(t *testing.T) {
 	})
 	if sessionID != "thread-1/lead_agent" {
 		t.Fatalf("sessionID = %q", sessionID)
+	}
+	scope := NewMemoryScopeResolver(fakeSessionRuntime{}).ResolveMemoryScope(&harness.RunState{
+		ThreadID:  "thread-1",
+		AgentName: "lead_agent",
+	})
+	if scope.Key() != "agent:lead_agent" {
+		t.Fatalf("scope key = %q", scope.Key())
 	}
 
 	title := NewTitleGenerator(fakeTitleRuntime{}).GenerateTitle(context.Background(), &harness.RunState{
@@ -394,7 +426,7 @@ func TestLifecycleConfigBuildHooks(t *testing.T) {
 	}.BuildHooks(features, LifecycleProviders{
 		MemoryRuntime:  &harness.MemoryRuntime{},
 		Summarizer:     Summarizer{},
-		MemoryResolver: MemorySessionResolver{},
+		MemoryResolver: MemoryScopeResolver{},
 		TitleGenerator: TitleGenerator{},
 	})
 	if hooks == nil {

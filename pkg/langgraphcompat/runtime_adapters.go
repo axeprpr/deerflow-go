@@ -7,6 +7,7 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
+	pkgmemory "github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
@@ -113,6 +114,13 @@ func (a runtimeConversationAdapter) ComputeThreadTitle(ctx context.Context, thre
 
 func (a runtimeMemoryAdapter) ResolveMemorySessionID(threadID string, agentName string) string {
 	return deriveMemorySessionID(threadID, agentName)
+}
+
+func (a runtimeMemoryAdapter) ResolveMemoryScope(threadID string, agentName string) pkgmemory.Scope {
+	if normalized, ok := normalizeAgentName(agentName); ok {
+		return pkgmemory.AgentScope(normalized)
+	}
+	return pkgmemory.SessionScope(threadID)
 }
 
 func (a runtimeCompletionAdapter) SetThreadTitle(threadID string, title string) {

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
+	pkgmemory "github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
@@ -37,6 +38,10 @@ type TitleLifecycleConfig struct {
 
 type MemorySessionResolver interface {
 	ResolveMemorySession(*RunState) string
+}
+
+type MemoryScopeResolver interface {
+	ResolveMemoryScope(*RunState) pkgmemory.Scope
 }
 
 type Summarizer interface {
@@ -170,6 +175,19 @@ func MemoryLifecycleHooksWithResolver(runtime *MemoryRuntime, resolver MemorySes
 		SessionKey: sessionKey,
 		ResolveSession: func(state *RunState) string {
 			return resolver.ResolveMemorySession(state)
+		},
+	})
+}
+
+func MemoryLifecycleHooksWithScopeResolver(runtime *MemoryRuntime, resolver MemoryScopeResolver, sessionKey string) *LifecycleHooks {
+	if resolver == nil {
+		return nil
+	}
+	return MemoryLifecycleHooks(MemoryLifecycleConfig{
+		Runtime:    runtime,
+		SessionKey: sessionKey,
+		ResolveSession: func(state *RunState) string {
+			return resolver.ResolveMemoryScope(state).Key()
 		},
 	})
 }

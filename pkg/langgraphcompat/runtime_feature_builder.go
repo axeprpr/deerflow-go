@@ -6,9 +6,9 @@ import (
 )
 
 type serverRuntimeProfileBuilder struct {
-	server        *Server
-	memoryRuntime *harness.MemoryRuntime
-	toolRuntime   harness.ToolRuntime
+	server         *Server
+	memoryRuntime  *harness.MemoryRuntime
+	toolRuntime    harness.ToolRuntime
 	sandboxRuntime harness.SandboxRuntime
 }
 
@@ -33,7 +33,7 @@ func (b serverRuntimeProfileBuilder) BuildProfile() harness.RuntimeProfile {
 		Lifecycle: harnessruntime.LifecycleProviders{
 			MemoryRuntime:  b.memoryRuntime,
 			Summarizer:     harnessruntime.NewSummarizer(b.server.runtimeConversationAdapter()),
-			MemoryResolver: harnessruntime.NewMemorySessionResolver(b.server.runtimeMemoryAdapter()),
+			MemoryResolver: harnessruntime.NewMemoryScopeResolver(b.server.runtimeMemoryAdapter()),
 			TitleGenerator: harnessruntime.NewTitleGenerator(b.server.runtimeConversationAdapter()),
 		},
 	})

@@ -55,6 +55,9 @@ func (s Scope) Key() string {
 	if scope.Type == ScopeSession && scope.Namespace == "" {
 		return scope.ID
 	}
+	if scope.Type == ScopeAgent && scope.Namespace == "" {
+		return "agent:" + scope.ID
+	}
 	return scopeKeyPrefix +
 		url.PathEscape(string(scope.Type)) + ":" +
 		url.PathEscape(scope.ID) + ":" +
@@ -63,6 +66,9 @@ func (s Scope) Key() string {
 
 func ParseScopeKey(key string) Scope {
 	key = strings.TrimSpace(key)
+	if strings.HasPrefix(key, "agent:") {
+		return AgentScope(strings.TrimPrefix(key, "agent:"))
+	}
 	if !strings.HasPrefix(key, scopeKeyPrefix) {
 		return SessionScope(key)
 	}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
+	pkgmemory "github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
@@ -70,8 +71,16 @@ type SessionRuntime interface {
 	ResolveMemorySessionID(threadID string, agentName string) string
 }
 
+type MemoryScopeRuntime interface {
+	ResolveMemoryScope(threadID string, agentName string) pkgmemory.Scope
+}
+
 type MemorySessionResolver struct {
 	Resolve MemorySessionIDResolver
+}
+
+type MemoryScopeResolver struct {
+	Resolve func(threadID string, agentName string) pkgmemory.Scope
 }
 
 func NewMemorySessionResolver(runtime SessionRuntime) MemorySessionResolver {
@@ -81,11 +90,25 @@ func NewMemorySessionResolver(runtime SessionRuntime) MemorySessionResolver {
 	return MemorySessionResolver{Resolve: runtime.ResolveMemorySessionID}
 }
 
+func NewMemoryScopeResolver(runtime MemoryScopeRuntime) MemoryScopeResolver {
+	if runtime == nil {
+		return MemoryScopeResolver{}
+	}
+	return MemoryScopeResolver{Resolve: runtime.ResolveMemoryScope}
+}
+
 func (r MemorySessionResolver) ResolveMemorySession(state *harness.RunState) string {
 	if state == nil || r.Resolve == nil {
 		return ""
 	}
 	return strings.TrimSpace(r.Resolve(state.ThreadID, state.AgentName))
+}
+
+func (r MemoryScopeResolver) ResolveMemoryScope(state *harness.RunState) pkgmemory.Scope {
+	if state == nil || r.Resolve == nil {
+		return pkgmemory.Scope{}
+	}
+	return r.Resolve(state.ThreadID, state.AgentName).Normalized()
 }
 
 type TitleGeneratorFunc func(ctx context.Context, threadID string, modelName string, messages []models.Message) string
