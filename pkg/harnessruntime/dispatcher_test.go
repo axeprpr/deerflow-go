@@ -20,7 +20,8 @@ func (e *fakeExecutor) Execute(_ context.Context, req DispatchRequest) (*Dispatc
 	e.req = req
 	return &DispatchResult{
 		Lifecycle: &harness.RunState{ThreadID: req.Plan.ThreadID},
-		Handle:    NewStaticExecutionHandle(&harness.Execution{}),
+		Handle:    NewStaticExecutionHandle(&harness.Execution{}, req.Plan.ThreadID),
+		Execution: ExecutionDescriptor{Kind: ExecutionKindLocalPrepared, SessionID: req.Plan.ThreadID},
 	}, nil
 }
 
@@ -170,7 +171,8 @@ func (e *blockingExecutor) Execute(_ context.Context, req DispatchRequest) (*Dis
 	<-e.release
 	return &DispatchResult{
 		Lifecycle: &harness.RunState{ThreadID: req.Plan.ThreadID},
-		Handle:    NewStaticExecutionHandle(&harness.Execution{}),
+		Handle:    NewStaticExecutionHandle(&harness.Execution{}, req.Plan.ThreadID),
+		Execution: ExecutionDescriptor{Kind: ExecutionKindLocalPrepared, SessionID: req.Plan.ThreadID},
 	}, nil
 }
 

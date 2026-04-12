@@ -39,7 +39,8 @@ func (d *fakeDispatcher) Dispatch(_ context.Context, req DispatchRequest) (*Disp
 			Messages:         append([]models.Message(nil), req.Plan.Messages...),
 			Metadata:         map[string]any{},
 		},
-		Handle: NewStaticExecutionHandle(&harness.Execution{}),
+		Handle:    NewStaticExecutionHandle(&harness.Execution{}, req.Plan.ThreadID),
+		Execution: ExecutionDescriptor{Kind: ExecutionKindLocalPrepared, SessionID: req.Plan.ThreadID},
 	}, nil
 }
 
@@ -128,6 +129,9 @@ func TestCoordinatorSubmitUsesInjectedDispatcher(t *testing.T) {
 	}
 	if _, err := prepared.Handle.Resolve(); err != nil {
 		t.Fatalf("prepared.Handle.Resolve() error = %v", err)
+	}
+	if prepared.Execution.Kind != ExecutionKindLocalPrepared {
+		t.Fatalf("prepared.Execution = %#v", prepared.Execution)
 	}
 	if dispatcher.plan.ThreadID != "thread-1" || dispatcher.plan.AssistantID != "lead_agent" {
 		t.Fatalf("dispatcher plan = %#v", dispatcher.plan)

@@ -40,8 +40,10 @@ func (w RuntimeWorker) execute(ctx context.Context, req DispatchRequest) (*Dispa
 	if err != nil {
 		return nil, err
 	}
+	handle := NewStaticExecutionHandle(prepared.Execution, prepared.Lifecycle.ThreadID)
 	return &DispatchResult{
 		Lifecycle: prepared.Lifecycle,
-		Handle:    NewStaticExecutionHandle(prepared.Execution),
+		Handle:    handle,
+		Execution: handle.Describe(),
 	}, nil
 }

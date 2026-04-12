@@ -13,6 +13,7 @@ type DispatchRequest struct {
 type DispatchResult struct {
 	Lifecycle *harness.RunState
 	Handle    ExecutionHandle
+	Execution ExecutionDescriptor
 }
 
 type RunDispatcher interface {
