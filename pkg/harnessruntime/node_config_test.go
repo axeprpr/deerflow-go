@@ -7,7 +7,7 @@ func TestDefaultRuntimeNodeConfigUsesQueuedLocalDefaults(t *testing.T) {
 	if config.Sandbox.Backend != SandboxBackendLocalLinux {
 		t.Fatalf("sandbox backend = %q, want %q", config.Sandbox.Backend, SandboxBackendLocalLinux)
 	}
-	if config.Dispatch.Topology != DispatchTopologyQueued {
-		t.Fatalf("dispatch topology = %q, want %q", config.Dispatch.Topology, DispatchTopologyQueued)
+	if config.Transport.Backend != WorkerTransportBackendQueue {
+		t.Fatalf("transport backend = %q, want %q", config.Transport.Backend, WorkerTransportBackendQueue)
 	}
 }

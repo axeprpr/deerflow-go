@@ -236,7 +236,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		sessions:       make(map[string]*Session),
 		runs:           make(map[string]*Run),
 		runRegistry:    newRunRegistry(),
-		runDispatcher:  runtimeNode.BuildDispatcher(),
+		runDispatcher:  runtimeNode.BuildDispatcher(harnessruntime.DispatchRuntimeConfig{}),
 		sandboxManager: sandboxManager,
 		runtimeNode:    runtimeNode,
 		dataRoot:       dataRootAbs,
@@ -361,7 +361,7 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 	if s.runDispatcher != nil {
 		return s.runDispatcher
 	}
-	if s.runtimeNode.Dispatch.Topology == "" {
+	if s.runtimeNode.Transport.Backend == "" {
 		root := strings.TrimSpace(s.sandboxRoot)
 		if root == "" {
 			root = filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
@@ -372,9 +372,10 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 		}
 		s.runtimeNode = harnessruntime.DefaultRuntimeNodeConfig(name, root)
 	}
-	s.runtimeNode.Dispatch.Runtime = s.runtimeView
-	s.runtimeNode.Dispatch.Specs = s.runtimeWorkerSpecAdapter()
-	s.runDispatcher = s.runtimeNode.BuildDispatcher()
+	s.runDispatcher = s.runtimeNode.BuildDispatcher(harnessruntime.DispatchRuntimeConfig{
+		Runtime: s.runtimeView,
+		Specs:   s.runtimeWorkerSpecAdapter(),
+	})
 	return s.runDispatcher
 }
 

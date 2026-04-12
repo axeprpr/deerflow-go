@@ -3,6 +3,8 @@ package harnessruntime
 import (
 	"context"
 	"errors"
+
+	"github.com/axeprpr/deerflow-go/pkg/harness"
 )
 
 type WorkerTransportBackend string
@@ -12,6 +14,21 @@ const (
 	WorkerTransportBackendQueue  WorkerTransportBackend = "queue"
 	WorkerTransportBackendRemote WorkerTransportBackend = "remote"
 )
+
+type WorkerTransportConfig struct {
+	Backend  WorkerTransportBackend
+	Endpoint string
+	Buffer   int
+	Workers  int
+}
+
+type DispatchRuntimeConfig struct {
+	Executor  RunExecutor
+	Runtime   func() *harness.Runtime
+	Specs     WorkerSpecRuntime
+	Codec     WorkerPlanMarshaler
+	Transport WorkerTransport
+}
 
 type remoteWorkerTransport struct {
 	endpoint string
@@ -24,33 +41,33 @@ func (t remoteWorkerTransport) Submit(context.Context, WorkerDispatchEnvelope) (
 	return nil, errors.New("remote worker transport not implemented")
 }
 
-func buildWorkerTransport(config DispatchConfig) WorkerTransport {
-	if config.Transport != nil {
-		return config.Transport
+func buildWorkerTransport(config WorkerTransportConfig, runtime DispatchRuntimeConfig) WorkerTransport {
+	if runtime.Transport != nil {
+		return runtime.Transport
 	}
-	executor := workerExecutorFromConfig(config)
-	codec := DispatchEnvelopeCodec{Plans: config.Codec}
+	executor := workerExecutorFromConfig(runtime)
+	codec := DispatchEnvelopeCodec{Plans: runtime.Codec}
 
-	switch config.Topology {
-	case DispatchTopologyDirect:
+	switch normalizeTransportBackend(config.Backend) {
+	case WorkerTransportBackendDirect:
 		return NewDirectWorkerTransport(executor, codec)
-	case DispatchTopologyRemote:
+	case WorkerTransportBackendRemote:
 		return remoteWorkerTransport{endpoint: config.Endpoint}
 	default:
-		return NewInProcessRunQueueWithCodec(executor, config.Buffer, config.Workers, config.Codec)
+		return NewInProcessRunQueueWithCodec(executor, config.Buffer, config.Workers, runtime.Codec)
 	}
 }
 
-func normalizeDispatchTopology(config DispatchConfig) DispatchTopology {
-	switch config.Topology {
-	case DispatchTopologyDirect, DispatchTopologyQueued, DispatchTopologyRemote:
-		return config.Topology
+func normalizeTransportBackend(backend WorkerTransportBackend) WorkerTransportBackend {
+	switch backend {
+	case WorkerTransportBackendDirect, WorkerTransportBackendQueue, WorkerTransportBackendRemote:
+		return backend
 	default:
-		return DispatchTopologyQueued
+		return WorkerTransportBackendQueue
 	}
 }
 
-func workerExecutorFromConfig(config DispatchConfig) RunExecutor {
+func workerExecutorFromConfig(config DispatchRuntimeConfig) RunExecutor {
 	if config.Executor != nil {
 		return config.Executor
 	}

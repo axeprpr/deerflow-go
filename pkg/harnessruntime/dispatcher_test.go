@@ -64,8 +64,7 @@ func TestRuntimeDispatcherSupportsDirectTopology(t *testing.T) {
 	executor := &fakeExecutor{}
 	dispatcher := NewRuntimeDispatcher(DispatchConfig{
 		Topology: DispatchTopologyDirect,
-		Executor: executor,
-	})
+	}, DispatchRuntimeConfig{Executor: executor})
 
 	result, err := dispatcher.Dispatch(context.Background(), DispatchRequest{
 		Plan: WorkerExecutionPlan{ThreadID: "thread-1"},
@@ -85,8 +84,7 @@ func TestRuntimeDispatcherQueuedTopologyDefaultsToWorkerQueue(t *testing.T) {
 	executor := &fakeExecutor{}
 	dispatcher := NewRuntimeDispatcher(DispatchConfig{
 		Topology: DispatchTopologyQueued,
-		Executor: executor,
-	})
+	}, DispatchRuntimeConfig{Executor: executor})
 
 	result, err := dispatcher.Dispatch(context.Background(), DispatchRequest{
 		Plan: WorkerExecutionPlan{ThreadID: "thread-queued"},
@@ -105,7 +103,7 @@ func TestRuntimeDispatcherQueuedTopologyDefaultsToWorkerQueue(t *testing.T) {
 func TestRuntimeDispatcherRemoteTopologyRequiresEndpoint(t *testing.T) {
 	dispatcher := NewRuntimeDispatcher(DispatchConfig{
 		Topology: DispatchTopologyRemote,
-	})
+	}, DispatchRuntimeConfig{})
 
 	_, err := dispatcher.Dispatch(context.Background(), DispatchRequest{
 		Plan: WorkerExecutionPlan{ThreadID: "thread-remote"},
@@ -120,9 +118,7 @@ func TestRuntimeDispatcherUsesEnvelopeCodec(t *testing.T) {
 	codec := &fakePlanCodec{}
 	dispatcher := NewRuntimeDispatcher(DispatchConfig{
 		Topology: DispatchTopologyDirect,
-		Executor: executor,
-		Codec:    codec,
-	})
+	}, DispatchRuntimeConfig{Executor: executor, Codec: codec})
 
 	_, err := dispatcher.Dispatch(context.Background(), DispatchRequest{
 		Plan: WorkerExecutionPlan{ThreadID: "thread-codec"},

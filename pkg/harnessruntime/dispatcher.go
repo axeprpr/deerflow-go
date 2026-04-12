@@ -28,15 +28,10 @@ const (
 )
 
 type DispatchConfig struct {
-	Topology  DispatchTopology
-	Endpoint  string
-	Executor  RunExecutor
-	Runtime   func() *harness.Runtime
-	Specs     WorkerSpecRuntime
-	Codec     WorkerPlanMarshaler
-	Transport WorkerTransport
-	Buffer    int
-	Workers   int
+	Topology DispatchTopology
+	Endpoint string
+	Buffer   int
+	Workers  int
 }
 
 type transportRunDispatcher struct {
@@ -45,13 +40,17 @@ type transportRunDispatcher struct {
 }
 
 func NewInProcessRunDispatcher() RunDispatcher {
-	return NewRuntimeDispatcher(DispatchConfig{Topology: DispatchTopologyQueued})
+	return NewRuntimeDispatcher(DispatchConfig{Topology: DispatchTopologyQueued}, DispatchRuntimeConfig{})
 }
 
-func NewRuntimeDispatcher(config DispatchConfig) RunDispatcher {
-	config.Topology = normalizeDispatchTopology(config)
-	codec := DispatchEnvelopeCodec{Plans: config.Codec}
-	transport := buildWorkerTransport(config)
+func NewRuntimeDispatcher(config DispatchConfig, runtime DispatchRuntimeConfig) RunDispatcher {
+	codec := DispatchEnvelopeCodec{Plans: runtime.Codec}
+	transport := buildWorkerTransport(WorkerTransportConfig{
+		Backend:  config.transportBackend(),
+		Endpoint: config.Endpoint,
+		Buffer:   config.Buffer,
+		Workers:  config.Workers,
+	}, runtime)
 	return transportRunDispatcher{transport: transport, codec: codec}
 }
 
@@ -69,4 +68,15 @@ func (d transportRunDispatcher) Dispatch(ctx context.Context, req DispatchReques
 		return nil, err
 	}
 	return transport.Submit(ctx, envelope)
+}
+
+func (c DispatchConfig) transportBackend() WorkerTransportBackend {
+	switch c.Topology {
+	case DispatchTopologyDirect:
+		return WorkerTransportBackendDirect
+	case DispatchTopologyRemote:
+		return WorkerTransportBackendRemote
+	default:
+		return WorkerTransportBackendQueue
+	}
 }
