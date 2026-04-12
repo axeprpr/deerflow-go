@@ -14,7 +14,7 @@ func TestLocalRunSnapshotStorePersistsAndLoadsSnapshots(t *testing.T) {
 		runs:     map[string]*Run{},
 		dataRoot: t.TempDir(),
 	}
-	server.snapshotStore = newLocalRunSnapshotStore(server)
+	server.snapshotStore = newCompatRunStateStore(server)
 
 	snapshot := harnessruntime.RunSnapshot{
 		Record: harnessruntime.RunRecord{
@@ -60,8 +60,8 @@ func TestLocalRunEventStoreAppendsEventsAndUpdatesSnapshot(t *testing.T) {
 		runs:     map[string]*Run{},
 		dataRoot: t.TempDir(),
 	}
-	server.snapshotStore = newLocalRunSnapshotStore(server)
-	server.eventStore = newLocalRunEventStore(server.snapshotStore)
+	server.snapshotStore = newCompatRunStateStore(server)
+	server.eventStore = server.snapshotStore.(harnessruntime.RunEventStore)
 
 	server.snapshotStore.SaveRunSnapshot(harnessruntime.RunSnapshot{
 		Record: harnessruntime.RunRecord{

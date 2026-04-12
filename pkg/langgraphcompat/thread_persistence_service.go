@@ -414,7 +414,7 @@ func (s *Server) loadPersistedRuns() {
 		if persisted.RunID == "" {
 			continue
 		}
-		s.saveRunSnapshotState(harnessruntime.RunSnapshot{
+		snapshot := harnessruntime.RunSnapshot{
 			Record: harnessruntime.RunRecord{
 				RunID:       persisted.RunID,
 				ThreadID:    persisted.ThreadID,
@@ -425,7 +425,11 @@ func (s *Server) loadPersistedRuns() {
 				Error:       persisted.Error,
 			},
 			Events: persisted.Events,
-		}, false)
+		}
+		if store, ok := s.ensureSnapshotStore().(*compatRunStateStore); ok && store.memory != nil {
+			store.memory.SaveRunSnapshot(snapshot)
+		}
+		s.saveRunSnapshotState(snapshot, false)
 	}
 }
 

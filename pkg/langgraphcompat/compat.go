@@ -231,8 +231,8 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		channelConfig: gatewayChannelsConfig{},
 		channels:      defaultGatewayChannelsStatus(),
 	}
-	s.snapshotStore = newLocalRunSnapshotStore(s)
-	s.eventStore = newLocalRunEventStore(s.snapshotStore)
+	s.snapshotStore = newCompatRunStateStore(s)
+	s.eventStore = s.snapshotStore.(harnessruntime.RunEventStore)
 	var memoryRuntime *harness.MemoryRuntime
 	if store, err := memory.NewFileStore(filepath.Join(dataRootAbs, "memory")); err == nil {
 		if migrateErr := store.AutoMigrate(ctx); migrateErr != nil {
