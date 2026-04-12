@@ -29,6 +29,7 @@ func ProfilePreset(mode ExecutionMode, opts ProfilePresetOptions) ProfileConfig 
 		mode = ExecutionModeInteractive
 	}
 	config := ProfileConfig{
+		Mode: mode,
 		Features: FeatureConfig{
 			ClarificationEnabled: opts.ClarificationEnabled,
 			MemoryEnabled:        opts.MemoryEnabled,

@@ -247,7 +247,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		SandboxRuntime:  sandboxRuntime,
 		SandboxProvider: s.defaultSandboxProvider(nil),
 	}, memoryRuntime,
-		harness.WithProfileBuilder(s.runtimeProfileBuilder(memoryRuntime)),
+		harness.WithProfileBuilder(s.runtimeProfileBuilder(memoryRuntime, toolRuntime, sandboxRuntime)),
 	)
 	s.skills = s.discoverGatewaySkills(nil)
 	for _, option := range options {
@@ -297,7 +297,7 @@ func (s *Server) runtimeView() *harness.Runtime {
 		SandboxRuntime:  s.defaultSandboxRuntime(sandboxRuntime),
 		SandboxProvider: s.defaultSandboxProvider(nil),
 	}, memoryRuntime,
-		harness.WithProfileBuilder(s.runtimeProfileBuilder(memoryRuntime)),
+		harness.WithProfileBuilder(s.runtimeProfileBuilder(memoryRuntime, toolRuntime, s.defaultSandboxRuntime(sandboxRuntime))),
 	)
 	return s.runtime
 }

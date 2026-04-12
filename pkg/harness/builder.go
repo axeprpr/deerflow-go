@@ -8,9 +8,11 @@ type FeatureBundle struct {
 }
 
 type RuntimeProfile struct {
-	RunPolicy *agent.RunPolicy
-	Features  FeatureAssembly
-	Lifecycle *LifecycleHooks
+	RunPolicy      *agent.RunPolicy
+	ToolRuntime    ToolRuntime
+	SandboxRuntime SandboxRuntime
+	Features       FeatureAssembly
+	Lifecycle      *LifecycleHooks
 }
 
 type FeatureBuilder interface {

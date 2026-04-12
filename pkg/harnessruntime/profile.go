@@ -7,6 +7,7 @@ import (
 )
 
 type ProfileConfig struct {
+	Mode      ExecutionMode
 	Features  FeatureConfig
 	Lifecycle LifecycleConfig
 	RunPolicy *agent.RunPolicy
@@ -14,6 +15,8 @@ type ProfileConfig struct {
 
 type ProfileProviders struct {
 	ClarificationManager *clarification.Manager
+	ToolRuntime          harness.ToolRuntime
+	SandboxRuntime       harness.SandboxRuntime
 	Lifecycle            LifecycleProviders
 }
 
@@ -24,8 +27,10 @@ func (c ProfileConfig) BuildProfile(providers ProfileProviders) harness.RuntimeP
 		runPolicy = NewDefaultRunPolicy()
 	}
 	return harness.RuntimeProfile{
-		RunPolicy: runPolicy,
-		Features:  assembly,
-		Lifecycle: c.Lifecycle.BuildHooks(assembly, providers.Lifecycle),
+		RunPolicy:      runPolicy,
+		ToolRuntime:    modeToolRuntime(c.Mode, providers.ToolRuntime),
+		SandboxRuntime: modeSandboxRuntime(c.Mode, providers.SandboxRuntime),
+		Features:       assembly,
+		Lifecycle:      c.Lifecycle.BuildHooks(assembly, providers.Lifecycle),
 	}
 }

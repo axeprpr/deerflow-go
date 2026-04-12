@@ -75,7 +75,9 @@ func NewRuntime(deps RuntimeDeps, memory *MemoryRuntime, opts ...RuntimeOption) 
 		sandboxRuntime: sandboxRuntime,
 		toolRuntime:    deps.ToolRuntime,
 		profile: RuntimeProfile{
-			RunPolicy: deps.RunPolicy,
+			RunPolicy:      deps.RunPolicy,
+			ToolRuntime:    deps.ToolRuntime,
+			SandboxRuntime: sandboxRuntime,
 		},
 	}
 	for _, opt := range opts {
@@ -90,11 +92,26 @@ func (r *Runtime) applyProfile(profile RuntimeProfile) {
 	if r == nil {
 		return
 	}
+	if profile.ToolRuntime == nil {
+		profile.ToolRuntime = r.toolRuntime
+	}
+	if profile.SandboxRuntime == nil {
+		profile.SandboxRuntime = r.sandboxRuntime
+	}
 	r.profile = profile
+	r.toolRuntime = profile.ToolRuntime
+	r.sandboxRuntime = profile.SandboxRuntime
 	r.features = profile.Features
 	r.lifecycle = profile.Lifecycle
-	if profile.RunPolicy != nil && r.factory != nil {
-		r.factory.deps.RunPolicy = profile.RunPolicy
+	if r.factory != nil {
+		if profile.RunPolicy != nil {
+			r.factory.deps.RunPolicy = profile.RunPolicy
+		}
+		r.factory.deps.ToolRuntime = profile.ToolRuntime
+		r.factory.deps.SandboxRuntime = profile.SandboxRuntime
+		if profile.SandboxRuntime != nil {
+			r.factory.deps.SandboxProvider = profile.SandboxRuntime.Provider()
+		}
 	}
 }
 

@@ -27,6 +27,12 @@ func (FeatureSandboxPolicy) Enabled(req AgentRequest) bool {
 	return req.Features.Sandbox
 }
 
+type AlwaysSandboxPolicy struct{}
+
+func (AlwaysSandboxPolicy) Enabled(AgentRequest) bool {
+	return true
+}
+
 // SandboxRuntime owns sandbox enablement and acquisition behind one runtime
 // boundary so compat layers do not wire provider access directly.
 type SandboxRuntime interface {

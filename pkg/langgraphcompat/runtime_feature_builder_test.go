@@ -14,7 +14,7 @@ func TestRuntimeProfileBuilderBuildsProfile(t *testing.T) {
 	}
 	memoryRuntime := &harness.MemoryRuntime{}
 
-	builder := server.runtimeProfileBuilder(memoryRuntime)
+	builder := server.runtimeProfileBuilder(memoryRuntime, nil, nil)
 	profile := builder.BuildProfile()
 
 	if profile.RunPolicy == nil {
@@ -25,6 +25,9 @@ func TestRuntimeProfileBuilderBuildsProfile(t *testing.T) {
 	}
 	if !profile.Features.Clarification.Enabled {
 		t.Fatal("clarification feature should be enabled")
+	}
+	if profile.ToolRuntime != nil || profile.SandboxRuntime != nil {
+		t.Fatal("expected nil runtimes when builder receives nil runtime dependencies")
 	}
 	if profile.Lifecycle == nil {
 		t.Fatal("lifecycle profile should not be nil")
