@@ -77,3 +77,24 @@ func TestRuntimeDispatcherSupportsDirectTopology(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 }
+
+func TestRuntimeDispatcherQueuedTopologyDefaultsToWorkerQueue(t *testing.T) {
+	executor := &fakeExecutor{}
+	dispatcher := NewRuntimeDispatcher(DispatchConfig{
+		Topology: DispatchTopologyQueued,
+		Executor: executor,
+	})
+
+	result, err := dispatcher.Dispatch(context.Background(), DispatchRequest{
+		Plan: RunPlan{ThreadID: "thread-queued"},
+	})
+	if err != nil {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+	if !executor.called {
+		t.Fatal("executor was not called")
+	}
+	if result == nil || result.Lifecycle == nil || result.Lifecycle.ThreadID != "thread-queued" {
+		t.Fatalf("result = %#v", result)
+	}
+}

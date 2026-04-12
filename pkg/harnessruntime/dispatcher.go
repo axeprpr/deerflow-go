@@ -50,7 +50,11 @@ func NewRuntimeDispatcher(config DispatchConfig) RunDispatcher {
 	case DispatchTopologyDirect:
 		return directRunDispatcher{executor: config.Executor}
 	default:
-		return NewQueuedRunDispatcher(config.Queue)
+		queue := config.Queue
+		if queue == nil {
+			queue = NewInProcessRunQueue(config.Executor, 0)
+		}
+		return NewQueuedRunDispatcher(queue)
 	}
 }
 
@@ -69,7 +73,7 @@ func (d directRunDispatcher) Dispatch(ctx context.Context, req DispatchRequest) 
 func (d queuedRunDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (*DispatchResult, error) {
 	queue := d.queue
 	if queue == nil {
-		queue = NewInlineDispatchQueue(nil)
+		queue = NewInProcessRunQueue(nil, 0)
 	}
 	return queue.Submit(ctx, req)
 }
