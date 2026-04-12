@@ -1,23 +1,18 @@
 package harnessruntime
 
-type EventFeedRuntime interface {
-	LoadRunEvents(runID string) []RunEvent
-	SubscribeRunEvents(runID string, buffer int) (<-chan RunEvent, func())
-}
-
 type EventFeedService struct {
-	runtime EventFeedRuntime
+	stream RunEventReplayFeed
 }
 
-func NewEventFeedService(runtime EventFeedRuntime) EventFeedService {
-	return EventFeedService{runtime: runtime}
+func NewEventFeedService(stream RunEventReplayFeed) EventFeedService {
+	return EventFeedService{stream: stream}
 }
 
 func (s EventFeedService) Replay(runID string) ([]RunEvent, bool) {
-	if s.runtime == nil {
+	if s.stream == nil {
 		return nil, false
 	}
-	events := append([]RunEvent(nil), s.runtime.LoadRunEvents(runID)...)
+	events := append([]RunEvent(nil), s.stream.LoadRunEvents(runID)...)
 	replayedEnd := false
 	for _, event := range events {
 		if event.Event == "end" {
@@ -28,10 +23,10 @@ func (s EventFeedService) Replay(runID string) ([]RunEvent, bool) {
 }
 
 func (s EventFeedService) Subscribe(runID string, buffer int) (<-chan RunEvent, func()) {
-	if s.runtime == nil {
+	if s.stream == nil {
 		ch := make(chan RunEvent)
 		close(ch)
 		return ch, func() {}
 	}
-	return s.runtime.SubscribeRunEvents(runID, buffer)
+	return s.stream.SubscribeRunEvents(runID, buffer)
 }

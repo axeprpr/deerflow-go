@@ -2,16 +2,19 @@ package langgraphcompat
 
 import (
 	"context"
-	"time"
+
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 )
 
 func (s *Server) saveRun(run *Run) {
-	s.runsMu.Lock()
-	defer s.runsMu.Unlock()
-	copyRun := *run
-	copyRun.Events = append([]StreamEvent(nil), run.Events...)
-	s.runs[run.RunID] = &copyRun
-	_ = s.persistRunFile(&copyRun)
+	if s == nil {
+		return
+	}
+	if store := s.ensureSnapshotStore(); store != nil {
+		store.SaveRunSnapshot(runSnapshotFromRun(run))
+		return
+	}
+	s.saveRunSnapshotState(runSnapshotFromRun(run), true)
 }
 
 func (s *Server) setRunCancel(runID string, cancel context.CancelFunc) {
@@ -27,51 +30,66 @@ func (s *Server) cancelActiveRun(runID string) bool {
 }
 
 func (s *Server) appendRunEvent(runID string, event StreamEvent) {
-	s.runsMu.Lock()
-	if run, exists := s.runs[runID]; exists {
-		run.Events = append(run.Events, event)
-		run.UpdatedAt = time.Now().UTC()
-		_ = s.persistRunFile(run)
+	if s == nil {
+		return
 	}
-	s.runsMu.Unlock()
+	if store := s.ensureEventStore(); store != nil {
+		store.AppendRunEvent(runID, runtimeEventFromStreamEvent(event))
+	} else {
+		s.appendRunEventState(runID, event, true)
+	}
 	s.ensureRunRegistry().publish(runID, event)
 }
 
 func (s *Server) nextRunEventIndex(runID string) int {
-	s.runsMu.RLock()
-	defer s.runsMu.RUnlock()
-	if run, exists := s.runs[runID]; exists {
-		return len(run.Events) + 1
+	if s == nil {
+		return 1
+	}
+	if store := s.ensureEventStore(); store != nil {
+		return store.NextRunEventIndex(runID)
+	}
+	if snapshot, ok := s.loadRunSnapshotState(runID); ok {
+		return len(snapshot.Events) + 1
 	}
 	return 1
 }
 
 func (s *Server) getRun(runID string) *Run {
-	s.runsMu.RLock()
-	defer s.runsMu.RUnlock()
-	run, exists := s.runs[runID]
-	if !exists {
+	if s == nil {
 		return nil
 	}
-	copyRun := *run
-	copyRun.Events = append([]StreamEvent(nil), run.Events...)
-	return &copyRun
+	if store := s.ensureSnapshotStore(); store != nil {
+		snapshot, ok := store.LoadRunSnapshot(runID)
+		if !ok {
+			return nil
+		}
+		return runFromSnapshot(snapshot)
+	}
+	snapshot, ok := s.loadRunSnapshotState(runID)
+	if !ok {
+		return nil
+	}
+	return runFromSnapshot(snapshot)
 }
 
 func (s *Server) getLatestRunForThread(threadID string) *Run {
-	s.runsMu.RLock()
-	defer s.runsMu.RUnlock()
-
-	var latest *Run
-	for _, run := range s.runs {
-		if run.ThreadID != threadID {
-			continue
-		}
-		if latest == nil || run.CreatedAt.After(latest.CreatedAt) {
-			copyRun := *run
-			copyRun.Events = append([]StreamEvent(nil), run.Events...)
-			latest = &copyRun
+	if s == nil {
+		return nil
+	}
+	var snapshots []harnessruntime.RunSnapshot
+	if store := s.ensureSnapshotStore(); store != nil {
+		snapshots = store.ListRunSnapshots(threadID)
+	}
+	var latest harnessruntime.RunSnapshot
+	found := false
+	for _, snapshot := range snapshots {
+		if !found || snapshot.Record.CreatedAt.After(latest.Record.CreatedAt) {
+			latest = snapshot
+			found = true
 		}
 	}
-	return latest
+	if !found {
+		return nil
+	}
+	return runFromSnapshot(latest)
 }

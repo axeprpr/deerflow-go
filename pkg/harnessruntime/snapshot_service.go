@@ -5,37 +5,31 @@ type RunSnapshot struct {
 	Events []RunEvent
 }
 
-type SnapshotRuntime interface {
-	LoadRunSnapshot(runID string) (RunSnapshot, bool)
-	ListRunSnapshots(threadID string) []RunSnapshot
-	SaveRunSnapshot(snapshot RunSnapshot)
-}
-
 type SnapshotStoreService struct {
-	runtime SnapshotRuntime
+	store RunSnapshotStore
 }
 
-func NewSnapshotStoreService(runtime SnapshotRuntime) SnapshotStoreService {
-	return SnapshotStoreService{runtime: runtime}
+func NewSnapshotStoreService(store RunSnapshotStore) SnapshotStoreService {
+	return SnapshotStoreService{store: store}
 }
 
 func (s SnapshotStoreService) SaveRecord(record RunRecord) {
-	if s.runtime == nil {
+	if s.store == nil {
 		return
 	}
-	snapshot, ok := s.runtime.LoadRunSnapshot(record.RunID)
+	snapshot, ok := s.store.LoadRunSnapshot(record.RunID)
 	if !ok {
 		snapshot = RunSnapshot{}
 	}
 	snapshot.Record = record
-	s.runtime.SaveRunSnapshot(snapshot)
+	s.store.SaveRunSnapshot(snapshot)
 }
 
 func (s SnapshotStoreService) LoadRecord(runID string) (RunRecord, bool) {
-	if s.runtime == nil {
+	if s.store == nil {
 		return RunRecord{}, false
 	}
-	snapshot, ok := s.runtime.LoadRunSnapshot(runID)
+	snapshot, ok := s.store.LoadRunSnapshot(runID)
 	if !ok {
 		return RunRecord{}, false
 	}
@@ -43,10 +37,10 @@ func (s SnapshotStoreService) LoadRecord(runID string) (RunRecord, bool) {
 }
 
 func (s SnapshotStoreService) ListRecords(threadID string) []RunRecord {
-	if s.runtime == nil {
+	if s.store == nil {
 		return nil
 	}
-	snapshots := s.runtime.ListRunSnapshots(threadID)
+	snapshots := s.store.ListRunSnapshots(threadID)
 	records := make([]RunRecord, 0, len(snapshots))
 	for _, snapshot := range snapshots {
 		records = append(records, snapshot.Record)
@@ -55,10 +49,10 @@ func (s SnapshotStoreService) ListRecords(threadID string) []RunRecord {
 }
 
 func (s SnapshotStoreService) NextEventIndex(runID string) int {
-	if s.runtime == nil {
+	if s.store == nil {
 		return 1
 	}
-	snapshot, ok := s.runtime.LoadRunSnapshot(runID)
+	snapshot, ok := s.store.LoadRunSnapshot(runID)
 	if !ok {
 		return 1
 	}
@@ -66,22 +60,22 @@ func (s SnapshotStoreService) NextEventIndex(runID string) int {
 }
 
 func (s SnapshotStoreService) AppendEvent(runID string, event RunEvent) {
-	if s.runtime == nil {
+	if s.store == nil {
 		return
 	}
-	snapshot, ok := s.runtime.LoadRunSnapshot(runID)
+	snapshot, ok := s.store.LoadRunSnapshot(runID)
 	if !ok {
 		snapshot = RunSnapshot{}
 	}
 	snapshot.Events = append(snapshot.Events, event)
-	s.runtime.SaveRunSnapshot(snapshot)
+	s.store.SaveRunSnapshot(snapshot)
 }
 
 func (s SnapshotStoreService) LoadEvents(runID string) []RunEvent {
-	if s.runtime == nil {
+	if s.store == nil {
 		return nil
 	}
-	snapshot, ok := s.runtime.LoadRunSnapshot(runID)
+	snapshot, ok := s.store.LoadRunSnapshot(runID)
 	if !ok {
 		return nil
 	}

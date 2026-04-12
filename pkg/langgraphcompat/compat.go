@@ -47,6 +47,8 @@ type Server struct {
 	runs             map[string]*Run
 	runsMu           sync.RWMutex
 	runRegistry      *runRegistry
+	snapshotStore    harnessruntime.RunSnapshotStore
+	eventStore       harnessruntime.RunEventStore
 	dataRoot         string
 	uiStateMu        sync.RWMutex
 	models           map[string]gatewayModel
@@ -229,6 +231,8 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		channelConfig: gatewayChannelsConfig{},
 		channels:      defaultGatewayChannelsStatus(),
 	}
+	s.snapshotStore = newLocalRunSnapshotStore(s)
+	s.eventStore = newLocalRunEventStore(s.snapshotStore)
 	var memoryRuntime *harness.MemoryRuntime
 	if store, err := memory.NewFileStore(filepath.Join(dataRootAbs, "memory")); err == nil {
 		if migrateErr := store.AutoMigrate(ctx); migrateErr != nil {

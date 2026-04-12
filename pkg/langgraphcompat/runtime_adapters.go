@@ -116,19 +116,27 @@ func (a runtimeMemoryAdapter) ResolveMemorySessionID(threadID string, agentName 
 }
 
 func (a runtimeCompletionAdapter) SetThreadTitle(threadID string, title string) {
-	a.server.setThreadMetadata(threadID, "title", title)
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		store.SetThreadMetadata(threadID, "title", title)
+	}
 }
 
 func (a runtimeCompletionAdapter) SetThreadInterrupts(threadID string, interrupts []any) {
-	a.server.setThreadMetadata(threadID, "interrupts", interrupts)
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		store.SetThreadMetadata(threadID, "interrupts", interrupts)
+	}
 }
 
 func (a runtimeCompletionAdapter) ClearThreadInterrupts(threadID string) {
-	a.server.deleteThreadMetadata(threadID, "interrupts")
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		store.ClearThreadMetadata(threadID, "interrupts")
+	}
 }
 
 func (a runtimeCompletionAdapter) MarkThreadStatus(threadID string, status string) {
-	a.server.markThreadStatus(threadID, status)
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		store.MarkThreadStatus(threadID, status)
+	}
 }
 
 func (a runtimePreflightAdapter) PrepareSession(threadID string) harnessruntime.SessionSnapshot {
@@ -146,27 +154,35 @@ func (a runtimePreflightAdapter) PrepareSession(threadID string) harnessruntime.
 }
 
 func (a runtimePreflightAdapter) MarkThreadStatus(threadID string, status string) {
-	a.server.markThreadStatus(threadID, status)
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		store.MarkThreadStatus(threadID, status)
+	}
 }
 
 func (a runtimePreflightAdapter) SetThreadMetadata(threadID string, key string, value any) {
-	a.server.setThreadMetadata(threadID, key, value)
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		store.SetThreadMetadata(threadID, key, value)
+	}
 }
 
 func (a runtimePreflightAdapter) ClearThreadMetadata(threadID string, key string) {
-	a.server.deleteThreadMetadata(threadID, key)
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		store.ClearThreadMetadata(threadID, key)
+	}
 }
 
 func (a runtimePreflightAdapter) SaveRunRecord(record harnessruntime.RunRecord) {
-	harnessruntime.NewSnapshotStoreService(a.server.runtimeSnapshotAdapter()).SaveRecord(record)
+	harnessruntime.NewSnapshotStoreService(a.server.ensureSnapshotStore()).SaveRecord(record)
 }
 
 func (a runtimeRunStateAdapter) SaveRunRecord(record harnessruntime.RunRecord) {
-	harnessruntime.NewSnapshotStoreService(a.server.runtimeSnapshotAdapter()).SaveRecord(record)
+	harnessruntime.NewSnapshotStoreService(a.server.ensureSnapshotStore()).SaveRecord(record)
 }
 
 func (a runtimeRunStateAdapter) MarkThreadStatus(threadID string, status string) {
-	a.server.markThreadStatus(threadID, status)
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		store.MarkThreadStatus(threadID, status)
+	}
 }
 
 func (a runtimeContextAdapter) ClarificationManager() *clarification.Manager {
@@ -178,7 +194,7 @@ func (a runtimeContextAdapter) SkillPaths() any {
 }
 
 func (a runtimeCoordinationAdapter) LoadRunRecord(runID string) (harnessruntime.RunRecord, bool) {
-	return harnessruntime.NewSnapshotStoreService(a.server.runtimeSnapshotAdapter()).LoadRecord(runID)
+	return harnessruntime.NewSnapshotStoreService(a.server.ensureSnapshotStore()).LoadRecord(runID)
 }
 
 func (a runtimeCoordinationAdapter) CancelRun(runID string) bool {
@@ -186,31 +202,41 @@ func (a runtimeCoordinationAdapter) CancelRun(runID string) bool {
 }
 
 func (a runtimeQueryAdapter) LoadRunRecord(runID string) (harnessruntime.RunRecord, bool) {
-	return harnessruntime.NewSnapshotStoreService(a.server.runtimeSnapshotAdapter()).LoadRecord(runID)
+	return harnessruntime.NewSnapshotStoreService(a.server.ensureSnapshotStore()).LoadRecord(runID)
 }
 
 func (a runtimeQueryAdapter) ListRunRecords(threadID string) []harnessruntime.RunRecord {
-	return harnessruntime.NewSnapshotStoreService(a.server.runtimeSnapshotAdapter()).ListRecords(threadID)
+	return harnessruntime.NewSnapshotStoreService(a.server.ensureSnapshotStore()).ListRecords(threadID)
 }
 
 func (a runtimeQueryAdapter) HasThread(threadID string) bool {
-	a.server.sessionsMu.RLock()
-	defer a.server.sessionsMu.RUnlock()
-	_, exists := a.server.sessions[threadID]
-	return exists
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		return store.HasThread(threadID)
+	}
+	return false
 }
 
 func (a runtimeEventAdapter) NextRunEventIndex(runID string) int {
-	return harnessruntime.NewSnapshotStoreService(a.server.runtimeSnapshotAdapter()).NextEventIndex(runID)
+	store := a.server.ensureEventStore()
+	if store == nil {
+		return 1
+	}
+	return store.NextRunEventIndex(runID)
 }
 
 func (a runtimeEventAdapter) AppendRunEvent(runID string, event harnessruntime.RunEvent) {
-	harnessruntime.NewSnapshotStoreService(a.server.runtimeSnapshotAdapter()).AppendEvent(runID, event)
+	if store := a.server.ensureEventStore(); store != nil {
+		store.AppendRunEvent(runID, event)
+	}
 	a.server.ensureRunRegistry().publish(runID, streamEventFromRuntimeEvent(event))
 }
 
 func (a runtimeEventAdapter) LoadRunEvents(runID string) []harnessruntime.RunEvent {
-	return harnessruntime.NewSnapshotStoreService(a.server.runtimeSnapshotAdapter()).LoadEvents(runID)
+	store := a.server.ensureEventStore()
+	if store == nil {
+		return nil
+	}
+	return store.LoadRunEvents(runID)
 }
 
 func (a runtimeEventAdapter) SubscribeRunEvents(runID string, buffer int) (<-chan harnessruntime.RunEvent, func()) {
@@ -245,27 +271,23 @@ func (a runtimeEventAdapter) SubscribeRunEvents(runID string, buffer int) (<-cha
 }
 
 func (a runtimeSnapshotAdapter) LoadRunSnapshot(runID string) (harnessruntime.RunSnapshot, bool) {
-	run := a.server.getRun(runID)
-	if run == nil {
+	store := a.server.ensureSnapshotStore()
+	if store == nil {
 		return harnessruntime.RunSnapshot{}, false
 	}
-	return runSnapshotFromRun(run), true
+	return store.LoadRunSnapshot(runID)
 }
 
 func (a runtimeSnapshotAdapter) ListRunSnapshots(threadID string) []harnessruntime.RunSnapshot {
-	a.server.runsMu.RLock()
-	defer a.server.runsMu.RUnlock()
-
-	snapshots := make([]harnessruntime.RunSnapshot, 0)
-	for _, run := range a.server.runs {
-		if threadID != "" && run.ThreadID != threadID {
-			continue
-		}
-		snapshots = append(snapshots, runSnapshotFromRun(run))
+	store := a.server.ensureSnapshotStore()
+	if store == nil {
+		return nil
 	}
-	return snapshots
+	return store.ListRunSnapshots(threadID)
 }
 
 func (a runtimeSnapshotAdapter) SaveRunSnapshot(snapshot harnessruntime.RunSnapshot) {
-	a.server.saveRun(runFromSnapshot(snapshot))
+	if store := a.server.ensureSnapshotStore(); store != nil {
+		store.SaveRunSnapshot(snapshot)
+	}
 }

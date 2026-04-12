@@ -10,17 +10,12 @@ type RunEvent struct {
 	ThreadID string
 }
 
-type EventLogRuntime interface {
-	NextRunEventIndex(runID string) int
-	AppendRunEvent(runID string, event RunEvent)
-}
-
 type EventLogService struct {
-	runtime EventLogRuntime
+	store RunEventRecorder
 }
 
-func NewEventLogService(runtime EventLogRuntime) EventLogService {
-	return EventLogService{runtime: runtime}
+func NewEventLogService(store RunEventRecorder) EventLogService {
+	return EventLogService{store: store}
 }
 
 func (s EventLogService) Record(runID string, threadID string, eventType string, data any) RunEvent {
@@ -30,11 +25,11 @@ func (s EventLogService) Record(runID string, threadID string, eventType string,
 		RunID:    runID,
 		ThreadID: threadID,
 	}
-	if s.runtime == nil {
+	if s.store == nil {
 		event.ID = fmt.Sprintf("%s:%d", runID, 1)
 		return event
 	}
-	event.ID = fmt.Sprintf("%s:%d", runID, s.runtime.NextRunEventIndex(runID))
-	s.runtime.AppendRunEvent(runID, event)
+	event.ID = fmt.Sprintf("%s:%d", runID, s.store.NextRunEventIndex(runID))
+	s.store.AppendRunEvent(runID, event)
 	return event
 }

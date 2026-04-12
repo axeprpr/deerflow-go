@@ -371,8 +371,6 @@ func (s *Server) loadPersistedRuns() {
 	if err != nil {
 		return
 	}
-	s.runsMu.Lock()
-	defer s.runsMu.Unlock()
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
@@ -416,16 +414,18 @@ func (s *Server) loadPersistedRuns() {
 		if persisted.RunID == "" {
 			continue
 		}
-		s.runs[persisted.RunID] = &Run{
-			RunID:       persisted.RunID,
-			ThreadID:    persisted.ThreadID,
-			AssistantID: persisted.AssistantID,
-			Status:      persisted.Status,
-			CreatedAt:   persisted.CreatedAt,
-			UpdatedAt:   persisted.UpdatedAt,
-			Events:      runFromSnapshot(harnessruntime.RunSnapshot{Record: harnessruntime.RunRecord{RunID: persisted.RunID, ThreadID: persisted.ThreadID, AssistantID: persisted.AssistantID, Status: persisted.Status, CreatedAt: persisted.CreatedAt, UpdatedAt: persisted.UpdatedAt, Error: persisted.Error}, Events: persisted.Events}).Events,
-			Error:       persisted.Error,
-		}
+		s.saveRunSnapshotState(harnessruntime.RunSnapshot{
+			Record: harnessruntime.RunRecord{
+				RunID:       persisted.RunID,
+				ThreadID:    persisted.ThreadID,
+				AssistantID: persisted.AssistantID,
+				Status:      persisted.Status,
+				CreatedAt:   persisted.CreatedAt,
+				UpdatedAt:   persisted.UpdatedAt,
+				Error:       persisted.Error,
+			},
+			Events: persisted.Events,
+		}, false)
 	}
 }
 
