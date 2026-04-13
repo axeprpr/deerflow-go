@@ -298,6 +298,22 @@ func (n *RuntimeNode) EnsureDispatchSource(source func() *harness.Runtime, specs
 	return n.Dispatcher
 }
 
+func EnsureRuntimeNode(existing *RuntimeNode, config RuntimeNodeConfig) (*RuntimeNode, error) {
+	if existing != nil {
+		return existing, nil
+	}
+	return config.BuildRuntimeNode(DispatchRuntimeConfig{})
+}
+
+func EnsureBoundRuntimeNode(existing *RuntimeNode, config RuntimeNodeConfig, source func() *harness.Runtime, specs WorkerSpecRuntime) (*RuntimeNode, error) {
+	node, err := EnsureRuntimeNode(existing, config)
+	if err != nil {
+		return nil, err
+	}
+	node.EnsureDispatchSource(source, specs)
+	return node, nil
+}
+
 func (n *RuntimeNode) Coordinator(runtime *harness.Runtime, adapters CoordinatorAdapters) Coordinator {
 	if n == nil {
 		return NewCoordinatorFromRuntime(runtime, nil, adapters)

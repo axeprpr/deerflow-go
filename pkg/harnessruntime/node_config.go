@@ -2,7 +2,10 @@ package harnessruntime
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	goruntime "runtime"
+	"strings"
 	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
@@ -65,6 +68,21 @@ func DefaultRuntimeNodeConfig(name, root string) RuntimeNodeConfig {
 			ReadHeaderTimeout: 10 * time.Second,
 		},
 	}
+}
+
+func ResolveRuntimeNodeConfig(existing RuntimeNodeConfig, name, root string) RuntimeNodeConfig {
+	if existing.Transport.Backend != "" {
+		return existing
+	}
+	root = strings.TrimSpace(root)
+	if root == "" {
+		root = filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "langgraph"
+	}
+	return DefaultRuntimeNodeConfig(name, root)
 }
 
 func (c RuntimeNodeConfig) BuildSandboxManager() (*SandboxResourceManager, error) {

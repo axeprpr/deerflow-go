@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -308,11 +307,10 @@ func (s *Server) bindRuntimeNodeDispatch() {
 	if s == nil {
 		return
 	}
-	node := s.ensureRuntimeSystem()
-	if node == nil {
+	node, err := harnessruntime.EnsureBoundRuntimeNode(s.runtimeSystem, s.runtimeNodeConfig(), s.runtimeView, s.runtimeWorkerSpecAdapter())
+	if err != nil {
 		return
 	}
-	node.EnsureDispatchSource(s.runtimeView, s.runtimeWorkerSpecAdapter())
 	s.attachRuntimeSystem(node)
 }
 
@@ -323,8 +321,7 @@ func (s *Server) ensureRuntimeSystem() *harnessruntime.RuntimeNode {
 	if s.runtimeSystem != nil {
 		return s.runtimeSystem
 	}
-	config := s.runtimeNodeConfig()
-	node, err := config.BuildRuntimeNode(harnessruntime.DispatchRuntimeConfig{})
+	node, err := harnessruntime.EnsureRuntimeNode(s.runtimeSystem, s.runtimeNodeConfig())
 	if err != nil {
 		return nil
 	}
@@ -336,18 +333,7 @@ func (s *Server) runtimeNodeConfig() harnessruntime.RuntimeNodeConfig {
 	if s == nil {
 		return harnessruntime.DefaultRuntimeNodeConfig("langgraph", filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox"))
 	}
-	if s.runtimeNode.Transport.Backend != "" {
-		return s.runtimeNode
-	}
-	root := strings.TrimSpace(s.sandboxRoot)
-	if root == "" {
-		root = filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
-	}
-	name := strings.TrimSpace(s.sandboxName)
-	if name == "" {
-		name = "langgraph"
-	}
-	s.runtimeNode = harnessruntime.DefaultRuntimeNodeConfig(name, root)
+	s.runtimeNode = harnessruntime.ResolveRuntimeNodeConfig(s.runtimeNode, s.sandboxName, s.sandboxRoot)
 	return s.runtimeNode
 }
 
@@ -368,9 +354,8 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 	if s.runDispatcher != nil {
 		return s.runDispatcher
 	}
-	node := s.ensureRuntimeSystem()
-	if node != nil {
-		s.runDispatcher = node.EnsureDispatchSource(s.runtimeView, s.runtimeWorkerSpecAdapter())
+	node, err := harnessruntime.EnsureBoundRuntimeNode(s.runtimeSystem, s.runtimeNodeConfig(), s.runtimeView, s.runtimeWorkerSpecAdapter())
+	if err == nil && node != nil {
 		s.attachRuntimeSystem(node)
 		return s.runDispatcher
 	}
