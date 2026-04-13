@@ -1350,3 +1350,62 @@ func TestUpdateThreadAcceptsTopLevelMemoryScope(t *testing.T) {
 		t.Fatalf("memory_scope.namespace=%q", got)
 	}
 }
+
+func TestThreadMemoryScopeHandlers(t *testing.T) {
+	s, err := NewServer(":0", "", "test-model")
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	_, code, detail := s.createThread(map[string]any{
+		"thread_id": "thread-memory-scope-api",
+		"memory_scope": map[string]any{
+			"user_id":   "user-1",
+			"group_id":  "group-1",
+			"namespace": "workspace-a",
+		},
+	})
+	if code != 0 || detail != "" {
+		t.Fatalf("createThread() code=%d detail=%q", code, detail)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/threads/thread-memory-scope-api/memory-scope", nil)
+	getReq.SetPathValue("thread_id", "thread-memory-scope-api")
+	getRes := httptest.NewRecorder()
+	s.handleThreadMemoryScopeGet(getRes, getReq)
+	if getRes.Code != http.StatusOK {
+		t.Fatalf("GET status=%d body=%s", getRes.Code, getRes.Body.String())
+	}
+	var getBody map[string]any
+	if err := json.Unmarshal(getRes.Body.Bytes(), &getBody); err != nil {
+		t.Fatalf("GET decode error = %v", err)
+	}
+	scope, _ := getBody["memory_scope"].(map[string]any)
+	if got := stringValue(scope["user_id"]); got != "user-1" {
+		t.Fatalf("GET memory_scope.user_id=%q", got)
+	}
+
+	putReq := httptest.NewRequest(http.MethodPut, "/threads/thread-memory-scope-api/memory-scope", strings.NewReader(`{"memory_scope":{"user_id":"user-2","group_id":"group-2","namespace":"workspace-b"}}`))
+	putReq.Header.Set("Content-Type", "application/json")
+	putReq.SetPathValue("thread_id", "thread-memory-scope-api")
+	putRes := httptest.NewRecorder()
+	s.handleThreadMemoryScopePut(putRes, putReq)
+	if putRes.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", putRes.Code, putRes.Body.String())
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/threads/thread-memory-scope-api/memory-scope", nil)
+	deleteReq.SetPathValue("thread_id", "thread-memory-scope-api")
+	deleteRes := httptest.NewRecorder()
+	s.handleThreadMemoryScopeDelete(deleteRes, deleteReq)
+	if deleteRes.Code != http.StatusOK {
+		t.Fatalf("DELETE status=%d body=%s", deleteRes.Code, deleteRes.Body.String())
+	}
+	var deleteBody map[string]any
+	if err := json.Unmarshal(deleteRes.Body.Bytes(), &deleteBody); err != nil {
+		t.Fatalf("DELETE decode error = %v", err)
+	}
+	scope, _ = deleteBody["memory_scope"].(map[string]any)
+	if len(scope) != 0 {
+		t.Fatalf("DELETE memory_scope=%#v", scope)
+	}
+}

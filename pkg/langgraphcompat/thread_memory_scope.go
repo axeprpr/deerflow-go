@@ -140,3 +140,30 @@ func (s threadMemoryScope) Response() map[string]any {
 		"namespace": s.Namespace,
 	}
 }
+
+func threadMemoryScopeFromSession(session *Session) threadMemoryScope {
+	if session == nil {
+		return threadMemoryScope{}
+	}
+	return threadMemoryScopeFromMetadata(session.Metadata).Merge(threadMemoryScopeFromConfigurable(session.Configurable))
+}
+
+func applyThreadMemoryScope(session *Session, scope threadMemoryScope) {
+	if session == nil {
+		return
+	}
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
+	}
+	if session.Configurable == nil {
+		session.Configurable = map[string]any{}
+	}
+	delete(session.Metadata, "memory_user_id")
+	delete(session.Metadata, "memory_group_id")
+	delete(session.Metadata, "memory_namespace")
+	delete(session.Configurable, "memory_user_id")
+	delete(session.Configurable, "memory_group_id")
+	delete(session.Configurable, "memory_namespace")
+	scope.ApplyMetadata(session.Metadata)
+	scope.ApplyConfigurable(session.Configurable)
+}
