@@ -1,7 +1,6 @@
 package harnessruntime
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,10 +10,14 @@ import (
 type JSONFileRunStore struct {
 	root string
 	mu   sync.Mutex
+	codec RunSnapshotMarshaler
 }
 
 func NewJSONFileRunStore(root string) *JSONFileRunStore {
-	return &JSONFileRunStore{root: strings.TrimSpace(root)}
+	return &JSONFileRunStore{
+		root:  strings.TrimSpace(root),
+		codec: defaultRunSnapshotCodec(nil),
+	}
 }
 
 func (s *JSONFileRunStore) LoadRunSnapshot(runID string) (RunSnapshot, bool) {
@@ -25,8 +28,9 @@ func (s *JSONFileRunStore) LoadRunSnapshot(runID string) (RunSnapshot, bool) {
 	if err != nil {
 		return RunSnapshot{}, false
 	}
-	var snapshot RunSnapshot
-	if err := json.Unmarshal(data, &snapshot); err != nil {
+	codec := defaultRunSnapshotCodec(s.codec)
+	snapshot, err := codec.Decode(data)
+	if err != nil {
 		return RunSnapshot{}, false
 	}
 	return cloneRunSnapshot(snapshot), true
@@ -64,7 +68,8 @@ func (s *JSONFileRunStore) SaveRunSnapshot(snapshot RunSnapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_ = os.MkdirAll(s.root, 0o755)
-	data, err := json.MarshalIndent(snapshot, "", "  ")
+	codec := defaultRunSnapshotCodec(s.codec)
+	data, err := codec.Encode(snapshot)
 	if err != nil {
 		return
 	}
@@ -95,4 +100,3 @@ func (s *JSONFileRunStore) LoadRunEvents(runID string) []RunEvent {
 	}
 	return append([]RunEvent(nil), snapshot.Events...)
 }
-

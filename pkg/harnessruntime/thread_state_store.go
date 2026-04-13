@@ -1,7 +1,6 @@
 package harnessruntime
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,10 +85,14 @@ func (s *InMemoryThreadStateStore) ClearThreadMetadata(threadID string, key stri
 type JSONFileThreadStateStore struct {
 	root string
 	mu   sync.Mutex
+	codec ThreadRuntimeStateMarshaler
 }
 
 func NewJSONFileThreadStateStore(root string) *JSONFileThreadStateStore {
-	return &JSONFileThreadStateStore{root: strings.TrimSpace(root)}
+	return &JSONFileThreadStateStore{
+		root:  strings.TrimSpace(root),
+		codec: defaultThreadRuntimeStateCodec(nil),
+	}
 }
 
 func (s *JSONFileThreadStateStore) LoadThreadRuntimeState(threadID string) (ThreadRuntimeState, bool) {
@@ -100,8 +103,9 @@ func (s *JSONFileThreadStateStore) LoadThreadRuntimeState(threadID string) (Thre
 	if err != nil {
 		return ThreadRuntimeState{}, false
 	}
-	var state ThreadRuntimeState
-	if err := json.Unmarshal(data, &state); err != nil {
+	codec := defaultThreadRuntimeStateCodec(s.codec)
+	state, err := codec.Decode(data)
+	if err != nil {
 		return ThreadRuntimeState{}, false
 	}
 	return cloneThreadRuntimeState(state), true
@@ -135,7 +139,8 @@ func (s *JSONFileThreadStateStore) SaveThreadRuntimeState(state ThreadRuntimeSta
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_ = os.MkdirAll(s.root, 0o755)
-	data, err := json.MarshalIndent(state, "", "  ")
+	codec := defaultThreadRuntimeStateCodec(s.codec)
+	data, err := codec.Encode(state)
 	if err != nil {
 		return
 	}
@@ -188,4 +193,3 @@ func cloneThreadRuntimeState(state ThreadRuntimeState) ThreadRuntimeState {
 	}
 	return cloned
 }
-
