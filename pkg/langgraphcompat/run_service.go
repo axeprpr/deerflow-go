@@ -30,11 +30,7 @@ type completedRun struct {
 }
 
 func (s *Server) runtimeCoordinator() harnessruntime.Coordinator {
-	node := s.ensureRuntimeSystem()
-	if node != nil {
-		node.EnsureDispatchSource(s.runtimeView, s.runtimeWorkerSpecAdapter())
-		s.attachRuntimeSystem(node)
-	}
+	node := s.ensureBoundRuntimeSystem()
 	return node.Coordinator(s.runtimeView(), harnessruntime.CoordinatorAdapters{
 		Preflight:    s.runtimePreflightAdapter(),
 		Context:      s.runtimeContextAdapter(),

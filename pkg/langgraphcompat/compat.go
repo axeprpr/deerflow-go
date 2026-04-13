@@ -331,11 +331,7 @@ func (s *Server) bindRuntimeNodeDispatch() {
 	if s == nil {
 		return
 	}
-	node, err := harnessruntime.EnsureBoundRuntimeNode(s.runtimeSystem, s.runtimeNodeConfig(), s.runtimeView, s.runtimeWorkerSpecAdapter())
-	if err != nil {
-		return
-	}
-	s.attachRuntimeSystem(node)
+	s.ensureBoundRuntimeSystem()
 }
 
 func (s *Server) ensureRuntimeSystem() *harnessruntime.RuntimeNode {
@@ -346,6 +342,18 @@ func (s *Server) ensureRuntimeSystem() *harnessruntime.RuntimeNode {
 		return s.runtimeSystem
 	}
 	node, err := harnessruntime.EnsureRuntimeNode(s.runtimeSystem, s.runtimeNodeConfig())
+	if err != nil {
+		return nil
+	}
+	s.attachRuntimeSystem(node)
+	return node
+}
+
+func (s *Server) ensureBoundRuntimeSystem() *harnessruntime.RuntimeNode {
+	if s == nil {
+		return nil
+	}
+	node, err := harnessruntime.EnsureBoundRuntimeNode(s.runtimeSystem, s.runtimeNodeConfig(), s.runtimeView, s.runtimeWorkerSpecAdapter())
 	if err != nil {
 		return nil
 	}
@@ -378,9 +386,7 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 	if dispatcher := s.runtimeDispatcher(); dispatcher != nil {
 		return dispatcher
 	}
-	node, err := harnessruntime.EnsureBoundRuntimeNode(s.runtimeSystem, s.runtimeNodeConfig(), s.runtimeView, s.runtimeWorkerSpecAdapter())
-	if err == nil && node != nil {
-		s.attachRuntimeSystem(node)
+	if node := s.ensureBoundRuntimeSystem(); node != nil {
 		return s.runtimeDispatcher()
 	}
 	return harnessruntime.NewInProcessRunDispatcher()
