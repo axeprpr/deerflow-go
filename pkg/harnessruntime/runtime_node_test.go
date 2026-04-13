@@ -15,6 +15,23 @@ func TestRuntimeNodeRemoteWorkerAddr(t *testing.T) {
 	}
 }
 
+func TestRuntimeNodeLaunchSpec(t *testing.T) {
+	node := &RuntimeNode{
+		Config:       RuntimeNodeConfig{Role: RuntimeNodeRoleWorker},
+		RemoteWorker: NewHTTPRemoteWorkerNode(buildTestHTTPServer("127.0.0.1:49081")),
+	}
+	spec := node.LaunchSpec()
+	if spec.Role != RuntimeNodeRoleWorker {
+		t.Fatalf("Role = %q, want %q", spec.Role, RuntimeNodeRoleWorker)
+	}
+	if !spec.ServesRemoteWorker {
+		t.Fatal("ServesRemoteWorker = false, want true")
+	}
+	if spec.RemoteWorkerAddr != "127.0.0.1:49081" {
+		t.Fatalf("RemoteWorkerAddr = %q", spec.RemoteWorkerAddr)
+	}
+}
+
 func TestRuntimeNodeStartDelegatesToRemoteWorker(t *testing.T) {
 	node := &RuntimeNode{}
 	if err := node.Start(); err != nil {

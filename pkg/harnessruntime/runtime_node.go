@@ -221,14 +221,11 @@ func (n *RuntimeNode) SandboxRuntime(policy harness.SandboxPolicy) harness.Sandb
 }
 
 func (n *RuntimeNode) RemoteWorkerAddr() string {
-	if n == nil || n.RemoteWorker == nil {
-		return ""
-	}
-	return n.RemoteWorker.Addr()
+	return n.LaunchSpec().RemoteWorkerAddr
 }
 
 func (n *RuntimeNode) Start() error {
-	if n == nil {
+	if spec := n.LaunchSpec(); !spec.ServesRemoteWorker {
 		return nil
 	}
 	return n.StartRemoteWorker()
@@ -242,7 +239,7 @@ func (n *RuntimeNode) StartRemoteWorker() error {
 }
 
 func (n *RuntimeNode) Serve(listener net.Listener) error {
-	if n == nil {
+	if spec := n.LaunchSpec(); !spec.ServesRemoteWorker {
 		return nil
 	}
 	return n.ServeRemoteWorker(listener)
