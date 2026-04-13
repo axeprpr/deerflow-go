@@ -29,6 +29,7 @@ const (
 	RuntimeNodePresetAuto         RuntimeNodePreset = "auto"
 	RuntimeNodePresetFastLocal    RuntimeNodePreset = "fast-local"
 	RuntimeNodePresetSharedSQLite RuntimeNodePreset = "shared-sqlite"
+	RuntimeNodePresetSharedRemote RuntimeNodePreset = "shared-remote"
 )
 
 type NodeConfig struct {
@@ -297,6 +298,8 @@ func NormalizePreset(value string, fallback RuntimeNodePreset) RuntimeNodePreset
 		return RuntimeNodePresetFastLocal
 	case string(RuntimeNodePresetSharedSQLite):
 		return RuntimeNodePresetSharedSQLite
+	case string(RuntimeNodePresetSharedRemote):
+		return RuntimeNodePresetSharedRemote
 	default:
 		return fallback
 	}
@@ -380,6 +383,20 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func stateStoreEndpointFromDispatchEndpoint(endpoint string) string {
+	trimmed := strings.TrimSpace(endpoint)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasSuffix(trimmed, harnessruntime.DefaultRemoteWorkerDispatchPath) {
+		return strings.TrimSuffix(trimmed, harnessruntime.DefaultRemoteWorkerDispatchPath) + harnessruntime.DefaultRemoteStateBasePath
+	}
+	if !strings.HasSuffix(trimmed, harnessruntime.DefaultRemoteStateBasePath) {
+		return strings.TrimRight(trimmed, "/") + harnessruntime.DefaultRemoteStateBasePath
+	}
+	return trimmed
 }
 
 func intFromEnv(name string, fallback int) int {

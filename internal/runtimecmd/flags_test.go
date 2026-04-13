@@ -119,3 +119,26 @@ func TestBindFlagsDerivesBackendsFromStoreURLs(t *testing.T) {
 		t.Fatalf("ThreadBackend = %q", cfg.ThreadBackend)
 	}
 }
+
+func TestBindFlagsBuildsSharedRemoteGatewayConfig(t *testing.T) {
+	fs := flag.NewFlagSet("runtime", flag.ContinueOnError)
+	defaults := DefaultNodeConfigForRole(harnessruntime.RuntimeNodeRoleGateway)
+	binding := BindFlags(fs, defaults, "", "")
+	if err := fs.Parse([]string{
+		"-preset=shared-remote",
+		"-endpoint=http://worker:8081/dispatch",
+	}); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	cfg := binding.Config()
+	if cfg.Preset != RuntimeNodePresetSharedRemote {
+		t.Fatalf("Preset = %q", cfg.Preset)
+	}
+	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendRemote {
+		t.Fatalf("StateBackend = %q", cfg.StateBackend)
+	}
+	if cfg.StateStoreURL != "http://worker:8081/state" {
+		t.Fatalf("StateStoreURL = %q", cfg.StateStoreURL)
+	}
+}

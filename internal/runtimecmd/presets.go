@@ -61,6 +61,8 @@ func applyNodePreset(config NodeConfig) NodeConfig {
 	switch config.effectivePreset() {
 	case RuntimeNodePresetSharedSQLite:
 		config = config.applySharedSQLiteDefaults()
+	case RuntimeNodePresetSharedRemote:
+		config = config.applySharedRemoteDefaults()
 	case RuntimeNodePresetFastLocal:
 		config = config.applyFastLocalDefaults()
 	default:
@@ -72,6 +74,8 @@ func applyNodePreset(config NodeConfig) NodeConfig {
 		switch config.effectivePreset() {
 		case RuntimeNodePresetSharedSQLite:
 			config.StateProvider = harnessruntime.RuntimeStateProviderModeSharedSQLite
+		case RuntimeNodePresetSharedRemote:
+			config.StateProvider = harnessruntime.RuntimeStateProviderModeAuto
 		case RuntimeNodePresetFastLocal:
 			config.StateProvider = harnessruntime.RuntimeStateProviderModeIsolated
 		default:
@@ -109,6 +113,27 @@ func (c NodeConfig) applyFastLocalDefaults() NodeConfig {
 	}
 	if c.StateRoot == "" && c.StateStoreURL == "" && c.SnapshotStoreURL == "" && c.EventStoreURL == "" && c.ThreadStoreURL == "" {
 		c.StateRoot = ""
+	}
+	return c
+}
+
+func (c NodeConfig) applySharedRemoteDefaults() NodeConfig {
+	switch c.Role {
+	case harnessruntime.RuntimeNodeRoleGateway:
+		c.StateProvider = harnessruntime.RuntimeStateProviderModeAuto
+		c.StateBackend = harnessruntime.RuntimeStateStoreBackendRemote
+		c.SnapshotBackend = harnessruntime.RuntimeStateStoreBackendRemote
+		c.EventBackend = harnessruntime.RuntimeStateStoreBackendRemote
+		c.ThreadBackend = harnessruntime.RuntimeStateStoreBackendRemote
+		if !strings.HasPrefix(strings.TrimSpace(c.StateStoreURL), "http://") && !strings.HasPrefix(strings.TrimSpace(c.StateStoreURL), "https://") {
+			c.StateStoreURL = stateStoreEndpointFromDispatchEndpoint(c.Endpoint)
+		}
+		c.SnapshotStoreURL = ""
+		c.EventStoreURL = ""
+		c.ThreadStoreURL = ""
+		c.StateRoot = ""
+	default:
+		c = c.applySharedSQLiteDefaults()
 	}
 	return c
 }

@@ -36,7 +36,7 @@ func BindFlags(fs *flag.FlagSet, defaults NodeConfig, prefix, label string) *Nod
 	}
 	return &NodeFlagBinding{
 		defaults:         defaults,
-		preset:           fs.String(flagName(prefix, "preset"), string(defaults.Preset), label+"runtime preset: auto|fast-local|shared-sqlite"),
+		preset:           fs.String(flagName(prefix, "preset"), string(defaults.Preset), label+"runtime preset: auto|fast-local|shared-sqlite|shared-remote"),
 		stateProvider:    fs.String(flagName(prefix, "state-provider"), string(defaults.StateProvider), label+"state provider: auto|isolated|shared-sqlite"),
 		role:             fs.String(flagName(prefix, "role"), string(defaults.Role), label+"node role: worker|all-in-one|gateway"),
 		addr:             fs.String(flagName(prefix, "addr"), defaults.Addr, label+"worker listen address"),

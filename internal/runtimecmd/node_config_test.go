@@ -218,8 +218,38 @@ func TestNormalizePresetSupportsKnownValues(t *testing.T) {
 	if got := NormalizePreset("shared-sqlite", RuntimeNodePresetAuto); got != RuntimeNodePresetSharedSQLite {
 		t.Fatalf("NormalizePreset() = %q", got)
 	}
+	if got := NormalizePreset("shared-remote", RuntimeNodePresetAuto); got != RuntimeNodePresetSharedRemote {
+		t.Fatalf("NormalizePreset() = %q", got)
+	}
 	if got := NormalizePreset("fast-local", RuntimeNodePresetAuto); got != RuntimeNodePresetFastLocal {
 		t.Fatalf("NormalizePreset() = %q", got)
+	}
+}
+
+func TestSharedRemotePresetDerivesGatewayStateEndpoint(t *testing.T) {
+	cfg := NodeConfig{
+		Role:     harnessruntime.RuntimeNodeRoleGateway,
+		Preset:   RuntimeNodePresetSharedRemote,
+		Endpoint: "http://worker:8081/dispatch",
+	}.withRoleDefaults()
+
+	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendRemote {
+		t.Fatalf("StateBackend = %q", cfg.StateBackend)
+	}
+	if cfg.SnapshotBackend != harnessruntime.RuntimeStateStoreBackendRemote {
+		t.Fatalf("SnapshotBackend = %q", cfg.SnapshotBackend)
+	}
+	if cfg.EventBackend != harnessruntime.RuntimeStateStoreBackendRemote {
+		t.Fatalf("EventBackend = %q", cfg.EventBackend)
+	}
+	if cfg.ThreadBackend != harnessruntime.RuntimeStateStoreBackendRemote {
+		t.Fatalf("ThreadBackend = %q", cfg.ThreadBackend)
+	}
+	if cfg.StateStoreURL != "http://worker:8081/state" {
+		t.Fatalf("StateStoreURL = %q", cfg.StateStoreURL)
+	}
+	if cfg.StateProvider != harnessruntime.RuntimeStateProviderModeAuto {
+		t.Fatalf("StateProvider = %q", cfg.StateProvider)
 	}
 }
 
