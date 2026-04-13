@@ -5,8 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/axeprpr/deerflow-go/internal/commandrun"
 	"github.com/axeprpr/deerflow-go/internal/langgraphcmd"
 	"github.com/axeprpr/deerflow-go/internal/runtimecmd"
+	"github.com/axeprpr/deerflow-go/internal/statecmd"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 )
 
@@ -14,6 +16,7 @@ type Config struct {
 	Preset  StackPreset
 	Gateway langgraphcmd.Config
 	Worker  runtimecmd.NodeConfig
+	State   statecmd.Config
 }
 
 type StackPreset string
@@ -27,11 +30,13 @@ const (
 func DefaultConfig() Config {
 	gateway := langgraphcmd.DefaultConfig()
 	worker := runtimecmd.DefaultSplitWorkerNodeConfig()
+	state := statecmd.DefaultConfig()
 
 	sharedDataRoot := firstNonEmpty(strings.TrimSpace(gateway.Runtime.DataRoot), strings.TrimSpace(worker.DataRoot))
 	if sharedDataRoot != "" {
 		gateway.Runtime.DataRoot = sharedDataRoot
 		worker.DataRoot = sharedDataRoot
+		state.Runtime.DataRoot = sharedDataRoot
 	}
 	worker.Provider = gateway.Provider
 	worker.MaxTurns = gateway.Runtime.MaxTurns
@@ -56,6 +61,7 @@ func DefaultConfig() Config {
 		Preset:  StackPresetSharedSQLite,
 		Gateway: gateway,
 		Worker:  worker,
+		State:   state,
 	}
 }
 
@@ -69,6 +75,11 @@ func (c Config) Validate() error {
 	}
 	if err := cfg.Gateway.Validate(); err != nil {
 		return fmt.Errorf("invalid gateway config: %w", err)
+	}
+	if cfg.usesDedicatedStateService() {
+		if err := cfg.State.Validate(); err != nil {
+			return fmt.Errorf("invalid state config: %w", err)
+		}
 	}
 	return nil
 }
@@ -84,6 +95,9 @@ func (c Config) withDefaults() Config {
 	}
 	if strings.TrimSpace(cfg.Worker.DataRoot) == "" {
 		cfg.Worker.DataRoot = cfg.Gateway.Runtime.DataRoot
+	}
+	if strings.TrimSpace(cfg.State.Runtime.DataRoot) == "" {
+		cfg.State.Runtime.DataRoot = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.DataRoot), strings.TrimSpace(cfg.Worker.DataRoot))
 	}
 	if strings.TrimSpace(cfg.Worker.MemoryStoreURL) == "" {
 		cfg.Worker.MemoryStoreURL = cfg.Gateway.Runtime.MemoryStoreURL
@@ -126,7 +140,31 @@ func (c Config) withDefaults() Config {
 	if cfg.Gateway.Runtime.StateProvider == "" {
 		cfg.Gateway.Runtime.StateProvider = cfg.Worker.StateProvider
 	}
-	if gatewayUsesRemoteState(cfg.Gateway.Runtime) {
+	if cfg.usesDedicatedStateService() {
+		stateURL := stateServiceEndpoint(cfg.State.Runtime.Addr)
+		cfg.State = cfg.State.WithDefaults()
+		cfg.Gateway.Runtime.StateProvider = harnessruntime.RuntimeStateProviderModeAuto
+		cfg.Gateway.Runtime.StateBackend = harnessruntime.RuntimeStateStoreBackendRemote
+		cfg.Gateway.Runtime.SnapshotBackend = harnessruntime.RuntimeStateStoreBackendRemote
+		cfg.Gateway.Runtime.EventBackend = harnessruntime.RuntimeStateStoreBackendRemote
+		cfg.Gateway.Runtime.ThreadBackend = harnessruntime.RuntimeStateStoreBackendRemote
+		cfg.Gateway.Runtime.StateStoreURL = stateURL
+		cfg.Gateway.Runtime.SnapshotStoreURL = ""
+		cfg.Gateway.Runtime.EventStoreURL = ""
+		cfg.Gateway.Runtime.ThreadStoreURL = ""
+		cfg.Gateway.Runtime.StateRoot = ""
+
+		cfg.Worker.StateProvider = harnessruntime.RuntimeStateProviderModeAuto
+		cfg.Worker.StateBackend = harnessruntime.RuntimeStateStoreBackendRemote
+		cfg.Worker.SnapshotBackend = harnessruntime.RuntimeStateStoreBackendRemote
+		cfg.Worker.EventBackend = harnessruntime.RuntimeStateStoreBackendRemote
+		cfg.Worker.ThreadBackend = harnessruntime.RuntimeStateStoreBackendRemote
+		cfg.Worker.StateStoreURL = stateURL
+		cfg.Worker.SnapshotStoreURL = ""
+		cfg.Worker.EventStoreURL = ""
+		cfg.Worker.ThreadStoreURL = ""
+		cfg.Worker.StateRoot = ""
+	} else if gatewayUsesRemoteState(cfg.Gateway.Runtime) {
 		cfg.Gateway.Runtime.StateBackend = harnessruntime.RuntimeStateStoreBackendRemote
 		cfg.Gateway.Runtime.SnapshotBackend = firstNonEmptyState(cfg.Gateway.Runtime.SnapshotBackend, harnessruntime.RuntimeStateStoreBackendRemote)
 		cfg.Gateway.Runtime.EventBackend = firstNonEmptyState(cfg.Gateway.Runtime.EventBackend, harnessruntime.RuntimeStateStoreBackendRemote)
@@ -149,7 +187,10 @@ func (c Config) withDefaults() Config {
 	}
 	cfg.Gateway.Runtime.Endpoint = workerDispatchEndpoint(cfg.Worker.Addr)
 
-	if gatewayUsesRemoteState(cfg.Gateway.Runtime) {
+	if cfg.usesDedicatedStateService() {
+		cfg.Gateway.Runtime.StateProvider = harnessruntime.RuntimeStateProviderModeAuto
+		cfg.Worker.StateProvider = harnessruntime.RuntimeStateProviderModeAuto
+	} else if gatewayUsesRemoteState(cfg.Gateway.Runtime) {
 		if cfg.Gateway.Runtime.StateProvider == harnessruntime.RuntimeStateProviderModeSharedSQLite {
 			cfg.Gateway.Runtime.StateProvider = harnessruntime.RuntimeStateProviderModeAuto
 		}
@@ -164,6 +205,7 @@ func (c Config) applyPresetDefaults() Config {
 	case StackPresetSharedRemote:
 		c.Gateway.Runtime.Preset = runtimecmd.RuntimeNodePresetSharedRemote
 		c.Worker.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
+		c.State.Runtime.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
 	case StackPresetSharedSQLite:
 		c.Gateway.Runtime.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
 		c.Worker.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
@@ -177,6 +219,7 @@ func (c Config) applyPresetDefaults() Config {
 	}
 	c.Gateway.Runtime = runtimecmd.ApplyNodePresetDefaults(c.Gateway.Runtime)
 	c.Worker = runtimecmd.ApplyNodePresetDefaults(c.Worker)
+	c.State.Runtime = runtimecmd.ApplyNodePresetDefaults(c.State.Runtime)
 	return c
 }
 
@@ -213,15 +256,22 @@ func (c Config) StartupLines(build langgraphcmd.BuildInfo, yolo bool, logLevel s
 		fmt.Sprintf("  Worker: role=%s addr=%s transport=%s sandbox=%s state_provider=%s", cfg.Worker.Role, cfg.Worker.Addr, cfg.Worker.TransportBackend, cfg.Worker.SandboxBackend, cfg.Worker.StateProvider),
 		fmt.Sprintf("  Shared state: root=%s store=%s snapshot=%s event=%s thread=%s", firstNonEmpty(cfg.Worker.StateRoot, "(memory)"), firstNonEmpty(cfg.Worker.StateStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.SnapshotStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.EventStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.ThreadStoreURL, "(derived)")),
 	)
+	if cfg.usesDedicatedStateService() {
+		lines = append(lines, fmt.Sprintf("  State service: addr=%s provider=%s store=%s", cfg.State.Runtime.Addr, cfg.State.Runtime.StateProvider, firstNonEmpty(cfg.State.Runtime.StateStoreURL, "(derived)")))
+	}
 	return lines
 }
 
 func (c Config) ReadyLines() []string {
 	cfg := c.withDefaults()
 	lines := cfg.Gateway.ReadyLines()
-	lines = append(lines, fmt.Sprintf("  Worker server: http://%s%s", cfg.Worker.Addr, harnessruntime.DefaultRemoteWorkerDispatchPath))
-	lines = append(lines, fmt.Sprintf("  Worker sandbox: http://%s%s", cfg.Worker.Addr, harnessruntime.DefaultRemoteSandboxHealthPath))
-	lines = append(lines, fmt.Sprintf("  Worker state: http://%s%s", cfg.Worker.Addr, harnessruntime.DefaultRemoteStateHealthPath))
+	lines = append(lines, fmt.Sprintf("  Worker server: %s%s", commandrun.HTTPURL(cfg.Worker.Addr), harnessruntime.DefaultRemoteWorkerDispatchPath))
+	lines = append(lines, fmt.Sprintf("  Worker sandbox: %s%s", commandrun.HTTPURL(cfg.Worker.Addr), harnessruntime.DefaultRemoteSandboxHealthPath))
+	if cfg.usesDedicatedStateService() {
+		lines = append(lines, fmt.Sprintf("  State server: %s%s", commandrun.HTTPURL(cfg.State.Runtime.Addr), harnessruntime.DefaultRemoteStateHealthPath))
+	} else {
+		lines = append(lines, fmt.Sprintf("  Worker state: %s%s", commandrun.HTTPURL(cfg.Worker.Addr), harnessruntime.DefaultRemoteStateHealthPath))
+	}
 	return lines
 }
 
@@ -298,10 +348,25 @@ func gatewayUsesRemoteState(cfg runtimecmd.NodeConfig) bool {
 	return false
 }
 
+func (c Config) usesDedicatedStateService() bool {
+	return c.effectivePreset() == StackPresetSharedRemote
+}
+
 func stateRootFromDataRoot(dataRoot string) string {
 	dataRoot = strings.TrimSpace(dataRoot)
 	if dataRoot == "" {
 		return ""
 	}
 	return filepath.Join(dataRoot, "runtime-state")
+}
+
+func stateServiceEndpoint(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if strings.HasPrefix(addr, ":") {
+		addr = "127.0.0.1" + addr
+	}
+	if !strings.HasPrefix(addr, "http://") && !strings.HasPrefix(addr, "https://") {
+		addr = "http://" + addr
+	}
+	return strings.TrimRight(addr, "/") + harnessruntime.DefaultRemoteStateBasePath
 }

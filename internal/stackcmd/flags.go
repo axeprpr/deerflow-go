@@ -1,9 +1,14 @@
 package stackcmd
 
-import "flag"
+import (
+	"flag"
+
+	"github.com/axeprpr/deerflow-go/internal/statecmd"
+)
 
 type Binding struct {
-	cfg *Config
+	cfg          *Config
+	stateBinding *statecmd.Binding
 }
 
 func BindFlags(fs *flag.FlagSet, defaults Config) *Binding {
@@ -29,15 +34,20 @@ func BindFlags(fs *flag.FlagSet, defaults Config) *Binding {
 	fs.StringVar(&cfg.Gateway.Runtime.SnapshotStoreURL, "snapshot-store", cfg.Gateway.Runtime.SnapshotStoreURL, "shared snapshot store URL")
 	fs.StringVar(&cfg.Gateway.Runtime.EventStoreURL, "event-store", cfg.Gateway.Runtime.EventStoreURL, "shared event store URL")
 	fs.StringVar(&cfg.Gateway.Runtime.ThreadStoreURL, "thread-store", cfg.Gateway.Runtime.ThreadStoreURL, "shared thread store URL")
+	stateBinding := statecmd.BindFlagsWithPrefix(fs, cfg.State, "state-service-", "state service ")
 	fs.StringVar((*string)(&cfg.Worker.SandboxBackend), "sandbox-backend", string(cfg.Worker.SandboxBackend), "worker sandbox backend")
 	fs.StringVar(&cfg.Worker.SandboxEndpoint, "sandbox-endpoint", cfg.Worker.SandboxEndpoint, "remote sandbox endpoint")
 	fs.StringVar(&cfg.Worker.SandboxImage, "sandbox-image", cfg.Worker.SandboxImage, "container sandbox image")
-	return &Binding{cfg: &cfg}
+	return &Binding{cfg: &cfg, stateBinding: stateBinding}
 }
 
 func (b *Binding) Config() Config {
 	if b == nil || b.cfg == nil {
 		return Config{}
 	}
-	return b.cfg.withDefaults()
+	cfg := *b.cfg
+	if b.stateBinding != nil {
+		cfg.State = b.stateBinding.Config()
+	}
+	return cfg.withDefaults()
 }

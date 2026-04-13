@@ -38,6 +38,9 @@ func TestDefaultConfigUsesGatewayWorkerSplit(t *testing.T) {
 	if cfg.Worker.StateStoreURL != cfg.Gateway.Runtime.StateStoreURL {
 		t.Fatalf("state store mismatch gateway=%q worker=%q", cfg.Gateway.Runtime.StateStoreURL, cfg.Worker.StateStoreURL)
 	}
+	if cfg.State.Runtime.Addr != ":8082" {
+		t.Fatalf("state addr = %q", cfg.State.Runtime.Addr)
+	}
 }
 
 func TestConfigBuildLauncherUsesSplitRoles(t *testing.T) {
@@ -61,26 +64,29 @@ func TestConfigValidateRejectsRemoteWorkerTransport(t *testing.T) {
 	}
 }
 
-func TestConfigWithRemoteGatewayStateKeepsWorkerLocalState(t *testing.T) {
+func TestConfigWithSharedRemotePresetUsesDedicatedStateService(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Worker.Addr = ":19081"
 	cfg.Preset = StackPresetSharedRemote
 
 	cfg = cfg.withDefaults()
 
-	if cfg.Gateway.Runtime.StateStoreURL != "http://127.0.0.1:19081"+harnessruntime.DefaultRemoteStateBasePath {
+	if cfg.Gateway.Runtime.StateStoreURL != "http://127.0.0.1:8082"+harnessruntime.DefaultRemoteStateBasePath {
 		t.Fatalf("gateway state store = %q", cfg.Gateway.Runtime.StateStoreURL)
 	}
-	if cfg.Worker.StateBackend == harnessruntime.RuntimeStateStoreBackendRemote {
+	if cfg.Worker.StateBackend != harnessruntime.RuntimeStateStoreBackendRemote {
 		t.Fatalf("worker state backend = %q", cfg.Worker.StateBackend)
 	}
-	if cfg.Worker.StateStoreURL == cfg.Gateway.Runtime.StateStoreURL {
-		t.Fatalf("worker state store unexpectedly mirrored remote endpoint: %q", cfg.Worker.StateStoreURL)
+	if cfg.Worker.StateStoreURL != cfg.Gateway.Runtime.StateStoreURL {
+		t.Fatalf("worker state store = %q gateway=%q", cfg.Worker.StateStoreURL, cfg.Gateway.Runtime.StateStoreURL)
 	}
 	if cfg.Worker.Preset != runtimecmd.RuntimeNodePresetSharedSQLite {
 		t.Fatalf("worker preset = %q", cfg.Worker.Preset)
 	}
 	if cfg.Gateway.Runtime.Preset != runtimecmd.RuntimeNodePresetSharedRemote {
 		t.Fatalf("gateway preset = %q", cfg.Gateway.Runtime.Preset)
+	}
+	if cfg.State.Runtime.Preset != runtimecmd.RuntimeNodePresetSharedSQLite {
+		t.Fatalf("state preset = %q", cfg.State.Runtime.Preset)
 	}
 }

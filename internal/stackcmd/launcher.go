@@ -6,19 +6,22 @@ import (
 	"github.com/axeprpr/deerflow-go/internal/commandrun"
 	"github.com/axeprpr/deerflow-go/internal/langgraphcmd"
 	"github.com/axeprpr/deerflow-go/internal/runtimecmd"
+	"github.com/axeprpr/deerflow-go/internal/statecmd"
 )
 
 type Launcher struct {
 	group   *commandrun.LifecycleGroup
 	gateway *langgraphcmd.Launcher
 	worker  *runtimecmd.NodeConfig
+	state   *statecmd.Config
 }
 
-func NewLauncher(gateway *langgraphcmd.Launcher, worker commandrun.Lifecycle, workerConfig *runtimecmd.NodeConfig) *Launcher {
+func NewLauncher(gateway *langgraphcmd.Launcher, worker commandrun.Lifecycle, workerConfig *runtimecmd.NodeConfig, state commandrun.Lifecycle, stateConfig *statecmd.Config) *Launcher {
 	return &Launcher{
-		group:   commandrun.NewLifecycleGroup(worker, gateway),
+		group:   commandrun.NewLifecycleGroup(state, worker, gateway),
 		gateway: gateway,
 		worker:  workerConfig,
+		state:   stateConfig,
 	}
 }
 
@@ -45,10 +48,21 @@ func (c Config) BuildLauncher(ctx context.Context) (*Launcher, error) {
 	if err != nil {
 		return nil, err
 	}
+	var stateLauncher commandrun.Lifecycle
+	var stateConfig *statecmd.Config
+	if cfg.usesDedicatedStateService() {
+		launcher, err := cfg.State.BuildLauncher()
+		if err != nil {
+			return nil, err
+		}
+		stateLauncher = launcher
+		stateCopy := cfg.State
+		stateConfig = &stateCopy
+	}
 	gatewayLauncher, err := cfg.Gateway.BuildLauncher()
 	if err != nil {
 		return nil, err
 	}
 	workerConfig := cfg.Worker
-	return NewLauncher(gatewayLauncher, workerLauncher, &workerConfig), nil
+	return NewLauncher(gatewayLauncher, workerLauncher, &workerConfig, stateLauncher, stateConfig), nil
 }
