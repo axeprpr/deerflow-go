@@ -18,6 +18,7 @@ type RuntimeNodeConfig struct {
 	Sandbox      SandboxManagerConfig
 	Transport    WorkerTransportConfig
 	State        RuntimeStateStoreConfig
+	Memory       RuntimeMemoryConfig
 	RemoteWorker RemoteWorkerServerConfig
 }
 
@@ -48,6 +49,10 @@ type RuntimeStateStoreConfig struct {
 type RemoteWorkerServerConfig struct {
 	Addr              string
 	ReadHeaderTimeout time.Duration
+}
+
+type RuntimeMemoryConfig struct {
+	StoreURL string
 }
 
 func DefaultRuntimeNodeConfig(name, root string) RuntimeNodeConfig {

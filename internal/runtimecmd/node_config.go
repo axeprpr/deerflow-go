@@ -35,6 +35,7 @@ type NodeConfig struct {
 	SandboxBackend   harnessruntime.SandboxBackend
 	SandboxEndpoint  string
 	SandboxImage     string
+	MemoryStoreURL   string
 	StateRoot        string
 	StateBackend     harnessruntime.RuntimeStateStoreBackend
 	SnapshotBackend  harnessruntime.RuntimeStateStoreBackend
@@ -57,6 +58,7 @@ func DefaultNodeConfig(defaults NodeDefaults) NodeConfig {
 		SandboxBackend:   NormalizeSandboxBackend(firstNonEmpty(os.Getenv("RUNTIME_NODE_SANDBOX_BACKEND"), string(defaults.SandboxBackend)), defaults.SandboxBackend),
 		SandboxEndpoint:  strings.TrimSpace(os.Getenv("RUNTIME_NODE_SANDBOX_ENDPOINT")),
 		SandboxImage:     strings.TrimSpace(os.Getenv("RUNTIME_NODE_SANDBOX_IMAGE")),
+		MemoryStoreURL:   strings.TrimSpace(os.Getenv("RUNTIME_NODE_MEMORY_STORE")),
 		StateRoot:        strings.TrimSpace(os.Getenv("RUNTIME_NODE_STATE_ROOT")),
 		StateBackend:     NormalizeStateBackend(firstNonEmpty(os.Getenv("RUNTIME_NODE_STATE_BACKEND"), string(defaults.StateBackend)), defaults.StateBackend),
 		SnapshotBackend:  NormalizeStateBackend(os.Getenv("RUNTIME_NODE_SNAPSHOT_BACKEND"), ""),
@@ -122,6 +124,9 @@ func (c NodeConfig) RuntimeNodeConfig() harnessruntime.RuntimeNodeConfig {
 	if strings.TrimSpace(c.SandboxImage) != "" {
 		config.Sandbox.Image = strings.TrimSpace(c.SandboxImage)
 	}
+	if strings.TrimSpace(c.MemoryStoreURL) != "" {
+		config.Memory.StoreURL = strings.TrimSpace(c.MemoryStoreURL)
+	}
 	if c.StateBackend != "" {
 		config.State.Backend = NormalizeStateBackend(string(c.StateBackend), config.State.Backend)
 	}
@@ -158,6 +163,9 @@ func (c NodeConfig) withRoleDefaults() NodeConfig {
 			ThreadBackend:   c.ThreadBackend,
 		}) {
 			c.StateRoot = filepath.Join(strings.TrimSpace(c.DataRoot), "runtime-state")
+		}
+		if strings.TrimSpace(c.MemoryStoreURL) == "" && strings.TrimSpace(c.DataRoot) != "" {
+			c.MemoryStoreURL = "sqlite://" + filepath.Join(strings.TrimSpace(c.DataRoot), "memory.sqlite3")
 		}
 	}
 	return c

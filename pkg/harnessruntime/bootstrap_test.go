@@ -6,6 +6,7 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
+	pkgmemory "github.com/axeprpr/deerflow-go/pkg/memory"
 )
 
 func TestBuildDefaultRuntimeBootstrapBuildsDefaultRuntimePieces(t *testing.T) {
@@ -35,7 +36,7 @@ func TestBuildDefaultRuntimeBootstrapBuildsDefaultRuntimePieces(t *testing.T) {
 }
 
 func TestBuildDefaultMemoryServiceBuildsMigratedRuntime(t *testing.T) {
-	service, err := BuildDefaultMemoryService(context.Background(), t.TempDir())
+	service, err := BuildDefaultMemoryService(context.Background(), t.TempDir(), RuntimeMemoryConfig{})
 	if err != nil {
 		t.Fatalf("BuildDefaultMemoryService() error = %v", err)
 	}
@@ -44,6 +45,22 @@ func TestBuildDefaultMemoryServiceBuildsMigratedRuntime(t *testing.T) {
 	}
 	if !service.Enabled() {
 		t.Fatal("memory service is not enabled")
+	}
+}
+
+func TestBuildDefaultMemoryServiceUsesConfiguredStoreURL(t *testing.T) {
+	root := t.TempDir()
+	service, err := BuildDefaultMemoryService(context.Background(), root, RuntimeMemoryConfig{
+		StoreURL: "sqlite://" + root + "/memory.sqlite3",
+	})
+	if err != nil {
+		t.Fatalf("BuildDefaultMemoryService() error = %v", err)
+	}
+	if service == nil || service.Runtime() == nil {
+		t.Fatalf("service = %#v", service)
+	}
+	if _, ok := service.Store().(*pkgmemory.SQLiteStore); !ok {
+		t.Fatalf("store = %T, want *memory.SQLiteStore", service.Store())
 	}
 }
 

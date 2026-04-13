@@ -18,6 +18,7 @@ func TestDefaultLangGraphNodeConfigUsesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("RUNTIME_NODE_TRANSPORT_BACKEND", "remote")
 	t.Setenv("RUNTIME_NODE_SANDBOX_BACKEND", "remote")
 	t.Setenv("RUNTIME_NODE_SANDBOX_ENDPOINT", "http://sandbox:8082")
+	t.Setenv("RUNTIME_NODE_MEMORY_STORE", "sqlite:///tmp/memory.sqlite3")
 	t.Setenv("RUNTIME_NODE_STATE_BACKEND", "file")
 	t.Setenv("RUNTIME_NODE_STATE_ROOT", "/tmp/state-root")
 
@@ -55,6 +56,9 @@ func TestDefaultLangGraphNodeConfigUsesEnvironmentOverrides(t *testing.T) {
 	if cfg.SandboxEndpoint != "http://sandbox:8082" {
 		t.Fatalf("SandboxEndpoint = %q", cfg.SandboxEndpoint)
 	}
+	if cfg.MemoryStoreURL != "sqlite:///tmp/memory.sqlite3" {
+		t.Fatalf("MemoryStoreURL = %q", cfg.MemoryStoreURL)
+	}
 	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendFile {
 		t.Fatalf("StateBackend = %q", cfg.StateBackend)
 	}
@@ -75,6 +79,9 @@ func TestDefaultLangGraphNodeConfigUsesSharedSQLiteForGatewayRole(t *testing.T) 
 	if cfg.StateRoot != "/tmp/shared-data/runtime-state" {
 		t.Fatalf("StateRoot = %q", cfg.StateRoot)
 	}
+	if cfg.MemoryStoreURL != "sqlite:///tmp/shared-data/memory.sqlite3" {
+		t.Fatalf("MemoryStoreURL = %q", cfg.MemoryStoreURL)
+	}
 }
 
 func TestDefaultRuntimeWorkerNodeConfigUsesSharedSQLiteState(t *testing.T) {
@@ -86,6 +93,9 @@ func TestDefaultRuntimeWorkerNodeConfigUsesSharedSQLiteState(t *testing.T) {
 	}
 	if cfg.StateRoot != "/tmp/shared-data/runtime-state" {
 		t.Fatalf("StateRoot = %q", cfg.StateRoot)
+	}
+	if cfg.MemoryStoreURL != "sqlite:///tmp/shared-data/memory.sqlite3" {
+		t.Fatalf("MemoryStoreURL = %q", cfg.MemoryStoreURL)
 	}
 }
 
@@ -128,6 +138,9 @@ func TestNodeConfigRuntimeNodeConfigUsesRoleDefaults(t *testing.T) {
 	}
 	if node.State.Root != "/tmp/root/state" {
 		t.Fatalf("State.Root = %q", node.State.Root)
+	}
+	if node.Memory.StoreURL != "" {
+		t.Fatalf("Memory.StoreURL = %q, want empty", node.Memory.StoreURL)
 	}
 	if node.State.Backend != harnessruntime.RuntimeStateStoreBackendFile {
 		t.Fatalf("State.Backend = %q", node.State.Backend)

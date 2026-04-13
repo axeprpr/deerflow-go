@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
@@ -61,7 +62,7 @@ func BuildDefaultRuntimeBootstrapWithMemory(ctx context.Context, config RuntimeN
 	if err != nil {
 		return nil, err
 	}
-	memoryService, err := BuildDefaultMemoryService(ctx, dataRoot)
+	memoryService, err := BuildDefaultMemoryService(ctx, dataRoot, config.Memory)
 	if err == nil {
 		bootstrap.MemoryService = memoryService
 		bootstrap.Node.BindMemoryService(memoryService)
@@ -71,7 +72,15 @@ func BuildDefaultRuntimeBootstrapWithMemory(ctx context.Context, config RuntimeN
 	return bootstrap, nil
 }
 
-func BuildDefaultMemoryService(ctx context.Context, dataRoot string) (*MemoryService, error) {
+func BuildDefaultMemoryService(ctx context.Context, dataRoot string, config RuntimeMemoryConfig) (*MemoryService, error) {
+	storeURL := strings.TrimSpace(config.StoreURL)
+	if storeURL != "" {
+		store, err := pkgmemory.OpenStore(ctx, storeURL)
+		if err != nil {
+			return nil, err
+		}
+		return NewMemoryService(store, nil), nil
+	}
 	store, err := pkgmemory.NewFileStore(filepath.Join(dataRoot, "memory"))
 	if err != nil {
 		return nil, err
