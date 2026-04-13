@@ -51,6 +51,9 @@ func TestPrepareCommandAcceptsSharedBackendFlags(t *testing.T) {
 	if !strings.Contains(strings.Join(prepared.StartupLines, "\n"), "store=sqlite:///tmp/runtime.sqlite3") {
 		t.Fatalf("StartupLines = %#v", prepared.StartupLines)
 	}
+	if !strings.Contains(strings.Join(prepared.StartupLines, "\n"), "state_provider=shared-sqlite") {
+		t.Fatalf("StartupLines = %#v", prepared.StartupLines)
+	}
 }
 
 func TestPrepareCommandRejectsConflictingSharedStateFlags(t *testing.T) {

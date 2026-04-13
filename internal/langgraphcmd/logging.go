@@ -29,7 +29,7 @@ func (c Config) StartupLines(build BuildInfo, yolo bool, logLevel string) []stri
 		fmt.Sprintf("  Database: %s", describeDB(c.DatabaseURL)),
 		fmt.Sprintf("  Provider: %s", c.Provider),
 		fmt.Sprintf("  Model:    %s", c.Model),
-		fmt.Sprintf("  Runtime:  role=%s preset=%s transport=%s worker_addr=%s worker_endpoint=%s sandbox=%s state=%s", c.Runtime.Role, c.Runtime.Preset, c.Runtime.TransportBackend, c.Runtime.Addr, firstNonEmpty(c.Runtime.Endpoint, "(local)"), c.Runtime.SandboxBackend, firstNonEmpty(string(c.Runtime.StateBackend), "(default)")),
+		fmt.Sprintf("  Runtime:  role=%s preset=%s state_provider=%s transport=%s worker_addr=%s worker_endpoint=%s sandbox=%s state=%s", c.Runtime.Role, c.Runtime.Preset, firstNonEmpty(string(c.Runtime.StateProvider), "(auto)"), c.Runtime.TransportBackend, c.Runtime.Addr, firstNonEmpty(c.Runtime.Endpoint, "(local)"), c.Runtime.SandboxBackend, firstNonEmpty(string(c.Runtime.StateBackend), "(default)")),
 		fmt.Sprintf("  Auth:     %s", describeAuth(c.AuthToken, yolo)),
 		fmt.Sprintf("  Version: %s (%s, %s)", build.Version, build.Commit, build.BuildTime),
 	}

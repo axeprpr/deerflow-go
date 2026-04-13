@@ -40,6 +40,8 @@ func DefaultConfig() Config {
 
 	gateway.Runtime.Role = harnessruntime.RuntimeNodeRoleGateway
 	gateway.Runtime.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
+	gateway.Runtime.StateProvider = harnessruntime.RuntimeStateProviderModeSharedSQLite
+	worker.StateProvider = gateway.Runtime.StateProvider
 	gateway.Runtime.Addr = worker.Addr
 	gateway.Runtime.Endpoint = workerDispatchEndpoint(worker.Addr)
 	gateway.Runtime.Provider = worker.Provider
@@ -78,6 +80,9 @@ func (c Config) withDefaults() Config {
 	if strings.TrimSpace(cfg.Worker.MemoryStoreURL) == "" {
 		cfg.Worker.MemoryStoreURL = cfg.Gateway.Runtime.MemoryStoreURL
 	}
+	if cfg.Worker.StateProvider == "" {
+		cfg.Worker.StateProvider = cfg.Gateway.Runtime.StateProvider
+	}
 	if strings.TrimSpace(cfg.Worker.StateRoot) == "" {
 		cfg.Worker.StateRoot = cfg.Gateway.Runtime.StateRoot
 	}
@@ -106,6 +111,9 @@ func (c Config) withDefaults() Config {
 	cfg.Gateway.Runtime.MaxTurns = cfg.Worker.MaxTurns
 	cfg.Gateway.Runtime.DataRoot = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.DataRoot), strings.TrimSpace(cfg.Worker.DataRoot))
 	cfg.Gateway.Runtime.MemoryStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.MemoryStoreURL), strings.TrimSpace(cfg.Worker.MemoryStoreURL))
+	if cfg.Gateway.Runtime.StateProvider == "" {
+		cfg.Gateway.Runtime.StateProvider = cfg.Worker.StateProvider
+	}
 	cfg.Gateway.Runtime.StateRoot = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.StateRoot), strings.TrimSpace(cfg.Worker.StateRoot))
 	cfg.Gateway.Runtime.StateStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.StateStoreURL), strings.TrimSpace(cfg.Worker.StateStoreURL))
 	cfg.Gateway.Runtime.SnapshotStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.SnapshotStoreURL), strings.TrimSpace(cfg.Worker.SnapshotStoreURL))
@@ -124,7 +132,7 @@ func (c Config) StartupLines(build langgraphcmd.BuildInfo, yolo bool, logLevel s
 	lines := cfg.Gateway.StartupLines(build, yolo, logLevel)
 	lines = append(lines,
 		"Starting split runtime stack...",
-		fmt.Sprintf("  Worker: role=%s addr=%s transport=%s sandbox=%s", cfg.Worker.Role, cfg.Worker.Addr, cfg.Worker.TransportBackend, cfg.Worker.SandboxBackend),
+		fmt.Sprintf("  Worker: role=%s addr=%s transport=%s sandbox=%s state_provider=%s", cfg.Worker.Role, cfg.Worker.Addr, cfg.Worker.TransportBackend, cfg.Worker.SandboxBackend, cfg.Worker.StateProvider),
 		fmt.Sprintf("  Shared state: root=%s store=%s snapshot=%s event=%s thread=%s", firstNonEmpty(cfg.Worker.StateRoot, "(memory)"), firstNonEmpty(cfg.Worker.StateStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.SnapshotStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.EventStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.ThreadStoreURL, "(derived)")),
 	)
 	return lines

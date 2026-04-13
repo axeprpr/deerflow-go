@@ -23,6 +23,9 @@ func TestNodeConfigStartupLines(t *testing.T) {
 	if !strings.Contains(joined, "preset=auto") {
 		t.Fatalf("StartupLines() = %q", joined)
 	}
+	if !strings.Contains(joined, "state_provider=auto") {
+		t.Fatalf("StartupLines() = %q", joined)
+	}
 	if !strings.Contains(joined, "worker_addr=") {
 		t.Fatalf("StartupLines() = %q", joined)
 	}

@@ -26,6 +26,12 @@ func TestDefaultConfigUsesGatewayWorkerSplit(t *testing.T) {
 	if cfg.Worker.Preset != runtimecmd.RuntimeNodePresetSharedSQLite {
 		t.Fatalf("worker preset = %q", cfg.Worker.Preset)
 	}
+	if cfg.Gateway.Runtime.StateProvider != harnessruntime.RuntimeStateProviderModeSharedSQLite {
+		t.Fatalf("gateway state provider = %q", cfg.Gateway.Runtime.StateProvider)
+	}
+	if cfg.Worker.StateProvider != harnessruntime.RuntimeStateProviderModeSharedSQLite {
+		t.Fatalf("worker state provider = %q", cfg.Worker.StateProvider)
+	}
 	if cfg.Worker.StateStoreURL != cfg.Gateway.Runtime.StateStoreURL {
 		t.Fatalf("state store mismatch gateway=%q worker=%q", cfg.Gateway.Runtime.StateStoreURL, cfg.Worker.StateStoreURL)
 	}
