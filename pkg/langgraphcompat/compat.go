@@ -341,8 +341,7 @@ func (s *Server) bindRuntimeNodeDispatch() {
 	if node == nil {
 		return
 	}
-	dispatchRuntime := s.runtimeNode.BuildDispatchRuntime(s.runtimeView, s.runtimeWorkerSpecAdapter())
-	node.BindDispatch(dispatchRuntime)
+	node.BindDispatchSource(s.runtimeView, s.runtimeWorkerSpecAdapter())
 	s.runDispatcher = node.Dispatcher
 }
 
@@ -415,9 +414,8 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 		return s.runDispatcher
 	}
 	node := s.ensureRuntimeSystem()
-	dispatchRuntime := s.runtimeNode.BuildDispatchRuntime(s.runtimeView, s.runtimeWorkerSpecAdapter())
 	if node != nil {
-		node.BindDispatch(dispatchRuntime)
+		node.BindDispatchSource(s.runtimeView, s.runtimeWorkerSpecAdapter())
 		s.runDispatcher = node.Dispatcher
 		return s.runDispatcher
 	}
@@ -432,7 +430,7 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 		}
 		s.runtimeNode = harnessruntime.DefaultRuntimeNodeConfig(name, root)
 	}
-	s.runDispatcher = s.runtimeNode.BuildDispatcher(dispatchRuntime)
+	s.runDispatcher = s.runtimeNode.BuildDispatcher(s.runtimeNode.BuildDispatchRuntime(s.runtimeView, s.runtimeWorkerSpecAdapter()))
 	return s.runDispatcher
 }
 

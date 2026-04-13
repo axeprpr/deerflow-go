@@ -183,6 +183,13 @@ func (n *RuntimeNode) BindDispatch(runtime DispatchRuntimeConfig) {
 	n.RemoteWorker = NewHTTPRemoteWorkerNode(n.Config.BuildRemoteWorkerHTTPServerWithProviders(transport, protocol, providers.Remote))
 }
 
+func (n *RuntimeNode) BindDispatchSource(source func() *harness.Runtime, specs WorkerSpecRuntime) {
+	if n == nil {
+		return
+	}
+	n.BindDispatch(n.Config.BuildDispatchRuntimeWithProviders(source, specs, n.Providers.Remote))
+}
+
 func (c DispatchRuntimeConfig) hasBindings() bool {
 	return c.Executor != nil ||
 		c.Runtime != nil ||
