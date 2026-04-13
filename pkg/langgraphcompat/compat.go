@@ -319,6 +319,30 @@ func (s *Server) runtimeSandboxManager() *harnessruntime.SandboxResourceManager 
 	return s.sandboxManager
 }
 
+func (s *Server) toolRegistry() *tools.Registry {
+	if s == nil {
+		return nil
+	}
+	if node := s.runtimeSystem; node != nil {
+		if registry := node.ToolRegistry(); registry != nil {
+			return registry
+		}
+	}
+	return s.tools
+}
+
+func (s *Server) subagentPool() *subagent.Pool {
+	if s == nil {
+		return nil
+	}
+	if node := s.runtimeSystem; node != nil {
+		if pool := node.Subagents(); pool != nil {
+			return pool
+		}
+	}
+	return s.subagents
+}
+
 func (s *Server) runtimeView() *harness.Runtime {
 	if s == nil {
 		return nil

@@ -126,7 +126,8 @@ func gatewayMCPEnv(values map[string]string) []string {
 }
 
 func (s *Server) applyGatewayMCPConfig(ctx context.Context, cfg gatewayMCPConfig) {
-	if s == nil || s.tools == nil {
+	registry := s.toolRegistry()
+	if s == nil || registry == nil {
 		return
 	}
 	if ctx == nil {
@@ -197,11 +198,11 @@ func (s *Server) applyGatewayMCPConfig(ctx context.Context, cfg gatewayMCPConfig
 	s.mcpMu.Unlock()
 
 	for name := range oldToolNames {
-		s.tools.Unregister(name)
+		registry.Unregister(name)
 	}
 	if !deferTools {
 		for _, tool := range newTools {
-			if err := s.tools.Register(tool); err != nil {
+			if err := registry.Register(tool); err != nil {
 				s.logMCPError("register tool "+tool.Name, tool.Name, err)
 			}
 		}
@@ -217,6 +218,7 @@ func (s *Server) closeGatewayMCPClients() {
 	if s == nil {
 		return
 	}
+	registry := s.toolRegistry()
 	s.mcpMu.Lock()
 	clients := s.mcpClients
 	toolNames := s.mcpToolNames
@@ -226,7 +228,10 @@ func (s *Server) closeGatewayMCPClients() {
 	s.mcpMu.Unlock()
 
 	for name := range toolNames {
-		s.tools.Unregister(name)
+		if registry == nil {
+			break
+		}
+		registry.Unregister(name)
 	}
 	for name, client := range clients {
 		if err := client.Close(); err != nil {

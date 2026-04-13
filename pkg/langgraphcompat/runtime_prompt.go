@@ -115,7 +115,7 @@ func (s *Server) environmentPrompt(runtimeContext map[string]any, skillNames ...
 		parts = append(parts, skills)
 	}
 	parts = append(parts, workingDirectoryPrompt)
-	if s != nil && s.tools != nil && s.tools.Get("invoke_acp_agent") != nil {
+	if registry := s.toolRegistry(); registry != nil && registry.Get("invoke_acp_agent") != nil {
 		parts = append(parts, acpAgentPrompt)
 	}
 	parts = append(parts, responseStylePrompt)
