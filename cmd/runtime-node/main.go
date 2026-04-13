@@ -70,18 +70,36 @@ func parseConfig() config {
 	provider := flag.String("provider", defaults.Provider, "LLM provider")
 	endpoint := flag.String("endpoint", defaults.Endpoint, "remote worker endpoint for gateway role")
 	maxTurns := flag.Int("max-turns", defaults.MaxTurns, "default max turns")
+	transportBackend := flag.String("transport-backend", string(defaults.TransportBackend), "worker transport backend: direct|queue|remote")
+	sandboxBackend := flag.String("sandbox-backend", string(defaults.SandboxBackend), "sandbox backend: local-linux|container|remote|windows-restricted")
+	sandboxEndpoint := flag.String("sandbox-endpoint", defaults.SandboxEndpoint, "sandbox backend endpoint for remote sandbox")
+	sandboxImage := flag.String("sandbox-image", defaults.SandboxImage, "sandbox image for container backend")
+	stateRoot := flag.String("state-root", defaults.StateRoot, "runtime state root")
+	stateBackend := flag.String("state-backend", string(defaults.StateBackend), "runtime state backend: in-memory|file")
+	snapshotBackend := flag.String("snapshot-backend", string(defaults.SnapshotBackend), "runtime snapshot backend override: in-memory|file")
+	eventBackend := flag.String("event-backend", string(defaults.EventBackend), "runtime event backend override: in-memory|file")
+	threadBackend := flag.String("thread-backend", string(defaults.ThreadBackend), "runtime thread backend override: in-memory|file")
 	flag.Parse()
 
 	return config{
 		Runtime: runtimecmd.NodeConfig{
-			Role:     runtimecmd.NormalizeRole(*role, defaults.Role),
-			Addr:     runtimecmd.NormalizeAddr(*addr, defaults.Addr),
-			Name:     *name,
-			Root:     *root,
-			DataRoot: *dataRoot,
-			Provider: *provider,
-			Endpoint: *endpoint,
-			MaxTurns: *maxTurns,
+			Role:             runtimecmd.NormalizeRole(*role, defaults.Role),
+			Addr:             runtimecmd.NormalizeAddr(*addr, defaults.Addr),
+			Name:             *name,
+			Root:             *root,
+			DataRoot:         *dataRoot,
+			Provider:         *provider,
+			Endpoint:         *endpoint,
+			MaxTurns:         *maxTurns,
+			TransportBackend: runtimecmd.NormalizeTransportBackend(*transportBackend, defaults.TransportBackend),
+			SandboxBackend:   runtimecmd.NormalizeSandboxBackend(*sandboxBackend, defaults.SandboxBackend),
+			SandboxEndpoint:  *sandboxEndpoint,
+			SandboxImage:     *sandboxImage,
+			StateRoot:        *stateRoot,
+			StateBackend:     runtimecmd.NormalizeStateBackend(*stateBackend, defaults.StateBackend),
+			SnapshotBackend:  runtimecmd.NormalizeStateBackend(*snapshotBackend, defaults.SnapshotBackend),
+			EventBackend:     runtimecmd.NormalizeStateBackend(*eventBackend, defaults.EventBackend),
+			ThreadBackend:    runtimecmd.NormalizeStateBackend(*threadBackend, defaults.ThreadBackend),
 		},
 		LogPrefix: "[runtime-node] ",
 	}

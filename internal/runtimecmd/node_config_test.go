@@ -15,6 +15,11 @@ func TestDefaultLangGraphNodeConfigUsesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("DEFAULT_LLM_PROVIDER", "openai")
 	t.Setenv("RUNTIME_NODE_ENDPOINT", "http://worker:8081/dispatch")
 	t.Setenv("RUNTIME_NODE_MAX_TURNS", "77")
+	t.Setenv("RUNTIME_NODE_TRANSPORT_BACKEND", "remote")
+	t.Setenv("RUNTIME_NODE_SANDBOX_BACKEND", "remote")
+	t.Setenv("RUNTIME_NODE_SANDBOX_ENDPOINT", "http://sandbox:8082")
+	t.Setenv("RUNTIME_NODE_STATE_BACKEND", "file")
+	t.Setenv("RUNTIME_NODE_STATE_ROOT", "/tmp/state-root")
 
 	cfg := DefaultLangGraphNodeConfig()
 	if cfg.Role != harnessruntime.RuntimeNodeRoleGateway {
@@ -41,15 +46,34 @@ func TestDefaultLangGraphNodeConfigUsesEnvironmentOverrides(t *testing.T) {
 	if cfg.MaxTurns != 77 {
 		t.Fatalf("MaxTurns = %d", cfg.MaxTurns)
 	}
+	if cfg.TransportBackend != harnessruntime.WorkerTransportBackendRemote {
+		t.Fatalf("TransportBackend = %q", cfg.TransportBackend)
+	}
+	if cfg.SandboxBackend != harnessruntime.SandboxBackendRemote {
+		t.Fatalf("SandboxBackend = %q", cfg.SandboxBackend)
+	}
+	if cfg.SandboxEndpoint != "http://sandbox:8082" {
+		t.Fatalf("SandboxEndpoint = %q", cfg.SandboxEndpoint)
+	}
+	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendFile {
+		t.Fatalf("StateBackend = %q", cfg.StateBackend)
+	}
+	if cfg.StateRoot != "/tmp/state-root" {
+		t.Fatalf("StateRoot = %q", cfg.StateRoot)
+	}
 }
 
 func TestNodeConfigRuntimeNodeConfigUsesRoleDefaults(t *testing.T) {
 	cfg := NodeConfig{
-		Role:     harnessruntime.RuntimeNodeRoleGateway,
-		Addr:     "9091",
-		Name:     "edge",
-		Root:     "/tmp/root",
-		Endpoint: "http://worker:8081/dispatch",
+		Role:             harnessruntime.RuntimeNodeRoleGateway,
+		Addr:             "9091",
+		Name:             "edge",
+		Root:             "/tmp/root",
+		Endpoint:         "http://worker:8081/dispatch",
+		SandboxBackend:   harnessruntime.SandboxBackendContainer,
+		SandboxImage:     "debian:bookworm",
+		StateBackend:     harnessruntime.RuntimeStateStoreBackendFile,
+		TransportBackend: harnessruntime.WorkerTransportBackendRemote,
 	}
 	node := cfg.RuntimeNodeConfig()
 	if node.Role != harnessruntime.RuntimeNodeRoleGateway {
@@ -63,6 +87,18 @@ func TestNodeConfigRuntimeNodeConfigUsesRoleDefaults(t *testing.T) {
 	}
 	if node.RemoteWorker.Addr != ":9091" {
 		t.Fatalf("RemoteWorker.Addr = %q", node.RemoteWorker.Addr)
+	}
+	if node.Sandbox.Backend != harnessruntime.SandboxBackendContainer {
+		t.Fatalf("Sandbox.Backend = %q", node.Sandbox.Backend)
+	}
+	if node.Sandbox.Image != "debian:bookworm" {
+		t.Fatalf("Sandbox.Image = %q", node.Sandbox.Image)
+	}
+	if node.State.Root != "/tmp/root/state" {
+		t.Fatalf("State.Root = %q", node.State.Root)
+	}
+	if node.State.Backend != harnessruntime.RuntimeStateStoreBackendFile {
+		t.Fatalf("State.Backend = %q", node.State.Backend)
 	}
 }
 
@@ -78,5 +114,8 @@ func TestNodeConfigValidateForLangGraph(t *testing.T) {
 	}
 	if err := (NodeConfig{Role: harnessruntime.RuntimeNodeRoleWorker}).ValidateForLangGraph(); err == nil {
 		t.Fatal("worker role should fail for langgraph")
+	}
+	if err := (NodeConfig{Role: harnessruntime.RuntimeNodeRoleAllInOne, SandboxBackend: harnessruntime.SandboxBackendContainer}).ValidateForLangGraph(); err == nil {
+		t.Fatal("container sandbox without image should fail")
 	}
 }

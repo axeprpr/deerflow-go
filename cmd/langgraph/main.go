@@ -33,6 +33,15 @@ func main() {
 	runtimeWorkerAddr := flag.String("runtime-worker-addr", cfg.Runtime.Addr, "Embedded runtime worker listen address")
 	runtimeWorkerEndpoint := flag.String("runtime-worker-endpoint", cfg.Runtime.Endpoint, "Remote worker endpoint for gateway runtime role")
 	maxTurns := flag.Int("max-turns", cfg.Runtime.MaxTurns, "Default agent max turns")
+	transportBackend := flag.String("runtime-transport-backend", string(cfg.Runtime.TransportBackend), "Runtime transport backend: direct|queue|remote")
+	sandboxBackend := flag.String("runtime-sandbox-backend", string(cfg.Runtime.SandboxBackend), "Runtime sandbox backend: local-linux|container|remote|windows-restricted")
+	sandboxEndpoint := flag.String("runtime-sandbox-endpoint", cfg.Runtime.SandboxEndpoint, "Runtime sandbox endpoint for remote backend")
+	sandboxImage := flag.String("runtime-sandbox-image", cfg.Runtime.SandboxImage, "Runtime sandbox image for container backend")
+	stateRoot := flag.String("runtime-state-root", cfg.Runtime.StateRoot, "Runtime state root")
+	stateBackend := flag.String("runtime-state-backend", string(cfg.Runtime.StateBackend), "Runtime state backend: in-memory|file")
+	snapshotBackend := flag.String("runtime-snapshot-backend", string(cfg.Runtime.SnapshotBackend), "Runtime snapshot backend override: in-memory|file")
+	eventBackend := flag.String("runtime-event-backend", string(cfg.Runtime.EventBackend), "Runtime event backend override: in-memory|file")
+	threadBackend := flag.String("runtime-thread-backend", string(cfg.Runtime.ThreadBackend), "Runtime thread backend override: in-memory|file")
 	flag.Parse()
 
 	logger := log.Default()
@@ -65,14 +74,23 @@ func main() {
 		Provider:    strings.TrimSpace(*provider),
 		Model:       strings.TrimSpace(*model),
 		Runtime: runtimecmd.NodeConfig{
-			Role:     runtimecmd.NormalizeRole(*runtimeRole, cfg.Runtime.Role),
-			Addr:     runtimecmd.NormalizeAddr(*runtimeWorkerAddr, cfg.Runtime.Addr),
-			Name:     strings.TrimSpace(*runtimeName),
-			Root:     strings.TrimSpace(*runtimeRoot),
-			DataRoot: cfg.Runtime.DataRoot,
-			Provider: strings.TrimSpace(*provider),
-			Endpoint: strings.TrimSpace(*runtimeWorkerEndpoint),
-			MaxTurns: *maxTurns,
+			Role:             runtimecmd.NormalizeRole(*runtimeRole, cfg.Runtime.Role),
+			Addr:             runtimecmd.NormalizeAddr(*runtimeWorkerAddr, cfg.Runtime.Addr),
+			Name:             strings.TrimSpace(*runtimeName),
+			Root:             strings.TrimSpace(*runtimeRoot),
+			DataRoot:         cfg.Runtime.DataRoot,
+			Provider:         strings.TrimSpace(*provider),
+			Endpoint:         strings.TrimSpace(*runtimeWorkerEndpoint),
+			MaxTurns:         *maxTurns,
+			TransportBackend: runtimecmd.NormalizeTransportBackend(*transportBackend, cfg.Runtime.TransportBackend),
+			SandboxBackend:   runtimecmd.NormalizeSandboxBackend(*sandboxBackend, cfg.Runtime.SandboxBackend),
+			SandboxEndpoint:  strings.TrimSpace(*sandboxEndpoint),
+			SandboxImage:     strings.TrimSpace(*sandboxImage),
+			StateRoot:        strings.TrimSpace(*stateRoot),
+			StateBackend:     runtimecmd.NormalizeStateBackend(*stateBackend, cfg.Runtime.StateBackend),
+			SnapshotBackend:  runtimecmd.NormalizeStateBackend(*snapshotBackend, cfg.Runtime.SnapshotBackend),
+			EventBackend:     runtimecmd.NormalizeStateBackend(*eventBackend, cfg.Runtime.EventBackend),
+			ThreadBackend:    runtimecmd.NormalizeStateBackend(*threadBackend, cfg.Runtime.ThreadBackend),
 		},
 	}
 	if err := cfg.Validate(); err != nil {
@@ -85,7 +103,7 @@ func main() {
 	logger.Printf("  Database: %s", describeDB(cfg.DatabaseURL))
 	logger.Printf("  Provider: %s", cfg.Provider)
 	logger.Printf("  Model:    %s", cfg.Model)
-	logger.Printf("  Runtime:  role=%s worker_addr=%s worker_endpoint=%s", cfg.Runtime.Role, cfg.Runtime.Addr, firstNonEmpty(cfg.Runtime.Endpoint, "(local)"))
+	logger.Printf("  Runtime:  role=%s transport=%s worker_addr=%s worker_endpoint=%s sandbox=%s state=%s", cfg.Runtime.Role, cfg.Runtime.TransportBackend, cfg.Runtime.Addr, firstNonEmpty(cfg.Runtime.Endpoint, "(local)"), cfg.Runtime.SandboxBackend, firstNonEmpty(string(cfg.Runtime.StateBackend), "(default)"))
 	logger.Printf("  Auth:     %s", describeAuth(*authToken, *yolo))
 	logger.Printf("  Version: %s (%s, %s)", version, commit, buildTime)
 	if level := strings.TrimSpace(os.Getenv("LOG_LEVEL")); level != "" {
