@@ -22,6 +22,9 @@ func TestBuildDefaultRuntimeBootstrapBuildsDefaultRuntimePieces(t *testing.T) {
 	if bootstrap.ToolRuntime == nil || bootstrap.ToolRuntime.Registry() == nil {
 		t.Fatalf("ToolRuntime = %#v", bootstrap.ToolRuntime)
 	}
+	if bootstrap.Node.ToolRuntime() != bootstrap.ToolRuntime {
+		t.Fatalf("node tool runtime = %#v want %#v", bootstrap.Node.ToolRuntime(), bootstrap.ToolRuntime)
+	}
 }
 
 func TestBuildDefaultMemoryServiceBuildsMigratedRuntime(t *testing.T) {

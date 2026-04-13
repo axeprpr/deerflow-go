@@ -208,7 +208,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	}
 	runtimeNodeInstance := bootstrap.Node
 	sandboxRuntime := bootstrap.SandboxRuntime
-	toolRuntime := bootstrap.ToolRuntime
+	toolRuntime := runtimeNodeInstance.ToolRuntime()
 	registry := toolRuntime.Registry()
 	subagentPool := toolRuntime.Subagents()
 	if bootstrap.MemoryErr != nil {

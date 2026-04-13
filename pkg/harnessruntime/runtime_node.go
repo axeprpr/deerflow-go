@@ -65,6 +65,7 @@ type RuntimeNode struct {
 	Sandbox      *SandboxResourceManager
 	RemoteWorker *HTTPRemoteWorkerNode
 	Memory       *MemoryService
+	Tools        harness.ToolRuntime
 }
 
 func (c RuntimeNodeConfig) BuildRuntimeNode(runtime DispatchRuntimeConfig) (*RuntimeNode, error) {
@@ -146,6 +147,13 @@ func (n *RuntimeNode) RunDispatcher() RunDispatcher {
 		return nil
 	}
 	return n.Dispatcher
+}
+
+func (n *RuntimeNode) ToolRuntime() harness.ToolRuntime {
+	if n == nil {
+		return nil
+	}
+	return n.Tools
 }
 
 func (n *RuntimeNode) SandboxManager() *SandboxResourceManager {
@@ -253,6 +261,13 @@ func (n *RuntimeNode) BindMemoryService(service *MemoryService) {
 		return
 	}
 	n.Memory = service
+}
+
+func (n *RuntimeNode) BindToolRuntime(runtime harness.ToolRuntime) {
+	if n == nil {
+		return
+	}
+	n.Tools = runtime
 }
 
 func (c DispatchRuntimeConfig) hasBindings() bool {

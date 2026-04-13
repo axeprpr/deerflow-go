@@ -24,10 +24,12 @@ func BuildDefaultRuntimeBootstrap(config RuntimeNodeConfig, provider llm.LLMProv
 		return nil, err
 	}
 	sandboxRuntime := node.ConfiguredSandboxRuntime()
+	toolRuntime := NewDefaultToolRuntime(provider, clarify, sandboxRuntime)
+	node.BindToolRuntime(toolRuntime)
 	return &RuntimeBootstrap{
 		Node:           node,
 		SandboxRuntime: sandboxRuntime,
-		ToolRuntime:    NewDefaultToolRuntime(provider, clarify, sandboxRuntime),
+		ToolRuntime:    toolRuntime,
 	}, nil
 }
 
