@@ -61,3 +61,7 @@ func (s PortableAgentSpec) AgentSpec() harness.AgentSpec {
 type WorkerSpecRuntime interface {
 	ResolveWorkerAgentSpec(threadID string, spec PortableAgentSpec) harness.AgentSpec
 }
+
+type WorkerContextRuntime interface {
+	ResolveWorkerContextSpec(threadID string) harness.ContextSpec
+}

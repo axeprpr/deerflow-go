@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 
+	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
+	"github.com/axeprpr/deerflow-go/pkg/subagent"
 )
 
 type RunExecutor interface {
@@ -48,10 +50,11 @@ func (w RuntimeWorker) execute(ctx context.Context, req DispatchRequest) (*Dispa
 	}
 	handle := NewStaticExecutionHandle(prepared.Execution, prepared.Lifecycle.ThreadID)
 	if w.complete {
+		recorder := NewWorkerRunEventRecorder(w.events)
+		ctx = bindWorkerExecutionContext(ctx, runtime, w.specs, req.Plan, recorder)
 		eventsDone := make(chan struct{})
 		go func() {
 			defer close(eventsDone)
-			recorder := NewWorkerRunEventRecorder(w.events)
 			for evt := range prepared.Execution.Events() {
 				recorder.RecordAgentEvent(req.Plan, evt)
 			}
@@ -61,6 +64,7 @@ func (w RuntimeWorker) execute(ctx context.Context, req DispatchRequest) (*Dispa
 		if err != nil {
 			return nil, err
 		}
+		recorder.RecordCompletion(req.Plan, result)
 		return &DispatchResult{
 			Lifecycle: prepared.Lifecycle,
 			Execution: ExecutionDescriptor{
@@ -75,4 +79,47 @@ func (w RuntimeWorker) execute(ctx context.Context, req DispatchRequest) (*Dispa
 		Handle:    handle,
 		Execution: handle.Describe(),
 	}, nil
+}
+
+func bindWorkerExecutionContext(ctx context.Context, runtime *harness.Runtime, specs WorkerSpecRuntime, plan WorkerExecutionPlan, recorder WorkerRunEventRecorder) context.Context {
+	base := harness.ContextSpec{ThreadID: plan.ThreadID}
+	if resolver, ok := specs.(WorkerContextRuntime); ok {
+		base = resolver.ResolveWorkerContextSpec(plan.ThreadID)
+		if base.ThreadID == "" {
+			base.ThreadID = plan.ThreadID
+		}
+	}
+	base.Hooks = mergeWorkerRunHooks(base.Hooks, harness.RunHooks{
+		TaskSink: func(evt subagent.TaskEvent) {
+			recorder.RecordTaskEvent(plan, evt)
+		},
+		ClarificationSink: func(item *clarification.Clarification) {
+			recorder.RecordClarification(plan, item)
+		},
+	})
+	if runtime != nil {
+		return runtime.BindContext(ctx, base)
+	}
+	return harness.BindContext(ctx, base)
+}
+
+func mergeWorkerRunHooks(existing harness.RunHooks, extra harness.RunHooks) harness.RunHooks {
+	return harness.RunHooks{
+		TaskSink: func(evt subagent.TaskEvent) {
+			if existing.TaskSink != nil {
+				existing.TaskSink(evt)
+			}
+			if extra.TaskSink != nil {
+				extra.TaskSink(evt)
+			}
+		},
+		ClarificationSink: func(item *clarification.Clarification) {
+			if existing.ClarificationSink != nil {
+				existing.ClarificationSink(item)
+			}
+			if extra.ClarificationSink != nil {
+				extra.ClarificationSink(item)
+			}
+		},
+	}
 }

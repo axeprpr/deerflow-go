@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
+	"github.com/axeprpr/deerflow-go/pkg/clarification"
+	"github.com/axeprpr/deerflow-go/pkg/subagent"
 )
 
 type WorkerRunEventRecorder struct {
@@ -104,6 +106,55 @@ func (r WorkerRunEventRecorder) RecordAgentEvent(plan WorkerExecutionPlan, evt a
 			errData["retryable"] = evt.Error.Retryable
 		}
 		recordEvent("error", errData)
+	}
+}
+
+func (r WorkerRunEventRecorder) RecordTaskEvent(plan WorkerExecutionPlan, evt subagent.TaskEvent) {
+	if r.store == nil {
+		return
+	}
+	EventLogService{store: r.store}.RecordWithContext(workerRunEventContext(plan), plan.RunID, plan.ThreadID, evt.Type, map[string]any{
+		"type":           evt.Type,
+		"task_id":        evt.TaskID,
+		"request_id":     evt.RequestID,
+		"description":    evt.Description,
+		"message":        evt.Message,
+		"message_index":  evt.MessageIndex,
+		"total_messages": evt.TotalMessages,
+		"result":         evt.Result,
+		"error":          evt.Error,
+	})
+}
+
+func (r WorkerRunEventRecorder) RecordClarification(plan WorkerExecutionPlan, item *clarification.Clarification) {
+	if r.store == nil || item == nil {
+		return
+	}
+	EventLogService{store: r.store}.RecordWithContext(workerRunEventContext(plan), plan.RunID, plan.ThreadID, "clarification_request", item)
+}
+
+func (r WorkerRunEventRecorder) RecordCompletion(plan WorkerExecutionPlan, result *agent.RunResult) {
+	if r.store == nil {
+		return
+	}
+	payload := map[string]any{"run_id": plan.RunID}
+	if result != nil && result.Usage != nil {
+		payload["usage"] = result.Usage
+	}
+	EventLogService{store: r.store}.RecordWithContext(workerRunEventContext(plan), plan.RunID, plan.ThreadID, "end", payload)
+}
+
+func workerRunEventContext(plan WorkerExecutionPlan) RunEventContext {
+	return RunEventContext{
+		Attempt:         plan.Attempt,
+		ResumeFromEvent: plan.ResumeFromEvent,
+		ResumeReason:    plan.ResumeReason,
+		Outcome: RunOutcomeDescriptor{
+			RunStatus:       "running",
+			Attempt:         plan.Attempt,
+			ResumeFromEvent: plan.ResumeFromEvent,
+			ResumeReason:    plan.ResumeReason,
+		},
 	}
 }
 

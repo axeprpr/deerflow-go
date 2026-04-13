@@ -333,3 +333,15 @@ func (a runtimeWorkerSpecAdapter) ResolveWorkerAgentSpec(threadID string, spec h
 	}
 	return resolved
 }
+
+func (a runtimeWorkerSpecAdapter) ResolveWorkerContextSpec(threadID string) harness.ContextSpec {
+	spec := harness.ContextSpec{ThreadID: threadID}
+	if a.server == nil {
+		return spec
+	}
+	spec.ClarificationManager = a.server.clarify
+	spec.RuntimeContext = map[string]any{
+		"skill_paths": a.server.runtimeSkillPaths(),
+	}
+	return spec
+}

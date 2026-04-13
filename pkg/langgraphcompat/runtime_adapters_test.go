@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
@@ -107,5 +108,22 @@ func TestRuntimeWorkerSpecAdapterRehydratesThreadScopedState(t *testing.T) {
 	}
 	if got.Model != "model-1" || got.SystemPrompt != "system" {
 		t.Fatalf("resolved spec = %#v", got)
+	}
+}
+
+func TestRuntimeWorkerSpecAdapterResolvesWorkerContextSpec(t *testing.T) {
+	server := &Server{
+		clarify: clarification.NewManager(4),
+	}
+
+	spec := server.runtimeWorkerSpecAdapter().ResolveWorkerContextSpec("thread-1")
+	if spec.ThreadID != "thread-1" {
+		t.Fatalf("ThreadID = %q", spec.ThreadID)
+	}
+	if spec.ClarificationManager != server.clarify {
+		t.Fatal("ClarificationManager not rehydrated")
+	}
+	if _, ok := spec.RuntimeContext["skill_paths"]; !ok {
+		t.Fatalf("RuntimeContext = %#v", spec.RuntimeContext)
 	}
 }
