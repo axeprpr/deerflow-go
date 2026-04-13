@@ -38,17 +38,8 @@ func RunCommand(fs *flag.FlagSet, build BuildInfo, options CommandOptions) error
 	}
 	cfg = binding.Config()
 
-	if *yolo {
-		os.Setenv("DEERFLOW_YOLO", "1")
-		os.Setenv("ADDR", ":8080")
-		os.Setenv("DEERFLOW_DATA_ROOT", "./data")
-		os.Setenv("LOG_LEVEL", "info")
-		cfg.ApplyYoloDefaults(true)
-	}
-
-	if cfg.AuthToken != "" {
-		os.Setenv("DEERFLOW_AUTH_TOKEN", cfg.AuthToken)
-	}
+	cfg.ApplyYoloEnvironment(*yolo)
+	cfg.ApplyProcessEnvironment()
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("invalid runtime configuration: %w", err)
 	}

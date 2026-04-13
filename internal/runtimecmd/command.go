@@ -38,6 +38,9 @@ func RunCommand(fs *flag.FlagSet, options CommandOptions) error {
 	if err != nil {
 		return err
 	}
+	for _, line := range cfg.StartupLines() {
+		logger.Print(line)
+	}
 	spec := launcher.Spec()
 	readyLine, err := cfg.ReadyLine(spec)
 	if err != nil {
