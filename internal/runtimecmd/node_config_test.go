@@ -76,11 +76,22 @@ func TestDefaultLangGraphNodeConfigUsesEnvironmentOverrides(t *testing.T) {
 	if cfg.ThreadStoreURL != "sqlite:///tmp/threads.sqlite3" {
 		t.Fatalf("ThreadStoreURL = %q", cfg.ThreadStoreURL)
 	}
-	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendFile {
+	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendSQLite {
 		t.Fatalf("StateBackend = %q", cfg.StateBackend)
 	}
 	if cfg.StateRoot != "/tmp/state-root" {
 		t.Fatalf("StateRoot = %q", cfg.StateRoot)
+	}
+}
+
+func TestNodeConfigDerivesSharedStateBackendFromURLOverExplicitBackend(t *testing.T) {
+	cfg := NodeConfig{
+		Role:          harnessruntime.RuntimeNodeRoleWorker,
+		StateBackend:  harnessruntime.RuntimeStateStoreBackendFile,
+		StateStoreURL: "sqlite:///tmp/runtime.sqlite3",
+	}.withRoleDefaults()
+	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendSQLite {
+		t.Fatalf("StateBackend = %q", cfg.StateBackend)
 	}
 }
 
@@ -152,6 +163,15 @@ func TestNormalizeStateBackendSupportsSQLite(t *testing.T) {
 	}
 }
 
+func TestDeriveStateBackendFromStoreURL(t *testing.T) {
+	if got := deriveStateBackendFromStoreURL("sqlite:///tmp/runtime.sqlite3", harnessruntime.RuntimeStateStoreBackendInMemory); got != harnessruntime.RuntimeStateStoreBackendSQLite {
+		t.Fatalf("deriveStateBackendFromStoreURL(sqlite) = %q", got)
+	}
+	if got := deriveStateBackendFromStoreURL("file:///tmp/runs", harnessruntime.RuntimeStateStoreBackendInMemory); got != harnessruntime.RuntimeStateStoreBackendFile {
+		t.Fatalf("deriveStateBackendFromStoreURL(file) = %q", got)
+	}
+}
+
 func TestNormalizePresetSupportsKnownValues(t *testing.T) {
 	if got := NormalizePreset("shared-sqlite", RuntimeNodePresetAuto); got != RuntimeNodePresetSharedSQLite {
 		t.Fatalf("NormalizePreset() = %q", got)
@@ -192,6 +212,29 @@ func TestSharedSQLitePresetPromotesAllInOneToSharedState(t *testing.T) {
 	}
 	if cfg.MemoryStoreURL == "" {
 		t.Fatal("MemoryStoreURL = empty")
+	}
+}
+
+func TestNodeConfigDerivesBackendsFromStoreURLs(t *testing.T) {
+	cfg := NodeConfig{
+		Role:             harnessruntime.RuntimeNodeRoleAllInOne,
+		StateBackend:     harnessruntime.RuntimeStateStoreBackendInMemory,
+		StateStoreURL:    "sqlite:///tmp/runtime.sqlite3",
+		SnapshotStoreURL: "file:///tmp/snapshots",
+		EventStoreURL:    "sqlite:///tmp/events.sqlite3",
+		ThreadStoreURL:   "file:///tmp/threads",
+	}.withRoleDefaults()
+	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendSQLite {
+		t.Fatalf("StateBackend = %q", cfg.StateBackend)
+	}
+	if cfg.SnapshotBackend != harnessruntime.RuntimeStateStoreBackendFile {
+		t.Fatalf("SnapshotBackend = %q", cfg.SnapshotBackend)
+	}
+	if cfg.EventBackend != harnessruntime.RuntimeStateStoreBackendSQLite {
+		t.Fatalf("EventBackend = %q", cfg.EventBackend)
+	}
+	if cfg.ThreadBackend != harnessruntime.RuntimeStateStoreBackendFile {
+		t.Fatalf("ThreadBackend = %q", cfg.ThreadBackend)
 	}
 }
 

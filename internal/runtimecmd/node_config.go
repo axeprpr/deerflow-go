@@ -197,7 +197,7 @@ func (c NodeConfig) withRoleDefaults() NodeConfig {
 			c = c.applySharedSQLiteDefaults()
 		}
 	}
-	return c
+	return c.deriveStateBackendsFromStoreURLs()
 }
 
 func (c NodeConfig) applySharedSQLiteDefaults() NodeConfig {
@@ -377,6 +377,18 @@ func NormalizeStateBackend(value string, fallback harnessruntime.RuntimeStateSto
 	}
 }
 
+func deriveStateBackendFromStoreURL(raw string, fallback harnessruntime.RuntimeStateStoreBackend) harnessruntime.RuntimeStateStoreBackend {
+	trimmed := strings.TrimSpace(raw)
+	switch {
+	case strings.HasPrefix(trimmed, "sqlite://"):
+		return harnessruntime.RuntimeStateStoreBackendSQLite
+	case strings.HasPrefix(trimmed, "file://"):
+		return harnessruntime.RuntimeStateStoreBackendFile
+	default:
+		return fallback
+	}
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
@@ -411,6 +423,22 @@ func usesPersistentStateBackend(config harnessruntime.RuntimeStateStoreConfig) b
 		}
 	}
 	return false
+}
+
+func (c NodeConfig) deriveStateBackendsFromStoreURLs() NodeConfig {
+	if derived := deriveStateBackendFromStoreURL(c.StateStoreURL, ""); derived != "" {
+		c.StateBackend = derived
+	}
+	if derived := deriveStateBackendFromStoreURL(c.SnapshotStoreURL, ""); derived != "" {
+		c.SnapshotBackend = derived
+	}
+	if derived := deriveStateBackendFromStoreURL(c.EventStoreURL, ""); derived != "" {
+		c.EventBackend = derived
+	}
+	if derived := deriveStateBackendFromStoreURL(c.ThreadStoreURL, ""); derived != "" {
+		c.ThreadBackend = derived
+	}
+	return c
 }
 
 func effectiveStateBackend(override harnessruntime.RuntimeStateStoreBackend, fallback harnessruntime.RuntimeStateStoreBackend) harnessruntime.RuntimeStateStoreBackend {

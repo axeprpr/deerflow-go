@@ -63,10 +63,56 @@ func TestBindFlagsBuildsNodeConfig(t *testing.T) {
 	if cfg.ThreadStoreURL != "sqlite:///tmp/threads.sqlite3" {
 		t.Fatalf("ThreadStoreURL = %q", cfg.ThreadStoreURL)
 	}
-	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendFile {
+	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendSQLite {
 		t.Fatalf("StateBackend = %q", cfg.StateBackend)
 	}
 	if cfg.StateRoot != "/tmp/state" {
 		t.Fatalf("StateRoot = %q", cfg.StateRoot)
+	}
+}
+
+func TestBindFlagsStateStoreURLOverridesStateBackend(t *testing.T) {
+	fs := flag.NewFlagSet("runtime", flag.ContinueOnError)
+	defaults := DefaultRuntimeWorkerNodeConfig()
+	binding := BindFlags(fs, defaults, "", "")
+	if err := fs.Parse([]string{
+		"-state-backend=file",
+		"-state-store=sqlite:///tmp/runtime.sqlite3",
+	}); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	cfg := binding.Config()
+	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendSQLite {
+		t.Fatalf("StateBackend = %q", cfg.StateBackend)
+	}
+}
+
+func TestBindFlagsDerivesBackendsFromStoreURLs(t *testing.T) {
+	fs := flag.NewFlagSet("runtime", flag.ContinueOnError)
+	defaults := DefaultRuntimeWorkerNodeConfig()
+	binding := BindFlags(fs, defaults, "", "")
+	if err := fs.Parse([]string{
+		"-state-store=sqlite:///tmp/runtime.sqlite3",
+		"-snapshot-store=file:///tmp/snapshots",
+		"-event-store=sqlite:///tmp/events.sqlite3",
+		"-thread-store=file:///tmp/threads",
+		"-state-backend=in-memory",
+	}); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	cfg := binding.Config()
+	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendSQLite {
+		t.Fatalf("StateBackend = %q", cfg.StateBackend)
+	}
+	if cfg.SnapshotBackend != harnessruntime.RuntimeStateStoreBackendFile {
+		t.Fatalf("SnapshotBackend = %q", cfg.SnapshotBackend)
+	}
+	if cfg.EventBackend != harnessruntime.RuntimeStateStoreBackendSQLite {
+		t.Fatalf("EventBackend = %q", cfg.EventBackend)
+	}
+	if cfg.ThreadBackend != harnessruntime.RuntimeStateStoreBackendFile {
+		t.Fatalf("ThreadBackend = %q", cfg.ThreadBackend)
 	}
 }
