@@ -109,6 +109,10 @@ func (c RuntimeNodeConfig) BuildRemoteWorkerHandler(runtime DispatchRuntimeConfi
 }
 
 func (c RuntimeNodeConfig) BuildRemoteWorkerHTTPServer(runtime DispatchRuntimeConfig) *http.Server {
+	return c.BuildRemoteWorkerHTTPServerWithTransport(c.BuildWorkerTransport(runtime), defaultRemoteWorkerProtocol(runtime.Protocol, runtime.Results))
+}
+
+func (c RuntimeNodeConfig) BuildRemoteWorkerHTTPServerWithTransport(transport WorkerTransport, protocol RemoteWorkerProtocol) *http.Server {
 	config := c.RemoteWorker
 	addr := config.Addr
 	if addr == "" {
@@ -120,7 +124,7 @@ func (c RuntimeNodeConfig) BuildRemoteWorkerHTTPServer(runtime DispatchRuntimeCo
 	}
 	return &http.Server{
 		Addr:              addr,
-		Handler:           c.BuildRemoteWorkerHandler(runtime),
+		Handler:           NewHTTPRemoteWorkerServer(transport, protocol).Handler(),
 		ReadHeaderTimeout: timeout,
 	}
 }

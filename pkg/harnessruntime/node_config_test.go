@@ -237,3 +237,51 @@ func TestRuntimeNodeConfigBuildDispatchRuntimeSuppliesNodeDefaults(t *testing.T)
 		t.Fatal("runtime.Results is nil")
 	}
 }
+
+func TestRuntimeNodeConfigBuildRuntimeNodeWithProvidersOverridesDefaultBuilders(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	customState := RuntimeStatePlane{
+		Snapshots: NewInMemoryRunStore(),
+		Events:    NewInMemoryRunEventStore(),
+		Threads:   NewInMemoryThreadStateStore(),
+	}
+	executor := &fakeExecutor{}
+	customSandbox := NewLocalSandboxManager("custom-runtime", t.TempDir())
+	node, err := config.BuildRuntimeNodeWithProviders(DispatchRuntimeConfig{
+		Codec: WorkerPlanCodec{},
+	}, RuntimeNodeProviders{
+		StatePlane: RuntimeStatePlaneFactoryFunc(func(RuntimeNodeConfig) RuntimeStatePlane {
+			return customState
+		}),
+		Transport: WorkerTransportFactoryFunc(func(_ WorkerTransportConfig, runtime DispatchRuntimeConfig) WorkerTransport {
+			return NewDirectWorkerTransportWithResults(executor, DispatchEnvelopeCodec{Plans: runtime.Codec}, nil)
+		}),
+		Sandbox: SandboxManagerFactoryFunc(func(SandboxManagerConfig) (*SandboxResourceManager, error) {
+			return customSandbox, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("BuildRuntimeNodeWithProviders() error = %v", err)
+	}
+	if node.State.Snapshots != customState.Snapshots || node.State.Events != customState.Events || node.State.Threads != customState.Threads {
+		t.Fatalf("state = %#v", node.State)
+	}
+	if node.Sandbox != customSandbox {
+		t.Fatalf("sandbox = %#v", node.Sandbox)
+	}
+	result, err := node.Dispatcher.Dispatch(context.Background(), DispatchRequest{
+		Plan: WorkerExecutionPlan{RunID: "run-providers", ThreadID: "thread-providers"},
+	})
+	if err != nil {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+	if !executor.called || executor.req.Plan.RunID != "run-providers" {
+		t.Fatalf("executor req = %#v", executor.req)
+	}
+	if result == nil || result.Lifecycle == nil || result.Lifecycle.ThreadID != "thread-providers" {
+		t.Fatalf("result = %#v", result)
+	}
+	if err := node.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}

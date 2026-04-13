@@ -2,6 +2,58 @@ package harnessruntime
 
 import "context"
 
+type RuntimeStatePlaneFactory interface {
+	Build(RuntimeNodeConfig) RuntimeStatePlane
+}
+
+type RuntimeStatePlaneFactoryFunc func(RuntimeNodeConfig) RuntimeStatePlane
+
+func (f RuntimeStatePlaneFactoryFunc) Build(config RuntimeNodeConfig) RuntimeStatePlane {
+	return f(config)
+}
+
+type WorkerTransportFactory interface {
+	Build(WorkerTransportConfig, DispatchRuntimeConfig) WorkerTransport
+}
+
+type WorkerTransportFactoryFunc func(WorkerTransportConfig, DispatchRuntimeConfig) WorkerTransport
+
+func (f WorkerTransportFactoryFunc) Build(config WorkerTransportConfig, runtime DispatchRuntimeConfig) WorkerTransport {
+	return f(config, runtime)
+}
+
+type SandboxManagerBuilder interface {
+	Build(SandboxManagerConfig) (*SandboxResourceManager, error)
+}
+
+type SandboxManagerFactoryFunc func(SandboxManagerConfig) (*SandboxResourceManager, error)
+
+func (f SandboxManagerFactoryFunc) Build(config SandboxManagerConfig) (*SandboxResourceManager, error) {
+	return f(config)
+}
+
+type RuntimeNodeProviders struct {
+	StatePlane RuntimeStatePlaneFactory
+	Transport  WorkerTransportFactory
+	Sandbox    SandboxManagerBuilder
+}
+
+func DefaultRuntimeNodeProviders() RuntimeNodeProviders {
+	return RuntimeNodeProviders{
+		StatePlane: RuntimeStatePlaneFactoryFunc(func(config RuntimeNodeConfig) RuntimeStatePlane {
+			return RuntimeStatePlane{
+				Snapshots: config.BuildRunSnapshotStore(),
+				Events:    config.BuildRunEventStore(),
+				Threads:   config.BuildThreadStateStore(),
+			}
+		}),
+		Transport: WorkerTransportFactoryFunc(func(config WorkerTransportConfig, runtime DispatchRuntimeConfig) WorkerTransport {
+			return buildWorkerTransport(config, runtime)
+		}),
+		Sandbox: DefaultSandboxManagerFactory(),
+	}
+}
+
 type RuntimeNode struct {
 	Config       RuntimeNodeConfig
 	State        RuntimeStatePlane
@@ -11,16 +63,31 @@ type RuntimeNode struct {
 }
 
 func (c RuntimeNodeConfig) BuildRuntimeNode(runtime DispatchRuntimeConfig) (*RuntimeNode, error) {
-	sandboxManager, err := c.BuildSandboxManager()
+	return c.BuildRuntimeNodeWithProviders(runtime, DefaultRuntimeNodeProviders())
+}
+
+func (c RuntimeNodeConfig) BuildRuntimeNodeWithProviders(runtime DispatchRuntimeConfig, providers RuntimeNodeProviders) (*RuntimeNode, error) {
+	if providers.StatePlane == nil {
+		providers.StatePlane = DefaultRuntimeNodeProviders().StatePlane
+	}
+	if providers.Transport == nil {
+		providers.Transport = DefaultRuntimeNodeProviders().Transport
+	}
+	if providers.Sandbox == nil {
+		providers.Sandbox = DefaultRuntimeNodeProviders().Sandbox
+	}
+	sandboxManager, err := providers.Sandbox.Build(c.Sandbox)
 	if err != nil {
 		return nil, err
 	}
+	transport := providers.Transport.Build(c.Transport, runtime)
+	protocol := defaultRemoteWorkerProtocol(runtime.Protocol, runtime.Results)
 	return &RuntimeNode{
 		Config:       c,
-		State:        c.BuildStatePlane(),
-		Dispatcher:   c.BuildDispatcher(runtime),
+		State:        providers.StatePlane.Build(c),
+		Dispatcher:   transportRunDispatcher{transport: transport, codec: DispatchEnvelopeCodec{Plans: runtime.Codec}},
 		Sandbox:      sandboxManager,
-		RemoteWorker: c.BuildRemoteWorkerNode(runtime),
+		RemoteWorker: NewHTTPRemoteWorkerNode(c.BuildRemoteWorkerHTTPServerWithTransport(transport, protocol)),
 	}, nil
 }
 
