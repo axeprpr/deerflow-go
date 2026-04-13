@@ -1,6 +1,7 @@
 package harnessruntime
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -171,22 +172,23 @@ func newPollingRunEventSubscription(buffer int, load func() []RunEvent) (<-chan 
 	done := make(chan struct{})
 	go func() {
 		defer close(out)
-		last := 0
+		seen := map[string]struct{}{}
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
 		for {
 			events := load()
-			if last > len(events) {
-				last = 0
-			}
-			for _, event := range events[last:] {
+			for i, event := range events {
+				key := runEventSubscriptionKey(i, event)
+				if _, ok := seen[key]; ok {
+					continue
+				}
 				select {
 				case out <- event:
+					seen[key] = struct{}{}
 				case <-done:
 					return
 				}
 			}
-			last = len(events)
 			select {
 			case <-done:
 				return
@@ -195,4 +197,11 @@ func newPollingRunEventSubscription(buffer int, load func() []RunEvent) (<-chan 
 		}
 	}()
 	return out, func() { close(done) }
+}
+
+func runEventSubscriptionKey(index int, event RunEvent) string {
+	if strings.TrimSpace(event.ID) != "" {
+		return event.ID
+	}
+	return fmt.Sprintf("%d:%s:%s:%s:%d:%s", index, event.Event, event.RunID, event.ThreadID, event.Attempt, event.ResumeReason)
 }

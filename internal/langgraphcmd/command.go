@@ -25,78 +25,43 @@ type CommandOptions struct {
 }
 
 func RunCommand(fs *flag.FlagSet, build BuildInfo, options CommandOptions) error {
+	prepared, err := PrepareCommand(fs, build, options)
+	if err != nil {
+		return err
+	}
+	return prepared.Run()
+}
+
+func PrepareCommand(fs *flag.FlagSet, build BuildInfo, options CommandOptions) (*commandrun.PreparedCommand, error) {
 	if fs == nil {
 		fs = flag.CommandLine
 	}
-	logger := log.New(orStderr(options.Stderr), "[deerflow] ", log.LstdFlags)
+	logger := log.New(commandrun.OutputWriter(options.Stderr), "[deerflow] ", log.LstdFlags)
 
 	yolo := fs.Bool("yolo", false, "YOLO mode: no auth, defaults for all settings")
 	cfg := DefaultConfig()
 	binding := BindFlags(fs, cfg)
-	if err := fs.Parse(commandArgs(fs, options.Args)); err != nil {
-		return err
+	if err := fs.Parse(commandrun.CommandArgs(fs, options.Args)); err != nil {
+		return nil, err
 	}
 	cfg = binding.Config()
 
 	cfg.ApplyYoloEnvironment(*yolo)
 	cfg.ApplyProcessEnvironment()
 	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("invalid runtime configuration: %w", err)
-	}
-
-	for _, line := range cfg.StartupLines(build, *yolo, strings.TrimSpace(os.Getenv("LOG_LEVEL"))) {
-		logger.Print(line)
+		return nil, fmt.Errorf("invalid runtime configuration: %w", err)
 	}
 
 	launcher, err := cfg.BuildLauncher()
 	if err != nil {
-		return fmt.Errorf("failed to create server: %w", err)
+		return nil, fmt.Errorf("failed to create server: %w", err)
 	}
-	for _, line := range cfg.ReadyLines() {
-		logger.Print(line)
-	}
-	return commandrun.Run(logger, launcher, 15*time.Second, http.ErrServerClosed)
-}
-
-func describeDB(dbURL string) string {
-	if dbURL == "" {
-		return "(file storage: $DEERFLOW_DATA_ROOT or /tmp/deerflow-go-data)"
-	}
-	return dbURL
-}
-
-func describeAuth(token string, yolo bool) string {
-	if yolo {
-		return "disabled (YOLO mode)"
-	}
-	if token == "" {
-		return "disabled (no token set)"
-	}
-	return "enabled (Bearer token required)"
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
-
-func orStderr(w io.Writer) io.Writer {
-	if w != nil {
-		return w
-	}
-	return os.Stderr
-}
-
-func commandArgs(fs *flag.FlagSet, explicit []string) []string {
-	if explicit != nil {
-		return explicit
-	}
-	if fs == flag.CommandLine {
-		return os.Args[1:]
-	}
-	return nil
+	return &commandrun.PreparedCommand{
+		Logger:          logger,
+		Lifecycle:       launcher,
+		StartupLines:    cfg.StartupLines(build, *yolo, strings.TrimSpace(os.Getenv("LOG_LEVEL"))),
+		ReadyLines:      cfg.ReadyLines(),
+		ShutdownTimeout: 15 * time.Second,
+		IgnoredErrors:   []error{http.ErrServerClosed},
+	}, nil
 }

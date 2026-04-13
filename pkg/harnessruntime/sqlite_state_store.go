@@ -180,13 +180,14 @@ func (s *SQLiteRunEventStore) AppendRunEvent(runID string, event RunEvent) {
 	if err != nil {
 		return
 	}
-	index := s.NextRunEventIndex(runID)
 	_, _ = s.db.Exec(`
 		insert into run_events (run_id, event_index, event_json)
-		values (?, ?, ?)
-		on conflict (run_id, event_index) do update set
-			event_json = excluded.event_json
-	`, runID, index, data)
+		values (
+			?,
+			coalesce((select max(event_index) + 1 from run_events where run_id = ?), 1),
+			?
+		)
+	`, runID, runID, data)
 }
 
 func (s *SQLiteRunEventStore) LoadRunEvents(runID string) []RunEvent {
