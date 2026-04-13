@@ -42,42 +42,48 @@ flowchart TD
 ```mermaid
 flowchart TD
     UI[Upstream DeerFlow Frontend]
-    Compat[pkg/langgraphcompat<br/>HTTP / SSE protocol compatibility]
-    CompatState[Compat State / Persistence View]
-    Harness[pkg/harness<br/>factory / runner / lifecycle / boundaries]
-    Runtime[pkg/harnessruntime<br/>orchestrator / completion / query / event / snapshot / profile]
+    Compat[pkg/langgraphcompat<br/>HTTP / SSE / DeerFlow-compatible API]
+    Node[pkg/harnessruntime RuntimeNode<br/>state plane / sandbox manager / dispatch / remote worker]
+    Runtime[pkg/harness + pkg/harnessruntime<br/>runtime assembly / coordinator / recovery / profiles]
     Agent[pkg/agent<br/>custom ReAct loop]
+    State[Runtime State Plane<br/>snapshots / events / threads]
+    Dispatch[Worker Transport<br/>direct / queued / remote]
+    Remote[Remote Worker Node<br/>HTTP client / server / protocol]
+    SandboxMgr[Sandbox Resource Service<br/>lease / heartbeat / eviction]
     ToolRuntime[Tool Runtime]
-    SandboxRuntime[Sandbox Runtime]
     Providers[pkg/llm]
     Tools[pkg/tools]
     Memory[pkg/memory]
     Sandbox[pkg/sandbox]
 
     UI --> Compat
-    Compat <--> CompatState
-    Compat --> Harness
-    Harness --> Runtime
-    Harness --> Agent
+    Compat --> Node
+    Compat --> Runtime
+    Node --> State
+    Node --> Dispatch
+    Node --> Remote
+    Node --> SandboxMgr
+    Runtime --> Agent
     Runtime --> ToolRuntime
-    Runtime --> SandboxRuntime
-    Runtime --> CompatState
+    Runtime --> Memory
+    Dispatch --> Runtime
     Agent --> Providers
     Agent --> Tools
     ToolRuntime --> Tools
-    Runtime --> Memory
-    SandboxRuntime --> Sandbox
+    SandboxMgr --> Sandbox
 ```
 
 ## Layers
 
-The repository is organized around five main layers:
+The repository is organized around six main layers:
 
 - `cmd/langgraph`: process entrypoint and server bootstrap
-- `pkg/langgraphcompat`: DeerFlow-compatible HTTP, thread/run lifecycle, gateway state, uploads, artifacts, and SSE
-- `pkg/harness`, `pkg/harnessruntime`: runtime assembly, lifecycle, profiles, orchestration, events, and snapshots
+- `pkg/langgraphcompat`: DeerFlow-compatible HTTP, gateway state, uploads, artifacts, threads/runs, and SSE
+- `pkg/harness`: runtime assembly boundary, lifecycle/profile wiring, and agent-facing abstractions
+- `pkg/harnessruntime`: runtime node, state plane, coordinator, dispatch, recovery, remote worker, sandbox manager, and bootstrap
 - `pkg/agent`, `pkg/llm`, `pkg/tools`: Go-native agent loop, model adapters, and tool execution
 - `pkg/memory`, `pkg/sandbox`: durable memory and execution isolation
+- `TODO.md`: current architecture roadmap and remaining runtime work
 
 Reference documents:
 

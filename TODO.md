@@ -125,10 +125,33 @@ Sandbox backend plan:
   - `heartbeat`
   - `release`
 
-### Immediate Next Steps
+## Remaining Large TODOs
 
-1. design the run snapshot store interface
-2. design the event log append/replay interface
-3. design the coordinator boundary between gateway and worker runtime
-4. design the sandbox lease service interface
-5. keep all changes gated by UI contract tests
+1. Finish runtime-owned refresh/rebuild of `harness.Runtime`
+   - reduce `langgraphcompat.runtimeView()` rebuilding logic
+   - move more runtime refresh rules behind `RuntimeNode` / `harnessruntime`
+   - keep profile/lifecycle injection compatible with upstream UI behavior
+
+2. Make deployment split first-class
+   - add real gateway-node / worker-node startup modes
+   - wire remote worker server/client through process entrypoints, not only library helpers
+   - keep single-node mode as the default fast path
+
+3. Promote state backends beyond local memory/file
+   - add store/provider wiring for shared snapshot/event/thread backends
+   - support true multi-instance run recovery and join/replay
+   - avoid reintroducing process-local truth in compat maps
+
+4. Finish sandbox backend implementations
+   - `container`
+   - `remote`
+   - `windows-restricted`
+   - keep `local-linux` as the fast default backend
+
+5. Finish memory scope rollout
+   - move from session/agent groundwork to real `user` / `group` shared memory
+   - define persistence, injection, and update rules per scope
+   - keep gateway memory APIs consistent with runtime-owned memory state
+
+6. Keep all changes gated by upstream UI contract tests
+   - UI-visible route/status/body/SSE compatibility remains non-negotiable
