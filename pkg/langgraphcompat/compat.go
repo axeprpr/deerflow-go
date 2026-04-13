@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -188,7 +189,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	ctx := context.Background()
 
 	// Create LLM provider
-	provider := llm.NewProvider("siliconflow")
+	provider := llm.NewProvider(defaultRuntimeProvider())
 
 	clarifyManager := clarification.NewManager(32)
 	sandboxRoot := filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
@@ -271,6 +272,10 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	}
 
 	return s, nil
+}
+
+func defaultRuntimeProvider() string {
+	return firstNonEmpty(strings.TrimSpace(os.Getenv("DEFAULT_LLM_PROVIDER")), "siliconflow")
 }
 
 func (s *Server) attachRuntimeBootstrap(bootstrap *harnessruntime.RuntimeBootstrap) {

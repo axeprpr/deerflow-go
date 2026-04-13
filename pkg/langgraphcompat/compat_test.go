@@ -63,6 +63,13 @@ func TestNewServerDefaultsMainRunMaxTurnsToUpstreamRecursionLimit(t *testing.T) 
 	}
 }
 
+func TestDefaultRuntimeProviderUsesConfiguredProvider(t *testing.T) {
+	t.Setenv("DEFAULT_LLM_PROVIDER", "openai")
+	if got := defaultRuntimeProvider(); got != "openai" {
+		t.Fatalf("defaultRuntimeProvider() = %q, want %q", got, "openai")
+	}
+}
+
 func TestNewServerUsesStableRuntimeBoundaries(t *testing.T) {
 	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
 
