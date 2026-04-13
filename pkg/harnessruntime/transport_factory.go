@@ -81,9 +81,13 @@ func buildWorkerTransport(config WorkerTransportConfig, runtime DispatchRuntimeC
 	case WorkerTransportBackendDirect:
 		return NewDirectWorkerTransportWithResults(executor, codec, runtime.Results)
 	case WorkerTransportBackendRemote:
+		client := runtime.Remote
+		if client == nil {
+			client = NewHTTPRemoteWorkerClient(nil)
+		}
 		return remoteWorkerTransport{
 			endpoint: config.Endpoint,
-			client:   runtime.Remote,
+			client:   client,
 			protocol: defaultRemoteWorkerProtocol(runtime.Protocol, runtime.Results),
 		}
 	default:

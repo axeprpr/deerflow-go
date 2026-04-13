@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -133,20 +135,6 @@ func TestRuntimeDispatcherRemoteTopologyRequiresEndpoint(t *testing.T) {
 	}
 }
 
-func TestRuntimeDispatcherRemoteTopologyRequiresClient(t *testing.T) {
-	dispatcher := NewRuntimeDispatcher(DispatchConfig{
-		Topology: DispatchTopologyRemote,
-		Endpoint: "http://worker",
-	}, DispatchRuntimeConfig{})
-
-	_, err := dispatcher.Dispatch(context.Background(), DispatchRequest{
-		Plan: WorkerExecutionPlan{ThreadID: "thread-remote"},
-	})
-	if err == nil || err.Error() != "remote worker client is not configured" {
-		t.Fatalf("Dispatch() error = %v", err)
-	}
-}
-
 func TestRuntimeDispatcherUsesEnvelopeCodec(t *testing.T) {
 	executor := &fakeExecutor{}
 	codec := &fakePlanCodec{}
@@ -185,6 +173,43 @@ func TestRuntimeDispatcherDirectTopologyUsesResultCodec(t *testing.T) {
 		t.Fatalf("result codec usage = encode:%v decode:%v", results.encoded, results.decoded)
 	}
 	if result == nil || result.Lifecycle == nil || result.Lifecycle.ThreadID != "thread-results" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestRuntimeDispatcherRemoteTopologyUsesDefaultHTTPClient(t *testing.T) {
+	results := &fakeResultCodec{
+		last: &DispatchResult{
+			Lifecycle: &harness.RunState{ThreadID: "thread-remote"},
+			Execution: ExecutionDescriptor{Kind: ExecutionKindLocalPrepared, SessionID: "thread-remote"},
+		},
+	}
+	encodedResult, err := results.Encode(results.last)
+	if err != nil {
+		t.Fatalf("results.Encode() error = %v", err)
+	}
+	response, err := json.Marshal(RemoteWorkerResponse{Result: encodedResult})
+	if err != nil {
+		t.Fatalf("Marshal(response) error = %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(response)
+	}))
+	defer server.Close()
+
+	dispatcher := NewRuntimeDispatcher(DispatchConfig{
+		Topology: DispatchTopologyRemote,
+		Endpoint: server.URL,
+	}, DispatchRuntimeConfig{Results: results})
+
+	result, err := dispatcher.Dispatch(context.Background(), DispatchRequest{
+		Plan: WorkerExecutionPlan{ThreadID: "thread-remote"},
+	})
+	if err != nil {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+	if result == nil || result.Lifecycle == nil || result.Lifecycle.ThreadID != "thread-remote" {
 		t.Fatalf("result = %#v", result)
 	}
 }
