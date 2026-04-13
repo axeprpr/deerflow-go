@@ -197,3 +197,32 @@ func TestHTTPRemoteWorkerNodeShutdownDelegatesToServer(t *testing.T) {
 		t.Fatalf("Shutdown() error = %v", err)
 	}
 }
+
+func TestRuntimeNodeConfigBuildRuntimeNodeWiresCoreServices(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	node, err := config.BuildRuntimeNode(DispatchRuntimeConfig{
+		Executor: &fakeExecutor{},
+		Results:  DispatchResultCodec{Handles: NewInMemoryExecutionHandleRegistry()},
+	})
+	if err != nil {
+		t.Fatalf("BuildRuntimeNode() error = %v", err)
+	}
+	if node == nil {
+		t.Fatal("node is nil")
+	}
+	if node.Sandbox == nil {
+		t.Fatal("node.Sandbox is nil")
+	}
+	if node.Dispatcher == nil {
+		t.Fatal("node.Dispatcher is nil")
+	}
+	if node.State.Snapshots == nil || node.State.Events == nil || node.State.Threads == nil {
+		t.Fatalf("state = %#v", node.State)
+	}
+	if node.RemoteWorker == nil || node.RemoteWorker.Server() == nil {
+		t.Fatalf("remote worker = %#v", node.RemoteWorker)
+	}
+	if err := node.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
