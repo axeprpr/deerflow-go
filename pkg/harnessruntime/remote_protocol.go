@@ -25,6 +25,23 @@ func (p JSONRemoteWorkerProtocol) EncodeRequest(env WorkerDispatchEnvelope) ([]b
 	return json.Marshal(RemoteWorkerRequest{Envelope: env})
 }
 
+func (p JSONRemoteWorkerProtocol) DecodeRequest(data []byte) (WorkerDispatchEnvelope, error) {
+	var request RemoteWorkerRequest
+	if err := json.Unmarshal(data, &request); err != nil {
+		return WorkerDispatchEnvelope{}, err
+	}
+	return request.Envelope, nil
+}
+
+func (p JSONRemoteWorkerProtocol) EncodeResponse(result *DispatchResult) ([]byte, error) {
+	results := defaultDispatchResultCodec(p.Results)
+	payload, err := results.Encode(result)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(RemoteWorkerResponse{Result: payload})
+}
+
 func (p JSONRemoteWorkerProtocol) DecodeResponse(data []byte) (*DispatchResult, error) {
 	var response RemoteWorkerResponse
 	if err := json.Unmarshal(data, &response); err != nil {

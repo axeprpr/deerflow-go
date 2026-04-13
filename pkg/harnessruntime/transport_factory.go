@@ -39,6 +39,8 @@ type RemoteWorkerClient interface {
 
 type RemoteWorkerProtocol interface {
 	EncodeRequest(WorkerDispatchEnvelope) ([]byte, error)
+	DecodeRequest([]byte) (WorkerDispatchEnvelope, error)
+	EncodeResponse(*DispatchResult) ([]byte, error)
 	DecodeResponse([]byte) (*DispatchResult, error)
 }
 

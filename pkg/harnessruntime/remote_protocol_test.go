@@ -32,14 +32,17 @@ func TestJSONRemoteWorkerProtocolRoundTrip(t *testing.T) {
 	if decodedRequest.Envelope.RunID != "run-1" || decodedRequest.Envelope.Attempt != 2 {
 		t.Fatalf("decoded request = %+v", decodedRequest)
 	}
-
-	encodedResult, err := resultCodec.Encode(resultCodec.last)
+	envelope, err := protocol.DecodeRequest(request)
 	if err != nil {
-		t.Fatalf("Encode(result) error = %v", err)
+		t.Fatalf("DecodeRequest() error = %v", err)
 	}
-	response, err := json.Marshal(RemoteWorkerResponse{Result: encodedResult})
+	if envelope.RunID != "run-1" || envelope.Attempt != 2 {
+		t.Fatalf("envelope = %+v", envelope)
+	}
+
+	response, err := protocol.EncodeResponse(resultCodec.last)
 	if err != nil {
-		t.Fatalf("Marshal(response) error = %v", err)
+		t.Fatalf("EncodeResponse() error = %v", err)
 	}
 	result, err := protocol.DecodeResponse(response)
 	if err != nil {
