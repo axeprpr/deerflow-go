@@ -64,9 +64,6 @@ func newCompatRunStateStore(server *Server, snapshots harnessruntime.RunSnapshot
 			store = node.SnapshotStore()
 		}
 	}
-	if store == nil && server != nil {
-		store = server.runtimeNode.BuildRunSnapshotStore()
-	}
 	if store == nil {
 		store = harnessruntime.NewInMemoryRunStore()
 	}
@@ -74,9 +71,6 @@ func newCompatRunStateStore(server *Server, snapshots harnessruntime.RunSnapshot
 		if node := server.ensureRuntimeSystem(); node != nil {
 			events = node.EventStore()
 		}
-	}
-	if events == nil && server != nil {
-		events = server.runtimeNode.BuildRunEventStore()
 	}
 	if events == nil {
 		if shared, ok := store.(harnessruntime.RunEventStore); ok {

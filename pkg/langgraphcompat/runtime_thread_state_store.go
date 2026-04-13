@@ -34,9 +34,6 @@ func newCompatThreadStateStore(server *Server, initial harnessruntime.ThreadStat
 			store = node.ThreadStateStore()
 		}
 	}
-	if store == nil && server != nil {
-		store = server.runtimeNode.BuildThreadStateStore()
-	}
 	if store == nil {
 		store = harnessruntime.NewInMemoryThreadStateStore()
 	}
