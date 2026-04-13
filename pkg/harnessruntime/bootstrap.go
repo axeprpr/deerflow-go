@@ -104,6 +104,18 @@ func BuildDefaultRuntimeSystemLauncherWithMemory(ctx context.Context, config Run
 	return bootstrap, bootstrap.EnsureLauncher(source, specs), nil
 }
 
+func BuildDefaultAllInOneRuntimeSystemLauncherWithMemory(ctx context.Context, name, root, dataRoot string, provider llm.LLMProvider, clarify *clarification.Manager, maxTurns int, profileBuilder RuntimeProfileBuilderFactory, source func() *harness.Runtime, specs WorkerSpecRuntime) (*RuntimeBootstrap, *RuntimeNodeLauncher, error) {
+	return BuildDefaultRuntimeSystemLauncherWithMemory(ctx, DefaultRuntimeNodeConfig(name, root), dataRoot, provider, clarify, maxTurns, profileBuilder, source, specs)
+}
+
+func BuildDefaultGatewayRuntimeSystemLauncherWithMemory(ctx context.Context, name, root, endpoint, dataRoot string, provider llm.LLMProvider, clarify *clarification.Manager, maxTurns int, profileBuilder RuntimeProfileBuilderFactory, source func() *harness.Runtime, specs WorkerSpecRuntime) (*RuntimeBootstrap, *RuntimeNodeLauncher, error) {
+	return BuildDefaultRuntimeSystemLauncherWithMemory(ctx, DefaultGatewayRuntimeNodeConfig(name, root, endpoint), dataRoot, provider, clarify, maxTurns, profileBuilder, source, specs)
+}
+
+func BuildDefaultWorkerRuntimeSystemLauncherWithMemory(ctx context.Context, name, root, dataRoot string, provider llm.LLMProvider, clarify *clarification.Manager, maxTurns int, profileBuilder RuntimeProfileBuilderFactory, source func() *harness.Runtime, specs WorkerSpecRuntime) (*RuntimeBootstrap, *RuntimeNodeLauncher, error) {
+	return BuildDefaultRuntimeSystemLauncherWithMemory(ctx, DefaultWorkerRuntimeNodeConfig(name, root), dataRoot, provider, clarify, maxTurns, profileBuilder, source, specs)
+}
+
 func RefreshHarnessRuntime(node *RuntimeNode, provider llm.LLMProvider, maxTurns int, current *harness.Runtime, profileBuilder RuntimeProfileBuilderFactory) *harness.Runtime {
 	var (
 		memoryRuntime  *harness.MemoryRuntime

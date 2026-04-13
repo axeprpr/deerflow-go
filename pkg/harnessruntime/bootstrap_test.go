@@ -140,6 +140,38 @@ func TestBuildDefaultRuntimeSystemLauncherWithMemoryBuildsLauncher(t *testing.T)
 	}
 }
 
+func TestBuildDefaultGatewayRuntimeSystemLauncherWithMemoryUsesGatewayRole(t *testing.T) {
+	bootstrap, launcher, err := BuildDefaultGatewayRuntimeSystemLauncherWithMemory(context.Background(), "runtime-test", t.TempDir(), "http://worker:8081/dispatch", t.TempDir(), nil, clarification.NewManager(4), 100, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("BuildDefaultGatewayRuntimeSystemLauncherWithMemory() error = %v", err)
+	}
+	if bootstrap.Node.Config.Role != RuntimeNodeRoleGateway {
+		t.Fatalf("role = %q, want %q", bootstrap.Node.Config.Role, RuntimeNodeRoleGateway)
+	}
+	if launcher.Spec().Role != RuntimeNodeRoleGateway {
+		t.Fatalf("launcher role = %q, want %q", launcher.Spec().Role, RuntimeNodeRoleGateway)
+	}
+	if launcher.Handler() != nil {
+		t.Fatalf("Handler() = %#v, want nil", launcher.Handler())
+	}
+}
+
+func TestBuildDefaultWorkerRuntimeSystemLauncherWithMemoryUsesWorkerRole(t *testing.T) {
+	bootstrap, launcher, err := BuildDefaultWorkerRuntimeSystemLauncherWithMemory(context.Background(), "runtime-test", t.TempDir(), t.TempDir(), nil, clarification.NewManager(4), 100, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("BuildDefaultWorkerRuntimeSystemLauncherWithMemory() error = %v", err)
+	}
+	if bootstrap.Node.Config.Role != RuntimeNodeRoleWorker {
+		t.Fatalf("role = %q, want %q", bootstrap.Node.Config.Role, RuntimeNodeRoleWorker)
+	}
+	if launcher.Spec().Role != RuntimeNodeRoleWorker {
+		t.Fatalf("launcher role = %q, want %q", launcher.Spec().Role, RuntimeNodeRoleWorker)
+	}
+	if launcher.Handler() == nil {
+		t.Fatal("Handler() = nil")
+	}
+}
+
 func TestRefreshHarnessRuntimePrefersCurrentOverrides(t *testing.T) {
 	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
 	bootstrap, err := BuildDefaultRuntimeBootstrapWithMemory(context.Background(), config, t.TempDir(), nil, clarification.NewManager(4))
