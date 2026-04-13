@@ -11,6 +11,7 @@ import (
 )
 
 type NodeDefaults struct {
+	Preset           RuntimeNodePreset
 	Role             harnessruntime.RuntimeNodeRole
 	Addr             string
 	Name             string
@@ -22,7 +23,16 @@ type NodeDefaults struct {
 	StateBackend     harnessruntime.RuntimeStateStoreBackend
 }
 
+type RuntimeNodePreset string
+
+const (
+	RuntimeNodePresetAuto         RuntimeNodePreset = "auto"
+	RuntimeNodePresetFastLocal    RuntimeNodePreset = "fast-local"
+	RuntimeNodePresetSharedSQLite RuntimeNodePreset = "shared-sqlite"
+)
+
 type NodeConfig struct {
+	Preset           RuntimeNodePreset
 	Role             harnessruntime.RuntimeNodeRole
 	Addr             string
 	Name             string
@@ -50,6 +60,7 @@ type NodeConfig struct {
 func DefaultNodeConfig(defaults NodeDefaults) NodeConfig {
 	role := NormalizeRole(os.Getenv("RUNTIME_NODE_ROLE"), defaults.Role)
 	config := NodeConfig{
+		Preset:           NormalizePreset(firstNonEmpty(os.Getenv("RUNTIME_NODE_PRESET"), string(defaults.Preset)), defaults.Preset),
 		Role:             role,
 		Addr:             NormalizeAddr(firstNonEmpty(os.Getenv("RUNTIME_NODE_ADDR"), defaults.Addr), defaults.Addr),
 		Name:             firstNonEmpty(os.Getenv("RUNTIME_NODE_NAME"), defaults.Name),
@@ -78,6 +89,7 @@ func DefaultNodeConfig(defaults NodeDefaults) NodeConfig {
 
 func DefaultLangGraphNodeConfig() NodeConfig {
 	return DefaultNodeConfig(NodeDefaults{
+		Preset:           RuntimeNodePresetAuto,
 		Role:             harnessruntime.RuntimeNodeRoleAllInOne,
 		Addr:             ":8081",
 		Name:             "langgraph",
@@ -92,6 +104,7 @@ func DefaultLangGraphNodeConfig() NodeConfig {
 
 func DefaultRuntimeWorkerNodeConfig() NodeConfig {
 	return DefaultNodeConfig(NodeDefaults{
+		Preset:           RuntimeNodePresetAuto,
 		Role:             harnessruntime.RuntimeNodeRoleWorker,
 		Addr:             ":8081",
 		Name:             "runtime-node",
@@ -171,8 +184,25 @@ func (c NodeConfig) withRoleDefaults() NodeConfig {
 	if c.DataRoot == "" {
 		c.DataRoot = tools.DataRootFromEnv()
 	}
+	if c.Preset == "" {
+		c.Preset = RuntimeNodePresetAuto
+	}
+	switch c.effectivePreset() {
+	case RuntimeNodePresetSharedSQLite:
+		c = c.applySharedSQLiteDefaults()
+	case RuntimeNodePresetFastLocal:
+		// Preserve the fast path: local sandbox, in-memory state, and no derived shared stores.
+	default:
+		if c.Role == harnessruntime.RuntimeNodeRoleGateway || c.Role == harnessruntime.RuntimeNodeRoleWorker {
+			c = c.applySharedSQLiteDefaults()
+		}
+	}
+	return c
+}
+
+func (c NodeConfig) applySharedSQLiteDefaults() NodeConfig {
 	switch c.Role {
-	case harnessruntime.RuntimeNodeRoleGateway, harnessruntime.RuntimeNodeRoleWorker:
+	case harnessruntime.RuntimeNodeRoleGateway, harnessruntime.RuntimeNodeRoleWorker, harnessruntime.RuntimeNodeRoleAllInOne:
 		if c.StateBackend == "" || c.StateBackend == harnessruntime.RuntimeStateStoreBackendInMemory {
 			c.StateBackend = harnessruntime.RuntimeStateStoreBackendSQLite
 		}
@@ -221,6 +251,13 @@ func (c NodeConfig) withRoleDefaults() NodeConfig {
 	return c
 }
 
+func (c NodeConfig) effectivePreset() RuntimeNodePreset {
+	if c.Preset == "" {
+		return RuntimeNodePresetAuto
+	}
+	return c.Preset
+}
+
 func (c NodeConfig) ValidateForLangGraph() error {
 	if err := c.validateStateConfig(); err != nil {
 		return err
@@ -267,6 +304,19 @@ func NormalizeRole(value string, fallback harnessruntime.RuntimeNodeRole) harnes
 		return harnessruntime.RuntimeNodeRoleGateway
 	case string(harnessruntime.RuntimeNodeRoleWorker):
 		return harnessruntime.RuntimeNodeRoleWorker
+	default:
+		return fallback
+	}
+}
+
+func NormalizePreset(value string, fallback RuntimeNodePreset) RuntimeNodePreset {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(RuntimeNodePresetAuto):
+		return RuntimeNodePresetAuto
+	case string(RuntimeNodePresetFastLocal):
+		return RuntimeNodePresetFastLocal
+	case string(RuntimeNodePresetSharedSQLite):
+		return RuntimeNodePresetSharedSQLite
 	default:
 		return fallback
 	}

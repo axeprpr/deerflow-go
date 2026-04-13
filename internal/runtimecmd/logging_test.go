@@ -20,6 +20,9 @@ func TestNodeConfigStartupLines(t *testing.T) {
 	if !strings.Contains(joined, "runtime node starting role=worker") {
 		t.Fatalf("StartupLines() = %q", joined)
 	}
+	if !strings.Contains(joined, "preset=auto") {
+		t.Fatalf("StartupLines() = %q", joined)
+	}
 	if !strings.Contains(joined, "worker_addr=") {
 		t.Fatalf("StartupLines() = %q", joined)
 	}

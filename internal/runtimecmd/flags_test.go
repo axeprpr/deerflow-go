@@ -12,6 +12,7 @@ func TestBindFlagsBuildsNodeConfig(t *testing.T) {
 	defaults := DefaultRuntimeWorkerNodeConfig()
 	binding := BindFlags(fs, defaults, "", "")
 	if err := fs.Parse([]string{
+		"-preset=shared-sqlite",
 		"-role=all-in-one",
 		"-addr=9091",
 		"-transport-backend=direct",
@@ -31,6 +32,9 @@ func TestBindFlagsBuildsNodeConfig(t *testing.T) {
 	cfg := binding.Config()
 	if cfg.Role != harnessruntime.RuntimeNodeRoleAllInOne {
 		t.Fatalf("Role = %q", cfg.Role)
+	}
+	if cfg.Preset != RuntimeNodePresetSharedSQLite {
+		t.Fatalf("Preset = %q", cfg.Preset)
 	}
 	if cfg.Addr != ":9091" {
 		t.Fatalf("Addr = %q", cfg.Addr)

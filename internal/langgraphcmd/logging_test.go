@@ -34,6 +34,9 @@ func TestConfigStartupLines(t *testing.T) {
 	if !strings.Contains(joined, "Log Level: debug") {
 		t.Fatalf("StartupLines() = %q", joined)
 	}
+	if !strings.Contains(joined, "preset=auto") {
+		t.Fatalf("StartupLines() = %q", joined)
+	}
 }
 
 func TestConfigReadyLinesForAllInOne(t *testing.T) {

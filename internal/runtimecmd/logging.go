@@ -4,7 +4,7 @@ import "fmt"
 
 func (c NodeConfig) StartupLines() []string {
 	return []string{
-		fmt.Sprintf("runtime node starting role=%s", c.Role),
+		fmt.Sprintf("runtime node starting role=%s preset=%s", c.Role, c.effectivePreset()),
 		fmt.Sprintf("  transport=%s endpoint=%s", c.TransportBackend, firstNonEmpty(c.Endpoint, "(local)")),
 		fmt.Sprintf("  worker_addr=%s", c.Addr),
 		fmt.Sprintf("  sandbox=%s", c.SandboxBackend),

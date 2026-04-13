@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axeprpr/deerflow-go/internal/runtimecmd"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 )
 
@@ -18,6 +19,12 @@ func TestDefaultConfigUsesGatewayWorkerSplit(t *testing.T) {
 	}
 	if !strings.Contains(cfg.Gateway.Runtime.Endpoint, harnessruntime.DefaultRemoteWorkerDispatchPath) {
 		t.Fatalf("gateway endpoint = %q", cfg.Gateway.Runtime.Endpoint)
+	}
+	if cfg.Gateway.Runtime.Preset != runtimecmd.RuntimeNodePresetSharedSQLite {
+		t.Fatalf("gateway preset = %q", cfg.Gateway.Runtime.Preset)
+	}
+	if cfg.Worker.Preset != runtimecmd.RuntimeNodePresetSharedSQLite {
+		t.Fatalf("worker preset = %q", cfg.Worker.Preset)
 	}
 	if cfg.Worker.StateStoreURL != cfg.Gateway.Runtime.StateStoreURL {
 		t.Fatalf("state store mismatch gateway=%q worker=%q", cfg.Gateway.Runtime.StateStoreURL, cfg.Worker.StateStoreURL)

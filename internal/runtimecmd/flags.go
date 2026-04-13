@@ -4,6 +4,7 @@ import "flag"
 
 type NodeFlagBinding struct {
 	defaults         NodeConfig
+	preset           *string
 	role             *string
 	addr             *string
 	name             *string
@@ -34,6 +35,7 @@ func BindFlags(fs *flag.FlagSet, defaults NodeConfig, prefix, label string) *Nod
 	}
 	return &NodeFlagBinding{
 		defaults:         defaults,
+		preset:           fs.String(flagName(prefix, "preset"), string(defaults.Preset), label+"runtime preset: auto|fast-local|shared-sqlite"),
 		role:             fs.String(flagName(prefix, "role"), string(defaults.Role), label+"node role: worker|all-in-one|gateway"),
 		addr:             fs.String(flagName(prefix, "addr"), defaults.Addr, label+"worker listen address"),
 		name:             fs.String(flagName(prefix, "name"), defaults.Name, label+"node name"),
@@ -65,6 +67,7 @@ func (b *NodeFlagBinding) Config() NodeConfig {
 	}
 	defaults := b.defaults
 	return NodeConfig{
+		Preset:           NormalizePreset(valueOrEmpty(b.preset), defaults.Preset),
 		Role:             NormalizeRole(valueOrEmpty(b.role), defaults.Role),
 		Addr:             NormalizeAddr(valueOrEmpty(b.addr), defaults.Addr),
 		Name:             valueOrEmpty(b.name),
@@ -87,7 +90,7 @@ func (b *NodeFlagBinding) Config() NodeConfig {
 		SnapshotStoreURL: valueOrEmpty(b.snapshotStore),
 		EventStoreURL:    valueOrEmpty(b.eventStore),
 		ThreadStoreURL:   valueOrEmpty(b.threadStore),
-	}
+	}.withRoleDefaults()
 }
 
 func flagName(prefix, name string) string {

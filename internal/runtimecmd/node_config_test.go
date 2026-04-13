@@ -90,6 +90,9 @@ func TestDefaultLangGraphNodeConfigUsesSharedSQLiteForGatewayRole(t *testing.T) 
 	t.Setenv("RUNTIME_NODE_ENDPOINT", "http://worker:8081/dispatch")
 
 	cfg := DefaultLangGraphNodeConfig()
+	if cfg.Preset != RuntimeNodePresetAuto {
+		t.Fatalf("Preset = %q", cfg.Preset)
+	}
 	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendSQLite {
 		t.Fatalf("StateBackend = %q", cfg.StateBackend)
 	}
@@ -117,6 +120,9 @@ func TestDefaultRuntimeWorkerNodeConfigUsesSharedSQLiteState(t *testing.T) {
 	t.Setenv("DEERFLOW_DATA_ROOT", "/tmp/shared-data")
 
 	cfg := DefaultRuntimeWorkerNodeConfig()
+	if cfg.Preset != RuntimeNodePresetAuto {
+		t.Fatalf("Preset = %q", cfg.Preset)
+	}
 	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendSQLite {
 		t.Fatalf("StateBackend = %q", cfg.StateBackend)
 	}
@@ -143,6 +149,49 @@ func TestDefaultRuntimeWorkerNodeConfigUsesSharedSQLiteState(t *testing.T) {
 func TestNormalizeStateBackendSupportsSQLite(t *testing.T) {
 	if got := NormalizeStateBackend("sqlite", harnessruntime.RuntimeStateStoreBackendInMemory); got != harnessruntime.RuntimeStateStoreBackendSQLite {
 		t.Fatalf("NormalizeStateBackend() = %q", got)
+	}
+}
+
+func TestNormalizePresetSupportsKnownValues(t *testing.T) {
+	if got := NormalizePreset("shared-sqlite", RuntimeNodePresetAuto); got != RuntimeNodePresetSharedSQLite {
+		t.Fatalf("NormalizePreset() = %q", got)
+	}
+	if got := NormalizePreset("fast-local", RuntimeNodePresetAuto); got != RuntimeNodePresetFastLocal {
+		t.Fatalf("NormalizePreset() = %q", got)
+	}
+}
+
+func TestFastLocalPresetKeepsWorkerOnFastPath(t *testing.T) {
+	cfg := NodeConfig{
+		Preset:   RuntimeNodePresetFastLocal,
+		Role:     harnessruntime.RuntimeNodeRoleWorker,
+		DataRoot: "/tmp/shared-data",
+	}.withRoleDefaults()
+	if cfg.StateBackend != "" && cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendInMemory {
+		t.Fatalf("StateBackend = %q", cfg.StateBackend)
+	}
+	if cfg.StateStoreURL != "" {
+		t.Fatalf("StateStoreURL = %q", cfg.StateStoreURL)
+	}
+	if cfg.MemoryStoreURL != "" {
+		t.Fatalf("MemoryStoreURL = %q", cfg.MemoryStoreURL)
+	}
+}
+
+func TestSharedSQLitePresetPromotesAllInOneToSharedState(t *testing.T) {
+	cfg := NodeConfig{
+		Preset:   RuntimeNodePresetSharedSQLite,
+		Role:     harnessruntime.RuntimeNodeRoleAllInOne,
+		DataRoot: "/tmp/shared-data",
+	}.withRoleDefaults()
+	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendSQLite {
+		t.Fatalf("StateBackend = %q", cfg.StateBackend)
+	}
+	if cfg.StateStoreURL == "" {
+		t.Fatal("StateStoreURL = empty")
+	}
+	if cfg.MemoryStoreURL == "" {
+		t.Fatal("MemoryStoreURL = empty")
 	}
 }
 

@@ -26,6 +26,7 @@ func DefaultConfig() Config {
 	}
 	worker.Provider = gateway.Provider
 	worker.MaxTurns = gateway.Runtime.MaxTurns
+	worker.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
 	worker.StateBackend = gateway.Runtime.StateBackend
 	worker.SnapshotBackend = gateway.Runtime.SnapshotBackend
 	worker.EventBackend = gateway.Runtime.EventBackend
@@ -38,6 +39,7 @@ func DefaultConfig() Config {
 	worker.MemoryStoreURL = gateway.Runtime.MemoryStoreURL
 
 	gateway.Runtime.Role = harnessruntime.RuntimeNodeRoleGateway
+	gateway.Runtime.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
 	gateway.Runtime.Addr = worker.Addr
 	gateway.Runtime.Endpoint = workerDispatchEndpoint(worker.Addr)
 	gateway.Runtime.Provider = worker.Provider
