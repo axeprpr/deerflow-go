@@ -11,9 +11,18 @@ import (
 )
 
 type Config struct {
+	Preset  StackPreset
 	Gateway langgraphcmd.Config
 	Worker  runtimecmd.NodeConfig
 }
+
+type StackPreset string
+
+const (
+	StackPresetAuto         StackPreset = "auto"
+	StackPresetSharedSQLite StackPreset = "shared-sqlite"
+	StackPresetSharedRemote StackPreset = "shared-remote"
+)
 
 func DefaultConfig() Config {
 	gateway := langgraphcmd.DefaultConfig()
@@ -44,6 +53,7 @@ func DefaultConfig() Config {
 	gateway.Runtime.Provider = worker.Provider
 
 	return Config{
+		Preset:  StackPresetSharedSQLite,
 		Gateway: gateway,
 		Worker:  worker,
 	}
@@ -65,6 +75,7 @@ func (c Config) Validate() error {
 
 func (c Config) withDefaults() Config {
 	cfg := c
+	cfg = cfg.applyPresetDefaults()
 	if strings.TrimSpace(cfg.Worker.Provider) == "" {
 		cfg.Worker.Provider = cfg.Gateway.Provider
 	}
@@ -108,6 +119,8 @@ func (c Config) withDefaults() Config {
 	cfg.Gateway.Runtime.Addr = cfg.Worker.Addr
 	cfg.Gateway.Runtime.Provider = cfg.Worker.Provider
 	cfg.Gateway.Runtime.MaxTurns = cfg.Worker.MaxTurns
+	prevGatewayEndpoint := cfg.Gateway.Runtime.Endpoint
+	prevGatewayStateStore := strings.TrimSpace(cfg.Gateway.Runtime.StateStoreURL)
 	cfg.Gateway.Runtime.DataRoot = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.DataRoot), strings.TrimSpace(cfg.Worker.DataRoot))
 	cfg.Gateway.Runtime.MemoryStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.MemoryStoreURL), strings.TrimSpace(cfg.Worker.MemoryStoreURL))
 	if cfg.Gateway.Runtime.StateProvider == "" {
@@ -118,7 +131,11 @@ func (c Config) withDefaults() Config {
 		cfg.Gateway.Runtime.SnapshotBackend = firstNonEmptyState(cfg.Gateway.Runtime.SnapshotBackend, harnessruntime.RuntimeStateStoreBackendRemote)
 		cfg.Gateway.Runtime.EventBackend = firstNonEmptyState(cfg.Gateway.Runtime.EventBackend, harnessruntime.RuntimeStateStoreBackendRemote)
 		cfg.Gateway.Runtime.ThreadBackend = firstNonEmptyState(cfg.Gateway.Runtime.ThreadBackend, harnessruntime.RuntimeStateStoreBackendRemote)
-		cfg.Gateway.Runtime.StateStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.StateStoreURL), workerStateEndpoint(cfg.Worker.Addr))
+		if prevGatewayStateStore == "" || prevGatewayStateStore == stateStoreEndpointFromWorkerDispatch(prevGatewayEndpoint) {
+			cfg.Gateway.Runtime.StateStoreURL = workerStateEndpoint(cfg.Worker.Addr)
+		} else {
+			cfg.Gateway.Runtime.StateStoreURL = prevGatewayStateStore
+		}
 	} else {
 		cfg.Gateway.Runtime.StateRoot = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.StateRoot), strings.TrimSpace(cfg.Worker.StateRoot))
 		cfg.Gateway.Runtime.StateStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.StateStoreURL), strings.TrimSpace(cfg.Worker.StateStoreURL))
@@ -142,6 +159,36 @@ func (c Config) withDefaults() Config {
 	return cfg
 }
 
+func (c Config) applyPresetDefaults() Config {
+	switch c.effectivePreset() {
+	case StackPresetSharedRemote:
+		c.Gateway.Runtime.Preset = runtimecmd.RuntimeNodePresetSharedRemote
+		c.Worker.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
+	case StackPresetSharedSQLite:
+		c.Gateway.Runtime.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
+		c.Worker.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
+	default:
+		if c.Gateway.Runtime.Preset == "" {
+			c.Gateway.Runtime.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
+		}
+		if c.Worker.Preset == "" {
+			c.Worker.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
+		}
+	}
+	c.Gateway.Runtime = runtimecmd.ApplyNodePresetDefaults(c.Gateway.Runtime)
+	c.Worker = runtimecmd.ApplyNodePresetDefaults(c.Worker)
+	return c
+}
+
+func (c Config) effectivePreset() StackPreset {
+	switch c.Preset {
+	case StackPresetSharedSQLite, StackPresetSharedRemote:
+		return c.Preset
+	default:
+		return StackPresetAuto
+	}
+}
+
 func (c Config) alignSharedStateStores() Config {
 	stateStore := firstNonEmpty(strings.TrimSpace(c.Gateway.Runtime.StateStoreURL), strings.TrimSpace(c.Worker.StateStoreURL))
 	if stateStore == "" {
@@ -162,7 +209,7 @@ func (c Config) StartupLines(build langgraphcmd.BuildInfo, yolo bool, logLevel s
 	cfg := c.withDefaults()
 	lines := cfg.Gateway.StartupLines(build, yolo, logLevel)
 	lines = append(lines,
-		"Starting split runtime stack...",
+		fmt.Sprintf("Starting split runtime stack preset=%s...", cfg.effectivePreset()),
 		fmt.Sprintf("  Worker: role=%s addr=%s transport=%s sandbox=%s state_provider=%s", cfg.Worker.Role, cfg.Worker.Addr, cfg.Worker.TransportBackend, cfg.Worker.SandboxBackend, cfg.Worker.StateProvider),
 		fmt.Sprintf("  Shared state: root=%s store=%s snapshot=%s event=%s thread=%s", firstNonEmpty(cfg.Worker.StateRoot, "(memory)"), firstNonEmpty(cfg.Worker.StateStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.SnapshotStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.EventStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.ThreadStoreURL, "(derived)")),
 	)
@@ -198,6 +245,17 @@ func workerStateEndpoint(addr string) string {
 		addr = "http://" + addr
 	}
 	return strings.TrimRight(addr, "/") + harnessruntime.DefaultRemoteStateBasePath
+}
+
+func stateStoreEndpointFromWorkerDispatch(endpoint string) string {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return ""
+	}
+	if strings.HasSuffix(endpoint, harnessruntime.DefaultRemoteWorkerDispatchPath) {
+		return strings.TrimSuffix(endpoint, harnessruntime.DefaultRemoteWorkerDispatchPath) + harnessruntime.DefaultRemoteStateBasePath
+	}
+	return strings.TrimRight(endpoint, "/") + harnessruntime.DefaultRemoteStateBasePath
 }
 
 func firstNonEmpty(values ...string) string {

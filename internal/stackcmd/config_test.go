@@ -11,6 +11,9 @@ import (
 
 func TestDefaultConfigUsesGatewayWorkerSplit(t *testing.T) {
 	cfg := DefaultConfig()
+	if cfg.Preset != StackPresetSharedSQLite {
+		t.Fatalf("preset = %q", cfg.Preset)
+	}
 	if cfg.Gateway.Runtime.Role != harnessruntime.RuntimeNodeRoleGateway {
 		t.Fatalf("gateway role = %q", cfg.Gateway.Runtime.Role)
 	}
@@ -61,11 +64,7 @@ func TestConfigValidateRejectsRemoteWorkerTransport(t *testing.T) {
 func TestConfigWithRemoteGatewayStateKeepsWorkerLocalState(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Worker.Addr = ":19081"
-	cfg.Gateway.Runtime.StateBackend = harnessruntime.RuntimeStateStoreBackendRemote
-	cfg.Gateway.Runtime.SnapshotBackend = harnessruntime.RuntimeStateStoreBackendRemote
-	cfg.Gateway.Runtime.EventBackend = harnessruntime.RuntimeStateStoreBackendRemote
-	cfg.Gateway.Runtime.ThreadBackend = harnessruntime.RuntimeStateStoreBackendRemote
-	cfg.Gateway.Runtime.StateStoreURL = ""
+	cfg.Preset = StackPresetSharedRemote
 
 	cfg = cfg.withDefaults()
 
@@ -77,5 +76,11 @@ func TestConfigWithRemoteGatewayStateKeepsWorkerLocalState(t *testing.T) {
 	}
 	if cfg.Worker.StateStoreURL == cfg.Gateway.Runtime.StateStoreURL {
 		t.Fatalf("worker state store unexpectedly mirrored remote endpoint: %q", cfg.Worker.StateStoreURL)
+	}
+	if cfg.Worker.Preset != runtimecmd.RuntimeNodePresetSharedSQLite {
+		t.Fatalf("worker preset = %q", cfg.Worker.Preset)
+	}
+	if cfg.Gateway.Runtime.Preset != runtimecmd.RuntimeNodePresetSharedRemote {
+		t.Fatalf("gateway preset = %q", cfg.Gateway.Runtime.Preset)
 	}
 }

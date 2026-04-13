@@ -8,6 +8,7 @@ type Binding struct {
 
 func BindFlags(fs *flag.FlagSet, defaults Config) *Binding {
 	cfg := defaults
+	fs.StringVar((*string)(&cfg.Preset), "preset", string(cfg.Preset), "runtime stack preset: auto|shared-sqlite|shared-remote")
 	fs.StringVar(&cfg.Gateway.Addr, "addr", cfg.Gateway.Addr, "gateway HTTP listen address")
 	fs.StringVar(&cfg.Worker.Addr, "worker-addr", cfg.Worker.Addr, "worker remote service address")
 	fs.StringVar(&cfg.Gateway.DatabaseURL, "db", cfg.Gateway.DatabaseURL, "gateway database URL")

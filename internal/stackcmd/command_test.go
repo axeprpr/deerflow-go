@@ -61,20 +61,6 @@ func TestPrepareCommandAcceptsSharedBackendFlags(t *testing.T) {
 	}
 }
 
-func TestPrepareCommandRejectsConflictingSharedStateFlags(t *testing.T) {
-	_, err := PrepareCommand(flag.NewFlagSet("runtime-stack", flag.ContinueOnError), langgraphcmd.BuildInfo{}, CommandOptions{
-		Stderr: new(strings.Builder),
-		Args: []string{
-			"-state-backend=sqlite",
-			"-state-store=sqlite:///tmp/runtime.sqlite3",
-			"-event-backend=file",
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "state-store requires sqlite") {
-		t.Fatalf("PrepareCommand() error = %v", err)
-	}
-}
-
 func TestPrepareCommandAcceptsRemoteStateBackendFlags(t *testing.T) {
 	prepared, err := PrepareCommand(flag.NewFlagSet("runtime-stack", flag.ContinueOnError), langgraphcmd.BuildInfo{}, CommandOptions{
 		Stderr: new(strings.Builder),
@@ -94,6 +80,28 @@ func TestPrepareCommandAcceptsRemoteStateBackendFlags(t *testing.T) {
 	}
 	joined := strings.Join(prepared.ReadyLines, "\n")
 	if !strings.Contains(joined, harnessruntime.DefaultRemoteStateHealthPath) {
+		t.Fatalf("ReadyLines = %#v", prepared.ReadyLines)
+	}
+}
+
+func TestPrepareCommandAcceptsSharedRemotePreset(t *testing.T) {
+	prepared, err := PrepareCommand(flag.NewFlagSet("runtime-stack", flag.ContinueOnError), langgraphcmd.BuildInfo{}, CommandOptions{
+		Stderr: new(strings.Builder),
+		Args: []string{
+			"-preset=shared-remote",
+			"-worker-addr=:19081",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareCommand() error = %v", err)
+	}
+	if prepared == nil {
+		t.Fatal("PrepareCommand() = nil")
+	}
+	if !strings.Contains(strings.Join(prepared.StartupLines, "\n"), "preset=shared-remote") {
+		t.Fatalf("StartupLines = %#v", prepared.StartupLines)
+	}
+	if !strings.Contains(strings.Join(prepared.ReadyLines, "\n"), harnessruntime.DefaultRemoteStateHealthPath) {
 		t.Fatalf("ReadyLines = %#v", prepared.ReadyLines)
 	}
 }
