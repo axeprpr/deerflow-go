@@ -118,6 +118,7 @@ func (c Config) ReadyLines() []string {
 	cfg := c.withDefaults()
 	lines := cfg.Gateway.ReadyLines()
 	lines = append(lines, fmt.Sprintf("  Worker server: http://%s%s", cfg.Worker.Addr, harnessruntime.DefaultRemoteWorkerDispatchPath))
+	lines = append(lines, fmt.Sprintf("  Worker sandbox: http://%s%s", cfg.Worker.Addr, harnessruntime.DefaultRemoteSandboxHealthPath))
 	return lines
 }
 
