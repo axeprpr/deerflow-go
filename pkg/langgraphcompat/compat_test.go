@@ -317,6 +317,91 @@ func TestGatewayRoleDispatchesRunsToRemoteWorker(t *testing.T) {
 	}
 }
 
+func TestGatewayRoleReplaysCompletedRemoteRunsFromSharedState(t *testing.T) {
+	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
+
+	sharedRoot := t.TempDir()
+	workerAddr := freeTCPAddr(t)
+	workerConfig := harnessruntime.DefaultWorkerRuntimeNodeConfig("remote-worker", sharedRoot)
+	workerConfig.RemoteWorker.Addr = workerAddr
+	workerConfig.State.Backend = harnessruntime.RuntimeStateStoreBackendSQLite
+	workerConfig.State.SnapshotBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	workerConfig.State.EventBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	workerConfig.State.ThreadBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	workerConfig.State.Root = filepath.Join(sharedRoot, "runtime-state")
+	_, workerLauncher, err := harnessruntime.BuildDefaultRuntimeSystemLauncherWithMemory(
+		context.Background(),
+		workerConfig,
+		sharedRoot,
+		fakeLLMProvider{},
+		nil,
+		32,
+		nil,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("BuildDefaultRuntimeSystemLauncherWithMemory() error = %v", err)
+	}
+
+	workerErrCh := make(chan error, 1)
+	go func() {
+		workerErrCh <- workerLauncher.Start()
+	}()
+	waitForHTTP(t, "http://"+workerAddr+harnessruntime.DefaultRemoteWorkerHealthPath)
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := workerLauncher.Close(shutdownCtx); err != nil {
+			t.Fatalf("worker Close() error = %v", err)
+		}
+		if err := <-workerErrCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Fatalf("worker Start() error = %v", err)
+		}
+	}()
+
+	gatewayConfig := harnessruntime.DefaultGatewayRuntimeNodeConfig("remote-gateway", sharedRoot, "http://"+workerAddr+harnessruntime.DefaultRemoteWorkerDispatchPath)
+	gatewayConfig.State.Backend = harnessruntime.RuntimeStateStoreBackendSQLite
+	gatewayConfig.State.SnapshotBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	gatewayConfig.State.EventBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	gatewayConfig.State.ThreadBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	gatewayConfig.State.Root = filepath.Join(sharedRoot, "runtime-state")
+	gateway, err := NewServer(":0", "", "test-model", WithRuntimeNodeConfig(gatewayConfig), WithLLMProvider(failingLLMProvider{}))
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	createResp := performCompatRequest(t, gateway.httpServer.Handler, http.MethodPost, "/threads/thread-remote-shared/runs", strings.NewReader(`{"input":{"messages":[{"role":"user","content":"hello"}]}}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if createResp.Code != http.StatusOK {
+		t.Fatalf("create status = %d body=%s", createResp.Code, createResp.Body.String())
+	}
+
+	runID := findRunIDForThread(gateway, "thread-remote-shared")
+	if runID == "" {
+		t.Fatal("runID missing")
+	}
+	streamResp := performCompatRequest(t, gateway.httpServer.Handler, http.MethodGet, "/threads/thread-remote-shared/runs/"+runID+"/stream", nil, nil)
+	if streamResp.Code != http.StatusOK {
+		t.Fatalf("stream status = %d body=%s", streamResp.Code, streamResp.Body.String())
+	}
+	body := streamResp.Body.String()
+	if !strings.Contains(body, "event: chunk") || !strings.Contains(body, "hello from fake llm") {
+		t.Fatalf("body missing replayed chunk: %q", body)
+	}
+	if got := strings.Count(body, "event: end"); got != 1 {
+		t.Fatalf("end event count = %d body=%q", got, body)
+	}
+	record, ok := gateway.ensureSnapshotStore().LoadRunSnapshot(runID)
+	if !ok {
+		t.Fatal("shared snapshot missing")
+	}
+	if record.Record.Status != "success" || record.Record.Outcome.RunStatus != "success" {
+		t.Fatalf("snapshot record = %+v", record.Record)
+	}
+}
+
 type flushBuffer struct {
 	mu     sync.Mutex
 	header http.Header
