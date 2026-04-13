@@ -41,6 +41,9 @@ func TestDefaultConfigUsesGatewayWorkerSplit(t *testing.T) {
 	if cfg.State.Runtime.Addr != ":8082" {
 		t.Fatalf("state addr = %q", cfg.State.Runtime.Addr)
 	}
+	if cfg.Sandbox.Runtime.Addr != ":8083" {
+		t.Fatalf("sandbox addr = %q", cfg.Sandbox.Runtime.Addr)
+	}
 }
 
 func TestConfigBuildLauncherUsesSplitRoles(t *testing.T) {
@@ -74,7 +77,7 @@ func TestConfigWithSharedRemotePresetUsesDedicatedStateService(t *testing.T) {
 
 	cfg = cfg.withDefaults()
 
-	if cfg.Gateway.Runtime.StateStoreURL != "http://127.0.0.1:8082"+harnessruntime.DefaultRemoteStateBasePath {
+	if cfg.Gateway.Runtime.StateStoreURL != "http://127.0.0.1:19082"+harnessruntime.DefaultRemoteStateBasePath {
 		t.Fatalf("gateway state store = %q", cfg.Gateway.Runtime.StateStoreURL)
 	}
 	if cfg.Worker.StateBackend != harnessruntime.RuntimeStateStoreBackendRemote {
@@ -92,10 +95,33 @@ func TestConfigWithSharedRemotePresetUsesDedicatedStateService(t *testing.T) {
 	if cfg.State.Runtime.Preset != runtimecmd.RuntimeNodePresetSharedSQLite {
 		t.Fatalf("state preset = %q", cfg.State.Runtime.Preset)
 	}
-	if cfg.LaunchSpec().StateAddr != ":8082" {
+	if cfg.LaunchSpec().StateAddr != ":19082" {
 		t.Fatalf("state addr = %q", cfg.LaunchSpec().StateAddr)
 	}
-	if cfg.LaunchSpec().SandboxAddr != ":8083" {
+	if cfg.LaunchSpec().SandboxAddr != ":19083" {
 		t.Fatalf("sandbox addr = %q", cfg.LaunchSpec().SandboxAddr)
+	}
+}
+
+func TestConfigWithSharedRemotePresetPreservesExplicitServiceAddrs(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Preset = StackPresetSharedRemote
+	cfg.Worker.Addr = ":19081"
+	cfg.State.Runtime.Addr = ":29082"
+	cfg.Sandbox.Runtime.Addr = ":29083"
+
+	cfg = cfg.withDefaults()
+
+	if cfg.State.Runtime.Addr != ":29082" {
+		t.Fatalf("state addr = %q", cfg.State.Runtime.Addr)
+	}
+	if cfg.Sandbox.Runtime.Addr != ":29083" {
+		t.Fatalf("sandbox addr = %q", cfg.Sandbox.Runtime.Addr)
+	}
+	if cfg.Gateway.Runtime.StateStoreURL != "http://127.0.0.1:29082"+harnessruntime.DefaultRemoteStateBasePath {
+		t.Fatalf("gateway state store = %q", cfg.Gateway.Runtime.StateStoreURL)
+	}
+	if cfg.Worker.SandboxEndpoint != "http://127.0.0.1:29083" {
+		t.Fatalf("sandbox endpoint = %q", cfg.Worker.SandboxEndpoint)
 	}
 }

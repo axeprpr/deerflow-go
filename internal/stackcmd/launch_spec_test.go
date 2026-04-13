@@ -18,10 +18,10 @@ func TestLaunchSpecUsesDedicatedServicesForSharedRemotePreset(t *testing.T) {
 	if !spec.DedicatedSandbox {
 		t.Fatal("DedicatedSandbox = false")
 	}
-	if spec.WorkerStateHealthURL() != "http://127.0.0.1:8082"+harnessruntime.DefaultRemoteStateHealthPath {
+	if spec.WorkerStateHealthURL() != "http://127.0.0.1:19082"+harnessruntime.DefaultRemoteStateHealthPath {
 		t.Fatalf("WorkerStateHealthURL() = %q", spec.WorkerStateHealthURL())
 	}
-	if spec.WorkerSandboxHealthURL() != "http://127.0.0.1:8083"+harnessruntime.DefaultRemoteSandboxHealthPath {
+	if spec.WorkerSandboxHealthURL() != "http://127.0.0.1:19083"+harnessruntime.DefaultRemoteSandboxHealthPath {
 		t.Fatalf("WorkerSandboxHealthURL() = %q", spec.WorkerSandboxHealthURL())
 	}
 }

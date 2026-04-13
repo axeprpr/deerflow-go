@@ -2,7 +2,9 @@ package stackcmd
 
 import (
 	"fmt"
+	"net"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/axeprpr/deerflow-go/internal/langgraphcmd"
@@ -94,6 +96,10 @@ func (c Config) Validate() error {
 func (c Config) withDefaults() Config {
 	cfg := c
 	cfg = cfg.applyPresetDefaults()
+	if cfg.usesDedicatedStateService() {
+		cfg.State.Runtime.Addr = deriveDedicatedServiceAddr(cfg.Worker.Addr, cfg.State.Runtime.Addr, defaultStateServiceAddr, 1)
+		cfg.Sandbox.Runtime.Addr = deriveDedicatedServiceAddr(cfg.Worker.Addr, cfg.Sandbox.Runtime.Addr, defaultSandboxServiceAddr, 2)
+	}
 	if strings.TrimSpace(cfg.Worker.Provider) == "" {
 		cfg.Worker.Provider = cfg.Gateway.Provider
 	}
@@ -390,4 +396,65 @@ func sandboxServiceEndpoint(addr string) string {
 		addr = "http://" + addr
 	}
 	return strings.TrimRight(addr, "/")
+}
+
+const (
+	defaultStateServiceAddr   = ":8082"
+	defaultSandboxServiceAddr = ":8083"
+)
+
+func deriveDedicatedServiceAddr(workerAddr, currentAddr, defaultAddr string, portOffset int) string {
+	currentAddr = strings.TrimSpace(currentAddr)
+	if currentAddr != "" && currentAddr != defaultAddr {
+		return currentAddr
+	}
+	derived, ok := deriveAddrWithPortOffset(workerAddr, portOffset)
+	if ok {
+		return derived
+	}
+	if currentAddr != "" {
+		return currentAddr
+	}
+	return defaultAddr
+}
+
+func deriveAddrWithPortOffset(addr string, portOffset int) (string, bool) {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return "", false
+	}
+	host, port, err := splitHostPort(addr)
+	if err != nil {
+		return "", false
+	}
+	nextPort, err := strconv.Atoi(port)
+	if err != nil {
+		return "", false
+	}
+	nextPort += portOffset
+	if nextPort <= 0 || nextPort > 65535 {
+		return "", false
+	}
+	if host == "" {
+		return ":" + strconv.Itoa(nextPort), true
+	}
+	return net.JoinHostPort(host, strconv.Itoa(nextPort)), true
+}
+
+func splitHostPort(addr string) (string, string, error) {
+	if strings.HasPrefix(addr, ":") {
+		return "", strings.TrimPrefix(addr, ":"), nil
+	}
+	if !strings.Contains(addr, ":") {
+		return "", "", fmt.Errorf("missing port")
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err == nil {
+		return host, port, nil
+	}
+	lastColon := strings.LastIndex(addr, ":")
+	if lastColon <= 0 || lastColon == len(addr)-1 {
+		return "", "", err
+	}
+	return addr[:lastColon], addr[lastColon+1:], nil
 }

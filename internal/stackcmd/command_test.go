@@ -102,10 +102,13 @@ func TestPrepareCommandAcceptsSharedRemotePreset(t *testing.T) {
 		t.Fatalf("StartupLines = %#v", prepared.StartupLines)
 	}
 	joined := strings.Join(prepared.ReadyLines, "\n")
-	if !strings.Contains(joined, "127.0.0.1:8082") {
+	if !strings.Contains(joined, "127.0.0.1:19082") {
 		t.Fatalf("ReadyLines = %#v", prepared.ReadyLines)
 	}
 	if !strings.Contains(joined, harnessruntime.DefaultRemoteStateHealthPath) {
+		t.Fatalf("ReadyLines = %#v", prepared.ReadyLines)
+	}
+	if !strings.Contains(joined, "127.0.0.1:19083") {
 		t.Fatalf("ReadyLines = %#v", prepared.ReadyLines)
 	}
 }
