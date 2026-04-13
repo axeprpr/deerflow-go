@@ -198,7 +198,6 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	if err != nil {
 		return nil, err
 	}
-	statePlane := runtimeNodeInstance.State
 	sandboxManager := runtimeNodeInstance.Sandbox
 	sandboxRuntime := sandboxManager.Runtime(runtimeNode.Sandbox.Policy)
 	toolRuntime := harnessruntime.NewDefaultToolRuntime(provider, clarifyManager, sandboxRuntime)
@@ -255,9 +254,9 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		channelConfig:  gatewayChannelsConfig{},
 		channels:       defaultGatewayChannelsStatus(),
 	}
-	s.snapshotStore = newCompatRunStateStore(s, statePlane.Snapshots, statePlane.Events)
+	s.snapshotStore = newCompatRunStateStore(s, runtimeNodeInstance.SnapshotStore(), runtimeNodeInstance.EventStore())
 	s.eventStore = s.snapshotStore.(harnessruntime.RunEventStore)
-	s.threadStateStore = newCompatThreadStateStore(s, statePlane.Threads)
+	s.threadStateStore = newCompatThreadStateStore(s, runtimeNodeInstance.ThreadStateStore())
 	var memoryRuntime *harness.MemoryRuntime
 	if store, err := memory.NewFileStore(filepath.Join(dataRootAbs, "memory")); err == nil {
 		if migrateErr := store.AutoMigrate(ctx); migrateErr != nil {
