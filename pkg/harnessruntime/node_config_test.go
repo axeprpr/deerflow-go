@@ -2,9 +2,11 @@ package harnessruntime
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestDefaultRuntimeNodeConfigUsesQueuedLocalDefaults(t *testing.T) {
@@ -148,5 +150,50 @@ func TestRuntimeNodeConfigBuildRemoteWorkerHandlerServesDispatchRequests(t *test
 	}
 	if result == nil || result.Lifecycle == nil || result.Lifecycle.ThreadID != "thread-2" {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestRuntimeNodeConfigBuildRemoteWorkerHTTPServerUsesConfiguredAddress(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	config.RemoteWorker = RemoteWorkerServerConfig{
+		Addr:              "127.0.0.1:19081",
+		ReadHeaderTimeout: 3 * time.Second,
+	}
+	server := config.BuildRemoteWorkerHTTPServer(DispatchRuntimeConfig{
+		Executor: &fakeExecutor{},
+	})
+	if server.Addr != "127.0.0.1:19081" {
+		t.Fatalf("server.Addr = %q", server.Addr)
+	}
+	if server.ReadHeaderTimeout != 3*time.Second {
+		t.Fatalf("server.ReadHeaderTimeout = %v", server.ReadHeaderTimeout)
+	}
+	if server.Handler == nil {
+		t.Fatal("server.Handler is nil")
+	}
+}
+
+func TestRuntimeNodeConfigBuildRemoteWorkerNodeWrapsHTTPServer(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	node := config.BuildRemoteWorkerNode(DispatchRuntimeConfig{
+		Executor: &fakeExecutor{},
+	})
+	if node == nil || node.Server() == nil {
+		t.Fatalf("node = %#v", node)
+	}
+}
+
+func TestHTTPRemoteWorkerNodeStartRequiresServer(t *testing.T) {
+	node := NewHTTPRemoteWorkerNode(nil)
+	err := node.Start()
+	if err == nil || err.Error() != "remote worker server is not configured" {
+		t.Fatalf("Start() error = %v", err)
+	}
+}
+
+func TestHTTPRemoteWorkerNodeShutdownDelegatesToServer(t *testing.T) {
+	node := NewHTTPRemoteWorkerNode(&http.Server{})
+	if err := node.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"path/filepath"
 	goruntime "runtime"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 )
@@ -11,9 +12,10 @@ import (
 // RuntimeNodeConfig describes the in-process runtime node shape. It keeps
 // deployment-facing execution choices outside compat protocol code.
 type RuntimeNodeConfig struct {
-	Sandbox   SandboxManagerConfig
-	Transport WorkerTransportConfig
-	State     RuntimeStateStoreConfig
+	Sandbox      SandboxManagerConfig
+	Transport    WorkerTransportConfig
+	State        RuntimeStateStoreConfig
+	RemoteWorker RemoteWorkerServerConfig
 }
 
 type RuntimeStateStoreBackend string
@@ -29,6 +31,11 @@ type RuntimeStateStoreConfig struct {
 	EventBackend    RuntimeStateStoreBackend
 	ThreadBackend   RuntimeStateStoreBackend
 	Root            string
+}
+
+type RemoteWorkerServerConfig struct {
+	Addr              string
+	ReadHeaderTimeout time.Duration
 }
 
 func DefaultRuntimeNodeConfig(name, root string) RuntimeNodeConfig {
@@ -53,6 +60,10 @@ func DefaultRuntimeNodeConfig(name, root string) RuntimeNodeConfig {
 			SnapshotBackend: RuntimeStateStoreBackendInMemory,
 			EventBackend:    RuntimeStateStoreBackendInMemory,
 			ThreadBackend:   RuntimeStateStoreBackendInMemory,
+		},
+		RemoteWorker: RemoteWorkerServerConfig{
+			Addr:              ":8081",
+			ReadHeaderTimeout: 10 * time.Second,
 		},
 	}
 }
@@ -86,6 +97,27 @@ func (c RuntimeNodeConfig) BuildRemoteWorkerServer(runtime DispatchRuntimeConfig
 func (c RuntimeNodeConfig) BuildRemoteWorkerHandler(runtime DispatchRuntimeConfig) http.Handler {
 	server := c.BuildRemoteWorkerServer(runtime)
 	return server.Handler()
+}
+
+func (c RuntimeNodeConfig) BuildRemoteWorkerHTTPServer(runtime DispatchRuntimeConfig) *http.Server {
+	config := c.RemoteWorker
+	addr := config.Addr
+	if addr == "" {
+		addr = ":8081"
+	}
+	timeout := config.ReadHeaderTimeout
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	return &http.Server{
+		Addr:              addr,
+		Handler:           c.BuildRemoteWorkerHandler(runtime),
+		ReadHeaderTimeout: timeout,
+	}
+}
+
+func (c RuntimeNodeConfig) BuildRemoteWorkerNode(runtime DispatchRuntimeConfig) *HTTPRemoteWorkerNode {
+	return NewHTTPRemoteWorkerNode(c.BuildRemoteWorkerHTTPServer(runtime))
 }
 
 func (c RuntimeNodeConfig) BuildRunSnapshotStore() RunSnapshotStore {
