@@ -199,6 +199,7 @@ func TestServerStartStartsAllInOneRemoteWorker(t *testing.T) {
 
 	waitForHTTP(t, "http://"+apiAddr+"/health")
 	waitForHTTP(t, "http://"+workerAddr+"/health")
+	waitForHTTP(t, "http://"+workerAddr+harnessruntime.DefaultRemoteSandboxHealthPath)
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
