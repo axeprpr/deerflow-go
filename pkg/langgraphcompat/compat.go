@@ -17,7 +17,6 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
-	"github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/sandbox"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
@@ -256,12 +255,8 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	s.eventStore = s.snapshotStore.(harnessruntime.RunEventStore)
 	s.threadStateStore = newCompatThreadStateStore(s, runtimeNodeInstance.ThreadStateStore())
 	var memoryRuntime *harness.MemoryRuntime
-	if store, err := memory.NewFileStore(filepath.Join(dataRootAbs, "memory")); err == nil {
-		if migrateErr := store.AutoMigrate(ctx); migrateErr != nil {
-			logger.Printf("Warning: failed to initialize memory store: %v", migrateErr)
-		} else {
-			memoryRuntime = harnessruntime.NewMemoryService(store, nil).Runtime()
-		}
+	if memoryService, err := harnessruntime.BuildDefaultMemoryService(ctx, dataRootAbs); err == nil {
+		memoryRuntime = memoryService.Runtime()
 	} else {
 		logger.Printf("Warning: failed to configure memory store: %v", err)
 	}

@@ -1,9 +1,13 @@
 package harnessruntime
 
 import (
+	"context"
+	"path/filepath"
+
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
+	pkgmemory "github.com/axeprpr/deerflow-go/pkg/memory"
 )
 
 type RuntimeBootstrap struct {
@@ -23,4 +27,15 @@ func BuildDefaultRuntimeBootstrap(config RuntimeNodeConfig, provider llm.LLMProv
 		SandboxRuntime: sandboxRuntime,
 		ToolRuntime:    NewDefaultToolRuntime(provider, clarify, sandboxRuntime),
 	}, nil
+}
+
+func BuildDefaultMemoryService(ctx context.Context, dataRoot string) (*MemoryService, error) {
+	store, err := pkgmemory.NewFileStore(filepath.Join(dataRoot, "memory"))
+	if err != nil {
+		return nil, err
+	}
+	if err := store.AutoMigrate(ctx); err != nil {
+		return nil, err
+	}
+	return NewMemoryService(store, nil), nil
 }
