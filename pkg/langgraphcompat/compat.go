@@ -194,7 +194,15 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	clarifyManager := clarification.NewManager(32)
 	sandboxRoot := filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
 	runtimeNode := harnessruntime.DefaultRuntimeNodeConfig("langgraph", sandboxRoot)
-	bootstrap, err := harnessruntime.BuildDefaultRuntimeBootstrap(runtimeNode, provider, clarifyManager)
+	dataRoot := tools.DataRootFromEnv()
+	dataRootAbs, err := filepath.Abs(dataRoot)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dataRootAbs, 0o755); err != nil {
+		return nil, err
+	}
+	bootstrap, err := harnessruntime.BuildDefaultRuntimeBootstrapWithMemory(ctx, runtimeNode, dataRootAbs, provider, clarifyManager)
 	if err != nil {
 		return nil, err
 	}
@@ -203,6 +211,9 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	toolRuntime := bootstrap.ToolRuntime
 	registry := toolRuntime.Registry()
 	subagentPool := toolRuntime.Subagents()
+	if bootstrap.MemoryErr != nil {
+		logger.Printf("Warning: failed to configure memory store: %v", bootstrap.MemoryErr)
+	}
 
 	// Create checkpoint store
 	var store checkpoint.Store
@@ -214,51 +225,40 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		}
 	}
 
-	dataRoot := tools.DataRootFromEnv()
-	dataRootAbs, err := filepath.Abs(dataRoot)
-	if err != nil {
-		return nil, err
-	}
-	if err := os.MkdirAll(dataRootAbs, 0o755); err != nil {
-		return nil, err
-	}
-
 	s := &Server{
-		logger:         logger,
-		llmProvider:    provider,
-		tools:          registry,
-		sandboxName:    "langgraph",
-		sandboxRoot:    sandboxRoot,
-		subagents:      subagentPool,
-		clarify:        clarifyManager,
-		clarifyAPI:     clarification.NewAPI(clarifyManager),
-		defaultModel:   defaultModel,
-		maxTurns:       100,
-		store:          store,
-		startedAt:      time.Now().UTC(),
-		sessions:       make(map[string]*Session),
-		runs:           make(map[string]*Run),
-		runRegistry:    newRunRegistry(),
-		runtimeNode:    runtimeNode,
-		dataRoot:       dataRootAbs,
-		models:         defaultGatewayModels(defaultModel),
-		skills:         nil,
-		mcpConfig:      defaultGatewayMCPConfig(),
-		agents:         map[string]gatewayAgent{},
-		memoryCache:    defaultGatewayMemory(),
-		memoryConfig:   defaultGatewayMemoryConfig(dataRootAbs),
-		channelConfig:  gatewayChannelsConfig{},
-		channels:       defaultGatewayChannelsStatus(),
+		logger:        logger,
+		llmProvider:   provider,
+		tools:         registry,
+		sandboxName:   "langgraph",
+		sandboxRoot:   sandboxRoot,
+		subagents:     subagentPool,
+		clarify:       clarifyManager,
+		clarifyAPI:    clarification.NewAPI(clarifyManager),
+		defaultModel:  defaultModel,
+		maxTurns:      100,
+		store:         store,
+		startedAt:     time.Now().UTC(),
+		sessions:      make(map[string]*Session),
+		runs:          make(map[string]*Run),
+		runRegistry:   newRunRegistry(),
+		runtimeNode:   runtimeNode,
+		dataRoot:      dataRootAbs,
+		models:        defaultGatewayModels(defaultModel),
+		skills:        nil,
+		mcpConfig:     defaultGatewayMCPConfig(),
+		agents:        map[string]gatewayAgent{},
+		memoryCache:   defaultGatewayMemory(),
+		memoryConfig:  defaultGatewayMemoryConfig(dataRootAbs),
+		channelConfig: gatewayChannelsConfig{},
+		channels:      defaultGatewayChannelsStatus(),
 	}
 	s.attachRuntimeSystem(runtimeNodeInstance)
 	s.snapshotStore = newCompatRunStateStore(s, runtimeNodeInstance.SnapshotStore(), runtimeNodeInstance.EventStore())
 	s.eventStore = s.snapshotStore.(harnessruntime.RunEventStore)
 	s.threadStateStore = newCompatThreadStateStore(s, runtimeNodeInstance.ThreadStateStore())
 	var memoryRuntime *harness.MemoryRuntime
-	if memoryService, err := harnessruntime.BuildDefaultMemoryService(ctx, dataRootAbs); err == nil {
-		memoryRuntime = memoryService.Runtime()
-	} else {
-		logger.Printf("Warning: failed to configure memory store: %v", err)
+	if bootstrap.MemoryService != nil {
+		memoryRuntime = bootstrap.MemoryService.Runtime()
 	}
 	s.runtime = harness.NewRuntime(harness.RuntimeDeps{
 		LLMProvider:     provider,

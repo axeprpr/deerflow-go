@@ -36,3 +36,20 @@ func TestBuildDefaultMemoryServiceBuildsMigratedRuntime(t *testing.T) {
 		t.Fatal("memory service is not enabled")
 	}
 }
+
+func TestBuildDefaultRuntimeBootstrapWithMemoryBuildsMemoryService(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	bootstrap, err := BuildDefaultRuntimeBootstrapWithMemory(context.Background(), config, t.TempDir(), nil, clarification.NewManager(4))
+	if err != nil {
+		t.Fatalf("BuildDefaultRuntimeBootstrapWithMemory() error = %v", err)
+	}
+	if bootstrap == nil || bootstrap.Node == nil {
+		t.Fatalf("bootstrap = %#v", bootstrap)
+	}
+	if bootstrap.MemoryService == nil || bootstrap.MemoryService.Runtime() == nil {
+		t.Fatalf("MemoryService = %#v", bootstrap.MemoryService)
+	}
+	if bootstrap.MemoryErr != nil {
+		t.Fatalf("MemoryErr = %v", bootstrap.MemoryErr)
+	}
+}

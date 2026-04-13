@@ -14,6 +14,8 @@ type RuntimeBootstrap struct {
 	Node           *RuntimeNode
 	SandboxRuntime harness.SandboxRuntime
 	ToolRuntime    harness.ToolRuntime
+	MemoryService  *MemoryService
+	MemoryErr      error
 }
 
 func BuildDefaultRuntimeBootstrap(config RuntimeNodeConfig, provider llm.LLMProvider, clarify *clarification.Manager) (*RuntimeBootstrap, error) {
@@ -27,6 +29,20 @@ func BuildDefaultRuntimeBootstrap(config RuntimeNodeConfig, provider llm.LLMProv
 		SandboxRuntime: sandboxRuntime,
 		ToolRuntime:    NewDefaultToolRuntime(provider, clarify, sandboxRuntime),
 	}, nil
+}
+
+func BuildDefaultRuntimeBootstrapWithMemory(ctx context.Context, config RuntimeNodeConfig, dataRoot string, provider llm.LLMProvider, clarify *clarification.Manager) (*RuntimeBootstrap, error) {
+	bootstrap, err := BuildDefaultRuntimeBootstrap(config, provider, clarify)
+	if err != nil {
+		return nil, err
+	}
+	memoryService, err := BuildDefaultMemoryService(ctx, dataRoot)
+	if err == nil {
+		bootstrap.MemoryService = memoryService
+	} else {
+		bootstrap.MemoryErr = err
+	}
+	return bootstrap, nil
 }
 
 func BuildDefaultMemoryService(ctx context.Context, dataRoot string) (*MemoryService, error) {
