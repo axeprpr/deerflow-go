@@ -96,6 +96,14 @@ func (c RuntimeNodeConfig) BuildRunEventStore() RunEventStore {
 	}
 }
 
+func (c RuntimeNodeConfig) BuildStatePlane() RuntimeStatePlane {
+	return RuntimeStatePlane{
+		Snapshots: c.BuildRunSnapshotStore(),
+		Events:    c.BuildRunEventStore(),
+		Threads:   c.BuildThreadStateStore(),
+	}
+}
+
 func transportTopology(backend WorkerTransportBackend) DispatchTopology {
 	switch normalizeTransportBackend(backend) {
 	case WorkerTransportBackendDirect:

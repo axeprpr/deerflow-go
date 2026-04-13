@@ -18,14 +18,14 @@ func (s *Server) ensureThreadStateStore() harnessruntime.ThreadStateStore {
 	s.sessionsMu.Lock()
 	defer s.sessionsMu.Unlock()
 	if s.threadStateStore == nil {
-		s.threadStateStore = newCompatThreadStateStore(s)
+		s.threadStateStore = newCompatThreadStateStore(s, nil)
 	}
 	return s.threadStateStore
 }
 
-func newCompatThreadStateStore(server *Server) harnessruntime.ThreadStateStore {
-	var store harnessruntime.ThreadStateStore
-	if server != nil {
+func newCompatThreadStateStore(server *Server, initial harnessruntime.ThreadStateStore) harnessruntime.ThreadStateStore {
+	var store harnessruntime.ThreadStateStore = initial
+	if store == nil && server != nil {
 		store = server.runtimeNode.BuildThreadStateStore()
 	}
 	if store == nil {

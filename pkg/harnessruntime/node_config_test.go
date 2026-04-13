@@ -68,3 +68,24 @@ func TestRuntimeNodeConfigSupportsMixedStateBackends(t *testing.T) {
 		t.Fatalf("BuildRunEventStore() returned %T", config.BuildRunEventStore())
 	}
 }
+
+func TestRuntimeNodeConfigBuildStatePlane(t *testing.T) {
+	root := t.TempDir()
+	config := DefaultRuntimeNodeConfig("runtime-test", root)
+	config.State = RuntimeStateStoreConfig{
+		SnapshotBackend: RuntimeStateStoreBackendFile,
+		EventBackend:    RuntimeStateStoreBackendFile,
+		ThreadBackend:   RuntimeStateStoreBackendInMemory,
+		Root:            root,
+	}
+	plane := config.BuildStatePlane()
+	if _, ok := plane.Snapshots.(*JSONFileRunStore); !ok {
+		t.Fatalf("Snapshots = %T", plane.Snapshots)
+	}
+	if _, ok := plane.Events.(*JSONFileRunEventStore); !ok {
+		t.Fatalf("Events = %T", plane.Events)
+	}
+	if _, ok := plane.Threads.(*InMemoryThreadStateStore); !ok {
+		t.Fatalf("Threads = %T", plane.Threads)
+	}
+}

@@ -21,7 +21,7 @@ func (s *Server) ensureSnapshotStore() harnessruntime.RunSnapshotStore {
 	s.runsMu.Lock()
 	defer s.runsMu.Unlock()
 	if s.snapshotStore == nil {
-		s.snapshotStore = newCompatRunStateStore(s)
+		s.snapshotStore = newCompatRunStateStore(s, nil, nil)
 	}
 	return s.snapshotStore
 }
@@ -34,22 +34,23 @@ func (s *Server) ensureEventStore() harnessruntime.RunEventStore {
 	defer s.runsMu.Unlock()
 	if s.eventStore == nil {
 		if s.snapshotStore == nil {
-			s.snapshotStore = newCompatRunStateStore(s)
+			s.snapshotStore = newCompatRunStateStore(s, nil, nil)
 		}
 		s.eventStore = s.snapshotStore.(harnessruntime.RunEventStore)
 	}
 	return s.eventStore
 }
 
-func newCompatRunStateStore(server *Server) *compatRunStateStore {
-	var store harnessruntime.RunSnapshotStore
-	var events harnessruntime.RunEventStore
-	if server != nil {
+func newCompatRunStateStore(server *Server, snapshots harnessruntime.RunSnapshotStore, events harnessruntime.RunEventStore) *compatRunStateStore {
+	var store harnessruntime.RunSnapshotStore = snapshots
+	if store == nil && server != nil {
 		store = server.runtimeNode.BuildRunSnapshotStore()
-		events = server.runtimeNode.BuildRunEventStore()
 	}
 	if store == nil {
 		store = harnessruntime.NewInMemoryRunStore()
+	}
+	if events == nil && server != nil {
+		events = server.runtimeNode.BuildRunEventStore()
 	}
 	if events == nil {
 		if shared, ok := store.(harnessruntime.RunEventStore); ok {
