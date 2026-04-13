@@ -10,7 +10,7 @@ import (
 )
 
 func (s *Server) handleMemoryGet(w http.ResponseWriter, r *http.Request) {
-	scope, ok := decodeGatewayMemoryScope(w, r)
+	scope, ok := s.decodeGatewayMemoryScope(w, r)
 	if !ok {
 		return
 	}
@@ -18,7 +18,7 @@ func (s *Server) handleMemoryGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMemoryExport(w http.ResponseWriter, r *http.Request) {
-	scope, ok := decodeGatewayMemoryScope(w, r)
+	scope, ok := s.decodeGatewayMemoryScope(w, r)
 	if !ok {
 		return
 	}
@@ -26,7 +26,7 @@ func (s *Server) handleMemoryExport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMemoryImport(w http.ResponseWriter, r *http.Request) {
-	scope, ok := decodeGatewayMemoryScope(w, r)
+	scope, ok := s.decodeGatewayMemoryScope(w, r)
 	if !ok {
 		return
 	}
@@ -44,7 +44,7 @@ func (s *Server) handleMemoryImport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMemoryReload(w http.ResponseWriter, r *http.Request) {
-	scope, ok := decodeGatewayMemoryScope(w, r)
+	scope, ok := s.decodeGatewayMemoryScope(w, r)
 	if !ok {
 		return
 	}
@@ -57,7 +57,7 @@ func (s *Server) handleMemoryReload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMemoryClear(w http.ResponseWriter, r *http.Request) {
-	scope, ok := decodeGatewayMemoryScope(w, r)
+	scope, ok := s.decodeGatewayMemoryScope(w, r)
 	if !ok {
 		return
 	}
@@ -70,7 +70,7 @@ func (s *Server) handleMemoryClear(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMemoryFactCreate(w http.ResponseWriter, r *http.Request) {
-	scope, ok := decodeGatewayMemoryScope(w, r)
+	scope, ok := s.decodeGatewayMemoryScope(w, r)
 	if !ok {
 		return
 	}
@@ -95,7 +95,7 @@ func (s *Server) handleMemoryFactCreate(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleMemoryFactDelete(w http.ResponseWriter, r *http.Request) {
-	scope, ok := decodeGatewayMemoryScope(w, r)
+	scope, ok := s.decodeGatewayMemoryScope(w, r)
 	if !ok {
 		return
 	}
@@ -113,7 +113,7 @@ func (s *Server) handleMemoryFactDelete(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleMemoryFactUpdate(w http.ResponseWriter, r *http.Request) {
-	scope, ok := decodeGatewayMemoryScope(w, r)
+	scope, ok := s.decodeGatewayMemoryScope(w, r)
 	if !ok {
 		return
 	}
@@ -155,8 +155,8 @@ func (s *Server) handleMemoryStatusGet(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func decodeGatewayMemoryScope(w http.ResponseWriter, r *http.Request) (pkgmemory.Scope, bool) {
-	scope, err := gatewayMemoryScopeFromRequest(r)
+func (s *Server) decodeGatewayMemoryScope(w http.ResponseWriter, r *http.Request) (pkgmemory.Scope, bool) {
+	scope, err := gatewayMemoryScopeFromRequest(s, r)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": err.Error()})
 		return pkgmemory.Scope{}, false

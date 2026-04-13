@@ -33,7 +33,7 @@ func isGatewayGlobalMemoryScope(scope pkgmemory.Scope) bool {
 		strings.TrimSpace(scope.Namespace) == ""
 }
 
-func gatewayMemoryScopeFromRequest(r *http.Request) (pkgmemory.Scope, error) {
+func gatewayMemoryScopeFromRequest(s *Server, r *http.Request) (pkgmemory.Scope, error) {
 	if r == nil || r.URL == nil {
 		return pkgmemory.Scope{}, nil
 	}
@@ -41,17 +41,50 @@ func gatewayMemoryScopeFromRequest(r *http.Request) (pkgmemory.Scope, error) {
 	scopeType := strings.TrimSpace(firstNonEmpty(query.Get("scope")))
 	scopeID := strings.TrimSpace(firstNonEmpty(query.Get("scope_id"), query.Get("scopeId")))
 	namespace := strings.TrimSpace(firstNonEmpty(query.Get("namespace")))
+	threadID := strings.TrimSpace(firstNonEmpty(query.Get("thread_id"), query.Get("threadId")))
+	threadScope, threadFound := s.resolveThreadMemoryScope(threadID)
 	if scopeType == "" && scopeID == "" && namespace == "" {
-		return pkgmemory.Scope{}, nil
+		if threadID == "" {
+			return pkgmemory.Scope{}, nil
+		}
+		if !threadFound {
+			return pkgmemory.Scope{}, fmt.Errorf("memory thread_id not found")
+		}
+		return defaultGatewayMemoryScopeFromThread(threadID, threadScope), nil
+	}
+	if threadID != "" && !threadFound {
+		return pkgmemory.Scope{}, fmt.Errorf("memory thread_id not found")
+	}
+	if namespace == "" {
+		namespace = threadScope.Namespace
+	}
+	if scopeType == "" && scopeID == "" && namespace != "" {
+		if threadID == "" {
+			return pkgmemory.Scope{}, nil
+		}
+		if !threadFound {
+			return pkgmemory.Scope{}, fmt.Errorf("memory thread_id not found")
+		}
+		return defaultGatewayMemoryScopeFromThread(threadID, threadScope), nil
 	}
 	if strings.EqualFold(scopeType, "global") {
-		if scopeID != "" || namespace != "" {
-			return pkgmemory.Scope{}, fmt.Errorf("global memory scope cannot use scope_id or namespace")
+		if scopeID != "" || namespace != "" || threadID != "" {
+			return pkgmemory.Scope{}, fmt.Errorf("global memory scope cannot use scope_id, namespace, or thread_id")
 		}
 		return pkgmemory.Scope{}, nil
 	}
 	if scopeType == "" {
-		scopeType = string(pkgmemory.ScopeSession)
+		scopeType = string(defaultMemoryScopeTypeFromThread(threadScope))
+	}
+	if scopeID == "" {
+		switch pkgmemory.ScopeType(scopeType) {
+		case pkgmemory.ScopeSession:
+			scopeID = threadID
+		case pkgmemory.ScopeUser:
+			scopeID = threadScope.UserID
+		case pkgmemory.ScopeGroup:
+			scopeID = threadScope.GroupID
+		}
 	}
 	if scopeID == "" {
 		return pkgmemory.Scope{}, fmt.Errorf("memory scope_id required")
@@ -66,6 +99,55 @@ func gatewayMemoryScopeFromRequest(r *http.Request) (pkgmemory.Scope, error) {
 		return scope, nil
 	default:
 		return pkgmemory.Scope{}, fmt.Errorf("unsupported memory scope %q", scopeType)
+	}
+}
+
+func (s *Server) resolveThreadMemoryScope(threadID string) (threadMemoryScope, bool) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return threadMemoryScope{}, false
+	}
+	if store := s.ensureThreadStateStore(); store != nil {
+		if state, ok := store.LoadThreadRuntimeState(threadID); ok {
+			scope := threadMemoryScopeFromMetadata(state.Metadata)
+			return scope, true
+		}
+	}
+	if thread, ok := s.findThreadResponse(threadID); ok {
+		scope := threadMemoryScopeFromRaw(thread)
+		if metadata := mapFromAny(thread["metadata"]); len(metadata) > 0 {
+			scope = threadMemoryScopeFromMetadata(metadata).Merge(scope)
+		}
+		return scope, true
+	}
+	return threadMemoryScope{}, false
+}
+
+func defaultMemoryScopeTypeFromThread(scope threadMemoryScope) pkgmemory.ScopeType {
+	switch {
+	case strings.TrimSpace(scope.GroupID) != "":
+		return pkgmemory.ScopeGroup
+	case strings.TrimSpace(scope.UserID) != "":
+		return pkgmemory.ScopeUser
+	default:
+		return pkgmemory.ScopeSession
+	}
+}
+
+func defaultGatewayMemoryScopeFromThread(threadID string, scope threadMemoryScope) pkgmemory.Scope {
+	switch defaultMemoryScopeTypeFromThread(scope) {
+	case pkgmemory.ScopeGroup:
+		derived := pkgmemory.GroupScope(scope.GroupID)
+		derived.Namespace = scope.Namespace
+		return derived.Normalized()
+	case pkgmemory.ScopeUser:
+		derived := pkgmemory.UserScope(scope.UserID)
+		derived.Namespace = scope.Namespace
+		return derived.Normalized()
+	default:
+		derived := pkgmemory.SessionScope(strings.TrimSpace(threadID))
+		derived.Namespace = scope.Namespace
+		return derived.Normalized()
 	}
 }
 
