@@ -89,3 +89,22 @@ func TestBuildDefaultHarnessRuntimeBindsRuntimeToNode(t *testing.T) {
 		t.Fatalf("node runtime = %#v want %#v", bootstrap.Node.RuntimeView(), runtime)
 	}
 }
+
+func TestBuildDefaultRuntimeSystemWithMemoryBuildsRuntime(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	bootstrap, err := BuildDefaultRuntimeSystemWithMemory(context.Background(), config, t.TempDir(), nil, clarification.NewManager(4), 100, func(memory *harness.MemoryRuntime, tools harness.ToolRuntime, sandbox harness.SandboxRuntime) harness.ProfileBuilder {
+		return harness.NewStaticProfileBuilder(harness.RuntimeProfile{
+			ToolRuntime:    tools,
+			SandboxRuntime: sandbox,
+		})
+	})
+	if err != nil {
+		t.Fatalf("BuildDefaultRuntimeSystemWithMemory() error = %v", err)
+	}
+	if bootstrap == nil || bootstrap.Runtime == nil {
+		t.Fatalf("bootstrap = %#v", bootstrap)
+	}
+	if bootstrap.Node.RuntimeView() != bootstrap.Runtime {
+		t.Fatalf("node runtime = %#v want %#v", bootstrap.Node.RuntimeView(), bootstrap.Runtime)
+	}
+}

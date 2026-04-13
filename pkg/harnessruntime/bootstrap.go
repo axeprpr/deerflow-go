@@ -16,6 +16,7 @@ type RuntimeBootstrap struct {
 	ToolRuntime    harness.ToolRuntime
 	MemoryService  *MemoryService
 	MemoryErr      error
+	Runtime        *harness.Runtime
 }
 
 type RuntimeProfileBuilderFactory func(*harness.MemoryRuntime, harness.ToolRuntime, harness.SandboxRuntime) harness.ProfileBuilder
@@ -103,5 +104,15 @@ func BuildDefaultHarnessRuntime(bootstrap *RuntimeBootstrap, provider llm.LLMPro
 	if node != nil {
 		node.BindRuntime(runtime)
 	}
+	bootstrap.Runtime = runtime
 	return runtime
+}
+
+func BuildDefaultRuntimeSystemWithMemory(ctx context.Context, config RuntimeNodeConfig, dataRoot string, provider llm.LLMProvider, clarify *clarification.Manager, maxTurns int, profileBuilder RuntimeProfileBuilderFactory) (*RuntimeBootstrap, error) {
+	bootstrap, err := BuildDefaultRuntimeBootstrapWithMemory(ctx, config, dataRoot, provider, clarify)
+	if err != nil {
+		return nil, err
+	}
+	BuildDefaultHarnessRuntime(bootstrap, provider, maxTurns, profileBuilder)
+	return bootstrap, nil
 }

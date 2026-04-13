@@ -202,39 +202,15 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	if err := os.MkdirAll(dataRootAbs, 0o755); err != nil {
 		return nil, err
 	}
-	bootstrap, err := harnessruntime.BuildDefaultRuntimeBootstrapWithMemory(ctx, runtimeNode, dataRootAbs, provider, clarifyManager)
-	if err != nil {
-		return nil, err
-	}
-	runtimeNodeInstance := bootstrap.Node
-	registry := runtimeNodeInstance.ToolRegistry()
-	subagentPool := runtimeNodeInstance.Subagents()
-	if bootstrap.MemoryErr != nil {
-		logger.Printf("Warning: failed to configure memory store: %v", bootstrap.MemoryErr)
-	}
-
-	// Create checkpoint store
-	var store checkpoint.Store
-	if dbURL != "" {
-		var err error
-		store, err = checkpoint.OpenStore(ctx, dbURL)
-		if err != nil {
-			logger.Printf("Warning: failed to create database store: %v", err)
-		}
-	}
-
 	s := &Server{
 		logger:        logger,
 		llmProvider:   provider,
-		tools:         registry,
 		sandboxName:   "langgraph",
 		sandboxRoot:   sandboxRoot,
-		subagents:     subagentPool,
 		clarify:       clarifyManager,
 		clarifyAPI:    clarification.NewAPI(clarifyManager),
 		defaultModel:  defaultModel,
 		maxTurns:      100,
-		store:         store,
 		startedAt:     time.Now().UTC(),
 		sessions:      make(map[string]*Session),
 		runs:          make(map[string]*Run),
@@ -250,11 +226,32 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		channelConfig: gatewayChannelsConfig{},
 		channels:      defaultGatewayChannelsStatus(),
 	}
+
+	bootstrap, err := harnessruntime.BuildDefaultRuntimeSystemWithMemory(ctx, runtimeNode, dataRootAbs, provider, clarifyManager, s.maxTurns, s.runtimeProfileBuilder)
+	if err != nil {
+		return nil, err
+	}
+	runtimeNodeInstance := bootstrap.Node
+	s.tools = runtimeNodeInstance.ToolRegistry()
+	s.subagents = runtimeNodeInstance.Subagents()
+	if bootstrap.MemoryErr != nil {
+		logger.Printf("Warning: failed to configure memory store: %v", bootstrap.MemoryErr)
+	}
+
+	// Create checkpoint store
+	if dbURL != "" {
+		var err error
+		s.store, err = checkpoint.OpenStore(ctx, dbURL)
+		if err != nil {
+			logger.Printf("Warning: failed to create database store: %v", err)
+		}
+	}
+
 	s.attachRuntimeSystem(runtimeNodeInstance)
 	s.snapshotStore = newCompatRunStateStore(s, runtimeNodeInstance.SnapshotStore(), runtimeNodeInstance.EventStore())
 	s.eventStore = s.snapshotStore.(harnessruntime.RunEventStore)
 	s.threadStateStore = newCompatThreadStateStore(s, runtimeNodeInstance.ThreadStateStore())
-	s.runtime = harnessruntime.BuildDefaultHarnessRuntime(bootstrap, provider, s.maxTurns, s.runtimeProfileBuilder)
+	s.runtime = bootstrap.Runtime
 	s.bindRuntimeNodeDispatch()
 	s.skills = s.discoverGatewaySkills(nil)
 	for _, option := range options {
