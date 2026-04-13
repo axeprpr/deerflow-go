@@ -149,7 +149,7 @@ func TestSandboxManagerFromConfigSupportsLocalBackend(t *testing.T) {
 	}
 }
 
-func TestSandboxManagerFromConfigReturnsDeterministicUnsupportedBackendError(t *testing.T) {
+func TestSandboxManagerFromConfigBuildsRemoteBackend(t *testing.T) {
 	manager, err := NewSandboxManagerFromConfig(SandboxManagerConfig{
 		Backend:  SandboxBackendRemote,
 		Endpoint: "https://sandbox.internal",
@@ -157,14 +157,8 @@ func TestSandboxManagerFromConfigReturnsDeterministicUnsupportedBackendError(t *
 	if err != nil {
 		t.Fatalf("NewSandboxManagerFromConfig() error = %v", err)
 	}
-	runtime := manager.Runtime(harness.FeatureSandboxPolicy{})
-	_, err = runtime.Resolve(harness.AgentRequest{Features: harness.FeatureSet{Sandbox: true}})
-	if err == nil {
-		t.Fatal("Resolve() error = nil, want unsupported backend error")
-	}
-	want := "remote sandbox backend is not configured"
-	if err.Error() != want {
-		t.Fatalf("Resolve() error = %q, want %q", err.Error(), want)
+	if manager == nil || manager.Backend() != SandboxBackendRemote {
+		t.Fatalf("manager = %#v", manager)
 	}
 }
 

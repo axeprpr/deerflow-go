@@ -85,7 +85,7 @@ func DefaultSandboxManagerFactory() SandboxManagerFactory {
 				return newUnsupportedSandboxLeaseService(config, "container sandbox backend is not configured"), nil
 			}),
 			SandboxBackendRemote: SandboxLeaseServiceFactoryFunc(func(config SandboxManagerConfig) (SandboxLeaseService, error) {
-				return newUnsupportedSandboxLeaseService(config, "remote sandbox backend is not configured"), nil
+				return NewRemoteSandboxLeaseService(config.Endpoint, nil), nil
 			}),
 			SandboxBackendWindowsRestricted: SandboxLeaseServiceFactoryFunc(func(config SandboxManagerConfig) (SandboxLeaseService, error) {
 				return newUnsupportedSandboxLeaseService(config, "windows restricted sandbox backend is not configured"), nil
