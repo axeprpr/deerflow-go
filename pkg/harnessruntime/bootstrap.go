@@ -32,6 +32,9 @@ func (b *RuntimeBootstrap) EnsureLauncher(source func() *harness.Runtime, specs 
 	if b == nil || b.Node == nil {
 		return NewRuntimeNodeLauncher(nil)
 	}
+	if source == nil && b.Runtime != nil {
+		source = func() *harness.Runtime { return b.Runtime }
+	}
 	b.Node.EnsureDispatchSource(source, specs)
 	return b.Launcher()
 }

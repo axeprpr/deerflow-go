@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 )
 
 type testLLMProvider struct{}
+type failingLLMProvider struct{}
 
 func (testLLMProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
 	return llm.ChatResponse{Message: models.Message{Role: models.RoleAI}}, nil
@@ -27,6 +29,14 @@ func (testLLMProvider) Stream(context.Context, llm.ChatRequest) (<-chan llm.Stre
 	ch := make(chan llm.StreamChunk)
 	close(ch)
 	return ch, nil
+}
+
+func (failingLLMProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{}, errors.New("gateway provider should not execute")
+}
+
+func (failingLLMProvider) Stream(context.Context, llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	return nil, errors.New("gateway provider should not execute")
 }
 
 func TestNewServerDefersSandboxCreation(t *testing.T) {
@@ -195,6 +205,80 @@ func TestServerStartStartsAllInOneRemoteWorker(t *testing.T) {
 	}
 	if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
 		t.Fatalf("Start() error = %v", err)
+	}
+}
+
+func TestGatewayRoleDispatchesRunsToRemoteWorker(t *testing.T) {
+	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
+
+	workerAddr := freeTCPAddr(t)
+	workerConfig := harnessruntime.DefaultWorkerRuntimeNodeConfig("remote-worker", t.TempDir())
+	workerConfig.RemoteWorker.Addr = workerAddr
+	_, workerLauncher, err := harnessruntime.BuildDefaultRuntimeSystemLauncherWithMemory(
+		context.Background(),
+		workerConfig,
+		t.TempDir(),
+		fakeLLMProvider{},
+		nil,
+		32,
+		nil,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("BuildDefaultRuntimeSystemLauncherWithMemory() error = %v", err)
+	}
+
+	workerErrCh := make(chan error, 1)
+	go func() {
+		workerErrCh <- workerLauncher.Start()
+	}()
+	waitForHTTP(t, "http://"+workerAddr+harnessruntime.DefaultRemoteWorkerHealthPath)
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := workerLauncher.Close(shutdownCtx); err != nil {
+			t.Fatalf("worker Close() error = %v", err)
+		}
+		if err := <-workerErrCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Fatalf("worker Start() error = %v", err)
+		}
+	}()
+
+	gatewayConfig := harnessruntime.DefaultGatewayRuntimeNodeConfig("remote-gateway", t.TempDir(), "http://"+workerAddr+harnessruntime.DefaultRemoteWorkerDispatchPath)
+	gateway, err := NewServer(":0", "", "test-model", WithRuntimeNodeConfig(gatewayConfig), WithLLMProvider(failingLLMProvider{}))
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	if gateway.runtimeSystem == nil || gateway.runtimeSystem.RemoteWorker != nil {
+		t.Fatalf("gateway runtimeSystem remote worker = %#v", gateway.runtimeSystem)
+	}
+
+	resp := performCompatRequest(t, gateway.httpServer.Handler, http.MethodPost, "/runs/stream", strings.NewReader(`{"thread_id":"thread-remote-worker","input":{"messages":[{"role":"user","content":"hello"}]}}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), `event: metadata`) {
+		t.Fatalf("body = %q", resp.Body.String())
+	}
+
+	var stored *Run
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		runID := findRunIDForThread(gateway, "thread-remote-worker")
+		stored = gateway.getRun(runID)
+		if stored != nil && stored.Status == "success" {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if stored == nil {
+		t.Fatal("stored run missing")
+	}
+	if stored.Status != "success" {
+		t.Fatalf("run status = %q err=%q", stored.Status, stored.Error)
 	}
 }
 

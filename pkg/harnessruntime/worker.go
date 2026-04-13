@@ -12,8 +12,9 @@ type RunExecutor interface {
 }
 
 type RuntimeWorker struct {
-	runtime func() *harness.Runtime
-	specs   WorkerSpecRuntime
+	runtime  func() *harness.Runtime
+	specs    WorkerSpecRuntime
+	complete bool
 }
 
 func NewRuntimeWorker() RunExecutor {
@@ -22,6 +23,10 @@ func NewRuntimeWorker() RunExecutor {
 
 func NewRuntimeWorkerSource(source func() *harness.Runtime, specs WorkerSpecRuntime) RunExecutor {
 	return RuntimeWorker{runtime: source, specs: specs}
+}
+
+func NewCompletingRuntimeWorkerSource(source func() *harness.Runtime, specs WorkerSpecRuntime) RunExecutor {
+	return RuntimeWorker{runtime: source, specs: specs, complete: true}
 }
 
 func (w RuntimeWorker) Execute(ctx context.Context, req DispatchRequest) (*DispatchResult, error) {
@@ -41,6 +46,20 @@ func (w RuntimeWorker) execute(ctx context.Context, req DispatchRequest) (*Dispa
 		return nil, err
 	}
 	handle := NewStaticExecutionHandle(prepared.Execution, prepared.Lifecycle.ThreadID)
+	if w.complete {
+		result, err := prepared.Execution.Run(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return &DispatchResult{
+			Lifecycle: prepared.Lifecycle,
+			Execution: ExecutionDescriptor{
+				Kind:      ExecutionKindRemoteCompleted,
+				SessionID: prepared.Lifecycle.ThreadID,
+			},
+			Completed: result,
+		}, nil
+	}
 	return &DispatchResult{
 		Lifecycle: prepared.Lifecycle,
 		Handle:    handle,

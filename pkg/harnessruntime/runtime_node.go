@@ -286,7 +286,13 @@ func (n *RuntimeNode) BindDispatchSource(source func() *harness.Runtime, specs W
 	if n == nil {
 		return
 	}
-	n.BindDispatch(n.Config.BuildDispatchRuntimeWithProviders(source, specs, n.Providers.Remote))
+	runtime := n.Config.BuildDispatchRuntimeWithProviders(source, specs, n.Providers.Remote)
+	n.BindDispatch(runtime)
+	if n.Config.servesRemoteWorker() {
+		remoteRuntime := runtime
+		remoteRuntime.Executor = NewCompletingRuntimeWorkerSource(source, specs)
+		n.BindRemoteWorker(remoteRuntime)
+	}
 }
 
 func (n *RuntimeNode) EnsureDispatchSource(source func() *harness.Runtime, specs WorkerSpecRuntime) RunDispatcher {
@@ -297,6 +303,35 @@ func (n *RuntimeNode) EnsureDispatchSource(source func() *harness.Runtime, specs
 		n.BindDispatchSource(source, specs)
 	}
 	return n.Dispatcher
+}
+
+func (n *RuntimeNode) BindRemoteWorker(runtime DispatchRuntimeConfig) {
+	if n == nil {
+		return
+	}
+	if !n.Config.servesRemoteWorker() {
+		n.RemoteWorker = nil
+		return
+	}
+	providers := n.Providers
+	if providers.Transport == nil {
+		providers.Transport = DefaultRuntimeNodeProviders().Transport
+	}
+	if providers.Remote.Client == nil {
+		providers.Remote.Client = DefaultRemoteWorkerProviders().Client
+	}
+	if providers.Remote.Protocol == nil {
+		providers.Remote.Protocol = DefaultRemoteWorkerProviders().Protocol
+	}
+	if providers.Remote.Server == nil {
+		providers.Remote.Server = DefaultRemoteWorkerProviders().Server
+	}
+	transport := providers.Transport.Build(n.Config.Transport, runtime)
+	protocol := runtime.Protocol
+	if protocol == nil {
+		protocol = providers.Remote.Protocol.Build(n.Config, runtime.Results)
+	}
+	n.RemoteWorker = NewHTTPRemoteWorkerNode(n.Config.BuildRemoteWorkerHTTPServerWithProviders(transport, protocol, providers.Remote))
 }
 
 func EnsureRuntimeNode(existing *RuntimeNode, config RuntimeNodeConfig) (*RuntimeNode, error) {

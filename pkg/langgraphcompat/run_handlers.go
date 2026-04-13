@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
@@ -42,20 +43,24 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	prepared := s.prepareRunRequest(threadID, req)
-	execution, err := s.buildRunExecution(r.Context(), prepared, req)
+	preparedExecution, err := s.buildRunExecution(r.Context(), prepared, req)
 	if err != nil {
 		s.markRunError(prepared.Run, prepared.ThreadID, err)
 		writeDetailError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	ctx := s.bindRunContext(r.Context(), prepared.ThreadID, func(evt subagent.TaskEvent) {}, func(item *clarification.Clarification) {})
-
-	result, err := execution.Run(ctx)
-	if err != nil {
-		s.markRunError(prepared.Run, prepared.ThreadID, err)
-		writeDetailError(w, http.StatusInternalServerError, err.Error())
-		return
+	var result *agent.RunResult
+	if preparedExecution.Completed != nil {
+		result = preparedExecution.Completed
+	} else {
+		ctx := s.bindRunContext(r.Context(), prepared.ThreadID, func(evt subagent.TaskEvent) {}, func(item *clarification.Clarification) {})
+		result, err = preparedExecution.Execution.Run(ctx)
+		if err != nil {
+			s.markRunError(prepared.Run, prepared.ThreadID, err)
+			writeDetailError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 
 	completed := s.finalizeCompletedRun(r.Context(), prepared, result)
@@ -111,7 +116,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	emitter := s.newRunStreamEmitter(w, flusher, prepared.Run, filter)
 	emitter.Metadata(prepared.ThreadID, prepared.AssistantID)
 
-	execution, err := s.buildRunExecution(r.Context(), prepared, req)
+	preparedExecution, err := s.buildRunExecution(r.Context(), prepared, req)
 	if err != nil {
 		s.markRunError(prepared.Run, prepared.ThreadID, err)
 		return
@@ -135,23 +140,28 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	}, func(item *clarification.Clarification) {
 		emitter.Clarification(item)
 	})
-	eventsDone := make(chan struct{})
-	go func() {
-		defer close(eventsDone)
-		for evt := range execution.Events() {
-			emitter.Agent(evt)
-		}
-	}()
+	var result *agent.RunResult
+	if preparedExecution.Completed != nil {
+		result = preparedExecution.Completed
+	} else {
+		eventsDone := make(chan struct{})
+		go func() {
+			defer close(eventsDone)
+			for evt := range preparedExecution.Execution.Events() {
+				emitter.Agent(evt)
+			}
+		}()
 
-	result, err := execution.Run(ctx)
-	<-eventsDone
-	if err != nil {
-		if isRunCanceledErr(err) {
-			s.markRunCanceled(prepared.Run, prepared.ThreadID)
-		} else {
-			s.markRunError(prepared.Run, prepared.ThreadID, err)
+		result, err = preparedExecution.Execution.Run(ctx)
+		<-eventsDone
+		if err != nil {
+			if isRunCanceledErr(err) {
+				s.markRunCanceled(prepared.Run, prepared.ThreadID)
+			} else {
+				s.markRunError(prepared.Run, prepared.ThreadID, err)
+			}
+			return
 		}
-		return
 	}
 
 	completed := s.finalizeCompletedRun(ctx, prepared, result)

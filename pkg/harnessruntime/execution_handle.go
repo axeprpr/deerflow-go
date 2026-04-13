@@ -17,6 +17,7 @@ type ExecutionDescriptor struct {
 }
 
 const ExecutionKindLocalPrepared = "local-prepared"
+const ExecutionKindRemoteCompleted = "remote-completed"
 
 type staticExecutionHandle struct {
 	execution *harness.Execution

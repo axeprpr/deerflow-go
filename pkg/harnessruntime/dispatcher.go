@@ -3,6 +3,7 @@ package harnessruntime
 import (
 	"context"
 
+	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 )
 
@@ -14,6 +15,7 @@ type DispatchResult struct {
 	Lifecycle *harness.RunState
 	Handle    ExecutionHandle
 	Execution ExecutionDescriptor
+	Completed *agent.RunResult
 }
 
 type RunDispatcher interface {

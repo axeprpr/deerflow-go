@@ -140,6 +140,26 @@ func TestBuildDefaultRuntimeSystemLauncherWithMemoryBuildsLauncher(t *testing.T)
 	}
 }
 
+func TestRuntimeBootstrapEnsureLauncherFallsBackToBootstrapRuntime(t *testing.T) {
+	bootstrap, err := BuildDefaultRuntimeSystemWithMemory(context.Background(), DefaultRuntimeNodeConfig("runtime-test", t.TempDir()), t.TempDir(), nil, clarification.NewManager(4), 100, nil)
+	if err != nil {
+		t.Fatalf("BuildDefaultRuntimeSystemWithMemory() error = %v", err)
+	}
+	launcher := bootstrap.EnsureLauncher(nil, nil)
+	if launcher == nil || launcher.Node() == nil {
+		t.Fatalf("launcher = %#v", launcher)
+	}
+	result, err := launcher.Node().RunDispatcher().Dispatch(context.Background(), DispatchRequest{
+		Plan: WorkerExecutionPlan{RunID: "run-bootstrap-runtime", ThreadID: "thread-bootstrap-runtime"},
+	})
+	if err != nil {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+	if result == nil || result.Lifecycle == nil || result.Lifecycle.ThreadID != "thread-bootstrap-runtime" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestBuildDefaultGatewayRuntimeSystemLauncherWithMemoryUsesGatewayRole(t *testing.T) {
 	bootstrap, launcher, err := BuildDefaultGatewayRuntimeSystemLauncherWithMemory(context.Background(), "runtime-test", t.TempDir(), "http://worker:8081/dispatch", t.TempDir(), nil, clarification.NewManager(4), 100, nil, nil, nil)
 	if err != nil {

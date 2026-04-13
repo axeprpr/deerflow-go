@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
@@ -26,6 +27,7 @@ type portableRunLifecycle struct {
 type portableDispatchResult struct {
 	Lifecycle portableRunLifecycle `json:"lifecycle"`
 	Execution ExecutionDescriptor  `json:"execution"`
+	Completed *agent.RunResult     `json:"completed,omitempty"`
 	HandleID  string               `json:"handle_id,omitempty"`
 	EncodedAt time.Time            `json:"encoded_at,omitempty"`
 }
@@ -60,6 +62,7 @@ func (c DispatchResultCodec) Encode(result *DispatchResult) ([]byte, error) {
 	payload := portableDispatchResult{
 		Lifecycle: lifecycle,
 		Execution: result.Execution,
+		Completed: result.Completed,
 		EncodedAt: time.Now().UTC(),
 	}
 	if c.Handles != nil && result.Handle != nil {
@@ -84,6 +87,7 @@ func (c DispatchResultCodec) Decode(data []byte) (*DispatchResult, error) {
 			Metadata:         copyStringAnyMap(payload.Lifecycle.Metadata),
 		},
 		Execution: payload.Execution,
+		Completed: payload.Completed,
 	}
 	if c.Handles != nil && payload.HandleID != "" {
 		if handle, ok := c.Handles.Resolve(payload.HandleID); ok {

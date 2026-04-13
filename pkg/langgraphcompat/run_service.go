@@ -29,6 +29,11 @@ type completedRun struct {
 	Interrupted bool
 }
 
+type preparedRunExecution struct {
+	Execution *harness.Execution
+	Completed *agent.RunResult
+}
+
 func (s *Server) runtimeCoordinator() harnessruntime.Coordinator {
 	node := s.ensureBoundRuntimeSystem()
 	return node.Coordinator(s.runtimeView(), harnessruntime.CoordinatorAdapters{
@@ -81,7 +86,7 @@ func (s *Server) prepareRunRequest(routeThreadID string, req RunCreateRequest) *
 	}
 }
 
-func (s *Server) buildRunExecution(ctx context.Context, prepared *preparedRunRequest, req RunCreateRequest) (*harness.Execution, error) {
+func (s *Server) buildRunExecution(ctx context.Context, prepared *preparedRunRequest, req RunCreateRequest) (*preparedRunExecution, error) {
 	runCfg := parseRunConfig(mergeRunConfig(req.Config, req.Context))
 	s.applyRunConfigMetadata(prepared.ThreadID, runCfg)
 	agentSpec, err := s.resolveRunConfig(runCfg, nil)
@@ -109,10 +114,17 @@ func (s *Server) buildRunExecution(ctx context.Context, prepared *preparedRunReq
 	}
 	prepared.Lifecycle = orchestrated.Lifecycle
 	prepared.Messages = append([]models.Message(nil), orchestrated.Lifecycle.Messages...)
+	if orchestrated.Completed != nil {
+		return &preparedRunExecution{Completed: orchestrated.Completed}, nil
+	}
 	if orchestrated.Handle == nil {
 		return nil, errors.New("execution handle is unavailable")
 	}
-	return orchestrated.Handle.Resolve()
+	execution, err := orchestrated.Handle.Resolve()
+	if err != nil {
+		return nil, err
+	}
+	return &preparedRunExecution{Execution: execution}, nil
 }
 
 func (s *Server) bindRunContext(ctx context.Context, threadID string, taskSink func(subagent.TaskEvent), clarificationSink func(*clarification.Clarification)) context.Context {
