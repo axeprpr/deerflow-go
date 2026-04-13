@@ -209,8 +209,8 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	runtimeNodeInstance := bootstrap.Node
 	sandboxRuntime := bootstrap.SandboxRuntime
 	toolRuntime := runtimeNodeInstance.ToolRuntime()
-	registry := toolRuntime.Registry()
-	subagentPool := toolRuntime.Subagents()
+	registry := runtimeNodeInstance.ToolRegistry()
+	subagentPool := runtimeNodeInstance.Subagents()
 	if bootstrap.MemoryErr != nil {
 		logger.Printf("Warning: failed to configure memory store: %v", bootstrap.MemoryErr)
 	}

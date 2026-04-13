@@ -5,6 +5,9 @@ import (
 	"net"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
+	"github.com/axeprpr/deerflow-go/pkg/models"
+	"github.com/axeprpr/deerflow-go/pkg/subagent"
+	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
 type RuntimeStatePlaneFactory interface {
@@ -162,6 +165,27 @@ func (n *RuntimeNode) ToolRuntime() harness.ToolRuntime {
 		return nil
 	}
 	return n.Tools
+}
+
+func (n *RuntimeNode) ToolRegistry() *tools.Registry {
+	if n == nil || n.Tools == nil {
+		return nil
+	}
+	return n.Tools.Registry()
+}
+
+func (n *RuntimeNode) DeferredTools() []models.Tool {
+	if n == nil || n.Tools == nil {
+		return nil
+	}
+	return n.Tools.DeferredTools()
+}
+
+func (n *RuntimeNode) Subagents() *subagent.Pool {
+	if n == nil || n.Tools == nil {
+		return nil
+	}
+	return n.Tools.Subagents()
 }
 
 func (n *RuntimeNode) SandboxManager() *SandboxResourceManager {

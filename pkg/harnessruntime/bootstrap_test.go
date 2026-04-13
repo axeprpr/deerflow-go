@@ -25,6 +25,12 @@ func TestBuildDefaultRuntimeBootstrapBuildsDefaultRuntimePieces(t *testing.T) {
 	if bootstrap.Node.ToolRuntime() != bootstrap.ToolRuntime {
 		t.Fatalf("node tool runtime = %#v want %#v", bootstrap.Node.ToolRuntime(), bootstrap.ToolRuntime)
 	}
+	if bootstrap.Node.ToolRegistry() != bootstrap.ToolRuntime.Registry() {
+		t.Fatalf("node tool registry = %#v want %#v", bootstrap.Node.ToolRegistry(), bootstrap.ToolRuntime.Registry())
+	}
+	if bootstrap.Node.Subagents() != bootstrap.ToolRuntime.Subagents() {
+		t.Fatalf("node subagents = %#v want %#v", bootstrap.Node.Subagents(), bootstrap.ToolRuntime.Subagents())
+	}
 }
 
 func TestBuildDefaultMemoryServiceBuildsMigratedRuntime(t *testing.T) {
