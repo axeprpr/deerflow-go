@@ -83,6 +83,23 @@ func TestRuntimeNodeConfigBuildsFileBackedStateStores(t *testing.T) {
 	}
 }
 
+func TestRuntimeNodeConfigBuildsFileBackedStateStoresFromExplicitURLs(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	config.State = RuntimeStateStoreConfig{
+		Backend:     RuntimeStateStoreBackendFile,
+		SnapshotURL: "file://" + filepath.Join(t.TempDir(), "custom-runs"),
+		EventURL:    "file://" + filepath.Join(t.TempDir(), "custom-events"),
+		ThreadURL:   "file://" + filepath.Join(t.TempDir(), "custom-threads"),
+	}
+	runStore, ok := config.BuildRunSnapshotStore().(*JSONFileRunStore)
+	if !ok {
+		t.Fatalf("BuildRunSnapshotStore() returned %T", config.BuildRunSnapshotStore())
+	}
+	if runStore.root != resolveStateStorePath(config.State.SnapshotURL, "") {
+		t.Fatalf("runStore.root = %q", runStore.root)
+	}
+}
+
 func TestRuntimeNodeConfigBuildsSQLiteBackedStateStores(t *testing.T) {
 	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
 	root := t.TempDir()
@@ -98,6 +115,25 @@ func TestRuntimeNodeConfigBuildsSQLiteBackedStateStores(t *testing.T) {
 	}
 	if _, ok := config.BuildRunEventStore().(*SQLiteRunEventStore); !ok {
 		t.Fatalf("BuildRunEventStore() returned %T", config.BuildRunEventStore())
+	}
+}
+
+func TestRuntimeNodeConfigBuildsSQLiteBackedStateStoresFromExplicitURLs(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	config.State = RuntimeStateStoreConfig{
+		Backend:     RuntimeStateStoreBackendSQLite,
+		SnapshotURL: "sqlite://" + filepath.Join(t.TempDir(), "snapshots.sqlite3"),
+		EventURL:    "sqlite://" + filepath.Join(t.TempDir(), "events.sqlite3"),
+		ThreadURL:   "sqlite://" + filepath.Join(t.TempDir(), "threads.sqlite3"),
+	}
+	if _, ok := config.BuildRunSnapshotStore().(*SQLiteRunSnapshotStore); !ok {
+		t.Fatalf("BuildRunSnapshotStore() returned %T", config.BuildRunSnapshotStore())
+	}
+	if _, ok := config.BuildRunEventStore().(*SQLiteRunEventStore); !ok {
+		t.Fatalf("BuildRunEventStore() returned %T", config.BuildRunEventStore())
+	}
+	if _, ok := config.BuildThreadStateStore().(*SQLiteThreadStateStore); !ok {
+		t.Fatalf("BuildThreadStateStore() returned %T", config.BuildThreadStateStore())
 	}
 }
 

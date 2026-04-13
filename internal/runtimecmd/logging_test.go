@@ -8,6 +8,9 @@ import (
 func TestNodeConfigStartupLines(t *testing.T) {
 	cfg := DefaultRuntimeWorkerNodeConfig()
 	cfg.MemoryStoreURL = "sqlite:///tmp/memory.sqlite3"
+	cfg.SnapshotStoreURL = "sqlite:///tmp/snapshots.sqlite3"
+	cfg.EventStoreURL = "sqlite:///tmp/events.sqlite3"
+	cfg.ThreadStoreURL = "sqlite:///tmp/threads.sqlite3"
 	lines := cfg.StartupLines()
 	if len(lines) == 0 {
 		t.Fatal("StartupLines() returned no lines")
@@ -20,6 +23,9 @@ func TestNodeConfigStartupLines(t *testing.T) {
 		t.Fatalf("StartupLines() = %q", joined)
 	}
 	if !strings.Contains(joined, "memory_store=sqlite:///tmp/memory.sqlite3") {
+		t.Fatalf("StartupLines() = %q", joined)
+	}
+	if !strings.Contains(joined, "snapshot_store=sqlite:///tmp/snapshots.sqlite3") {
 		t.Fatalf("StartupLines() = %q", joined)
 	}
 	if !strings.Contains(joined, "root=") {

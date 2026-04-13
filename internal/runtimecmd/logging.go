@@ -10,5 +10,6 @@ func (c NodeConfig) StartupLines() []string {
 		fmt.Sprintf("  sandbox=%s", c.SandboxBackend),
 		fmt.Sprintf("  memory_store=%s", firstNonEmpty(c.MemoryStoreURL, "(file-store)")),
 		fmt.Sprintf("  state=%s snapshot=%s event=%s thread=%s root=%s", firstNonEmpty(string(c.StateBackend), "(default)"), firstNonEmpty(string(c.SnapshotBackend), "(default)"), firstNonEmpty(string(c.EventBackend), "(default)"), firstNonEmpty(string(c.ThreadBackend), "(default)"), firstNonEmpty(c.StateRoot, "(memory)")),
+		fmt.Sprintf("  snapshot_store=%s event_store=%s thread_store=%s", firstNonEmpty(c.SnapshotStoreURL, "(derived)"), firstNonEmpty(c.EventStoreURL, "(derived)"), firstNonEmpty(c.ThreadStoreURL, "(derived)")),
 	}
 }

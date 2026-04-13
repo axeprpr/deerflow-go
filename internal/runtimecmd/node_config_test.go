@@ -19,6 +19,9 @@ func TestDefaultLangGraphNodeConfigUsesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("RUNTIME_NODE_SANDBOX_BACKEND", "remote")
 	t.Setenv("RUNTIME_NODE_SANDBOX_ENDPOINT", "http://sandbox:8082")
 	t.Setenv("RUNTIME_NODE_MEMORY_STORE", "sqlite:///tmp/memory.sqlite3")
+	t.Setenv("RUNTIME_NODE_SNAPSHOT_STORE", "sqlite:///tmp/snapshots.sqlite3")
+	t.Setenv("RUNTIME_NODE_EVENT_STORE", "sqlite:///tmp/events.sqlite3")
+	t.Setenv("RUNTIME_NODE_THREAD_STORE", "sqlite:///tmp/threads.sqlite3")
 	t.Setenv("RUNTIME_NODE_STATE_BACKEND", "file")
 	t.Setenv("RUNTIME_NODE_STATE_ROOT", "/tmp/state-root")
 
@@ -59,6 +62,15 @@ func TestDefaultLangGraphNodeConfigUsesEnvironmentOverrides(t *testing.T) {
 	if cfg.MemoryStoreURL != "sqlite:///tmp/memory.sqlite3" {
 		t.Fatalf("MemoryStoreURL = %q", cfg.MemoryStoreURL)
 	}
+	if cfg.SnapshotStoreURL != "sqlite:///tmp/snapshots.sqlite3" {
+		t.Fatalf("SnapshotStoreURL = %q", cfg.SnapshotStoreURL)
+	}
+	if cfg.EventStoreURL != "sqlite:///tmp/events.sqlite3" {
+		t.Fatalf("EventStoreURL = %q", cfg.EventStoreURL)
+	}
+	if cfg.ThreadStoreURL != "sqlite:///tmp/threads.sqlite3" {
+		t.Fatalf("ThreadStoreURL = %q", cfg.ThreadStoreURL)
+	}
 	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendFile {
 		t.Fatalf("StateBackend = %q", cfg.StateBackend)
 	}
@@ -82,6 +94,15 @@ func TestDefaultLangGraphNodeConfigUsesSharedSQLiteForGatewayRole(t *testing.T) 
 	if cfg.MemoryStoreURL != "sqlite:///tmp/shared-data/memory.sqlite3" {
 		t.Fatalf("MemoryStoreURL = %q", cfg.MemoryStoreURL)
 	}
+	if cfg.SnapshotStoreURL != "sqlite:///tmp/shared-data/runtime-state/snapshots.sqlite3" {
+		t.Fatalf("SnapshotStoreURL = %q", cfg.SnapshotStoreURL)
+	}
+	if cfg.EventStoreURL != "sqlite:///tmp/shared-data/runtime-state/events.sqlite3" {
+		t.Fatalf("EventStoreURL = %q", cfg.EventStoreURL)
+	}
+	if cfg.ThreadStoreURL != "sqlite:///tmp/shared-data/runtime-state/threads.sqlite3" {
+		t.Fatalf("ThreadStoreURL = %q", cfg.ThreadStoreURL)
+	}
 }
 
 func TestDefaultRuntimeWorkerNodeConfigUsesSharedSQLiteState(t *testing.T) {
@@ -96,6 +117,15 @@ func TestDefaultRuntimeWorkerNodeConfigUsesSharedSQLiteState(t *testing.T) {
 	}
 	if cfg.MemoryStoreURL != "sqlite:///tmp/shared-data/memory.sqlite3" {
 		t.Fatalf("MemoryStoreURL = %q", cfg.MemoryStoreURL)
+	}
+	if cfg.SnapshotStoreURL != "sqlite:///tmp/shared-data/runtime-state/snapshots.sqlite3" {
+		t.Fatalf("SnapshotStoreURL = %q", cfg.SnapshotStoreURL)
+	}
+	if cfg.EventStoreURL != "sqlite:///tmp/shared-data/runtime-state/events.sqlite3" {
+		t.Fatalf("EventStoreURL = %q", cfg.EventStoreURL)
+	}
+	if cfg.ThreadStoreURL != "sqlite:///tmp/shared-data/runtime-state/threads.sqlite3" {
+		t.Fatalf("ThreadStoreURL = %q", cfg.ThreadStoreURL)
 	}
 }
 
@@ -141,6 +171,9 @@ func TestNodeConfigRuntimeNodeConfigUsesRoleDefaults(t *testing.T) {
 	}
 	if node.Memory.StoreURL != "" {
 		t.Fatalf("Memory.StoreURL = %q, want empty", node.Memory.StoreURL)
+	}
+	if node.State.SnapshotURL != "" || node.State.EventURL != "" || node.State.ThreadURL != "" {
+		t.Fatalf("state urls = %+v", node.State)
 	}
 	if node.State.Backend != harnessruntime.RuntimeStateStoreBackendFile {
 		t.Fatalf("State.Backend = %q", node.State.Backend)

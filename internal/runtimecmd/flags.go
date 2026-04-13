@@ -22,6 +22,9 @@ type NodeFlagBinding struct {
 	snapshotBackend  *string
 	eventBackend     *string
 	threadBackend    *string
+	snapshotStore    *string
+	eventStore       *string
+	threadStore      *string
 }
 
 func BindFlags(fs *flag.FlagSet, defaults NodeConfig, prefix, label string) *NodeFlagBinding {
@@ -48,6 +51,9 @@ func BindFlags(fs *flag.FlagSet, defaults NodeConfig, prefix, label string) *Nod
 		snapshotBackend:  fs.String(flagName(prefix, "snapshot-backend"), string(defaults.SnapshotBackend), label+"snapshot backend override: in-memory|file|sqlite"),
 		eventBackend:     fs.String(flagName(prefix, "event-backend"), string(defaults.EventBackend), label+"event backend override: in-memory|file|sqlite"),
 		threadBackend:    fs.String(flagName(prefix, "thread-backend"), string(defaults.ThreadBackend), label+"thread backend override: in-memory|file|sqlite"),
+		snapshotStore:    fs.String(flagName(prefix, "snapshot-store"), defaults.SnapshotStoreURL, label+"snapshot store URL/path"),
+		eventStore:       fs.String(flagName(prefix, "event-store"), defaults.EventStoreURL, label+"event store URL/path"),
+		threadStore:      fs.String(flagName(prefix, "thread-store"), defaults.ThreadStoreURL, label+"thread state store URL/path"),
 	}
 }
 
@@ -75,6 +81,9 @@ func (b *NodeFlagBinding) Config() NodeConfig {
 		SnapshotBackend:  NormalizeStateBackend(valueOrEmpty(b.snapshotBackend), defaults.SnapshotBackend),
 		EventBackend:     NormalizeStateBackend(valueOrEmpty(b.eventBackend), defaults.EventBackend),
 		ThreadBackend:    NormalizeStateBackend(valueOrEmpty(b.threadBackend), defaults.ThreadBackend),
+		SnapshotStoreURL: valueOrEmpty(b.snapshotStore),
+		EventStoreURL:    valueOrEmpty(b.eventStore),
+		ThreadStoreURL:   valueOrEmpty(b.threadStore),
 	}
 }
 

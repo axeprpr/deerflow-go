@@ -18,6 +18,9 @@ func TestBindFlagsBuildsNodeConfig(t *testing.T) {
 		"-sandbox-backend=container",
 		"-sandbox-image=debian:bookworm",
 		"-memory-store=sqlite:///tmp/memory.sqlite3",
+		"-snapshot-store=sqlite:///tmp/snapshots.sqlite3",
+		"-event-store=sqlite:///tmp/events.sqlite3",
+		"-thread-store=sqlite:///tmp/threads.sqlite3",
 		"-state-backend=file",
 		"-state-root=/tmp/state",
 	}); err != nil {
@@ -42,6 +45,15 @@ func TestBindFlagsBuildsNodeConfig(t *testing.T) {
 	}
 	if cfg.MemoryStoreURL != "sqlite:///tmp/memory.sqlite3" {
 		t.Fatalf("MemoryStoreURL = %q", cfg.MemoryStoreURL)
+	}
+	if cfg.SnapshotStoreURL != "sqlite:///tmp/snapshots.sqlite3" {
+		t.Fatalf("SnapshotStoreURL = %q", cfg.SnapshotStoreURL)
+	}
+	if cfg.EventStoreURL != "sqlite:///tmp/events.sqlite3" {
+		t.Fatalf("EventStoreURL = %q", cfg.EventStoreURL)
+	}
+	if cfg.ThreadStoreURL != "sqlite:///tmp/threads.sqlite3" {
+		t.Fatalf("ThreadStoreURL = %q", cfg.ThreadStoreURL)
 	}
 	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendFile {
 		t.Fatalf("StateBackend = %q", cfg.StateBackend)

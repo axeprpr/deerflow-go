@@ -44,6 +44,9 @@ type RuntimeStateStoreConfig struct {
 	EventBackend    RuntimeStateStoreBackend
 	ThreadBackend   RuntimeStateStoreBackend
 	Root            string
+	SnapshotURL     string
+	EventURL        string
+	ThreadURL       string
 }
 
 type RemoteWorkerServerConfig struct {

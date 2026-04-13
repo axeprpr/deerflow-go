@@ -1,6 +1,9 @@
 package harnessruntime
 
-import "path/filepath"
+import (
+	"path/filepath"
+	"strings"
+)
 
 type RunSnapshotStoreFactory interface {
 	Build(RuntimeNodeConfig) RunSnapshotStore
@@ -43,9 +46,9 @@ func DefaultRuntimeStatePlaneProviders() RuntimeStatePlaneProviders {
 		Snapshots: RunSnapshotStoreFactoryFunc(func(config RuntimeNodeConfig) RunSnapshotStore {
 			switch config.normalizedSnapshotBackend() {
 			case RuntimeStateStoreBackendFile:
-				return NewJSONFileRunStore(filepath.Join(config.State.Root, "runs"))
+				return NewJSONFileRunStore(resolveStateStorePath(config.State.SnapshotURL, filepath.Join(config.State.Root, "runs")))
 			case RuntimeStateStoreBackendSQLite:
-				store, err := NewSQLiteRunSnapshotStore(filepath.Join(config.State.Root, "snapshots.sqlite3"))
+				store, err := NewSQLiteRunSnapshotStore(resolveStateStorePath(config.State.SnapshotURL, filepath.Join(config.State.Root, "snapshots.sqlite3")))
 				if err == nil {
 					return store
 				}
@@ -57,9 +60,9 @@ func DefaultRuntimeStatePlaneProviders() RuntimeStatePlaneProviders {
 		Events: RunEventStoreFactoryFunc(func(config RuntimeNodeConfig) RunEventStore {
 			switch config.normalizedEventBackend() {
 			case RuntimeStateStoreBackendFile:
-				return NewJSONFileRunEventStore(filepath.Join(config.State.Root, "events"))
+				return NewJSONFileRunEventStore(resolveStateStorePath(config.State.EventURL, filepath.Join(config.State.Root, "events")))
 			case RuntimeStateStoreBackendSQLite:
-				store, err := NewSQLiteRunEventStore(filepath.Join(config.State.Root, "events.sqlite3"))
+				store, err := NewSQLiteRunEventStore(resolveStateStorePath(config.State.EventURL, filepath.Join(config.State.Root, "events.sqlite3")))
 				if err == nil {
 					return store
 				}
@@ -71,9 +74,9 @@ func DefaultRuntimeStatePlaneProviders() RuntimeStatePlaneProviders {
 		Threads: ThreadStateStoreFactoryFunc(func(config RuntimeNodeConfig) ThreadStateStore {
 			switch config.normalizedThreadBackend() {
 			case RuntimeStateStoreBackendFile:
-				return NewJSONFileThreadStateStore(filepath.Join(config.State.Root, "threads"))
+				return NewJSONFileThreadStateStore(resolveStateStorePath(config.State.ThreadURL, filepath.Join(config.State.Root, "threads")))
 			case RuntimeStateStoreBackendSQLite:
-				store, err := NewSQLiteThreadStateStore(filepath.Join(config.State.Root, "threads.sqlite3"))
+				store, err := NewSQLiteThreadStateStore(resolveStateStorePath(config.State.ThreadURL, filepath.Join(config.State.Root, "threads.sqlite3")))
 				if err == nil {
 					return store
 				}
@@ -83,6 +86,19 @@ func DefaultRuntimeStatePlaneProviders() RuntimeStatePlaneProviders {
 			}
 		}),
 	}
+}
+
+func resolveStateStorePath(raw string, fallback string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback
+	}
+	raw = strings.TrimPrefix(raw, "sqlite://")
+	raw = strings.TrimPrefix(raw, "file://")
+	if raw == "" {
+		return fallback
+	}
+	return raw
 }
 
 type RuntimeStatePlane struct {

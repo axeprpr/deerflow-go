@@ -41,6 +41,9 @@ type NodeConfig struct {
 	SnapshotBackend  harnessruntime.RuntimeStateStoreBackend
 	EventBackend     harnessruntime.RuntimeStateStoreBackend
 	ThreadBackend    harnessruntime.RuntimeStateStoreBackend
+	SnapshotStoreURL string
+	EventStoreURL    string
+	ThreadStoreURL   string
 }
 
 func DefaultNodeConfig(defaults NodeDefaults) NodeConfig {
@@ -64,6 +67,9 @@ func DefaultNodeConfig(defaults NodeDefaults) NodeConfig {
 		SnapshotBackend:  NormalizeStateBackend(os.Getenv("RUNTIME_NODE_SNAPSHOT_BACKEND"), ""),
 		EventBackend:     NormalizeStateBackend(os.Getenv("RUNTIME_NODE_EVENT_BACKEND"), ""),
 		ThreadBackend:    NormalizeStateBackend(os.Getenv("RUNTIME_NODE_THREAD_BACKEND"), ""),
+		SnapshotStoreURL: strings.TrimSpace(os.Getenv("RUNTIME_NODE_SNAPSHOT_STORE")),
+		EventStoreURL:    strings.TrimSpace(os.Getenv("RUNTIME_NODE_EVENT_STORE")),
+		ThreadStoreURL:   strings.TrimSpace(os.Getenv("RUNTIME_NODE_THREAD_STORE")),
 	}
 	return config.withRoleDefaults()
 }
@@ -139,6 +145,15 @@ func (c NodeConfig) RuntimeNodeConfig() harnessruntime.RuntimeNodeConfig {
 	if c.ThreadBackend != "" {
 		config.State.ThreadBackend = NormalizeStateBackend(string(c.ThreadBackend), config.State.ThreadBackend)
 	}
+	if strings.TrimSpace(c.SnapshotStoreURL) != "" {
+		config.State.SnapshotURL = strings.TrimSpace(c.SnapshotStoreURL)
+	}
+	if strings.TrimSpace(c.EventStoreURL) != "" {
+		config.State.EventURL = strings.TrimSpace(c.EventStoreURL)
+	}
+	if strings.TrimSpace(c.ThreadStoreURL) != "" {
+		config.State.ThreadURL = strings.TrimSpace(c.ThreadStoreURL)
+	}
 	if strings.TrimSpace(c.StateRoot) != "" {
 		config.State.Root = strings.TrimSpace(c.StateRoot)
 	} else if usesPersistentStateBackend(config.State) {
@@ -161,8 +176,23 @@ func (c NodeConfig) withRoleDefaults() NodeConfig {
 			SnapshotBackend: c.SnapshotBackend,
 			EventBackend:    c.EventBackend,
 			ThreadBackend:   c.ThreadBackend,
+			SnapshotURL:     c.SnapshotStoreURL,
+			EventURL:        c.EventStoreURL,
+			ThreadURL:       c.ThreadStoreURL,
 		}) {
 			c.StateRoot = filepath.Join(strings.TrimSpace(c.DataRoot), "runtime-state")
+		}
+		if strings.TrimSpace(c.DataRoot) != "" {
+			stateRoot := firstNonEmpty(strings.TrimSpace(c.StateRoot), filepath.Join(strings.TrimSpace(c.DataRoot), "runtime-state"))
+			if strings.TrimSpace(c.SnapshotStoreURL) == "" && effectiveStateBackend(c.SnapshotBackend, c.StateBackend) == harnessruntime.RuntimeStateStoreBackendSQLite {
+				c.SnapshotStoreURL = "sqlite://" + filepath.Join(stateRoot, "snapshots.sqlite3")
+			}
+			if strings.TrimSpace(c.EventStoreURL) == "" && effectiveStateBackend(c.EventBackend, c.StateBackend) == harnessruntime.RuntimeStateStoreBackendSQLite {
+				c.EventStoreURL = "sqlite://" + filepath.Join(stateRoot, "events.sqlite3")
+			}
+			if strings.TrimSpace(c.ThreadStoreURL) == "" && effectiveStateBackend(c.ThreadBackend, c.StateBackend) == harnessruntime.RuntimeStateStoreBackendSQLite {
+				c.ThreadStoreURL = "sqlite://" + filepath.Join(stateRoot, "threads.sqlite3")
+			}
 		}
 		if strings.TrimSpace(c.MemoryStoreURL) == "" && strings.TrimSpace(c.DataRoot) != "" {
 			c.MemoryStoreURL = "sqlite://" + filepath.Join(strings.TrimSpace(c.DataRoot), "memory.sqlite3")
@@ -305,4 +335,11 @@ func usesPersistentStateBackend(config harnessruntime.RuntimeStateStoreConfig) b
 		}
 	}
 	return false
+}
+
+func effectiveStateBackend(override harnessruntime.RuntimeStateStoreBackend, fallback harnessruntime.RuntimeStateStoreBackend) harnessruntime.RuntimeStateStoreBackend {
+	if override != "" {
+		return override
+	}
+	return fallback
 }
