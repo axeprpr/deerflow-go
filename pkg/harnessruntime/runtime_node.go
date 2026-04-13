@@ -41,11 +41,7 @@ type RuntimeNodeProviders struct {
 func DefaultRuntimeNodeProviders() RuntimeNodeProviders {
 	return RuntimeNodeProviders{
 		StatePlane: RuntimeStatePlaneFactoryFunc(func(config RuntimeNodeConfig) RuntimeStatePlane {
-			return RuntimeStatePlane{
-				Snapshots: config.BuildRunSnapshotStore(),
-				Events:    config.BuildRunEventStore(),
-				Threads:   config.BuildThreadStateStore(),
-			}
+			return config.BuildStatePlaneWithProviders(DefaultRuntimeStatePlaneProviders())
 		}),
 		Transport: WorkerTransportFactoryFunc(func(config WorkerTransportConfig, runtime DispatchRuntimeConfig) WorkerTransport {
 			return buildWorkerTransport(config, runtime)

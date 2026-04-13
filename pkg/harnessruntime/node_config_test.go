@@ -285,3 +285,24 @@ func TestRuntimeNodeConfigBuildRuntimeNodeWithProvidersOverridesDefaultBuilders(
 		t.Fatalf("Close() error = %v", err)
 	}
 }
+
+func TestRuntimeNodeConfigBuildStatePlaneWithProvidersOverridesDefaultStores(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	customSnapshots := NewInMemoryRunStore()
+	customEvents := NewInMemoryRunEventStore()
+	customThreads := NewInMemoryThreadStateStore()
+	plane := config.BuildStatePlaneWithProviders(RuntimeStatePlaneProviders{
+		Snapshots: RunSnapshotStoreFactoryFunc(func(RuntimeNodeConfig) RunSnapshotStore { return customSnapshots }),
+		Events:    RunEventStoreFactoryFunc(func(RuntimeNodeConfig) RunEventStore { return customEvents }),
+		Threads:   ThreadStateStoreFactoryFunc(func(RuntimeNodeConfig) ThreadStateStore { return customThreads }),
+	})
+	if plane.Snapshots != customSnapshots {
+		t.Fatalf("Snapshots = %T", plane.Snapshots)
+	}
+	if plane.Events != customEvents {
+		t.Fatalf("Events = %T", plane.Events)
+	}
+	if plane.Threads != customThreads {
+		t.Fatalf("Threads = %T", plane.Threads)
+	}
+}

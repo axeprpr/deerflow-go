@@ -2,7 +2,6 @@ package harnessruntime
 
 import (
 	"net/http"
-	"path/filepath"
 	goruntime "runtime"
 	"time"
 
@@ -134,37 +133,35 @@ func (c RuntimeNodeConfig) BuildRemoteWorkerNode(runtime DispatchRuntimeConfig) 
 }
 
 func (c RuntimeNodeConfig) BuildRunSnapshotStore() RunSnapshotStore {
-	switch c.normalizedSnapshotBackend() {
-	case RuntimeStateStoreBackendFile:
-		return NewJSONFileRunStore(filepath.Join(c.State.Root, "runs"))
-	default:
-		return NewInMemoryRunStore()
-	}
+	return c.BuildStatePlaneWithProviders(DefaultRuntimeStatePlaneProviders()).Snapshots
 }
 
 func (c RuntimeNodeConfig) BuildThreadStateStore() ThreadStateStore {
-	switch c.normalizedThreadBackend() {
-	case RuntimeStateStoreBackendFile:
-		return NewJSONFileThreadStateStore(filepath.Join(c.State.Root, "threads"))
-	default:
-		return NewInMemoryThreadStateStore()
-	}
+	return c.BuildStatePlaneWithProviders(DefaultRuntimeStatePlaneProviders()).Threads
 }
 
 func (c RuntimeNodeConfig) BuildRunEventStore() RunEventStore {
-	switch c.normalizedEventBackend() {
-	case RuntimeStateStoreBackendFile:
-		return NewJSONFileRunEventStore(filepath.Join(c.State.Root, "events"))
-	default:
-		return NewInMemoryRunEventStore()
-	}
+	return c.BuildStatePlaneWithProviders(DefaultRuntimeStatePlaneProviders()).Events
 }
 
 func (c RuntimeNodeConfig) BuildStatePlane() RuntimeStatePlane {
+	return c.BuildStatePlaneWithProviders(DefaultRuntimeStatePlaneProviders())
+}
+
+func (c RuntimeNodeConfig) BuildStatePlaneWithProviders(providers RuntimeStatePlaneProviders) RuntimeStatePlane {
+	if providers.Snapshots == nil {
+		providers.Snapshots = DefaultRuntimeStatePlaneProviders().Snapshots
+	}
+	if providers.Events == nil {
+		providers.Events = DefaultRuntimeStatePlaneProviders().Events
+	}
+	if providers.Threads == nil {
+		providers.Threads = DefaultRuntimeStatePlaneProviders().Threads
+	}
 	return RuntimeStatePlane{
-		Snapshots: c.BuildRunSnapshotStore(),
-		Events:    c.BuildRunEventStore(),
-		Threads:   c.BuildThreadStateStore(),
+		Snapshots: providers.Snapshots.Build(c),
+		Events:    providers.Events.Build(c),
+		Threads:   providers.Threads.Build(c),
 	}
 }
 
