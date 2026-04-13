@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
+	"github.com/axeprpr/deerflow-go/pkg/harness"
 )
 
 func TestBuildDefaultRuntimeBootstrapBuildsDefaultRuntimePieces(t *testing.T) {
@@ -66,5 +67,25 @@ func TestBuildDefaultRuntimeBootstrapWithMemoryBuildsMemoryService(t *testing.T)
 	}
 	if bootstrap.Node.MemoryRuntime() != bootstrap.MemoryService.Runtime() {
 		t.Fatalf("node memory runtime = %#v want %#v", bootstrap.Node.MemoryRuntime(), bootstrap.MemoryService.Runtime())
+	}
+}
+
+func TestBuildDefaultHarnessRuntimeBindsRuntimeToNode(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	bootstrap, err := BuildDefaultRuntimeBootstrapWithMemory(context.Background(), config, t.TempDir(), nil, clarification.NewManager(4))
+	if err != nil {
+		t.Fatalf("BuildDefaultRuntimeBootstrapWithMemory() error = %v", err)
+	}
+	runtime := BuildDefaultHarnessRuntime(bootstrap, nil, 100, func(memory *harness.MemoryRuntime, tools harness.ToolRuntime, sandbox harness.SandboxRuntime) harness.ProfileBuilder {
+		return harness.NewStaticProfileBuilder(harness.RuntimeProfile{
+			ToolRuntime:    tools,
+			SandboxRuntime: sandbox,
+		})
+	})
+	if runtime == nil {
+		t.Fatal("runtime = nil")
+	}
+	if bootstrap.Node.RuntimeView() != runtime {
+		t.Fatalf("node runtime = %#v want %#v", bootstrap.Node.RuntimeView(), runtime)
 	}
 }

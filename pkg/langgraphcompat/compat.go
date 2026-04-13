@@ -207,8 +207,6 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		return nil, err
 	}
 	runtimeNodeInstance := bootstrap.Node
-	sandboxRuntime := bootstrap.SandboxRuntime
-	toolRuntime := runtimeNodeInstance.ToolRuntime()
 	registry := runtimeNodeInstance.ToolRegistry()
 	subagentPool := runtimeNodeInstance.Subagents()
 	if bootstrap.MemoryErr != nil {
@@ -256,18 +254,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	s.snapshotStore = newCompatRunStateStore(s, runtimeNodeInstance.SnapshotStore(), runtimeNodeInstance.EventStore())
 	s.eventStore = s.snapshotStore.(harnessruntime.RunEventStore)
 	s.threadStateStore = newCompatThreadStateStore(s, runtimeNodeInstance.ThreadStateStore())
-	memoryRuntime := runtimeNodeInstance.MemoryRuntime()
-	s.runtime = harness.NewRuntime(harness.RuntimeDeps{
-		LLMProvider:     provider,
-		Tools:           registry,
-		ToolRuntime:     toolRuntime,
-		DefaultMaxTurns: s.maxTurns,
-		ProfileResolver: harnessruntime.NewModeProfileResolver(),
-		SandboxRuntime:  sandboxRuntime,
-		SandboxProvider: s.defaultSandboxProvider(nil),
-	}, memoryRuntime,
-		harness.WithProfileBuilder(s.runtimeProfileBuilder(memoryRuntime, toolRuntime, sandboxRuntime)),
-	)
+	s.runtime = harnessruntime.BuildDefaultHarnessRuntime(bootstrap, provider, s.maxTurns, s.runtimeProfileBuilder)
 	s.bindRuntimeNodeDispatch()
 	s.skills = s.discoverGatewaySkills(nil)
 	for _, option := range options {

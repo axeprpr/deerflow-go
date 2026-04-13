@@ -18,6 +18,8 @@ type RuntimeBootstrap struct {
 	MemoryErr      error
 }
 
+type RuntimeProfileBuilderFactory func(*harness.MemoryRuntime, harness.ToolRuntime, harness.SandboxRuntime) harness.ProfileBuilder
+
 func BuildDefaultRuntimeBootstrap(config RuntimeNodeConfig, provider llm.LLMProvider, clarify *clarification.Manager) (*RuntimeBootstrap, error) {
 	node, err := config.BuildRuntimeNode(DispatchRuntimeConfig{})
 	if err != nil {
@@ -57,4 +59,49 @@ func BuildDefaultMemoryService(ctx context.Context, dataRoot string) (*MemorySer
 		return nil, err
 	}
 	return NewMemoryService(store, nil), nil
+}
+
+func BuildDefaultHarnessRuntime(bootstrap *RuntimeBootstrap, provider llm.LLMProvider, maxTurns int, profileBuilder RuntimeProfileBuilderFactory) *harness.Runtime {
+	if bootstrap == nil {
+		return nil
+	}
+	node := bootstrap.Node
+	var memoryRuntime *harness.MemoryRuntime
+	if bootstrap.MemoryService != nil {
+		memoryRuntime = bootstrap.MemoryService.Runtime()
+	}
+	toolRuntime := bootstrap.ToolRuntime
+	sandboxRuntime := bootstrap.SandboxRuntime
+	if node != nil {
+		if runtime := node.MemoryRuntime(); runtime != nil {
+			memoryRuntime = runtime
+		}
+		if runtime := node.ToolRuntime(); runtime != nil {
+			toolRuntime = runtime
+		}
+		if runtime := node.ConfiguredSandboxRuntime(); runtime != nil {
+			sandboxRuntime = runtime
+		}
+	}
+	var sandboxProvider harness.SandboxProvider
+	if sandboxRuntime != nil {
+		sandboxProvider = sandboxRuntime.Provider()
+	}
+	var options []harness.RuntimeOption
+	if profileBuilder != nil {
+		options = append(options, harness.WithProfileBuilder(profileBuilder(memoryRuntime, toolRuntime, sandboxRuntime)))
+	}
+	runtime := harness.NewRuntime(harness.RuntimeDeps{
+		LLMProvider:     provider,
+		Tools:           toolRuntime.Registry(),
+		ToolRuntime:     toolRuntime,
+		DefaultMaxTurns: maxTurns,
+		ProfileResolver: NewModeProfileResolver(),
+		SandboxRuntime:  sandboxRuntime,
+		SandboxProvider: sandboxProvider,
+	}, memoryRuntime, options...)
+	if node != nil {
+		node.BindRuntime(runtime)
+	}
+	return runtime
 }
