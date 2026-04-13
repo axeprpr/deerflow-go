@@ -1,6 +1,10 @@
 package harnessruntime
 
-import "context"
+import (
+	"context"
+
+	"github.com/axeprpr/deerflow-go/pkg/harness"
+)
 
 type RuntimeStatePlaneFactory interface {
 	Build(RuntimeNodeConfig) RuntimeStatePlane
@@ -54,6 +58,7 @@ func DefaultRuntimeNodeProviders() RuntimeNodeProviders {
 
 type RuntimeNode struct {
 	Config       RuntimeNodeConfig
+	Providers    RuntimeNodeProviders
 	State        RuntimeStatePlane
 	Dispatcher   RunDispatcher
 	Sandbox      *SandboxResourceManager
@@ -94,11 +99,69 @@ func (c RuntimeNodeConfig) BuildRuntimeNodeWithProviders(runtime DispatchRuntime
 	}
 	return &RuntimeNode{
 		Config:       c,
+		Providers:    providers,
 		State:        providers.StatePlane.Build(c),
 		Dispatcher:   transportRunDispatcher{transport: transport, codec: DispatchEnvelopeCodec{Plans: runtime.Codec}},
 		Sandbox:      sandboxManager,
 		RemoteWorker: NewHTTPRemoteWorkerNode(c.BuildRemoteWorkerHTTPServerWithProviders(transport, protocol, providers.Remote)),
 	}, nil
+}
+
+func (n *RuntimeNode) SnapshotStore() RunSnapshotStore {
+	if n == nil {
+		return nil
+	}
+	return n.State.Snapshots
+}
+
+func (n *RuntimeNode) EventStore() RunEventStore {
+	if n == nil {
+		return nil
+	}
+	return n.State.Events
+}
+
+func (n *RuntimeNode) ThreadStateStore() ThreadStateStore {
+	if n == nil {
+		return nil
+	}
+	return n.State.Threads
+}
+
+func (n *RuntimeNode) SandboxRuntime(policy harness.SandboxPolicy) harness.SandboxRuntime {
+	if n == nil || n.Sandbox == nil {
+		return nil
+	}
+	if policy == nil {
+		policy = harness.FeatureSandboxPolicy{}
+	}
+	return n.Sandbox.Runtime(policy)
+}
+
+func (n *RuntimeNode) BindDispatch(runtime DispatchRuntimeConfig) {
+	if n == nil {
+		return
+	}
+	providers := n.Providers
+	if providers.Transport == nil {
+		providers.Transport = DefaultRuntimeNodeProviders().Transport
+	}
+	if providers.Remote.Client == nil {
+		providers.Remote.Client = DefaultRemoteWorkerProviders().Client
+	}
+	if providers.Remote.Protocol == nil {
+		providers.Remote.Protocol = DefaultRemoteWorkerProviders().Protocol
+	}
+	if providers.Remote.Server == nil {
+		providers.Remote.Server = DefaultRemoteWorkerProviders().Server
+	}
+	transport := providers.Transport.Build(n.Config.Transport, runtime)
+	protocol := runtime.Protocol
+	if protocol == nil {
+		protocol = providers.Remote.Protocol.Build(n.Config, runtime.Results)
+	}
+	n.Dispatcher = transportRunDispatcher{transport: transport, codec: DispatchEnvelopeCodec{Plans: runtime.Codec}}
+	n.RemoteWorker = NewHTTPRemoteWorkerNode(n.Config.BuildRemoteWorkerHTTPServerWithProviders(transport, protocol, providers.Remote))
 }
 
 func (n *RuntimeNode) Close(ctx context.Context) error {

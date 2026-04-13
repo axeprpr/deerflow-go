@@ -358,6 +358,44 @@ func TestRuntimeNodeConfigBuildRuntimeNodeWithProvidersOverridesRemoteServerFact
 	}
 }
 
+func TestRuntimeNodeBindDispatchReusesProviders(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	executor := &fakeExecutor{}
+	node, err := config.BuildRuntimeNodeWithProviders(DispatchRuntimeConfig{}, RuntimeNodeProviders{
+		StatePlane: DefaultRuntimeNodeProviders().StatePlane,
+		Transport: WorkerTransportFactoryFunc(func(_ WorkerTransportConfig, runtime DispatchRuntimeConfig) WorkerTransport {
+			return NewDirectWorkerTransportWithResults(executor, DispatchEnvelopeCodec{Plans: runtime.Codec}, nil)
+		}),
+		Sandbox: DefaultRuntimeNodeProviders().Sandbox,
+		Remote: RemoteWorkerProviders{
+			Client:   DefaultRemoteWorkerProviders().Client,
+			Protocol: DefaultRemoteWorkerProviders().Protocol,
+			Server: RemoteWorkerHTTPServerFactoryFunc(func(_ RemoteWorkerServerConfig, _ WorkerTransport, _ RemoteWorkerProtocol) *http.Server {
+				return &http.Server{Addr: "127.0.0.1:39081", Handler: http.NewServeMux()}
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildRuntimeNodeWithProviders() error = %v", err)
+	}
+	node.BindDispatch(DispatchRuntimeConfig{Codec: WorkerPlanCodec{}})
+	result, err := node.Dispatcher.Dispatch(context.Background(), DispatchRequest{
+		Plan: WorkerExecutionPlan{RunID: "run-bind", ThreadID: "thread-bind"},
+	})
+	if err != nil {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+	if !executor.called || executor.req.Plan.RunID != "run-bind" {
+		t.Fatalf("executor req = %#v", executor.req)
+	}
+	if result == nil || result.Lifecycle == nil || result.Lifecycle.ThreadID != "thread-bind" {
+		t.Fatalf("result = %#v", result)
+	}
+	if node.RemoteWorker == nil || node.RemoteWorker.Server() == nil || node.RemoteWorker.Server().Addr != "127.0.0.1:39081" {
+		t.Fatalf("remote worker = %#v", node.RemoteWorker)
+	}
+}
+
 type fakeRemoteProtocol struct{}
 
 func (fakeRemoteProtocol) EncodeRequest(env WorkerDispatchEnvelope) ([]byte, error) {

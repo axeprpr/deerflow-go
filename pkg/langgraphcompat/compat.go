@@ -339,17 +339,18 @@ func (s *Server) bindRuntimeNodeDispatch() {
 		return
 	}
 	dispatchRuntime := s.runtimeNode.BuildDispatchRuntime(s.runtimeView, s.runtimeWorkerSpecAdapter())
-	s.runDispatcher = s.runtimeNode.BuildDispatcher(dispatchRuntime)
-	s.runtimeSystem.Dispatcher = s.runDispatcher
-	s.runtimeSystem.RemoteWorker = s.runtimeNode.BuildRemoteWorkerNode(dispatchRuntime)
+	s.runtimeSystem.BindDispatch(dispatchRuntime)
+	s.runDispatcher = s.runtimeSystem.Dispatcher
 }
 
 func (s *Server) defaultSandboxRuntime(existing harness.SandboxRuntime) harness.SandboxRuntime {
 	if existing != nil {
 		return existing
 	}
-	if s != nil && s.runtimeSystem != nil && s.runtimeSystem.Sandbox != nil {
-		return s.runtimeSystem.Sandbox.Runtime(s.runtimeNode.Sandbox.Policy)
+	if s != nil && s.runtimeSystem != nil {
+		if runtime := s.runtimeSystem.SandboxRuntime(s.runtimeNode.Sandbox.Policy); runtime != nil {
+			return runtime
+		}
 	}
 	if s != nil && s.sandboxManager != nil {
 		return s.sandboxManager.Runtime(s.runtimeNode.Sandbox.Policy)
@@ -403,8 +404,8 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 	}
 	s.runDispatcher = s.runtimeNode.BuildDispatcher(s.runtimeNode.BuildDispatchRuntime(s.runtimeView, s.runtimeWorkerSpecAdapter()))
 	if s.runtimeSystem != nil {
-		s.runtimeSystem.Dispatcher = s.runDispatcher
-		s.runtimeSystem.RemoteWorker = s.runtimeNode.BuildRemoteWorkerNode(s.runtimeNode.BuildDispatchRuntime(s.runtimeView, s.runtimeWorkerSpecAdapter()))
+		s.runtimeSystem.BindDispatch(s.runtimeNode.BuildDispatchRuntime(s.runtimeView, s.runtimeWorkerSpecAdapter()))
+		s.runDispatcher = s.runtimeSystem.Dispatcher
 	}
 	return s.runDispatcher
 }
