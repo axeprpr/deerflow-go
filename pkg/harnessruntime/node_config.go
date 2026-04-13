@@ -241,6 +241,25 @@ func (c RuntimeNodeConfig) BuildRemoteStateHTTPServerWithProviders(state Runtime
 	}
 }
 
+func (c RuntimeNodeConfig) BuildRemoteSandboxHTTPServer() *http.Server {
+	return c.BuildRemoteSandboxHTTPServerWithProviders(DefaultRemoteSandboxProviders())
+}
+
+func (c RuntimeNodeConfig) BuildRemoteSandboxHTTPServerWithProviders(providers RemoteSandboxProviders) *http.Server {
+	if providers.Protocol == nil {
+		providers.Protocol = DefaultRemoteSandboxProviders().Protocol
+	}
+	if providers.Server == nil {
+		providers.Server = DefaultRemoteSandboxProviders().Server
+	}
+	sandboxServer := providers.Server.Build(c.Sandbox, providers.Protocol.Build(c))
+	return &http.Server{
+		Addr:              c.RemoteWorker.Addr,
+		ReadHeaderTimeout: c.RemoteWorker.ReadHeaderTimeout,
+		Handler:           sandboxServer.Handler(),
+	}
+}
+
 func (c RuntimeNodeConfig) BuildRemoteWorkerNode(runtime DispatchRuntimeConfig) *HTTPRemoteWorkerNode {
 	return NewHTTPRemoteWorkerNode(c.BuildRemoteWorkerHTTPServer(runtime))
 }
@@ -254,6 +273,16 @@ func (c RuntimeNodeConfig) BuildRuntimeStateLauncherWithProviders(providers Runt
 	state := providers.StatePlane.Build(c)
 	server := c.BuildRemoteStateHTTPServerWithProviders(state, providers.RemoteState)
 	return NewRuntimeStateLauncher(NewHTTPRemoteStateNode(server), state), nil
+}
+
+func (c RuntimeNodeConfig) BuildRuntimeSandboxLauncher() (*RuntimeSandboxLauncher, error) {
+	return c.BuildRuntimeSandboxLauncherWithProviders(DefaultRuntimeNodeProviders())
+}
+
+func (c RuntimeNodeConfig) BuildRuntimeSandboxLauncherWithProviders(providers RuntimeNodeProviders) (*RuntimeSandboxLauncher, error) {
+	providers = normalizeRuntimeNodeProviders(c, providers)
+	server := c.BuildRemoteSandboxHTTPServerWithProviders(providers.RemoteSB)
+	return NewRuntimeSandboxLauncher(NewHTTPRemoteSandboxNode(server)), nil
 }
 
 func (c RuntimeNodeConfig) BuildRunSnapshotStore() RunSnapshotStore {

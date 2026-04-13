@@ -284,6 +284,18 @@ func (c NodeConfig) ValidateForStateServer() error {
 	return c.validateStateConfig()
 }
 
+func (c NodeConfig) ValidateForSandboxServer() error {
+	node := c.RuntimeNodeConfig()
+	switch node.Sandbox.Normalized().Backend {
+	case harnessruntime.SandboxBackendRemote:
+		return fmt.Errorf("remote sandbox server requires a local sandbox backend")
+	case "", harnessruntime.SandboxBackendLocalLinux, harnessruntime.SandboxBackendContainer, harnessruntime.SandboxBackendWindowsRestricted:
+		return node.Sandbox.Validate()
+	default:
+		return node.Sandbox.Validate()
+	}
+}
+
 func NormalizeRole(value string, fallback harnessruntime.RuntimeNodeRole) harnessruntime.RuntimeNodeRole {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case string(harnessruntime.RuntimeNodeRoleAllInOne):
@@ -497,6 +509,13 @@ func (c NodeConfig) BuildStateLauncher() (*harnessruntime.RuntimeStateLauncher, 
 	return c.RuntimeNodeConfig().BuildRuntimeStateLauncher()
 }
 
+func (c NodeConfig) BuildSandboxLauncher() (*harnessruntime.RuntimeSandboxLauncher, error) {
+	if err := c.ValidateForSandboxServer(); err != nil {
+		return nil, err
+	}
+	return c.RuntimeNodeConfig().BuildRuntimeSandboxLauncher()
+}
+
 func (c NodeConfig) StateReadyLine() string {
 	return fmt.Sprintf("runtime state ready addr=%s", NormalizeAddr(c.Addr, ":8082"))
 }
@@ -506,6 +525,19 @@ func (c NodeConfig) StateReadyProbe() func(context.Context) error {
 		Interval: 50 * time.Millisecond,
 		Targets: []string{
 			commandrun.HTTPURL(NormalizeAddr(c.Addr, ":8082")) + harnessruntime.DefaultRemoteStateHealthPath,
+		},
+	}.Wait
+}
+
+func (c NodeConfig) SandboxReadyLine() string {
+	return fmt.Sprintf("runtime sandbox ready addr=%s", NormalizeAddr(c.Addr, ":8083"))
+}
+
+func (c NodeConfig) SandboxReadyProbe() func(context.Context) error {
+	return commandrun.HTTPReadyProbe{
+		Interval: 50 * time.Millisecond,
+		Targets: []string{
+			commandrun.HTTPURL(NormalizeAddr(c.Addr, ":8083")) + harnessruntime.DefaultRemoteSandboxHealthPath,
 		},
 	}.Wait
 }
