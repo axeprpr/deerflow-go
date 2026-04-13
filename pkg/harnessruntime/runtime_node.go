@@ -298,6 +298,13 @@ func (n *RuntimeNode) EnsureDispatchSource(source func() *harness.Runtime, specs
 	return n.Dispatcher
 }
 
+func (n *RuntimeNode) Coordinator(runtime *harness.Runtime, adapters CoordinatorAdapters) Coordinator {
+	if n == nil {
+		return NewCoordinatorFromRuntime(runtime, nil, adapters)
+	}
+	return NewCoordinatorFromRuntime(runtime, n.RunDispatcher(), adapters)
+}
+
 func (n *RuntimeNode) BindMemoryService(service *MemoryService) {
 	if n == nil {
 		return

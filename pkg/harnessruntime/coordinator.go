@@ -24,6 +24,17 @@ type CoordinatorDeps struct {
 	InterruptKey string
 }
 
+type CoordinatorAdapters struct {
+	Preflight    PreflightRuntime
+	Context      ContextRuntime
+	RunState     RunStateRuntime
+	Completion   CompletionRuntime
+	Coordination CoordinationRuntime
+	Query        QueryRuntime
+	TitleKey     string
+	InterruptKey string
+}
+
 type PreparedRun struct {
 	ThreadID         string
 	AssistantID      string
@@ -66,6 +77,21 @@ func NewCoordinator(deps CoordinatorDeps) Coordinator {
 		coordination: NewCoordinationService(deps.Coordination),
 		query:        NewQueryService(deps.Query),
 	}
+}
+
+func NewCoordinatorFromRuntime(runtime *harness.Runtime, dispatcher RunDispatcher, adapters CoordinatorAdapters) Coordinator {
+	return NewCoordinator(CoordinatorDeps{
+		Runtime:      runtime,
+		Dispatcher:   dispatcher,
+		Preflight:    adapters.Preflight,
+		Context:      adapters.Context,
+		RunState:     adapters.RunState,
+		Completion:   adapters.Completion,
+		Coordination: adapters.Coordination,
+		Query:        adapters.Query,
+		TitleKey:     adapters.TitleKey,
+		InterruptKey: adapters.InterruptKey,
+	})
 }
 
 func (c Coordinator) Prepare(ctx context.Context, input PreflightInput, plan RunPlan) (*PreparedRun, error) {
