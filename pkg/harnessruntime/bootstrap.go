@@ -20,6 +20,21 @@ type RuntimeBootstrap struct {
 	Runtime        *harness.Runtime
 }
 
+func (b *RuntimeBootstrap) Launcher() *RuntimeNodeLauncher {
+	if b == nil {
+		return nil
+	}
+	return NewRuntimeNodeLauncher(b.Node)
+}
+
+func (b *RuntimeBootstrap) EnsureLauncher(source func() *harness.Runtime, specs WorkerSpecRuntime) *RuntimeNodeLauncher {
+	if b == nil || b.Node == nil {
+		return NewRuntimeNodeLauncher(nil)
+	}
+	b.Node.EnsureDispatchSource(source, specs)
+	return b.Launcher()
+}
+
 type RuntimeProfileBuilderFactory func(*harness.MemoryRuntime, harness.ToolRuntime, harness.SandboxRuntime) harness.ProfileBuilder
 
 func BuildDefaultRuntimeBootstrap(config RuntimeNodeConfig, provider llm.LLMProvider, clarify *clarification.Manager) (*RuntimeBootstrap, error) {

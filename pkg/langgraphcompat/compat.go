@@ -244,7 +244,9 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	}
 
 	s.attachRuntimeBootstrap(bootstrap)
-	s.bindRuntimeNodeDispatch()
+	if launcher := bootstrap.EnsureLauncher(s.runtimeView, s.runtimeWorkerSpecAdapter()); launcher != nil {
+		s.attachRuntimeSystem(launcher.Node())
+	}
 	s.skills = s.discoverGatewaySkills(nil)
 	for _, option := range options {
 		if option != nil {

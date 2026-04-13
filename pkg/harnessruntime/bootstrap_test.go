@@ -90,6 +90,21 @@ func TestBuildDefaultHarnessRuntimeBindsRuntimeToNode(t *testing.T) {
 	}
 }
 
+func TestRuntimeBootstrapEnsureLauncherBindsDispatch(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	bootstrap, err := BuildDefaultRuntimeSystemWithMemory(context.Background(), config, t.TempDir(), nil, clarification.NewManager(4), 100, nil)
+	if err != nil {
+		t.Fatalf("BuildDefaultRuntimeSystemWithMemory() error = %v", err)
+	}
+	launcher := bootstrap.EnsureLauncher(func() *harness.Runtime { return bootstrap.Runtime }, nil)
+	if launcher == nil || launcher.Node() == nil {
+		t.Fatalf("launcher = %#v", launcher)
+	}
+	if launcher.Node().RunDispatcher() == nil {
+		t.Fatal("dispatcher = nil")
+	}
+}
+
 func TestBuildDefaultRuntimeSystemWithMemoryBuildsRuntime(t *testing.T) {
 	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
 	bootstrap, err := BuildDefaultRuntimeSystemWithMemory(context.Background(), config, t.TempDir(), nil, clarification.NewManager(4), 100, func(memory *harness.MemoryRuntime, tools harness.ToolRuntime, sandbox harness.SandboxRuntime) harness.ProfileBuilder {
