@@ -111,6 +111,15 @@ func ResolveRuntimeNodeConfig(existing RuntimeNodeConfig, name, root string) Run
 	return DefaultRuntimeNodeConfig(name, root)
 }
 
+func (c RuntimeNodeConfig) servesRemoteWorker() bool {
+	switch c.Role {
+	case RuntimeNodeRoleGateway:
+		return false
+	default:
+		return true
+	}
+}
+
 func (c RuntimeNodeConfig) BuildSandboxManager() (*SandboxResourceManager, error) {
 	return NewSandboxManagerFromConfig(c.Sandbox)
 }

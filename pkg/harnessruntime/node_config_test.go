@@ -213,6 +213,34 @@ func TestRuntimeNodeConfigBuildRemoteWorkerNodeWrapsHTTPServer(t *testing.T) {
 	}
 }
 
+func TestGatewayRuntimeNodeDoesNotExposeRemoteWorkerServer(t *testing.T) {
+	config := DefaultGatewayRuntimeNodeConfig("runtime-test", t.TempDir(), "http://worker:8081/dispatch")
+	node, err := config.BuildRuntimeNode(DispatchRuntimeConfig{
+		Executor: &fakeExecutor{},
+		Results:  DispatchResultCodec{Handles: NewInMemoryExecutionHandleRegistry()},
+	})
+	if err != nil {
+		t.Fatalf("BuildRuntimeNode() error = %v", err)
+	}
+	if node.RemoteWorker != nil {
+		t.Fatalf("remote worker = %#v, want nil", node.RemoteWorker)
+	}
+}
+
+func TestWorkerRuntimeNodeExposesRemoteWorkerServer(t *testing.T) {
+	config := DefaultWorkerRuntimeNodeConfig("runtime-test", t.TempDir())
+	node, err := config.BuildRuntimeNode(DispatchRuntimeConfig{
+		Executor: &fakeExecutor{},
+		Results:  DispatchResultCodec{Handles: NewInMemoryExecutionHandleRegistry()},
+	})
+	if err != nil {
+		t.Fatalf("BuildRuntimeNode() error = %v", err)
+	}
+	if node.RemoteWorker == nil || node.RemoteWorker.Server() == nil {
+		t.Fatalf("remote worker = %#v", node.RemoteWorker)
+	}
+}
+
 func TestHTTPRemoteWorkerNodeStartRequiresServer(t *testing.T) {
 	node := NewHTTPRemoteWorkerNode(nil)
 	err := node.Start()

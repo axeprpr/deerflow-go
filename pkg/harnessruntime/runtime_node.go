@@ -278,7 +278,11 @@ func (n *RuntimeNode) BindDispatch(runtime DispatchRuntimeConfig) {
 		protocol = providers.Remote.Protocol.Build(n.Config, runtime.Results)
 	}
 	n.Dispatcher = transportRunDispatcher{transport: transport, codec: DispatchEnvelopeCodec{Plans: runtime.Codec}}
-	n.RemoteWorker = NewHTTPRemoteWorkerNode(n.Config.BuildRemoteWorkerHTTPServerWithProviders(transport, protocol, providers.Remote))
+	if n.Config.servesRemoteWorker() {
+		n.RemoteWorker = NewHTTPRemoteWorkerNode(n.Config.BuildRemoteWorkerHTTPServerWithProviders(transport, protocol, providers.Remote))
+	} else {
+		n.RemoteWorker = nil
+	}
 }
 
 func (n *RuntimeNode) BindDispatchSource(source func() *harness.Runtime, specs WorkerSpecRuntime) {
