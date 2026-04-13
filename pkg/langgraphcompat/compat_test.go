@@ -1,6 +1,7 @@
 package langgraphcompat
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -293,6 +295,104 @@ func TestGatewayRoleDispatchesRunsToRemoteWorker(t *testing.T) {
 	}
 	if stored.Status != "success" {
 		t.Fatalf("run status = %q err=%q", stored.Status, stored.Error)
+	}
+}
+
+type flushBuffer struct {
+	mu     sync.Mutex
+	header http.Header
+	body   bytes.Buffer
+	status int
+}
+
+func (b *flushBuffer) Header() http.Header {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.header == nil {
+		b.header = make(http.Header)
+	}
+	return b.header
+}
+
+func (b *flushBuffer) WriteHeader(status int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.status = status
+}
+
+func (b *flushBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.body.Write(p)
+}
+
+func (b *flushBuffer) Flush() {}
+
+func (b *flushBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.body.String()
+}
+
+func TestRemoteJoinStreamPollsSharedEventStore(t *testing.T) {
+	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
+
+	sharedRoot := t.TempDir()
+	config := harnessruntime.DefaultGatewayRuntimeNodeConfig("remote-gateway", sharedRoot, "http://worker:8081/dispatch")
+	config.State.Backend = harnessruntime.RuntimeStateStoreBackendSQLite
+	config.State.SnapshotBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	config.State.EventBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	config.State.ThreadBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	config.State.Root = filepath.Join(sharedRoot, "runtime-state")
+
+	server, err := NewServer(":0", "", "test-model", WithRuntimeNodeConfig(config))
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	run := &Run{
+		RunID:       "run-remote-join",
+		ThreadID:    "thread-remote-join",
+		Status:      "running",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Outcome:     harnessruntime.RunOutcomeDescriptor{RunStatus: "running"},
+		AssistantID: "assistant-1",
+	}
+	server.saveRun(run)
+
+	recorder := &flushBuffer{}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		server.newRunReplayStreamer(recorder, recorder, newStreamModeFilter(nil)).Join(run)
+	}()
+
+	time.Sleep(150 * time.Millisecond)
+	harnessruntime.NewEventLogService(server.ensureEventStore()).Record(run.RunID, run.ThreadID, "chunk", map[string]any{
+		"run_id":    run.RunID,
+		"thread_id": run.ThreadID,
+		"type":      "ai",
+		"role":      "assistant",
+		"delta":     "remote hello",
+		"content":   "remote hello",
+	})
+	harnessruntime.NewEventLogService(server.ensureEventStore()).Record(run.RunID, run.ThreadID, "end", map[string]any{
+		"run_id": run.RunID,
+	})
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Join() did not return")
+	}
+
+	body := recorder.String()
+	if !strings.Contains(body, "event: chunk") || !strings.Contains(body, "remote hello") {
+		t.Fatalf("body missing replayed remote chunk: %q", body)
+	}
+	if !strings.Contains(body, "event: end") {
+		t.Fatalf("body missing remote end: %q", body)
 	}
 }
 

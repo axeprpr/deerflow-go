@@ -156,6 +156,10 @@ func (s runReplayStreamer) Join(run *Run) {
 	if run == nil {
 		return
 	}
+	if s.server != nil && s.server.usesRemoteDispatch() {
+		s.pollJoin(run)
+		return
+	}
 	sub, unsubscribe := harnessruntime.NewEventFeedService(s.server.runtimeEventAdapter()).Subscribe(run.RunID, 16)
 	defer unsubscribe()
 	for {
@@ -171,6 +175,31 @@ func (s runReplayStreamer) Join(run *Run) {
 				return
 			}
 		case <-time.After(defaultSSEHeartbeatInterval):
+			sendSSEHeartbeat(s.w, s.flusher)
+		}
+	}
+}
+
+func (s runReplayStreamer) pollJoin(run *Run) {
+	if run == nil {
+		return
+	}
+	last := run.ResumeFromEvent
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var replayedEnd bool
+		last, replayedEnd = s.replayFrom(run, last)
+		if replayedEnd {
+			return
+		}
+		current := s.server.getRun(run.RunID)
+		if current != nil && current.Status != "running" {
+			s.replayFrom(current, last)
+			return
+		}
+		select {
+		case <-ticker.C:
 			sendSSEHeartbeat(s.w, s.flusher)
 		}
 	}
