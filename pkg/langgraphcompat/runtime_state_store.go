@@ -8,9 +8,10 @@ import (
 )
 
 type compatRunStateStore struct {
-	server *Server
-	store  harnessruntime.RunSnapshotStore
-	events harnessruntime.RunEventStore
+	server        *Server
+	snapshots     harnessruntime.RunSnapshotStore
+	events        harnessruntime.RunEventStore
+	replaceEvents harnessruntime.RunEventReplaceStore
 }
 
 func (s *Server) ensureSnapshotStore() harnessruntime.RunSnapshotStore {
@@ -45,41 +46,63 @@ func newCompatRunStateStore(server *Server) *compatRunStateStore {
 	var events harnessruntime.RunEventStore
 	if server != nil {
 		store = server.runtimeNode.BuildRunSnapshotStore()
-		events, _ = store.(harnessruntime.RunEventStore)
+		events = server.runtimeNode.BuildRunEventStore()
 	}
 	if store == nil {
 		store = harnessruntime.NewInMemoryRunStore()
-		events = store.(harnessruntime.RunEventStore)
+	}
+	if events == nil {
+		if shared, ok := store.(harnessruntime.RunEventStore); ok {
+			events = shared
+		}
 	}
 	return &compatRunStateStore{
-		server: server,
-		store:  store,
-		events: events,
+		server:        server,
+		snapshots:     store,
+		events:        events,
+		replaceEvents: asRunEventReplaceStore(events),
 	}
 }
 
 func (s *compatRunStateStore) LoadRunSnapshot(runID string) (harnessruntime.RunSnapshot, bool) {
-	if s == nil || s.store == nil {
+	if s == nil || s.snapshots == nil {
 		return harnessruntime.RunSnapshot{}, false
 	}
-	return s.store.LoadRunSnapshot(runID)
+	snapshot, ok := s.snapshots.LoadRunSnapshot(runID)
+	if !ok {
+		return harnessruntime.RunSnapshot{}, false
+	}
+	if s.events != nil {
+		snapshot.Events = s.events.LoadRunEvents(runID)
+	}
+	return snapshot, true
 }
 
 func (s *compatRunStateStore) ListRunSnapshots(threadID string) []harnessruntime.RunSnapshot {
-	if s == nil || s.store == nil {
+	if s == nil || s.snapshots == nil {
 		return nil
 	}
-	return s.store.ListRunSnapshots(threadID)
+	snapshots := s.snapshots.ListRunSnapshots(threadID)
+	if s.events == nil {
+		return snapshots
+	}
+	for i := range snapshots {
+		snapshots[i].Events = s.events.LoadRunEvents(snapshots[i].Record.RunID)
+	}
+	return snapshots
 }
 
 func (s *compatRunStateStore) SaveRunSnapshot(snapshot harnessruntime.RunSnapshot) {
-	if s == nil || s.store == nil {
+	if s == nil || s.snapshots == nil {
 		return
 	}
 	if strings.TrimSpace(snapshot.Record.RunID) == "" {
 		return
 	}
-	s.store.SaveRunSnapshot(snapshot)
+	s.snapshots.SaveRunSnapshot(snapshot)
+	if s.replaceEvents != nil {
+		s.replaceEvents.ReplaceRunEvents(snapshot.Record.RunID, snapshot.Events)
+	}
 	if s.server != nil {
 		s.server.saveRunSnapshotState(snapshot, true)
 	}
@@ -93,10 +116,10 @@ func (s *compatRunStateStore) NextRunEventIndex(runID string) int {
 }
 
 func (s *compatRunStateStore) AppendRunEvent(runID string, event harnessruntime.RunEvent) {
-	if s == nil || s.store == nil {
+	if s == nil || s.snapshots == nil {
 		return
 	}
-	snapshot, ok := s.store.LoadRunSnapshot(runID)
+	snapshot, ok := s.snapshots.LoadRunSnapshot(runID)
 	if !ok {
 		snapshot = harnessruntime.RunSnapshot{}
 	}
@@ -107,7 +130,12 @@ func (s *compatRunStateStore) AppendRunEvent(runID string, event harnessruntime.
 		snapshot.Record.ThreadID = strings.TrimSpace(event.ThreadID)
 	}
 	snapshot.Record.UpdatedAt = time.Now().UTC()
-	snapshot.Events = append(snapshot.Events, event)
+	if s.events != nil {
+		s.events.AppendRunEvent(runID, event)
+		snapshot.Events = s.events.LoadRunEvents(runID)
+	} else {
+		snapshot.Events = append(snapshot.Events, event)
+	}
 	s.SaveRunSnapshot(snapshot)
 }
 
@@ -116,4 +144,9 @@ func (s *compatRunStateStore) LoadRunEvents(runID string) []harnessruntime.RunEv
 		return nil
 	}
 	return s.events.LoadRunEvents(runID)
+}
+
+func asRunEventReplaceStore(store harnessruntime.RunEventStore) harnessruntime.RunEventReplaceStore {
+	replace, _ := store.(harnessruntime.RunEventReplaceStore)
+	return replace
 }

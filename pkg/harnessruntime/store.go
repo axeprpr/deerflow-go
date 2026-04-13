@@ -16,6 +16,10 @@ type RunEventStore interface {
 	LoadRunEvents(runID string) []RunEvent
 }
 
+type RunEventReplaceStore interface {
+	ReplaceRunEvents(runID string, events []RunEvent)
+}
+
 // RunEventRecorder is the minimal append/index boundary needed by EventLogService.
 type RunEventRecorder interface {
 	NextRunEventIndex(runID string) int

@@ -16,7 +16,7 @@ func TestDefaultRuntimeNodeConfigUsesQueuedLocalDefaults(t *testing.T) {
 	if config.State.Backend != RuntimeStateStoreBackendInMemory {
 		t.Fatalf("state backend = %q, want %q", config.State.Backend, RuntimeStateStoreBackendInMemory)
 	}
-	if config.State.SnapshotBackend != RuntimeStateStoreBackendInMemory || config.State.ThreadBackend != RuntimeStateStoreBackendInMemory {
+	if config.State.SnapshotBackend != RuntimeStateStoreBackendInMemory || config.State.EventBackend != RuntimeStateStoreBackendInMemory || config.State.ThreadBackend != RuntimeStateStoreBackendInMemory {
 		t.Fatalf("state config = %+v", config.State)
 	}
 }
@@ -42,6 +42,11 @@ func TestRuntimeNodeConfigBuildsFileBackedStateStores(t *testing.T) {
 	if threadStore.root != filepath.Join(root, "threads") {
 		t.Fatalf("threadStore.root = %q", threadStore.root)
 	}
+	if eventStore, ok := config.BuildRunEventStore().(*JSONFileRunEventStore); !ok {
+		t.Fatalf("BuildRunEventStore() returned %T", config.BuildRunEventStore())
+	} else if eventStore.root != filepath.Join(root, "events") {
+		t.Fatalf("eventStore.root = %q", eventStore.root)
+	}
 }
 
 func TestRuntimeNodeConfigSupportsMixedStateBackends(t *testing.T) {
@@ -49,6 +54,7 @@ func TestRuntimeNodeConfigSupportsMixedStateBackends(t *testing.T) {
 	config := DefaultRuntimeNodeConfig("runtime-test", root)
 	config.State = RuntimeStateStoreConfig{
 		SnapshotBackend: RuntimeStateStoreBackendFile,
+		EventBackend:    RuntimeStateStoreBackendInMemory,
 		ThreadBackend:   RuntimeStateStoreBackendInMemory,
 		Root:            root,
 	}
@@ -57,5 +63,8 @@ func TestRuntimeNodeConfigSupportsMixedStateBackends(t *testing.T) {
 	}
 	if _, ok := config.BuildThreadStateStore().(*InMemoryThreadStateStore); !ok {
 		t.Fatalf("BuildThreadStateStore() returned %T", config.BuildThreadStateStore())
+	}
+	if _, ok := config.BuildRunEventStore().(*InMemoryRunEventStore); !ok {
+		t.Fatalf("BuildRunEventStore() returned %T", config.BuildRunEventStore())
 	}
 }

@@ -25,6 +25,7 @@ const (
 type RuntimeStateStoreConfig struct {
 	Backend         RuntimeStateStoreBackend
 	SnapshotBackend RuntimeStateStoreBackend
+	EventBackend    RuntimeStateStoreBackend
 	ThreadBackend   RuntimeStateStoreBackend
 	Root            string
 }
@@ -49,6 +50,7 @@ func DefaultRuntimeNodeConfig(name, root string) RuntimeNodeConfig {
 		State: RuntimeStateStoreConfig{
 			Backend:         RuntimeStateStoreBackendInMemory,
 			SnapshotBackend: RuntimeStateStoreBackendInMemory,
+			EventBackend:    RuntimeStateStoreBackendInMemory,
 			ThreadBackend:   RuntimeStateStoreBackendInMemory,
 		},
 	}
@@ -85,6 +87,15 @@ func (c RuntimeNodeConfig) BuildThreadStateStore() ThreadStateStore {
 	}
 }
 
+func (c RuntimeNodeConfig) BuildRunEventStore() RunEventStore {
+	switch c.normalizedEventBackend() {
+	case RuntimeStateStoreBackendFile:
+		return NewJSONFileRunEventStore(filepath.Join(c.State.Root, "events"))
+	default:
+		return NewInMemoryRunEventStore()
+	}
+}
+
 func transportTopology(backend WorkerTransportBackend) DispatchTopology {
 	switch normalizeTransportBackend(backend) {
 	case WorkerTransportBackendDirect:
@@ -115,6 +126,13 @@ func (c RuntimeNodeConfig) normalizedSnapshotBackend() RuntimeStateStoreBackend 
 func (c RuntimeNodeConfig) normalizedThreadBackend() RuntimeStateStoreBackend {
 	if c.State.ThreadBackend != "" {
 		return c.normalizedStateBackend(c.State.ThreadBackend)
+	}
+	return c.normalizedStateBackend(c.State.Backend)
+}
+
+func (c RuntimeNodeConfig) normalizedEventBackend() RuntimeStateStoreBackend {
+	if c.State.EventBackend != "" {
+		return c.normalizedStateBackend(c.State.EventBackend)
 	}
 	return c.normalizedStateBackend(c.State.Backend)
 }
