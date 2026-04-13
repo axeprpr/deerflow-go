@@ -507,6 +507,36 @@ func TestRuntimeNodeConfigBuildRuntimeNodeWithProvidersUsesStateBackendRegistry(
 	}
 }
 
+func TestRuntimeNodeConfigBuildRuntimeNodeWithProvidersUsesStateProviderFactory(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	customState := RuntimeStatePlane{
+		Snapshots: NewInMemoryRunStore(),
+		Events:    NewInMemoryRunEventStore(),
+		Threads:   NewInMemoryThreadStateStore(),
+	}
+	node, err := config.BuildRuntimeNodeWithProviders(DispatchRuntimeConfig{}, RuntimeNodeProviders{
+		StateFactory: RuntimeStatePlaneProvidersFactoryFunc(func(RuntimeNodeConfig) RuntimeStatePlaneProviders {
+			return RuntimeStatePlaneProviders{
+				Backends: RuntimeStateBackendProviders{
+					InMemory: fakeStateBackendProvider{plane: customState},
+				},
+			}
+		}),
+	})
+	if err != nil {
+		t.Fatalf("BuildRuntimeNodeWithProviders() error = %v", err)
+	}
+	if node.State.Snapshots != customState.Snapshots {
+		t.Fatalf("Snapshots = %T", node.State.Snapshots)
+	}
+	if node.State.Events != customState.Events {
+		t.Fatalf("Events = %T", node.State.Events)
+	}
+	if node.State.Threads != customState.Threads {
+		t.Fatalf("Threads = %T", node.State.Threads)
+	}
+}
+
 func TestRuntimeNodeConfigBuildStatePlaneWithProvidersOverridesDefaultStores(t *testing.T) {
 	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
 	customSnapshots := NewInMemoryRunStore()

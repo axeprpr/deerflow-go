@@ -42,21 +42,18 @@ func (f SandboxManagerFactoryFunc) Build(config SandboxManagerConfig) (*SandboxR
 }
 
 type RuntimeNodeProviders struct {
-	StatePlane  RuntimeStatePlaneFactory
-	StateStores RuntimeStatePlaneProviders
-	Transport   WorkerTransportFactory
-	Sandbox     SandboxManagerBuilder
-	Remote      RemoteWorkerProviders
-	RemoteSB    RemoteSandboxProviders
+	StateFactory RuntimeStatePlaneProvidersFactory
+	StatePlane   RuntimeStatePlaneFactory
+	StateStores  RuntimeStatePlaneProviders
+	Transport    WorkerTransportFactory
+	Sandbox      SandboxManagerBuilder
+	Remote       RemoteWorkerProviders
+	RemoteSB     RemoteSandboxProviders
 }
 
 func DefaultRuntimeNodeProviders() RuntimeNodeProviders {
-	stateProviders := DefaultRuntimeStatePlaneProviders()
 	return RuntimeNodeProviders{
-		StatePlane: RuntimeStatePlaneFactoryFunc(func(config RuntimeNodeConfig) RuntimeStatePlane {
-			return config.BuildStatePlaneWithProviders(stateProviders)
-		}),
-		StateStores: stateProviders,
+		StateFactory: DefaultRuntimeStatePlaneProvidersFactory(),
 		Transport: WorkerTransportFactoryFunc(func(config WorkerTransportConfig, runtime DispatchRuntimeConfig) WorkerTransport {
 			return buildWorkerTransport(config, runtime)
 		}),
@@ -84,7 +81,7 @@ func (c RuntimeNodeConfig) BuildRuntimeNode(runtime DispatchRuntimeConfig) (*Run
 }
 
 func (c RuntimeNodeConfig) BuildRuntimeNodeWithProviders(runtime DispatchRuntimeConfig, providers RuntimeNodeProviders) (*RuntimeNode, error) {
-	providers = normalizeRuntimeNodeProviders(providers)
+	providers = normalizeRuntimeNodeProviders(c, providers)
 	sandboxManager, err := providers.Sandbox.Build(c.Sandbox)
 	if err != nil {
 		return nil, err
@@ -101,15 +98,21 @@ func (c RuntimeNodeConfig) BuildRuntimeNodeWithProviders(runtime DispatchRuntime
 	return node, nil
 }
 
-func normalizeRuntimeNodeProviders(providers RuntimeNodeProviders) RuntimeNodeProviders {
+func normalizeRuntimeNodeProviders(config RuntimeNodeConfig, providers RuntimeNodeProviders) RuntimeNodeProviders {
 	defaults := DefaultRuntimeNodeProviders()
+	if providers.StateFactory == nil {
+		providers.StateFactory = defaults.StateFactory
+	}
+	if providers.StateStores.Backends.Default == nil && providers.StateStores.Backends.InMemory == nil &&
+		providers.StateStores.Backends.File == nil && providers.StateStores.Backends.SQLite == nil &&
+		providers.StateStores.Plane == nil && providers.StateStores.Snapshots == nil &&
+		providers.StateStores.Events == nil && providers.StateStores.Threads == nil &&
+		providers.StateFactory != nil {
+		providers.StateStores = providers.StateFactory.Build(config)
+	}
 	providers.StateStores = providers.StateStores.normalized()
 	if providers.StatePlane == nil {
 		stateProviders := providers.StateStores
-		if stateProviders.Backends.Default == nil && stateProviders.Backends.InMemory == nil &&
-			stateProviders.Backends.File == nil && stateProviders.Backends.SQLite == nil {
-			stateProviders = defaults.StateStores
-		}
 		providers.StatePlane = RuntimeStatePlaneFactoryFunc(func(config RuntimeNodeConfig) RuntimeStatePlane {
 			return config.BuildStatePlaneWithProviders(stateProviders)
 		})
