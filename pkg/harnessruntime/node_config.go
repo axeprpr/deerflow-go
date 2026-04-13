@@ -1,6 +1,7 @@
 package harnessruntime
 
 import (
+	"path/filepath"
 	goruntime "runtime"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
@@ -65,7 +66,7 @@ func (c RuntimeNodeConfig) BuildDispatcher(runtime DispatchRuntimeConfig) RunDis
 func (c RuntimeNodeConfig) BuildRunSnapshotStore() RunSnapshotStore {
 	switch c.normalizedStateBackend() {
 	case RuntimeStateStoreBackendFile:
-		return NewJSONFileRunStore(c.State.Root)
+		return NewJSONFileRunStore(filepath.Join(c.State.Root, "runs"))
 	default:
 		return NewInMemoryRunStore()
 	}
@@ -74,7 +75,7 @@ func (c RuntimeNodeConfig) BuildRunSnapshotStore() RunSnapshotStore {
 func (c RuntimeNodeConfig) BuildThreadStateStore() ThreadStateStore {
 	switch c.normalizedStateBackend() {
 	case RuntimeStateStoreBackendFile:
-		return NewJSONFileThreadStateStore(c.State.Root)
+		return NewJSONFileThreadStateStore(filepath.Join(c.State.Root, "threads"))
 	default:
 		return NewInMemoryThreadStateStore()
 	}

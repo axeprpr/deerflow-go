@@ -1,6 +1,9 @@
 package harnessruntime
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestDefaultRuntimeNodeConfigUsesQueuedLocalDefaults(t *testing.T) {
 	config := DefaultRuntimeNodeConfig("runtime-test", "/tmp/runtime-test")
@@ -17,14 +20,23 @@ func TestDefaultRuntimeNodeConfigUsesQueuedLocalDefaults(t *testing.T) {
 
 func TestRuntimeNodeConfigBuildsFileBackedStateStores(t *testing.T) {
 	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	root := t.TempDir()
 	config.State = RuntimeStateStoreConfig{
 		Backend: RuntimeStateStoreBackendFile,
-		Root:    t.TempDir(),
+		Root:    root,
 	}
-	if _, ok := config.BuildRunSnapshotStore().(*JSONFileRunStore); !ok {
+	runStore, ok := config.BuildRunSnapshotStore().(*JSONFileRunStore)
+	if !ok {
 		t.Fatalf("BuildRunSnapshotStore() returned %T", config.BuildRunSnapshotStore())
 	}
-	if _, ok := config.BuildThreadStateStore().(*JSONFileThreadStateStore); !ok {
+	threadStore, ok := config.BuildThreadStateStore().(*JSONFileThreadStateStore)
+	if !ok {
 		t.Fatalf("BuildThreadStateStore() returned %T", config.BuildThreadStateStore())
+	}
+	if runStore.root != filepath.Join(root, "runs") {
+		t.Fatalf("runStore.root = %q", runStore.root)
+	}
+	if threadStore.root != filepath.Join(root, "threads") {
+		t.Fatalf("threadStore.root = %q", threadStore.root)
 	}
 }
