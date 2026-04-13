@@ -1,6 +1,10 @@
 package langgraphcmd
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
+)
 
 func (c *Config) ApplyYoloDefaults(enabled bool) {
 	if c == nil || !enabled {
@@ -36,8 +40,15 @@ func (c Config) StartupLines(build BuildInfo, yolo bool, logLevel string) []stri
 }
 
 func (c Config) ReadyLines() []string {
-	return []string{
+	lines := []string{
 		fmt.Sprintf("Server ready on %s", c.Addr),
 		fmt.Sprintf("  API docs: http://%s/docs", c.Addr),
 	}
+	switch c.Runtime.Role {
+	case harnessruntime.RuntimeNodeRoleAllInOne:
+		lines = append(lines, fmt.Sprintf("  Runtime worker: http://%s/dispatch", c.Runtime.Addr))
+	case harnessruntime.RuntimeNodeRoleGateway:
+		lines = append(lines, fmt.Sprintf("  Remote worker endpoint: %s", firstNonEmpty(c.Runtime.Endpoint, "(unset)")))
+	}
+	return lines
 }

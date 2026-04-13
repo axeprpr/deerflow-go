@@ -3,6 +3,8 @@ package langgraphcmd
 import (
 	"strings"
 	"testing"
+
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 )
 
 func TestConfigApplyYoloDefaults(t *testing.T) {
@@ -31,5 +33,25 @@ func TestConfigStartupLines(t *testing.T) {
 	}
 	if !strings.Contains(joined, "Log Level: debug") {
 		t.Fatalf("StartupLines() = %q", joined)
+	}
+}
+
+func TestConfigReadyLinesForAllInOne(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Runtime.Role = harnessruntime.RuntimeNodeRoleAllInOne
+	cfg.Runtime.Addr = "127.0.0.1:18081"
+	joined := strings.Join(cfg.ReadyLines(), "\n")
+	if !strings.Contains(joined, "Runtime worker: http://127.0.0.1:18081/dispatch") {
+		t.Fatalf("ReadyLines() = %q", joined)
+	}
+}
+
+func TestConfigReadyLinesForGateway(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Runtime.Role = harnessruntime.RuntimeNodeRoleGateway
+	cfg.Runtime.Endpoint = "http://worker:8081/dispatch"
+	joined := strings.Join(cfg.ReadyLines(), "\n")
+	if !strings.Contains(joined, "Remote worker endpoint: http://worker:8081/dispatch") {
+		t.Fatalf("ReadyLines() = %q", joined)
 	}
 }

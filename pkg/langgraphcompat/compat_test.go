@@ -2,11 +2,14 @@ package langgraphcompat
 
 import (
 	"context"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
@@ -164,6 +167,37 @@ func TestNewServerWithRuntimeNodeConfigUsesConfiguredRole(t *testing.T) {
 	}
 }
 
+func TestServerStartStartsAllInOneRemoteWorker(t *testing.T) {
+	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
+
+	apiAddr := freeTCPAddr(t)
+	workerAddr := freeTCPAddr(t)
+	config := harnessruntime.DefaultRuntimeNodeConfig("all-in-one-node", t.TempDir())
+	config.RemoteWorker.Addr = workerAddr
+
+	s, err := NewServer(apiAddr, "", "test-model", WithRuntimeNodeConfig(config), WithLLMProvider(testLLMProvider{}))
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.Start()
+	}()
+
+	waitForHTTP(t, "http://"+apiAddr+"/health")
+	waitForHTTP(t, "http://"+workerAddr+"/health")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+	if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("Start() error = %v", err)
+	}
+}
+
 func TestNewServerWithMaxTurnsAppliesBeforeBootstrap(t *testing.T) {
 	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
 
@@ -176,6 +210,40 @@ func TestNewServerWithMaxTurnsAppliesBeforeBootstrap(t *testing.T) {
 	}
 	if s.runtime == nil {
 		t.Fatal("runtime = nil")
+	}
+}
+
+func freeTCPAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	return addr
+}
+
+func waitForHTTP(t *testing.T, url string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		resp, err := http.Get(url)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode < 500 {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				t.Fatalf("waitForHTTP(%q) error = %v", url, err)
+			}
+			t.Fatalf("waitForHTTP(%q) timed out", url)
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 }
 

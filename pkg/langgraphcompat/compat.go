@@ -535,7 +535,48 @@ func (s *Server) registerLangGraphRoutes(mux *http.ServeMux, prefix string) {
 
 func (s *Server) Start() error {
 	s.logger.Printf("LangGraph-compatible server starting on %s", s.httpServer.Addr)
+	if node := s.ensureRuntimeSystem(); node != nil && node.LaunchSpec().ServesRemoteWorker {
+		return s.startWithRuntimeNode(node)
+	}
 	return s.httpServer.ListenAndServe()
+}
+
+func (s *Server) startWithRuntimeNode(node *harnessruntime.RuntimeNode) error {
+	errCh := make(chan error, 2)
+
+	go func() {
+		err := node.Start()
+		if isExpectedServeExit(err) {
+			errCh <- nil
+			return
+		}
+		if s.httpServer != nil {
+			_ = s.httpServer.Close()
+		}
+		errCh <- err
+	}()
+
+	go func() {
+		err := s.httpServer.ListenAndServe()
+		if isExpectedServeExit(err) {
+			errCh <- nil
+			return
+		}
+		_ = node.Close(context.Background())
+		errCh <- err
+	}()
+
+	var firstErr error
+	for i := 0; i < 2; i++ {
+		if err := <-errCh; err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func isExpectedServeExit(err error) bool {
+	return err == nil || errors.Is(err, http.ErrServerClosed) || errors.Is(err, context.Canceled)
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
