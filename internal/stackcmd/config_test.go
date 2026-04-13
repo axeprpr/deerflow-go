@@ -19,6 +19,9 @@ func TestDefaultConfigUsesGatewayWorkerSplit(t *testing.T) {
 	if !strings.Contains(cfg.Gateway.Runtime.Endpoint, harnessruntime.DefaultRemoteWorkerDispatchPath) {
 		t.Fatalf("gateway endpoint = %q", cfg.Gateway.Runtime.Endpoint)
 	}
+	if cfg.Worker.StateStoreURL != cfg.Gateway.Runtime.StateStoreURL {
+		t.Fatalf("state store mismatch gateway=%q worker=%q", cfg.Gateway.Runtime.StateStoreURL, cfg.Worker.StateStoreURL)
+	}
 }
 
 func TestConfigBuildLauncherUsesSplitRoles(t *testing.T) {

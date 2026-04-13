@@ -120,6 +120,9 @@ func sharedSQLiteStatePlanePath(config RuntimeNodeConfig) (string, bool) {
 		config.normalizedThreadBackend() != RuntimeStateStoreBackendSQLite {
 		return "", false
 	}
+	if shared := resolveStateStorePath(config.State.URL, ""); shared != "" {
+		return shared, true
+	}
 	snapshotPath := resolveStateStorePath(config.State.SnapshotURL, filepath.Join(config.State.Root, "snapshots.sqlite3"))
 	eventPath := resolveStateStorePath(config.State.EventURL, filepath.Join(config.State.Root, "events.sqlite3"))
 	threadPath := resolveStateStorePath(config.State.ThreadURL, filepath.Join(config.State.Root, "threads.sqlite3"))

@@ -18,6 +18,7 @@ func TestBindFlagsBuildsNodeConfig(t *testing.T) {
 		"-sandbox-backend=container",
 		"-sandbox-image=debian:bookworm",
 		"-memory-store=sqlite:///tmp/memory.sqlite3",
+		"-state-store=sqlite:///tmp/runtime.sqlite3",
 		"-snapshot-store=sqlite:///tmp/snapshots.sqlite3",
 		"-event-store=sqlite:///tmp/events.sqlite3",
 		"-thread-store=sqlite:///tmp/threads.sqlite3",
@@ -45,6 +46,9 @@ func TestBindFlagsBuildsNodeConfig(t *testing.T) {
 	}
 	if cfg.MemoryStoreURL != "sqlite:///tmp/memory.sqlite3" {
 		t.Fatalf("MemoryStoreURL = %q", cfg.MemoryStoreURL)
+	}
+	if cfg.StateStoreURL != "sqlite:///tmp/runtime.sqlite3" {
+		t.Fatalf("StateStoreURL = %q", cfg.StateStoreURL)
 	}
 	if cfg.SnapshotStoreURL != "sqlite:///tmp/snapshots.sqlite3" {
 		t.Fatalf("SnapshotStoreURL = %q", cfg.SnapshotStoreURL)

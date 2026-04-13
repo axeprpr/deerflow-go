@@ -44,6 +44,7 @@ type RuntimeStateStoreConfig struct {
 	EventBackend    RuntimeStateStoreBackend
 	ThreadBackend   RuntimeStateStoreBackend
 	Root            string
+	URL             string
 	SnapshotURL     string
 	EventURL        string
 	ThreadURL       string
@@ -207,15 +208,15 @@ func (c RuntimeNodeConfig) BuildRemoteWorkerNode(runtime DispatchRuntimeConfig) 
 }
 
 func (c RuntimeNodeConfig) BuildRunSnapshotStore() RunSnapshotStore {
-	return c.BuildStatePlaneWithProviders(DefaultRuntimeStatePlaneProviders()).Snapshots
+	return defaultRuntimeSnapshotStoreFactory().Build(c)
 }
 
 func (c RuntimeNodeConfig) BuildThreadStateStore() ThreadStateStore {
-	return c.BuildStatePlaneWithProviders(DefaultRuntimeStatePlaneProviders()).Threads
+	return defaultRuntimeThreadStateStoreFactory().Build(c)
 }
 
 func (c RuntimeNodeConfig) BuildRunEventStore() RunEventStore {
-	return c.BuildStatePlaneWithProviders(DefaultRuntimeStatePlaneProviders()).Events
+	return defaultRuntimeEventStoreFactory().Build(c)
 }
 
 func (c RuntimeNodeConfig) BuildStatePlane() RuntimeStatePlane {

@@ -19,6 +19,7 @@ func TestDefaultLangGraphNodeConfigUsesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("RUNTIME_NODE_SANDBOX_BACKEND", "remote")
 	t.Setenv("RUNTIME_NODE_SANDBOX_ENDPOINT", "http://sandbox:8082")
 	t.Setenv("RUNTIME_NODE_MEMORY_STORE", "sqlite:///tmp/memory.sqlite3")
+	t.Setenv("RUNTIME_NODE_STATE_STORE", "sqlite:///tmp/runtime.sqlite3")
 	t.Setenv("RUNTIME_NODE_SNAPSHOT_STORE", "sqlite:///tmp/snapshots.sqlite3")
 	t.Setenv("RUNTIME_NODE_EVENT_STORE", "sqlite:///tmp/events.sqlite3")
 	t.Setenv("RUNTIME_NODE_THREAD_STORE", "sqlite:///tmp/threads.sqlite3")
@@ -62,6 +63,9 @@ func TestDefaultLangGraphNodeConfigUsesEnvironmentOverrides(t *testing.T) {
 	if cfg.MemoryStoreURL != "sqlite:///tmp/memory.sqlite3" {
 		t.Fatalf("MemoryStoreURL = %q", cfg.MemoryStoreURL)
 	}
+	if cfg.StateStoreURL != "sqlite:///tmp/runtime.sqlite3" {
+		t.Fatalf("StateStoreURL = %q", cfg.StateStoreURL)
+	}
 	if cfg.SnapshotStoreURL != "sqlite:///tmp/snapshots.sqlite3" {
 		t.Fatalf("SnapshotStoreURL = %q", cfg.SnapshotStoreURL)
 	}
@@ -94,6 +98,9 @@ func TestDefaultLangGraphNodeConfigUsesSharedSQLiteForGatewayRole(t *testing.T) 
 	if cfg.MemoryStoreURL != "sqlite:///tmp/shared-data/memory.sqlite3" {
 		t.Fatalf("MemoryStoreURL = %q", cfg.MemoryStoreURL)
 	}
+	if cfg.StateStoreURL != "sqlite:///tmp/shared-data/runtime-state/runtime.sqlite3" {
+		t.Fatalf("StateStoreURL = %q", cfg.StateStoreURL)
+	}
 	if cfg.SnapshotStoreURL != "sqlite:///tmp/shared-data/runtime-state/snapshots.sqlite3" {
 		t.Fatalf("SnapshotStoreURL = %q", cfg.SnapshotStoreURL)
 	}
@@ -117,6 +124,9 @@ func TestDefaultRuntimeWorkerNodeConfigUsesSharedSQLiteState(t *testing.T) {
 	}
 	if cfg.MemoryStoreURL != "sqlite:///tmp/shared-data/memory.sqlite3" {
 		t.Fatalf("MemoryStoreURL = %q", cfg.MemoryStoreURL)
+	}
+	if cfg.StateStoreURL != "sqlite:///tmp/shared-data/runtime-state/runtime.sqlite3" {
+		t.Fatalf("StateStoreURL = %q", cfg.StateStoreURL)
 	}
 	if cfg.SnapshotStoreURL != "sqlite:///tmp/shared-data/runtime-state/snapshots.sqlite3" {
 		t.Fatalf("SnapshotStoreURL = %q", cfg.SnapshotStoreURL)
@@ -145,6 +155,7 @@ func TestNodeConfigRuntimeNodeConfigUsesRoleDefaults(t *testing.T) {
 		SandboxBackend:   harnessruntime.SandboxBackendContainer,
 		SandboxImage:     "debian:bookworm",
 		StateBackend:     harnessruntime.RuntimeStateStoreBackendFile,
+		StateStoreURL:    "sqlite:///tmp/runtime.sqlite3",
 		TransportBackend: harnessruntime.WorkerTransportBackendRemote,
 	}
 	node := cfg.RuntimeNodeConfig()
@@ -171,6 +182,9 @@ func TestNodeConfigRuntimeNodeConfigUsesRoleDefaults(t *testing.T) {
 	}
 	if node.Memory.StoreURL != "" {
 		t.Fatalf("Memory.StoreURL = %q, want empty", node.Memory.StoreURL)
+	}
+	if node.State.URL != "sqlite:///tmp/runtime.sqlite3" {
+		t.Fatalf("State.URL = %q", node.State.URL)
 	}
 	if node.State.SnapshotURL != "" || node.State.EventURL != "" || node.State.ThreadURL != "" {
 		t.Fatalf("state urls = %+v", node.State)

@@ -38,6 +38,7 @@ type NodeConfig struct {
 	MemoryStoreURL   string
 	StateRoot        string
 	StateBackend     harnessruntime.RuntimeStateStoreBackend
+	StateStoreURL    string
 	SnapshotBackend  harnessruntime.RuntimeStateStoreBackend
 	EventBackend     harnessruntime.RuntimeStateStoreBackend
 	ThreadBackend    harnessruntime.RuntimeStateStoreBackend
@@ -64,6 +65,7 @@ func DefaultNodeConfig(defaults NodeDefaults) NodeConfig {
 		MemoryStoreURL:   strings.TrimSpace(os.Getenv("RUNTIME_NODE_MEMORY_STORE")),
 		StateRoot:        strings.TrimSpace(os.Getenv("RUNTIME_NODE_STATE_ROOT")),
 		StateBackend:     NormalizeStateBackend(firstNonEmpty(os.Getenv("RUNTIME_NODE_STATE_BACKEND"), string(defaults.StateBackend)), defaults.StateBackend),
+		StateStoreURL:    strings.TrimSpace(os.Getenv("RUNTIME_NODE_STATE_STORE")),
 		SnapshotBackend:  NormalizeStateBackend(os.Getenv("RUNTIME_NODE_SNAPSHOT_BACKEND"), ""),
 		EventBackend:     NormalizeStateBackend(os.Getenv("RUNTIME_NODE_EVENT_BACKEND"), ""),
 		ThreadBackend:    NormalizeStateBackend(os.Getenv("RUNTIME_NODE_THREAD_BACKEND"), ""),
@@ -136,6 +138,9 @@ func (c NodeConfig) RuntimeNodeConfig() harnessruntime.RuntimeNodeConfig {
 	if c.StateBackend != "" {
 		config.State.Backend = NormalizeStateBackend(string(c.StateBackend), config.State.Backend)
 	}
+	if strings.TrimSpace(c.StateStoreURL) != "" {
+		config.State.URL = strings.TrimSpace(c.StateStoreURL)
+	}
 	if c.SnapshotBackend != "" {
 		config.State.SnapshotBackend = NormalizeStateBackend(string(c.SnapshotBackend), config.State.SnapshotBackend)
 	}
@@ -176,6 +181,7 @@ func (c NodeConfig) withRoleDefaults() NodeConfig {
 			SnapshotBackend: c.SnapshotBackend,
 			EventBackend:    c.EventBackend,
 			ThreadBackend:   c.ThreadBackend,
+			URL:             c.StateStoreURL,
 			SnapshotURL:     c.SnapshotStoreURL,
 			EventURL:        c.EventStoreURL,
 			ThreadURL:       c.ThreadStoreURL,
@@ -184,6 +190,9 @@ func (c NodeConfig) withRoleDefaults() NodeConfig {
 		}
 		if strings.TrimSpace(c.DataRoot) != "" {
 			stateRoot := firstNonEmpty(strings.TrimSpace(c.StateRoot), filepath.Join(strings.TrimSpace(c.DataRoot), "runtime-state"))
+			if strings.TrimSpace(c.StateStoreURL) == "" && c.StateBackend == harnessruntime.RuntimeStateStoreBackendSQLite {
+				c.StateStoreURL = "sqlite://" + filepath.Join(stateRoot, "runtime.sqlite3")
+			}
 			if strings.TrimSpace(c.SnapshotStoreURL) == "" && effectiveStateBackend(c.SnapshotBackend, c.StateBackend) == harnessruntime.RuntimeStateStoreBackendSQLite {
 				c.SnapshotStoreURL = "sqlite://" + filepath.Join(stateRoot, "snapshots.sqlite3")
 			}

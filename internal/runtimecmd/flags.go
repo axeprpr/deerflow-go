@@ -19,6 +19,7 @@ type NodeFlagBinding struct {
 	memoryStore      *string
 	stateRoot        *string
 	stateBackend     *string
+	stateStore       *string
 	snapshotBackend  *string
 	eventBackend     *string
 	threadBackend    *string
@@ -48,6 +49,7 @@ func BindFlags(fs *flag.FlagSet, defaults NodeConfig, prefix, label string) *Nod
 		memoryStore:      fs.String(flagName(prefix, "memory-store"), defaults.MemoryStoreURL, label+"shared memory store URL"),
 		stateRoot:        fs.String(flagName(prefix, "state-root"), defaults.StateRoot, label+"state root"),
 		stateBackend:     fs.String(flagName(prefix, "state-backend"), string(defaults.StateBackend), label+"state backend: in-memory|file|sqlite"),
+		stateStore:       fs.String(flagName(prefix, "state-store"), defaults.StateStoreURL, label+"shared runtime state store URL/path"),
 		snapshotBackend:  fs.String(flagName(prefix, "snapshot-backend"), string(defaults.SnapshotBackend), label+"snapshot backend override: in-memory|file|sqlite"),
 		eventBackend:     fs.String(flagName(prefix, "event-backend"), string(defaults.EventBackend), label+"event backend override: in-memory|file|sqlite"),
 		threadBackend:    fs.String(flagName(prefix, "thread-backend"), string(defaults.ThreadBackend), label+"thread backend override: in-memory|file|sqlite"),
@@ -78,6 +80,7 @@ func (b *NodeFlagBinding) Config() NodeConfig {
 		MemoryStoreURL:   valueOrEmpty(b.memoryStore),
 		StateRoot:        valueOrEmpty(b.stateRoot),
 		StateBackend:     NormalizeStateBackend(valueOrEmpty(b.stateBackend), defaults.StateBackend),
+		StateStoreURL:    valueOrEmpty(b.stateStore),
 		SnapshotBackend:  NormalizeStateBackend(valueOrEmpty(b.snapshotBackend), defaults.SnapshotBackend),
 		EventBackend:     NormalizeStateBackend(valueOrEmpty(b.eventBackend), defaults.EventBackend),
 		ThreadBackend:    NormalizeStateBackend(valueOrEmpty(b.threadBackend), defaults.ThreadBackend),

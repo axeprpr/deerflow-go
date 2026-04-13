@@ -31,6 +31,7 @@ func DefaultConfig() Config {
 	worker.EventBackend = gateway.Runtime.EventBackend
 	worker.ThreadBackend = gateway.Runtime.ThreadBackend
 	worker.StateRoot = gateway.Runtime.StateRoot
+	worker.StateStoreURL = gateway.Runtime.StateStoreURL
 	worker.SnapshotStoreURL = gateway.Runtime.SnapshotStoreURL
 	worker.EventStoreURL = gateway.Runtime.EventStoreURL
 	worker.ThreadStoreURL = gateway.Runtime.ThreadStoreURL
@@ -78,6 +79,9 @@ func (c Config) withDefaults() Config {
 	if strings.TrimSpace(cfg.Worker.StateRoot) == "" {
 		cfg.Worker.StateRoot = cfg.Gateway.Runtime.StateRoot
 	}
+	if strings.TrimSpace(cfg.Worker.StateStoreURL) == "" {
+		cfg.Worker.StateStoreURL = cfg.Gateway.Runtime.StateStoreURL
+	}
 	if strings.TrimSpace(cfg.Worker.SnapshotStoreURL) == "" {
 		cfg.Worker.SnapshotStoreURL = cfg.Gateway.Runtime.SnapshotStoreURL
 	}
@@ -101,6 +105,7 @@ func (c Config) withDefaults() Config {
 	cfg.Gateway.Runtime.DataRoot = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.DataRoot), strings.TrimSpace(cfg.Worker.DataRoot))
 	cfg.Gateway.Runtime.MemoryStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.MemoryStoreURL), strings.TrimSpace(cfg.Worker.MemoryStoreURL))
 	cfg.Gateway.Runtime.StateRoot = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.StateRoot), strings.TrimSpace(cfg.Worker.StateRoot))
+	cfg.Gateway.Runtime.StateStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.StateStoreURL), strings.TrimSpace(cfg.Worker.StateStoreURL))
 	cfg.Gateway.Runtime.SnapshotStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.SnapshotStoreURL), strings.TrimSpace(cfg.Worker.SnapshotStoreURL))
 	cfg.Gateway.Runtime.EventStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.EventStoreURL), strings.TrimSpace(cfg.Worker.EventStoreURL))
 	cfg.Gateway.Runtime.ThreadStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.ThreadStoreURL), strings.TrimSpace(cfg.Worker.ThreadStoreURL))
@@ -118,7 +123,7 @@ func (c Config) StartupLines(build langgraphcmd.BuildInfo, yolo bool, logLevel s
 	lines = append(lines,
 		"Starting split runtime stack...",
 		fmt.Sprintf("  Worker: role=%s addr=%s transport=%s sandbox=%s", cfg.Worker.Role, cfg.Worker.Addr, cfg.Worker.TransportBackend, cfg.Worker.SandboxBackend),
-		fmt.Sprintf("  Shared state: root=%s snapshot=%s event=%s thread=%s", firstNonEmpty(cfg.Worker.StateRoot, "(memory)"), firstNonEmpty(cfg.Worker.SnapshotStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.EventStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.ThreadStoreURL, "(derived)")),
+		fmt.Sprintf("  Shared state: root=%s store=%s snapshot=%s event=%s thread=%s", firstNonEmpty(cfg.Worker.StateRoot, "(memory)"), firstNonEmpty(cfg.Worker.StateStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.SnapshotStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.EventStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.ThreadStoreURL, "(derived)")),
 	)
 	return lines
 }

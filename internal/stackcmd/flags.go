@@ -18,6 +18,7 @@ func BindFlags(fs *flag.FlagSet, defaults Config) *Binding {
 	fs.IntVar(&cfg.Gateway.Runtime.MaxTurns, "max-turns", cfg.Gateway.Runtime.MaxTurns, "max agent turns")
 	fs.StringVar(&cfg.Gateway.Runtime.MemoryStoreURL, "memory-store", cfg.Gateway.Runtime.MemoryStoreURL, "shared memory store URL")
 	fs.StringVar(&cfg.Gateway.Runtime.StateRoot, "state-root", cfg.Gateway.Runtime.StateRoot, "shared runtime state root")
+	fs.StringVar(&cfg.Gateway.Runtime.StateStoreURL, "state-store", cfg.Gateway.Runtime.StateStoreURL, "shared runtime state store URL")
 	fs.StringVar((*string)(&cfg.Worker.TransportBackend), "worker-transport", string(cfg.Worker.TransportBackend), "worker transport backend")
 	fs.StringVar((*string)(&cfg.Gateway.Runtime.StateBackend), "state-backend", string(cfg.Gateway.Runtime.StateBackend), "shared runtime state backend")
 	fs.StringVar((*string)(&cfg.Gateway.Runtime.SnapshotBackend), "snapshot-backend", string(cfg.Gateway.Runtime.SnapshotBackend), "shared snapshot backend")

@@ -35,6 +35,7 @@ func TestPrepareCommandAcceptsSharedBackendFlags(t *testing.T) {
 		Stderr: new(strings.Builder),
 		Args: []string{
 			"-state-backend=sqlite",
+			"-state-store=sqlite:///tmp/runtime.sqlite3",
 			"-event-backend=file",
 			"-thread-backend=sqlite",
 			"-worker-transport=queue",
@@ -45,5 +46,8 @@ func TestPrepareCommandAcceptsSharedBackendFlags(t *testing.T) {
 	}
 	if prepared == nil {
 		t.Fatal("PrepareCommand() = nil")
+	}
+	if !strings.Contains(strings.Join(prepared.StartupLines, "\n"), "store=sqlite:///tmp/runtime.sqlite3") {
+		t.Fatalf("StartupLines = %#v", prepared.StartupLines)
 	}
 }
