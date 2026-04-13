@@ -391,19 +391,7 @@ func (s *Server) defaultSandboxRuntime(existing harness.SandboxRuntime) harness.
 			return runtime
 		}
 	}
-	if s != nil && s.sandboxManager != nil {
-		return s.sandboxManager.Runtime(s.runtimeNode.Sandbox.Policy)
-	}
-	config := s.runtimeNodeConfig()
-	manager, err := config.BuildSandboxManager()
-	if err != nil {
-		return nil
-	}
-	if s != nil {
-		s.sandboxManager = manager
-		s.runtimeNode.Sandbox = config.Sandbox
-	}
-	return manager.Runtime(config.Sandbox.Policy)
+	return nil
 }
 
 func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
@@ -419,9 +407,7 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 		s.runDispatcher = node.RunDispatcher()
 		return s.runDispatcher
 	}
-	s.runtimeNode = s.runtimeNodeConfig()
-	s.runDispatcher = s.runtimeNode.BuildDispatcher(s.runtimeNode.BuildDispatchRuntime(s.runtimeView, s.runtimeWorkerSpecAdapter()))
-	return s.runDispatcher
+	return harnessruntime.NewInProcessRunDispatcher()
 }
 
 func (s *Server) defaultSandboxProvider(existing harness.SandboxProvider) harness.SandboxProvider {
