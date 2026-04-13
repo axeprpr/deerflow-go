@@ -64,6 +64,7 @@ type RuntimeNode struct {
 	Dispatcher   RunDispatcher
 	Sandbox      *SandboxResourceManager
 	RemoteWorker *HTTPRemoteWorkerNode
+	Memory       *MemoryService
 }
 
 func (c RuntimeNodeConfig) BuildRuntimeNode(runtime DispatchRuntimeConfig) (*RuntimeNode, error) {
@@ -94,10 +95,10 @@ func (c RuntimeNodeConfig) BuildRuntimeNodeWithProviders(runtime DispatchRuntime
 		return nil, err
 	}
 	node := &RuntimeNode{
-		Config:       c,
-		Providers:    providers,
-		State:        providers.StatePlane.Build(c),
-		Sandbox:      sandboxManager,
+		Config:    c,
+		Providers: providers,
+		State:     providers.StatePlane.Build(c),
+		Sandbox:   sandboxManager,
 	}
 	if runtime.hasBindings() {
 		node.BindDispatch(runtime)
@@ -124,6 +125,20 @@ func (n *RuntimeNode) ThreadStateStore() ThreadStateStore {
 		return nil
 	}
 	return n.State.Threads
+}
+
+func (n *RuntimeNode) MemoryService() *MemoryService {
+	if n == nil {
+		return nil
+	}
+	return n.Memory
+}
+
+func (n *RuntimeNode) MemoryRuntime() *harness.MemoryRuntime {
+	if n == nil || n.Memory == nil {
+		return nil
+	}
+	return n.Memory.Runtime()
 }
 
 func (n *RuntimeNode) RunDispatcher() RunDispatcher {
@@ -233,6 +248,13 @@ func (n *RuntimeNode) BindDispatchSource(source func() *harness.Runtime, specs W
 	n.BindDispatch(n.Config.BuildDispatchRuntimeWithProviders(source, specs, n.Providers.Remote))
 }
 
+func (n *RuntimeNode) BindMemoryService(service *MemoryService) {
+	if n == nil {
+		return
+	}
+	n.Memory = service
+}
+
 func (c DispatchRuntimeConfig) hasBindings() bool {
 	return c.Executor != nil ||
 		c.Runtime != nil ||
@@ -256,6 +278,11 @@ func (n *RuntimeNode) Close(ctx context.Context) error {
 	}
 	if n.RemoteWorker != nil {
 		if err := n.RemoteWorker.Shutdown(ctx); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	if n.Memory != nil {
+		if err := n.Memory.Close(); err != nil && closeErr == nil {
 			closeErr = err
 		}
 	}

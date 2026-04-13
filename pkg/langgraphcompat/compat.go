@@ -256,10 +256,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	s.snapshotStore = newCompatRunStateStore(s, runtimeNodeInstance.SnapshotStore(), runtimeNodeInstance.EventStore())
 	s.eventStore = s.snapshotStore.(harnessruntime.RunEventStore)
 	s.threadStateStore = newCompatThreadStateStore(s, runtimeNodeInstance.ThreadStateStore())
-	var memoryRuntime *harness.MemoryRuntime
-	if bootstrap.MemoryService != nil {
-		memoryRuntime = bootstrap.MemoryService.Runtime()
-	}
+	memoryRuntime := runtimeNodeInstance.MemoryRuntime()
 	s.runtime = harness.NewRuntime(harness.RuntimeDeps{
 		LLMProvider:     provider,
 		Tools:           registry,

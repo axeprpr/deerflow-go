@@ -39,6 +39,7 @@ func BuildDefaultRuntimeBootstrapWithMemory(ctx context.Context, config RuntimeN
 	memoryService, err := BuildDefaultMemoryService(ctx, dataRoot)
 	if err == nil {
 		bootstrap.MemoryService = memoryService
+		bootstrap.Node.BindMemoryService(memoryService)
 	} else {
 		bootstrap.MemoryErr = err
 	}

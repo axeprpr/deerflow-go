@@ -52,4 +52,10 @@ func TestBuildDefaultRuntimeBootstrapWithMemoryBuildsMemoryService(t *testing.T)
 	if bootstrap.MemoryErr != nil {
 		t.Fatalf("MemoryErr = %v", bootstrap.MemoryErr)
 	}
+	if bootstrap.Node.MemoryService() != bootstrap.MemoryService {
+		t.Fatalf("node memory service = %#v want %#v", bootstrap.Node.MemoryService(), bootstrap.MemoryService)
+	}
+	if bootstrap.Node.MemoryRuntime() != bootstrap.MemoryService.Runtime() {
+		t.Fatalf("node memory runtime = %#v want %#v", bootstrap.Node.MemoryRuntime(), bootstrap.MemoryService.Runtime())
+	}
 }
