@@ -193,16 +193,15 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	provider := llm.NewProvider("siliconflow")
 
 	clarifyManager := clarification.NewManager(32)
-	runtimeNode := harnessruntime.DefaultRuntimeNodeConfig("langgraph", filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox"))
+	sandboxRoot := filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
+	runtimeNode := harnessruntime.DefaultRuntimeNodeConfig("langgraph", sandboxRoot)
 	runtimeNodeInstance, err := runtimeNode.BuildRuntimeNode(harnessruntime.DispatchRuntimeConfig{})
 	if err != nil {
 		return nil, err
 	}
-	sandboxManager := runtimeNodeInstance.SandboxManager()
 	sandboxRuntime := runtimeNodeInstance.ConfiguredSandboxRuntime()
 	toolRuntime := harnessruntime.NewDefaultToolRuntime(provider, clarifyManager, sandboxRuntime)
 	registry := toolRuntime.Registry()
-	sandboxRoot := filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
 	subagentPool := toolRuntime.Subagents()
 
 	// Create checkpoint store
@@ -240,9 +239,6 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		sessions:       make(map[string]*Session),
 		runs:           make(map[string]*Run),
 		runRegistry:    newRunRegistry(),
-		runtimeSystem:  runtimeNodeInstance,
-		runDispatcher:  runtimeNodeInstance.RunDispatcher(),
-		sandboxManager: sandboxManager,
 		runtimeNode:    runtimeNode,
 		dataRoot:       dataRootAbs,
 		models:         defaultGatewayModels(defaultModel),
@@ -254,6 +250,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		channelConfig:  gatewayChannelsConfig{},
 		channels:       defaultGatewayChannelsStatus(),
 	}
+	s.attachRuntimeSystem(runtimeNodeInstance)
 	s.snapshotStore = newCompatRunStateStore(s, runtimeNodeInstance.SnapshotStore(), runtimeNodeInstance.EventStore())
 	s.eventStore = s.snapshotStore.(harnessruntime.RunEventStore)
 	s.threadStateStore = newCompatThreadStateStore(s, runtimeNodeInstance.ThreadStateStore())
@@ -305,6 +302,18 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	return s, nil
 }
 
+func (s *Server) attachRuntimeSystem(node *harnessruntime.RuntimeNode) {
+	if s == nil || node == nil {
+		return
+	}
+	s.runtimeSystem = node
+	s.runtimeNode = node.Config
+	s.sandboxManager = node.SandboxManager()
+	if dispatcher := node.RunDispatcher(); dispatcher != nil {
+		s.runDispatcher = dispatcher
+	}
+}
+
 func (s *Server) runtimeView() *harness.Runtime {
 	if s == nil {
 		return nil
@@ -342,7 +351,7 @@ func (s *Server) bindRuntimeNodeDispatch() {
 		return
 	}
 	node.BindDispatchSource(s.runtimeView, s.runtimeWorkerSpecAdapter())
-	s.runDispatcher = node.RunDispatcher()
+	s.attachRuntimeSystem(node)
 }
 
 func (s *Server) ensureRuntimeSystem() *harnessruntime.RuntimeNode {
@@ -357,9 +366,7 @@ func (s *Server) ensureRuntimeSystem() *harnessruntime.RuntimeNode {
 	if err != nil {
 		return nil
 	}
-	s.runtimeSystem = node
-	s.runtimeNode = node.Config
-	s.sandboxManager = node.SandboxManager()
+	s.attachRuntimeSystem(node)
 	return node
 }
 
@@ -404,7 +411,7 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 	node := s.ensureRuntimeSystem()
 	if node != nil {
 		node.BindDispatchSource(s.runtimeView, s.runtimeWorkerSpecAdapter())
-		s.runDispatcher = node.RunDispatcher()
+		s.attachRuntimeSystem(node)
 		return s.runDispatcher
 	}
 	return harnessruntime.NewInProcessRunDispatcher()
