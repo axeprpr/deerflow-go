@@ -11,12 +11,13 @@ import (
 )
 
 type Launcher struct {
-	group   *commandrun.LifecycleGroup
-	gateway *langgraphcmd.Launcher
-	worker  *runtimecmd.NodeConfig
-	state   *statecmd.Config
-	sandbox *sandboxcmd.Config
-	spec    LaunchSpec
+	group          *commandrun.LifecycleGroup
+	gateway        *langgraphcmd.Launcher
+	worker         *runtimecmd.NodeConfig
+	state          *statecmd.Config
+	sandbox        *sandboxcmd.Config
+	spec           LaunchSpec
+	deploymentSpec DeploymentSpec
 }
 
 func NewLauncher(gateway *langgraphcmd.Launcher, worker commandrun.Lifecycle, workerConfig *runtimecmd.NodeConfig, state commandrun.Lifecycle, stateConfig *statecmd.Config, sandbox commandrun.Lifecycle, sandboxConfig *sandboxcmd.Config) *Launcher {
@@ -34,6 +35,13 @@ func (l *Launcher) Spec() LaunchSpec {
 		return LaunchSpec{}
 	}
 	return l.spec
+}
+
+func (l *Launcher) DeploymentSpec() DeploymentSpec {
+	if l == nil {
+		return DeploymentSpec{}
+	}
+	return l.deploymentSpec
 }
 
 func (l *Launcher) Start() error {
@@ -87,5 +95,6 @@ func (c Config) BuildLauncher(ctx context.Context) (*Launcher, error) {
 	workerConfig := cfg.Worker
 	launcher := NewLauncher(gatewayLauncher, workerLauncher, &workerConfig, stateLauncher, stateConfig, sandboxLauncher, sandboxConfig)
 	launcher.spec = cfg.LaunchSpec()
+	launcher.deploymentSpec = cfg.DeploymentSpec()
 	return launcher, nil
 }

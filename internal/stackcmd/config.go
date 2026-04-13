@@ -271,6 +271,7 @@ func (c Config) alignSharedStateStores() Config {
 
 func (c Config) StartupLines(build langgraphcmd.BuildInfo, yolo bool, logLevel string) []string {
 	cfg := c.withDefaults()
+	spec := cfg.DeploymentSpec()
 	lines := cfg.Gateway.StartupLines(build, yolo, logLevel)
 	lines = append(lines,
 		fmt.Sprintf("Starting split runtime stack preset=%s...", cfg.effectivePreset()),
@@ -278,8 +279,14 @@ func (c Config) StartupLines(build langgraphcmd.BuildInfo, yolo bool, logLevel s
 		fmt.Sprintf("  Shared state: root=%s store=%s snapshot=%s event=%s thread=%s", firstNonEmpty(cfg.Worker.StateRoot, "(memory)"), firstNonEmpty(cfg.Worker.StateStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.SnapshotStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.EventStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.ThreadStoreURL, "(derived)")),
 	)
 	if cfg.usesDedicatedStateService() {
-		lines = append(lines, fmt.Sprintf("  State service: addr=%s provider=%s store=%s", cfg.State.Runtime.Addr, cfg.State.Runtime.StateProvider, firstNonEmpty(cfg.State.Runtime.StateStoreURL, "(derived)")))
-		lines = append(lines, fmt.Sprintf("  Sandbox service: addr=%s backend=%s", cfg.Sandbox.Runtime.Addr, cfg.Sandbox.Runtime.SandboxBackend))
+		for _, component := range spec.Components {
+			switch component.Kind {
+			case ComponentState:
+				lines = append(lines, fmt.Sprintf("  State service: addr=%s provider=%s store=%s", component.Addr, cfg.State.Runtime.StateProvider, firstNonEmpty(cfg.State.Runtime.StateStoreURL, "(derived)")))
+			case ComponentSandbox:
+				lines = append(lines, fmt.Sprintf("  Sandbox service: addr=%s backend=%s", component.Addr, cfg.Sandbox.Runtime.SandboxBackend))
+			}
+		}
 	}
 	return lines
 }
@@ -287,7 +294,7 @@ func (c Config) StartupLines(build langgraphcmd.BuildInfo, yolo bool, logLevel s
 func (c Config) ReadyLines() []string {
 	cfg := c.withDefaults()
 	lines := cfg.Gateway.ReadyLines()
-	lines = append(lines, c.LaunchSpec().ReadyLines()...)
+	lines = append(lines, cfg.DeploymentSpec().ReadyLines()...)
 	return lines
 }
 
