@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 type InMemoryRunEventStore struct {
@@ -149,4 +150,49 @@ func (s *JSONFileRunEventStore) ReplaceRunEvents(runID string, events []RunEvent
 		return
 	}
 	_ = os.WriteFile(filepath.Join(s.root, runID+".json"), data, 0o644)
+}
+
+func (s *JSONFileRunEventStore) SubscribeRunEvents(runID string, buffer int) (<-chan RunEvent, func()) {
+	return newPollingRunEventSubscription(buffer, func() []RunEvent {
+		return s.LoadRunEvents(runID)
+	})
+}
+
+func newPollingRunEventSubscription(buffer int, load func() []RunEvent) (<-chan RunEvent, func()) {
+	if buffer <= 0 {
+		buffer = 1
+	}
+	if load == nil {
+		ch := make(chan RunEvent)
+		close(ch)
+		return ch, func() {}
+	}
+	out := make(chan RunEvent, buffer)
+	done := make(chan struct{})
+	go func() {
+		defer close(out)
+		last := 0
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			events := load()
+			if last > len(events) {
+				last = 0
+			}
+			for _, event := range events[last:] {
+				select {
+				case out <- event:
+				case <-done:
+					return
+				}
+			}
+			last = len(events)
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	return out, func() { close(done) }
 }

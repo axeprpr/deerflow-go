@@ -167,6 +167,18 @@ func (s *compatRunStateStore) LoadRunEvents(runID string) []harnessruntime.RunEv
 	return s.events.LoadRunEvents(runID)
 }
 
+func (s *compatRunStateStore) SubscribeRunEvents(runID string, buffer int) (<-chan harnessruntime.RunEvent, func()) {
+	if s == nil {
+		ch := make(chan harnessruntime.RunEvent)
+		close(ch)
+		return ch, func() {}
+	}
+	if feed, ok := s.events.(harnessruntime.RunEventFeed); ok {
+		return feed.SubscribeRunEvents(runID, buffer)
+	}
+	return harnessruntime.NewInMemoryRunEventStore().SubscribeRunEvents(runID, buffer)
+}
+
 func asRunEventReplaceStore(store harnessruntime.RunEventStore) harnessruntime.RunEventReplaceStore {
 	replace, _ := store.(harnessruntime.RunEventReplaceStore)
 	return replace

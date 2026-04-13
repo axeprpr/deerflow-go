@@ -1,6 +1,9 @@
 package harnessruntime
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestSQLiteRunSnapshotStorePersistsSnapshots(t *testing.T) {
 	store, err := NewSQLiteRunSnapshotStore(t.TempDir() + "/snapshots.sqlite3")
@@ -36,6 +39,37 @@ func TestSQLiteRunEventStorePersistsEvents(t *testing.T) {
 	events := store.LoadRunEvents("run-1")
 	if len(events) != 2 || events[1].Event != "end" {
 		t.Fatalf("LoadRunEvents() = %#v", events)
+	}
+}
+
+func TestSQLiteRunEventStoreSubscribeRunEvents(t *testing.T) {
+	store, err := NewSQLiteRunEventStore(t.TempDir() + "/events.sqlite3")
+	if err != nil {
+		t.Fatalf("NewSQLiteRunEventStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	sub, unsubscribe := store.SubscribeRunEvents("run-1", 4)
+	defer unsubscribe()
+
+	store.AppendRunEvent("run-1", RunEvent{ID: "run-1:1", Event: "chunk"})
+	store.AppendRunEvent("run-1", RunEvent{ID: "run-1:2", Event: "end"})
+
+	var events []RunEvent
+	deadline := time.After(2 * time.Second)
+	for len(events) < 2 {
+		select {
+		case event, ok := <-sub:
+			if !ok {
+				t.Fatal("subscription closed before events arrived")
+			}
+			events = append(events, event)
+		case <-deadline:
+			t.Fatalf("timed out waiting for events; got %#v", events)
+		}
+	}
+	if events[0].Event != "chunk" || events[1].Event != "end" {
+		t.Fatalf("events = %#v", events)
 	}
 }
 

@@ -269,23 +269,56 @@ func (a runtimeEventAdapter) LoadRunEvents(runID string) []harnessruntime.RunEve
 }
 
 func (a runtimeEventAdapter) SubscribeRunEvents(runID string, buffer int) (<-chan harnessruntime.RunEvent, func()) {
-	source, unsubscribe := a.server.ensureRunRegistry().subscribe(runID, buffer)
+	registrySource, registryUnsubscribe := a.server.ensureRunRegistry().subscribe(runID, buffer)
+	var storeSource <-chan harnessruntime.RunEvent
+	storeUnsubscribe := func() {}
+	if store, ok := a.server.ensureEventStore().(harnessruntime.RunEventFeed); ok {
+		storeSource, storeUnsubscribe = store.SubscribeRunEvents(runID, buffer)
+	}
 	out := make(chan harnessruntime.RunEvent, buffer)
 	done := make(chan struct{})
 	var once sync.Once
 	go func() {
 		defer close(out)
+		seen := map[string]struct{}{}
+		forward := func(event harnessruntime.RunEvent) bool {
+			if event.ID != "" {
+				if _, ok := seen[event.ID]; ok {
+					return true
+				}
+				seen[event.ID] = struct{}{}
+			}
+			select {
+			case out <- event:
+				return true
+			case <-done:
+				return false
+			}
+		}
 		for {
 			select {
 			case <-done:
 				return
-			case event, ok := <-source:
+			case event, ok := <-registrySource:
 				if !ok {
+					registrySource = nil
+					if storeSource == nil {
+						return
+					}
+					continue
+				}
+				if !forward(runtimeEventFromStreamEvent(event)) {
 					return
 				}
-				select {
-				case out <- runtimeEventFromStreamEvent(event):
-				case <-done:
+			case event, ok := <-storeSource:
+				if !ok {
+					storeSource = nil
+					if registrySource == nil {
+						return
+					}
+					continue
+				}
+				if !forward(event) {
 					return
 				}
 			}
@@ -294,7 +327,8 @@ func (a runtimeEventAdapter) SubscribeRunEvents(runID string, buffer int) (<-cha
 	return out, func() {
 		once.Do(func() {
 			close(done)
-			unsubscribe()
+			registryUnsubscribe()
+			storeUnsubscribe()
 		})
 	}
 }

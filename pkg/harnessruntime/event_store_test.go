@@ -1,6 +1,9 @@
 package harnessruntime
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestInMemoryRunEventStoreReplaceAndSubscribe(t *testing.T) {
 	store := NewInMemoryRunEventStore()
@@ -25,6 +28,32 @@ func TestJSONFileRunEventStorePersistsEvents(t *testing.T) {
 	})
 	events := store.LoadRunEvents("run-1")
 	if len(events) != 2 || events[1].Event != "end" {
+		t.Fatalf("events = %#v", events)
+	}
+}
+
+func TestJSONFileRunEventStoreSubscribeRunEvents(t *testing.T) {
+	store := NewJSONFileRunEventStore(t.TempDir())
+	ch, unsubscribe := store.SubscribeRunEvents("run-1", 4)
+	defer unsubscribe()
+
+	store.AppendRunEvent("run-1", RunEvent{ID: "run-1:1", Event: "chunk", RunID: "run-1"})
+	store.AppendRunEvent("run-1", RunEvent{ID: "run-1:2", Event: "end", RunID: "run-1"})
+
+	var events []RunEvent
+	deadline := time.After(2 * time.Second)
+	for len(events) < 2 {
+		select {
+		case event, ok := <-ch:
+			if !ok {
+				t.Fatal("subscription closed before events arrived")
+			}
+			events = append(events, event)
+		case <-deadline:
+			t.Fatalf("timed out waiting for events; got %#v", events)
+		}
+	}
+	if events[0].Event != "chunk" || events[1].Event != "end" {
 		t.Fatalf("events = %#v", events)
 	}
 }

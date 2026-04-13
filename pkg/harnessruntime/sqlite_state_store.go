@@ -241,6 +241,12 @@ func (s *SQLiteRunEventStore) ReplaceRunEvents(runID string, events []RunEvent) 
 	_ = tx.Commit()
 }
 
+func (s *SQLiteRunEventStore) SubscribeRunEvents(runID string, buffer int) (<-chan RunEvent, func()) {
+	return newPollingRunEventSubscription(buffer, func() []RunEvent {
+		return s.LoadRunEvents(runID)
+	})
+}
+
 type SQLiteThreadStateStore struct {
 	db    *sql.DB
 	codec ThreadRuntimeStateMarshaler
