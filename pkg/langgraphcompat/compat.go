@@ -295,6 +295,30 @@ func (s *Server) attachRuntimeSystem(node *harnessruntime.RuntimeNode) {
 	}
 }
 
+func (s *Server) runtimeDispatcher() harnessruntime.RunDispatcher {
+	if s == nil {
+		return nil
+	}
+	if node := s.runtimeSystem; node != nil {
+		if dispatcher := node.RunDispatcher(); dispatcher != nil {
+			return dispatcher
+		}
+	}
+	return s.runDispatcher
+}
+
+func (s *Server) runtimeSandboxManager() *harnessruntime.SandboxResourceManager {
+	if s == nil {
+		return nil
+	}
+	if node := s.runtimeSystem; node != nil {
+		if manager := node.SandboxManager(); manager != nil {
+			return manager
+		}
+	}
+	return s.sandboxManager
+}
+
 func (s *Server) runtimeView() *harness.Runtime {
 	if s == nil {
 		return nil
@@ -351,13 +375,13 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 	if s == nil {
 		return harnessruntime.NewInProcessRunDispatcher()
 	}
-	if s.runDispatcher != nil {
-		return s.runDispatcher
+	if dispatcher := s.runtimeDispatcher(); dispatcher != nil {
+		return dispatcher
 	}
 	node, err := harnessruntime.EnsureBoundRuntimeNode(s.runtimeSystem, s.runtimeNodeConfig(), s.runtimeView, s.runtimeWorkerSpecAdapter())
 	if err == nil && node != nil {
 		s.attachRuntimeSystem(node)
-		return s.runDispatcher
+		return s.runtimeDispatcher()
 	}
 	return harnessruntime.NewInProcessRunDispatcher()
 }
@@ -459,13 +483,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			shutdownErr = err
 		}
 	} else {
-		if closer, ok := s.runDispatcher.(interface{ Close() error }); ok {
+		if closer, ok := s.runtimeDispatcher().(interface{ Close() error }); ok {
 			if err := closer.Close(); err != nil && shutdownErr == nil {
 				shutdownErr = err
 			}
 		}
-		if s.sandboxManager != nil {
-			if err := s.sandboxManager.Close(); err != nil && shutdownErr == nil {
+		if manager := s.runtimeSandboxManager(); manager != nil {
+			if err := manager.Close(); err != nil && shutdownErr == nil {
 				shutdownErr = err
 			}
 		}
