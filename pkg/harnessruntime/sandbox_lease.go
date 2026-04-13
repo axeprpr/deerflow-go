@@ -19,7 +19,7 @@ type SandboxLeaseConfig struct {
 }
 
 type SandboxLease struct {
-	Sandbox           *sandbox.Sandbox
+	Sandbox           sandbox.Session
 	Heartbeat         func() error
 	Release           func() error
 	HeartbeatInterval time.Duration
@@ -53,7 +53,7 @@ func (r leaseBackedSandboxRuntime) Provider() harness.SandboxProvider {
 	return r.leases.Provider()
 }
 
-func (r leaseBackedSandboxRuntime) Resolve(req harness.AgentRequest) (*sandbox.Sandbox, error) {
+func (r leaseBackedSandboxRuntime) Resolve(req harness.AgentRequest) (sandbox.Session, error) {
 	binding, err := r.Bind(req)
 	if err != nil {
 		return nil, err

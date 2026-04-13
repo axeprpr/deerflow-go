@@ -19,8 +19,8 @@ var subagentMessageSeq uint64
 type SubagentExecutor struct {
 	llm             llm.LLMProvider
 	tools           *tools.Registry
-	sandbox         *sandbox.Sandbox
-	sandboxProvider func() (*sandbox.Sandbox, error)
+	sandbox         sandbox.Session
+	sandboxProvider func() (sandbox.Session, error)
 	model           string
 }
 
@@ -31,7 +31,7 @@ type subagentStreamState struct {
 	messageCount     int
 }
 
-func NewSubagentExecutor(provider llm.LLMProvider, registry *tools.Registry, sb *sandbox.Sandbox) *SubagentExecutor {
+func NewSubagentExecutor(provider llm.LLMProvider, registry *tools.Registry, sb sandbox.Session) *SubagentExecutor {
 	if registry == nil {
 		registry = tools.NewRegistry()
 	}
@@ -42,7 +42,7 @@ func NewSubagentExecutor(provider llm.LLMProvider, registry *tools.Registry, sb 
 	}
 }
 
-func (e *SubagentExecutor) SetSandboxProvider(provider func() (*sandbox.Sandbox, error)) {
+func (e *SubagentExecutor) SetSandboxProvider(provider func() (sandbox.Session, error)) {
 	if e == nil {
 		return
 	}
@@ -116,7 +116,7 @@ func (e *SubagentExecutor) Execute(ctx context.Context, task *subagent.Task, emi
 	}, nil
 }
 
-func NewSubagentPool(provider llm.LLMProvider, registry *tools.Registry, sb *sandbox.Sandbox, sandboxProvider func() (*sandbox.Sandbox, error), maxConcurrent int, timeout time.Duration) *subagent.Pool {
+func NewSubagentPool(provider llm.LLMProvider, registry *tools.Registry, sb sandbox.Session, sandboxProvider func() (sandbox.Session, error), maxConcurrent int, timeout time.Duration) *subagent.Pool {
 	executor := NewSubagentExecutor(provider, registry, sb)
 	executor.SetSandboxProvider(sandboxProvider)
 	return subagent.NewPool(executor, subagent.PoolConfig{

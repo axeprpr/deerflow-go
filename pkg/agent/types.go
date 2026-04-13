@@ -42,7 +42,7 @@ type AgentConfig struct {
 	SystemPrompt           string
 	Temperature            *float64
 	MaxTokens              *int
-	Sandbox                *sandbox.Sandbox
+	Sandbox                sandbox.Session
 	RequestTimeout         time.Duration
 	GuardrailProvider      guardrails.Provider
 	GuardrailFailClosed    *bool

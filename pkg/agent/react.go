@@ -36,7 +36,7 @@ type Agent struct {
 	llm                    llm.LLMProvider
 	tools                  *tools.Registry
 	deferredTools          *tools.DeferredToolRegistry
-	sandbox                *sandbox.Sandbox
+	sandbox                sandbox.Session
 	agentType              AgentType
 	model                  string
 	reasoningEffort        string

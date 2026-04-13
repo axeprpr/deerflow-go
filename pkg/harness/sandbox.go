@@ -8,7 +8,7 @@ import (
 )
 
 type SandboxBinding struct {
-	Sandbox           *sandbox.Sandbox
+	Sandbox           sandbox.Session
 	Heartbeat         func() error
 	Release           func() error
 	HeartbeatInterval time.Duration
@@ -18,7 +18,7 @@ type SandboxBinding struct {
 // implementation keeps the existing singleton behavior, but runtime assembly no
 // longer depends on compat-owned sandbox fields directly.
 type SandboxProvider interface {
-	Acquire() (*sandbox.Sandbox, error)
+	Acquire() (sandbox.Session, error)
 	Close() error
 }
 
@@ -45,7 +45,7 @@ func (AlwaysSandboxPolicy) Enabled(AgentRequest) bool {
 // boundary so compat layers do not wire provider access directly.
 type SandboxRuntime interface {
 	Provider() SandboxProvider
-	Resolve(AgentRequest) (*sandbox.Sandbox, error)
+	Resolve(AgentRequest) (sandbox.Session, error)
 	Close() error
 }
 
@@ -76,7 +76,7 @@ func (r *StaticSandboxRuntime) Provider() SandboxProvider {
 	return r.provider
 }
 
-func (r *StaticSandboxRuntime) Resolve(req AgentRequest) (*sandbox.Sandbox, error) {
+func (r *StaticSandboxRuntime) Resolve(req AgentRequest) (sandbox.Session, error) {
 	if r == nil || r.provider == nil {
 		return nil, nil
 	}
@@ -106,14 +106,14 @@ type LocalSandboxProvider struct {
 	root string
 
 	mu      sync.Mutex
-	sandbox *sandbox.Sandbox
+	sandbox sandbox.Session
 }
 
 func NewLocalSandboxProvider(name, root string) *LocalSandboxProvider {
 	return &LocalSandboxProvider{name: name, root: root}
 }
 
-func (p *LocalSandboxProvider) Acquire() (*sandbox.Sandbox, error) {
+func (p *LocalSandboxProvider) Acquire() (sandbox.Session, error) {
 	if p == nil {
 		return nil, nil
 	}

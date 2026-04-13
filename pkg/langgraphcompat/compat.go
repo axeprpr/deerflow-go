@@ -480,7 +480,7 @@ func (s *Server) newAgent(spec harness.AgentSpec) *agent.Agent {
 	return runAgent
 }
 
-func (s *Server) getOrCreateSandbox() (*sandbox.Sandbox, error) {
+func (s *Server) getOrCreateSandbox() (sandbox.Session, error) {
 	if s == nil {
 		return nil, errors.New("server is nil")
 	}

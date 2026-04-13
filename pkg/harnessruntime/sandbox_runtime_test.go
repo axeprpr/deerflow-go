@@ -214,7 +214,7 @@ type fakeSandboxProvider struct {
 	closes   int
 }
 
-func (p *fakeSandboxProvider) Acquire() (*sandbox.Sandbox, error) {
+func (p *fakeSandboxProvider) Acquire() (sandbox.Session, error) {
 	p.acquires++
 	return &sandbox.Sandbox{}, nil
 }

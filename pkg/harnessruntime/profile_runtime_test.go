@@ -39,7 +39,7 @@ type sandboxRuntimeStub struct {
 }
 
 func (s *sandboxRuntimeStub) Provider() harness.SandboxProvider { return nil }
-func (s *sandboxRuntimeStub) Resolve(req harness.AgentRequest) (*tools.Sandbox, error) {
+func (s *sandboxRuntimeStub) Resolve(req harness.AgentRequest) (sandbox.Session, error) {
 	s.lastRequest = req
 	return nil, nil
 }
@@ -50,7 +50,7 @@ type managedSandboxRuntimeStub struct {
 }
 
 func (s *managedSandboxRuntimeStub) Provider() harness.SandboxProvider { return nil }
-func (s *managedSandboxRuntimeStub) Resolve(req harness.AgentRequest) (*tools.Sandbox, error) {
+func (s *managedSandboxRuntimeStub) Resolve(req harness.AgentRequest) (sandbox.Session, error) {
 	binding, err := s.Bind(req)
 	if err != nil {
 		return nil, err

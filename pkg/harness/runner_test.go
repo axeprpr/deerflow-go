@@ -132,7 +132,7 @@ func (r runnerManagedSandboxRuntime) Provider() SandboxProvider {
 	return nil
 }
 
-func (r runnerManagedSandboxRuntime) Resolve(req AgentRequest) (*sandbox.Sandbox, error) {
+func (r runnerManagedSandboxRuntime) Resolve(req AgentRequest) (sandbox.Session, error) {
 	binding, err := r.Bind(req)
 	if err != nil {
 		return nil, err

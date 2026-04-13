@@ -197,7 +197,7 @@ func TestSubagentExecutorUsesLazySandboxProvider(t *testing.T) {
 
 	executor := NewSubagentExecutor(provider, registry, nil)
 	var providerCalls int
-	executor.SetSandboxProvider(func() (*sandbox.Sandbox, error) {
+	executor.SetSandboxProvider(func() (sandbox.Session, error) {
 		providerCalls++
 		return &sandbox.Sandbox{}, nil
 	})

@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
-	"github.com/axeprpr/deerflow-go/pkg/tools"
+	"github.com/axeprpr/deerflow-go/pkg/sandbox"
 )
 
 func modeToolRuntime(mode ExecutionMode, base harness.ToolRuntime) harness.ToolRuntime {
@@ -59,7 +59,7 @@ func (r modeSandboxRuntimeWrapper) Provider() harness.SandboxProvider {
 	return r.base.Provider()
 }
 
-func (r modeSandboxRuntimeWrapper) Resolve(req harness.AgentRequest) (*tools.Sandbox, error) {
+func (r modeSandboxRuntimeWrapper) Resolve(req harness.AgentRequest) (sandbox.Session, error) {
 	binding, err := r.Bind(req)
 	if err != nil {
 		return nil, err

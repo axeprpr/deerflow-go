@@ -12,7 +12,7 @@ func TestFactoryAppliesDefaultsAndResolvesSandbox(t *testing.T) {
 	factory := NewFactory(RuntimeDeps{
 		DefaultMaxTurns: 100,
 		SandboxRuntime: NewStaticSandboxRuntime(
-			testSandboxProvider(func() (*sandbox.Sandbox, error) {
+			testSandboxProvider(func() (sandbox.Session, error) {
 				resolved++
 				return sandbox.New("harness-test", tmp)
 			}),
@@ -39,7 +39,7 @@ func TestFactoryDoesNotResolveSandboxWhenFeatureDisabled(t *testing.T) {
 	factory := NewFactory(RuntimeDeps{
 		DefaultMaxTurns: 100,
 		SandboxRuntime: NewStaticSandboxRuntime(
-			testSandboxProvider(func() (*sandbox.Sandbox, error) {
+			testSandboxProvider(func() (sandbox.Session, error) {
 				t.Fatal("ResolveSandbox should not be called")
 				return nil, nil
 			}),
@@ -92,7 +92,7 @@ func (r testProfileResolver) ResolveProfile(base RuntimeProfile, req AgentReques
 		return base
 	}
 	base.SandboxRuntime = NewStaticSandboxRuntime(
-		testSandboxProvider(func() (*sandbox.Sandbox, error) {
+		testSandboxProvider(func() (sandbox.Session, error) {
 			if r.resolved != nil {
 				(*r.resolved)++
 			}
@@ -103,7 +103,7 @@ func (r testProfileResolver) ResolveProfile(base RuntimeProfile, req AgentReques
 	return base
 }
 
-type testSandboxProvider func() (*sandbox.Sandbox, error)
+type testSandboxProvider func() (sandbox.Session, error)
 
-func (p testSandboxProvider) Acquire() (*sandbox.Sandbox, error) { return p() }
-func (p testSandboxProvider) Close() error                       { return nil }
+func (p testSandboxProvider) Acquire() (sandbox.Session, error) { return p() }
+func (p testSandboxProvider) Close() error                      { return nil }

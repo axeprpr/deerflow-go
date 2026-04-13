@@ -38,6 +38,14 @@ type Config struct {
 	CleanupDelay time.Duration
 }
 
+type Session interface {
+	Exec(context.Context, string, time.Duration) (*Result, error)
+	WriteFile(string, []byte) error
+	ReadFile(string) ([]byte, error)
+	Close() error
+	GetDir() string
+}
+
 type TimeoutError struct {
 	Duration time.Duration
 	Message  string
@@ -62,6 +70,8 @@ type Sandbox struct {
 	backend backend
 	cfg     Config
 }
+
+var _ Session = (*Sandbox)(nil)
 
 func init() {
 	if os.Getenv(helperEnvEnabled) != "1" {

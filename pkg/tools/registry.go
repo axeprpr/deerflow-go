@@ -16,6 +16,7 @@ import (
 )
 
 type Sandbox = pkgsandbox.Sandbox
+type SandboxSession = pkgsandbox.Session
 
 type contextKey string
 
@@ -147,18 +148,18 @@ func (r *Registry) Descriptions() string {
 	return strings.Join(lines, "\n")
 }
 
-func WithSandbox(ctx context.Context, sandbox *Sandbox) context.Context {
+func WithSandbox(ctx context.Context, sandbox SandboxSession) context.Context {
 	if sandbox == nil {
 		return ctx
 	}
 	return context.WithValue(ctx, sandboxContextKey, sandbox)
 }
 
-func SandboxFromContext(ctx context.Context) *Sandbox {
+func SandboxFromContext(ctx context.Context) SandboxSession {
 	if ctx == nil {
 		return nil
 	}
-	sandbox, _ := ctx.Value(sandboxContextKey).(*Sandbox)
+	sandbox, _ := ctx.Value(sandboxContextKey).(SandboxSession)
 	return sandbox
 }
 
@@ -219,7 +220,7 @@ func RuntimeContextFromContext(ctx context.Context) map[string]any {
 	return cloned
 }
 
-func (r *Registry) Call(ctx context.Context, name string, args map[string]interface{}, sandbox *Sandbox) (string, error) {
+func (r *Registry) Call(ctx context.Context, name string, args map[string]interface{}, sandbox SandboxSession) (string, error) {
 	if r == nil {
 		return "", fmt.Errorf("tool registry is nil")
 	}
@@ -252,7 +253,7 @@ func (r *Registry) Execute(ctx context.Context, call models.ToolCall) (models.To
 	return r.executeWithSandbox(ctx, call, SandboxFromContext(ctx))
 }
 
-func (r *Registry) executeWithSandbox(ctx context.Context, call models.ToolCall, sandbox *Sandbox) (models.ToolResult, error) {
+func (r *Registry) executeWithSandbox(ctx context.Context, call models.ToolCall, sandbox SandboxSession) (models.ToolResult, error) {
 	if r == nil {
 		return models.ToolResult{}, fmt.Errorf("tool registry is nil")
 	}

@@ -26,9 +26,9 @@ func NewDefaultToolRuntime(provider llm.LLMProvider, clarify *clarification.Mana
 	if clarify != nil {
 		_ = registry.Register(clarification.AskClarificationTool(clarify))
 	}
-	var sandboxProvider func() (*sandbox.Sandbox, error)
+	var sandboxProvider func() (sandbox.Session, error)
 	if sandboxRuntime != nil {
-		sandboxProvider = func() (*sandbox.Sandbox, error) {
+		sandboxProvider = func() (sandbox.Session, error) {
 			return sandboxRuntime.Resolve(harness.AgentRequest{Features: harness.FeatureSet{Sandbox: true}})
 		}
 	}

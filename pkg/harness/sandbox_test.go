@@ -9,7 +9,7 @@ import (
 func TestStaticSandboxRuntimeHonorsFeaturePolicy(t *testing.T) {
 	var acquired int
 	runtime := NewStaticSandboxRuntime(
-		testSandboxProvider(func() (*sandbox.Sandbox, error) {
+		testSandboxProvider(func() (sandbox.Session, error) {
 			acquired++
 			return &sandbox.Sandbox{}, nil
 		}),
