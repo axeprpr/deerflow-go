@@ -28,6 +28,9 @@ type runConfig struct {
 	ReasoningEffort string
 	AgentType       agent.AgentType
 	AgentName       string
+	MemoryUserID    string
+	MemoryGroupID   string
+	MemoryNamespace string
 	MaxTurns        *int
 	ThinkingEnabled *bool
 	IsPlanMode      *bool
@@ -840,6 +843,28 @@ func parseRunConfig(raw map[string]any) runConfig {
 			stringFromAny(configurable["agent_name"]),
 			stringFromAny(configurable["agentName"]),
 		),
+		MemoryUserID: firstNonEmpty(
+			stringFromAny(raw["memory_user_id"]),
+			stringFromAny(raw["memoryUserId"]),
+			stringFromAny(raw["memoryUserID"]),
+			stringFromAny(configurable["memory_user_id"]),
+			stringFromAny(configurable["memoryUserId"]),
+			stringFromAny(configurable["memoryUserID"]),
+		),
+		MemoryGroupID: firstNonEmpty(
+			stringFromAny(raw["memory_group_id"]),
+			stringFromAny(raw["memoryGroupId"]),
+			stringFromAny(raw["memoryGroupID"]),
+			stringFromAny(configurable["memory_group_id"]),
+			stringFromAny(configurable["memoryGroupId"]),
+			stringFromAny(configurable["memoryGroupID"]),
+		),
+		MemoryNamespace: firstNonEmpty(
+			stringFromAny(raw["memory_namespace"]),
+			stringFromAny(raw["memoryNamespace"]),
+			stringFromAny(configurable["memory_namespace"]),
+			stringFromAny(configurable["memoryNamespace"]),
+		),
 		MaxTurns: intPointerFromAny(firstNonNil(
 			raw["recursion_limit"],
 			raw["recursionLimit"],
@@ -915,6 +940,15 @@ func (s *Server) applyRunConfigMetadata(threadID string, cfg runConfig) {
 	}
 	if cfg.AgentName != "" {
 		s.setThreadMetadata(threadID, "agent_name", cfg.AgentName)
+	}
+	if cfg.MemoryUserID != "" {
+		s.setThreadMetadata(threadID, "memory_user_id", cfg.MemoryUserID)
+	}
+	if cfg.MemoryGroupID != "" {
+		s.setThreadMetadata(threadID, "memory_group_id", cfg.MemoryGroupID)
+	}
+	if cfg.MemoryNamespace != "" {
+		s.setThreadMetadata(threadID, "memory_namespace", cfg.MemoryNamespace)
 	}
 	if cfg.ThinkingEnabled != nil {
 		s.setThreadMetadata(threadID, "thinking_enabled", *cfg.ThinkingEnabled)

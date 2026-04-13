@@ -42,6 +42,25 @@ func TestParseRunConfigRecursionLimit(t *testing.T) {
 	}
 }
 
+func TestParseRunConfigMemoryScopeHints(t *testing.T) {
+	cfg := parseRunConfig(map[string]any{
+		"configurable": map[string]any{
+			"memoryUserId":    "user-1",
+			"memory_group_id": "group-1",
+			"memoryNamespace": "workspace-a",
+		},
+	})
+	if cfg.MemoryUserID != "user-1" {
+		t.Fatalf("MemoryUserID = %q", cfg.MemoryUserID)
+	}
+	if cfg.MemoryGroupID != "group-1" {
+		t.Fatalf("MemoryGroupID = %q", cfg.MemoryGroupID)
+	}
+	if cfg.MemoryNamespace != "workspace-a" {
+		t.Fatalf("MemoryNamespace = %q", cfg.MemoryNamespace)
+	}
+}
+
 func TestThreadClarificationHandlers(t *testing.T) {
 	manager := clarification.NewManager(4)
 	root := t.TempDir()

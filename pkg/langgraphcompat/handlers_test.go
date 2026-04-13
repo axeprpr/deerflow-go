@@ -1126,10 +1126,16 @@ func TestResolvedToolNameForArtifactsPrefersResultNameButFallsBackToToolEvent(t 
 
 func TestThreadMetadataFromRuntimeContextPrefersRuntimeAgentName(t *testing.T) {
 	metadata := threadMetadataFromRuntimeContext(map[string]any{
-		"agent_name": "release-bot",
+		"agent_name":       "release-bot",
+		"memory_user_id":   "user-1",
+		"memory_group_id":  "group-1",
+		"memory_namespace": "workspace-a",
 	}, runConfig{
-		AgentName: "fallback-bot",
-		AgentType: agent.AgentTypeCoder,
+		AgentName:       "fallback-bot",
+		AgentType:       agent.AgentTypeCoder,
+		MemoryUserID:    "fallback-user",
+		MemoryGroupID:   "fallback-group",
+		MemoryNamespace: "fallback-space",
 	})
 
 	if got := stringValue(metadata["agent_name"]); got != "release-bot" {
@@ -1138,10 +1144,36 @@ func TestThreadMetadataFromRuntimeContextPrefersRuntimeAgentName(t *testing.T) {
 	if got := stringValue(metadata["agent_type"]); got != string(agent.AgentTypeCoder) {
 		t.Fatalf("agent_type=%q want=%q", got, agent.AgentTypeCoder)
 	}
+	if got := stringValue(metadata["memory_user_id"]); got != "user-1" {
+		t.Fatalf("memory_user_id=%q want=%q", got, "user-1")
+	}
+	if got := stringValue(metadata["memory_group_id"]); got != "group-1" {
+		t.Fatalf("memory_group_id=%q want=%q", got, "group-1")
+	}
+	if got := stringValue(metadata["memory_namespace"]); got != "workspace-a" {
+		t.Fatalf("memory_namespace=%q want=%q", got, "workspace-a")
+	}
 }
 
 func TestThreadMetadataFromRuntimeContextReturnsNilWhenEmpty(t *testing.T) {
 	if metadata := threadMetadataFromRuntimeContext(nil, runConfig{}); metadata != nil {
 		t.Fatalf("metadata=%#v want nil", metadata)
+	}
+}
+
+func TestThreadMetadataFromRuntimeContextFallsBackToRunConfigMemoryScope(t *testing.T) {
+	metadata := threadMetadataFromRuntimeContext(nil, runConfig{
+		MemoryUserID:    "user-1",
+		MemoryGroupID:   "group-1",
+		MemoryNamespace: "workspace-a",
+	})
+	if got := stringValue(metadata["memory_user_id"]); got != "user-1" {
+		t.Fatalf("memory_user_id=%q", got)
+	}
+	if got := stringValue(metadata["memory_group_id"]); got != "group-1" {
+		t.Fatalf("memory_group_id=%q", got)
+	}
+	if got := stringValue(metadata["memory_namespace"]); got != "workspace-a" {
+		t.Fatalf("memory_namespace=%q", got)
 	}
 }
