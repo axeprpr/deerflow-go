@@ -16,6 +16,9 @@ func TestDefaultRuntimeNodeConfigUsesQueuedLocalDefaults(t *testing.T) {
 	if config.State.Backend != RuntimeStateStoreBackendInMemory {
 		t.Fatalf("state backend = %q, want %q", config.State.Backend, RuntimeStateStoreBackendInMemory)
 	}
+	if config.State.SnapshotBackend != RuntimeStateStoreBackendInMemory || config.State.ThreadBackend != RuntimeStateStoreBackendInMemory {
+		t.Fatalf("state config = %+v", config.State)
+	}
 }
 
 func TestRuntimeNodeConfigBuildsFileBackedStateStores(t *testing.T) {
@@ -38,5 +41,21 @@ func TestRuntimeNodeConfigBuildsFileBackedStateStores(t *testing.T) {
 	}
 	if threadStore.root != filepath.Join(root, "threads") {
 		t.Fatalf("threadStore.root = %q", threadStore.root)
+	}
+}
+
+func TestRuntimeNodeConfigSupportsMixedStateBackends(t *testing.T) {
+	root := t.TempDir()
+	config := DefaultRuntimeNodeConfig("runtime-test", root)
+	config.State = RuntimeStateStoreConfig{
+		SnapshotBackend: RuntimeStateStoreBackendFile,
+		ThreadBackend:   RuntimeStateStoreBackendInMemory,
+		Root:            root,
+	}
+	if _, ok := config.BuildRunSnapshotStore().(*JSONFileRunStore); !ok {
+		t.Fatalf("BuildRunSnapshotStore() returned %T", config.BuildRunSnapshotStore())
+	}
+	if _, ok := config.BuildThreadStateStore().(*InMemoryThreadStateStore); !ok {
+		t.Fatalf("BuildThreadStateStore() returned %T", config.BuildThreadStateStore())
 	}
 }

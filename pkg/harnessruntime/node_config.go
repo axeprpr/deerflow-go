@@ -23,8 +23,10 @@ const (
 )
 
 type RuntimeStateStoreConfig struct {
-	Backend RuntimeStateStoreBackend
-	Root    string
+	Backend         RuntimeStateStoreBackend
+	SnapshotBackend RuntimeStateStoreBackend
+	ThreadBackend   RuntimeStateStoreBackend
+	Root            string
 }
 
 func DefaultRuntimeNodeConfig(name, root string) RuntimeNodeConfig {
@@ -45,7 +47,9 @@ func DefaultRuntimeNodeConfig(name, root string) RuntimeNodeConfig {
 			Workers: workers,
 		},
 		State: RuntimeStateStoreConfig{
-			Backend: RuntimeStateStoreBackendInMemory,
+			Backend:         RuntimeStateStoreBackendInMemory,
+			SnapshotBackend: RuntimeStateStoreBackendInMemory,
+			ThreadBackend:   RuntimeStateStoreBackendInMemory,
 		},
 	}
 }
@@ -64,7 +68,7 @@ func (c RuntimeNodeConfig) BuildDispatcher(runtime DispatchRuntimeConfig) RunDis
 }
 
 func (c RuntimeNodeConfig) BuildRunSnapshotStore() RunSnapshotStore {
-	switch c.normalizedStateBackend() {
+	switch c.normalizedSnapshotBackend() {
 	case RuntimeStateStoreBackendFile:
 		return NewJSONFileRunStore(filepath.Join(c.State.Root, "runs"))
 	default:
@@ -73,7 +77,7 @@ func (c RuntimeNodeConfig) BuildRunSnapshotStore() RunSnapshotStore {
 }
 
 func (c RuntimeNodeConfig) BuildThreadStateStore() ThreadStateStore {
-	switch c.normalizedStateBackend() {
+	switch c.normalizedThreadBackend() {
 	case RuntimeStateStoreBackendFile:
 		return NewJSONFileThreadStateStore(filepath.Join(c.State.Root, "threads"))
 	default:
@@ -92,11 +96,25 @@ func transportTopology(backend WorkerTransportBackend) DispatchTopology {
 	}
 }
 
-func (c RuntimeNodeConfig) normalizedStateBackend() RuntimeStateStoreBackend {
-	switch c.State.Backend {
+func (c RuntimeNodeConfig) normalizedStateBackend(value RuntimeStateStoreBackend) RuntimeStateStoreBackend {
+	switch value {
 	case RuntimeStateStoreBackendFile:
 		return RuntimeStateStoreBackendFile
 	default:
 		return RuntimeStateStoreBackendInMemory
 	}
+}
+
+func (c RuntimeNodeConfig) normalizedSnapshotBackend() RuntimeStateStoreBackend {
+	if c.State.SnapshotBackend != "" {
+		return c.normalizedStateBackend(c.State.SnapshotBackend)
+	}
+	return c.normalizedStateBackend(c.State.Backend)
+}
+
+func (c RuntimeNodeConfig) normalizedThreadBackend() RuntimeStateStoreBackend {
+	if c.State.ThreadBackend != "" {
+		return c.normalizedStateBackend(c.State.ThreadBackend)
+	}
+	return c.normalizedStateBackend(c.State.Backend)
 }
