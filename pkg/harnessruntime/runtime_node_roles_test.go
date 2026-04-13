@@ -49,3 +49,16 @@ func TestBuildAllInOneRuntimeNodeUsesAllInOneRole(t *testing.T) {
 		t.Fatal("dispatcher = nil")
 	}
 }
+
+func TestBuildGatewayRuntimeNodeLauncherDoesNotExposeHandler(t *testing.T) {
+	launcher, err := BuildGatewayRuntimeNodeLauncher("runtime-test", t.TempDir(), "http://worker:8081/dispatch", nil, nil)
+	if err != nil {
+		t.Fatalf("BuildGatewayRuntimeNodeLauncher() error = %v", err)
+	}
+	if launcher.Spec().Role != RuntimeNodeRoleGateway {
+		t.Fatalf("role = %q, want %q", launcher.Spec().Role, RuntimeNodeRoleGateway)
+	}
+	if launcher.Handler() != nil {
+		t.Fatalf("Handler() = %#v, want nil", launcher.Handler())
+	}
+}

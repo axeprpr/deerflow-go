@@ -29,6 +29,13 @@ func (n *HTTPRemoteWorkerNode) Addr() string {
 	return n.server.Addr
 }
 
+func (n *HTTPRemoteWorkerNode) Handler() http.Handler {
+	if n == nil || n.server == nil {
+		return nil
+	}
+	return n.server.Handler
+}
+
 func (n *HTTPRemoteWorkerNode) Start() error {
 	if n == nil || n.server == nil {
 		return errors.New("remote worker server is not configured")

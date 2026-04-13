@@ -32,6 +32,24 @@ func TestRuntimeNodeLaunchSpec(t *testing.T) {
 	}
 }
 
+func TestRuntimeNodeLauncherExposesRemoteWorkerHandler(t *testing.T) {
+	node := &RuntimeNode{
+		Config:       RuntimeNodeConfig{Role: RuntimeNodeRoleWorker},
+		RemoteWorker: NewHTTPRemoteWorkerNode(buildTestHTTPServer("127.0.0.1:49081")),
+	}
+	node.RemoteWorker.Server().Handler = http.NewServeMux()
+	launcher := NewRuntimeNodeLauncher(node)
+	if launcher.Node() != node {
+		t.Fatalf("Node() = %#v want %#v", launcher.Node(), node)
+	}
+	if launcher.Spec().Role != RuntimeNodeRoleWorker {
+		t.Fatalf("Spec().Role = %q", launcher.Spec().Role)
+	}
+	if launcher.Handler() == nil {
+		t.Fatal("Handler() = nil")
+	}
+}
+
 func TestRuntimeNodeStartDelegatesToRemoteWorker(t *testing.T) {
 	node := &RuntimeNode{}
 	if err := node.Start(); err != nil {
