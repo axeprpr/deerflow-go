@@ -1,11 +1,14 @@
 package runtimecmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/axeprpr/deerflow-go/internal/commandrun"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
@@ -277,6 +280,10 @@ func (c NodeConfig) ValidateForRuntimeNode() error {
 	return node.Sandbox.Validate()
 }
 
+func (c NodeConfig) ValidateForStateServer() error {
+	return c.validateStateConfig()
+}
+
 func NormalizeRole(value string, fallback harnessruntime.RuntimeNodeRole) harnessruntime.RuntimeNodeRole {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case string(harnessruntime.RuntimeNodeRoleAllInOne):
@@ -481,6 +488,26 @@ func (c NodeConfig) validateStateConfig() error {
 		}
 	}
 	return nil
+}
+
+func (c NodeConfig) BuildStateLauncher() (*harnessruntime.RuntimeStateLauncher, error) {
+	if err := c.ValidateForStateServer(); err != nil {
+		return nil, err
+	}
+	return c.RuntimeNodeConfig().BuildRuntimeStateLauncher()
+}
+
+func (c NodeConfig) StateReadyLine() string {
+	return fmt.Sprintf("runtime state ready addr=%s", NormalizeAddr(c.Addr, ":8082"))
+}
+
+func (c NodeConfig) StateReadyProbe() func(context.Context) error {
+	return commandrun.HTTPReadyProbe{
+		Interval: 50 * time.Millisecond,
+		Targets: []string{
+			commandrun.HTTPURL(NormalizeAddr(c.Addr, ":8082")) + harnessruntime.DefaultRemoteStateHealthPath,
+		},
+	}.Wait
 }
 
 func normalizeStoreLocation(raw string) string {

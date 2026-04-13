@@ -222,8 +222,38 @@ func (c RuntimeNodeConfig) BuildRemoteWorkerHTTPServerWithProviders(transport Wo
 	return providers.Server.Build(c.RemoteWorker, transport, protocol)
 }
 
+func (c RuntimeNodeConfig) BuildRemoteStateHTTPServer(state RuntimeStatePlane) *http.Server {
+	return c.BuildRemoteStateHTTPServerWithProviders(state, DefaultRemoteStateProviders())
+}
+
+func (c RuntimeNodeConfig) BuildRemoteStateHTTPServerWithProviders(state RuntimeStatePlane, providers RemoteStateProviders) *http.Server {
+	if providers.Protocol == nil {
+		providers.Protocol = DefaultRemoteStateProviders().Protocol
+	}
+	if providers.Server == nil {
+		providers.Server = DefaultRemoteStateProviders().Server
+	}
+	stateServer := providers.Server.Build(state, providers.Protocol.Build(c))
+	return &http.Server{
+		Addr:              c.RemoteWorker.Addr,
+		ReadHeaderTimeout: c.RemoteWorker.ReadHeaderTimeout,
+		Handler:           stateServer.Handler(),
+	}
+}
+
 func (c RuntimeNodeConfig) BuildRemoteWorkerNode(runtime DispatchRuntimeConfig) *HTTPRemoteWorkerNode {
 	return NewHTTPRemoteWorkerNode(c.BuildRemoteWorkerHTTPServer(runtime))
+}
+
+func (c RuntimeNodeConfig) BuildRuntimeStateLauncher() (*RuntimeStateLauncher, error) {
+	return c.BuildRuntimeStateLauncherWithProviders(DefaultRuntimeNodeProviders())
+}
+
+func (c RuntimeNodeConfig) BuildRuntimeStateLauncherWithProviders(providers RuntimeNodeProviders) (*RuntimeStateLauncher, error) {
+	providers = normalizeRuntimeNodeProviders(c, providers)
+	state := providers.StatePlane.Build(c)
+	server := c.BuildRemoteStateHTTPServerWithProviders(state, providers.RemoteState)
+	return NewRuntimeStateLauncher(NewHTTPRemoteStateNode(server), state), nil
 }
 
 func (c RuntimeNodeConfig) BuildRunSnapshotStore() RunSnapshotStore {
