@@ -299,6 +299,11 @@ func (s *Server) attachRuntimeSystem(node *harnessruntime.RuntimeNode) {
 	if s == nil || node == nil {
 		return
 	}
+	if s.runtime != nil {
+		node.BindRuntime(s.runtime)
+	} else if node.RuntimeView() != nil {
+		s.runtime = node.RuntimeView()
+	}
 	s.runtimeSystem = node
 	s.runtimeNode = node.Config
 	s.sandboxManager = node.SandboxManager()
@@ -316,10 +321,21 @@ func (s *Server) runtimeView() *harness.Runtime {
 		sandboxRuntime harness.SandboxRuntime
 		toolRuntime    harness.ToolRuntime
 	)
+	if node := s.ensureRuntimeSystem(); node != nil {
+		memoryRuntime = node.MemoryRuntime()
+		sandboxRuntime = node.ConfiguredSandboxRuntime()
+		toolRuntime = node.ToolRuntime()
+	}
 	if s.runtime != nil {
-		memoryRuntime = s.runtime.Memory()
-		sandboxRuntime = s.runtime.SandboxRuntime()
-		toolRuntime = s.runtime.ToolRuntime()
+		if current := s.runtime.Memory(); current != nil {
+			memoryRuntime = current
+		}
+		if current := s.runtime.SandboxRuntime(); current != nil {
+			sandboxRuntime = current
+		}
+		if current := s.runtime.ToolRuntime(); current != nil {
+			toolRuntime = current
+		}
 	}
 	s.runtime = harness.NewRuntime(harness.RuntimeDeps{
 		LLMProvider:     s.llmProvider,
@@ -332,6 +348,9 @@ func (s *Server) runtimeView() *harness.Runtime {
 	}, memoryRuntime,
 		harness.WithProfileBuilder(s.runtimeProfileBuilder(memoryRuntime, toolRuntime, s.defaultSandboxRuntime(sandboxRuntime))),
 	)
+	if node := s.runtimeSystem; node != nil {
+		node.BindRuntime(s.runtime)
+	}
 	return s.runtime
 }
 

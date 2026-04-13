@@ -66,6 +66,7 @@ type RuntimeNode struct {
 	RemoteWorker *HTTPRemoteWorkerNode
 	Memory       *MemoryService
 	Tools        harness.ToolRuntime
+	Runtime      *harness.Runtime
 }
 
 func (c RuntimeNodeConfig) BuildRuntimeNode(runtime DispatchRuntimeConfig) (*RuntimeNode, error) {
@@ -147,6 +148,13 @@ func (n *RuntimeNode) RunDispatcher() RunDispatcher {
 		return nil
 	}
 	return n.Dispatcher
+}
+
+func (n *RuntimeNode) RuntimeView() *harness.Runtime {
+	if n == nil {
+		return nil
+	}
+	return n.Runtime
 }
 
 func (n *RuntimeNode) ToolRuntime() harness.ToolRuntime {
@@ -268,6 +276,13 @@ func (n *RuntimeNode) BindToolRuntime(runtime harness.ToolRuntime) {
 		return
 	}
 	n.Tools = runtime
+}
+
+func (n *RuntimeNode) BindRuntime(runtime *harness.Runtime) {
+	if n == nil {
+		return
+	}
+	n.Runtime = runtime
 }
 
 func (c DispatchRuntimeConfig) hasBindings() bool {

@@ -85,6 +85,9 @@ func TestNewServerUsesStableRuntimeBoundaries(t *testing.T) {
 	if s.runtimeSystem == nil || s.runtimeSystem.RemoteWorker == nil || s.runtimeSystem.RemoteWorker.Server() == nil {
 		t.Fatalf("runtimeSystem remote worker = %#v", s.runtimeSystem)
 	}
+	if s.runtimeSystem.RuntimeView() != s.runtime {
+		t.Fatalf("runtimeSystem runtime = %#v want %#v", s.runtimeSystem.RuntimeView(), s.runtime)
+	}
 }
 
 func TestCompatFallbacksRebuildRuntimeSystemFromNodeConfig(t *testing.T) {
