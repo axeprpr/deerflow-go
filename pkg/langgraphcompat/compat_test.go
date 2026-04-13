@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 )
 
 func TestNewServerDefersSandboxCreation(t *testing.T) {
@@ -123,6 +124,43 @@ func TestCompatFallbacksRebuildRuntimeSystemFromNodeConfig(t *testing.T) {
 	}
 	if s.runtimeSystem.RemoteWorker == nil || s.runtimeSystem.RemoteWorker.Server() == nil {
 		t.Fatalf("runtimeSystem remote worker = %#v", s.runtimeSystem.RemoteWorker)
+	}
+}
+
+func TestNewServerWithRuntimeNodeConfigUsesConfiguredRole(t *testing.T) {
+	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
+
+	config := harnessruntime.DefaultGatewayRuntimeNodeConfig("gateway-node", t.TempDir(), "http://worker:8081/dispatch")
+	s, err := NewServer(":0", "", "test-model", WithRuntimeNodeConfig(config))
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	if s.runtimeNode.Role != harnessruntime.RuntimeNodeRoleGateway {
+		t.Fatalf("runtimeNode.Role = %q", s.runtimeNode.Role)
+	}
+	if s.runtimeSystem == nil {
+		t.Fatal("runtimeSystem = nil")
+	}
+	if s.runtimeSystem.Config.Role != harnessruntime.RuntimeNodeRoleGateway {
+		t.Fatalf("runtimeSystem.Config.Role = %q", s.runtimeSystem.Config.Role)
+	}
+	if s.runtimeSystem.RemoteWorker != nil {
+		t.Fatalf("gateway node remote worker = %#v, want nil", s.runtimeSystem.RemoteWorker)
+	}
+}
+
+func TestNewServerWithMaxTurnsAppliesBeforeBootstrap(t *testing.T) {
+	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
+
+	s, err := NewServer(":0", "", "test-model", WithMaxTurns(23))
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	if s.maxTurns != 23 {
+		t.Fatalf("maxTurns = %d, want 23", s.maxTurns)
+	}
+	if s.runtime == nil {
+		t.Fatal("runtime = nil")
 	}
 }
 

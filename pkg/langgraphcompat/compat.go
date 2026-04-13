@@ -226,6 +226,12 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		channelConfig: gatewayChannelsConfig{},
 		channels:      defaultGatewayChannelsStatus(),
 	}
+	for _, option := range options {
+		if option != nil {
+			option(s)
+		}
+	}
+	runtimeNode = s.runtimeNodeConfig()
 
 	bootstrap, launcher, err := harnessruntime.BuildDefaultRuntimeSystemLauncherWithMemory(ctx, runtimeNode, dataRootAbs, provider, clarifyManager, s.maxTurns, s.runtimeProfileBuilder, s.runtimeView, s.runtimeWorkerSpecAdapter())
 	if err != nil {
@@ -249,11 +255,6 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		s.attachRuntimeSystem(launcher.Node())
 	}
 	s.skills = s.discoverGatewaySkills(nil)
-	for _, option := range options {
-		if option != nil {
-			option(s)
-		}
-	}
 	if err := s.loadGatewayState(); err != nil {
 		logger.Printf("Warning: failed to load gateway state: %v", err)
 	}

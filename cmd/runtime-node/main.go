@@ -4,32 +4,22 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
+	"github.com/axeprpr/deerflow-go/internal/runtimecmd"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
-	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
 type config struct {
-	Role       string
-	Addr       string
-	Name       string
-	Root       string
-	DataRoot   string
-	Provider   string
-	Endpoint   string
-	MaxTurns   int
-	LogPrefix  string
+	Runtime   runtimecmd.NodeConfig
+	LogPrefix string
 }
 
 func main() {
@@ -71,99 +61,60 @@ func main() {
 }
 
 func parseConfig() config {
-	role := flag.String("role", firstNonEmpty(os.Getenv("RUNTIME_NODE_ROLE"), string(harnessruntime.RuntimeNodeRoleWorker)), "runtime node role: worker|all-in-one|gateway")
-	addr := flag.String("addr", firstNonEmpty(os.Getenv("RUNTIME_NODE_ADDR"), ":8081"), "remote worker listen address")
-	name := flag.String("name", firstNonEmpty(os.Getenv("RUNTIME_NODE_NAME"), "runtime-node"), "runtime node name")
-	root := flag.String("root", firstNonEmpty(os.Getenv("RUNTIME_NODE_ROOT"), filepath.Join(os.TempDir(), "deerflow-runtime-node")), "runtime node root")
-	dataRoot := flag.String("data-root", firstNonEmpty(os.Getenv("DEERFLOW_DATA_ROOT"), tools.DataRootFromEnv()), "runtime data root")
-	provider := flag.String("provider", firstNonEmpty(os.Getenv("DEFAULT_LLM_PROVIDER"), "siliconflow"), "LLM provider")
-	endpoint := flag.String("endpoint", strings.TrimSpace(os.Getenv("RUNTIME_NODE_ENDPOINT")), "remote worker endpoint for gateway role")
-	maxTurns := flag.Int("max-turns", intFromEnv("RUNTIME_NODE_MAX_TURNS", 100), "default max turns")
+	defaults := runtimecmd.DefaultRuntimeWorkerNodeConfig()
+	role := flag.String("role", string(defaults.Role), "runtime node role: worker|all-in-one|gateway")
+	addr := flag.String("addr", defaults.Addr, "remote worker listen address")
+	name := flag.String("name", defaults.Name, "runtime node name")
+	root := flag.String("root", defaults.Root, "runtime node root")
+	dataRoot := flag.String("data-root", defaults.DataRoot, "runtime data root")
+	provider := flag.String("provider", defaults.Provider, "LLM provider")
+	endpoint := flag.String("endpoint", defaults.Endpoint, "remote worker endpoint for gateway role")
+	maxTurns := flag.Int("max-turns", defaults.MaxTurns, "default max turns")
 	flag.Parse()
 
 	return config{
-		Role:      strings.TrimSpace(*role),
-		Addr:      normalizeAddr(*addr),
-		Name:      strings.TrimSpace(*name),
-		Root:      strings.TrimSpace(*root),
-		DataRoot:  strings.TrimSpace(*dataRoot),
-		Provider:  strings.TrimSpace(*provider),
-		Endpoint:  strings.TrimSpace(*endpoint),
-		MaxTurns:  *maxTurns,
+		Runtime: runtimecmd.NodeConfig{
+			Role:     runtimecmd.NormalizeRole(*role, defaults.Role),
+			Addr:     runtimecmd.NormalizeAddr(*addr, defaults.Addr),
+			Name:     *name,
+			Root:     *root,
+			DataRoot: *dataRoot,
+			Provider: *provider,
+			Endpoint: *endpoint,
+			MaxTurns: *maxTurns,
+		},
 		LogPrefix: "[runtime-node] ",
 	}
 }
 
 func buildLauncher(ctx context.Context, cfg config) (*harnessruntime.RuntimeNodeLauncher, error) {
-	provider := llm.NewProvider(firstNonEmpty(cfg.Provider, "siliconflow"))
-	role := normalizeRole(cfg.Role)
+	if err := cfg.Runtime.ValidateForRuntimeNode(); err != nil {
+		return nil, err
+	}
+	provider := llm.NewProvider(cfg.Runtime.Provider)
+	role := cfg.Runtime.Role
 	clarify := clarification.NewManager(32)
 
 	switch role {
 	case harnessruntime.RuntimeNodeRoleAllInOne:
-		_, launcher, err := harnessruntime.BuildDefaultAllInOneRuntimeSystemLauncherWithMemory(ctx, cfg.Name, cfg.Root, cfg.DataRoot, provider, clarify, cfg.MaxTurns, nil, nil, nil)
+		_, launcher, err := harnessruntime.BuildDefaultAllInOneRuntimeSystemLauncherWithMemory(ctx, cfg.Runtime.Name, cfg.Runtime.Root, cfg.Runtime.DataRoot, provider, clarify, cfg.Runtime.MaxTurns, nil, nil, nil)
 		if err != nil {
 			return nil, err
 		}
 		if launcher != nil && launcher.Node() != nil && launcher.Node().RemoteWorker != nil && launcher.Node().RemoteWorker.Server() != nil {
-			launcher.Node().RemoteWorker.Server().Addr = cfg.Addr
+			launcher.Node().RemoteWorker.Server().Addr = cfg.Runtime.Addr
 		}
 		return launcher, nil
 	case harnessruntime.RuntimeNodeRoleWorker:
-		_, launcher, err := harnessruntime.BuildDefaultWorkerRuntimeSystemLauncherWithMemory(ctx, cfg.Name, cfg.Root, cfg.DataRoot, provider, clarify, cfg.MaxTurns, nil, nil, nil)
+		_, launcher, err := harnessruntime.BuildDefaultWorkerRuntimeSystemLauncherWithMemory(ctx, cfg.Runtime.Name, cfg.Runtime.Root, cfg.Runtime.DataRoot, provider, clarify, cfg.Runtime.MaxTurns, nil, nil, nil)
 		if err != nil {
 			return nil, err
 		}
 		if launcher != nil && launcher.Node() != nil && launcher.Node().RemoteWorker != nil && launcher.Node().RemoteWorker.Server() != nil {
-			launcher.Node().RemoteWorker.Server().Addr = cfg.Addr
+			launcher.Node().RemoteWorker.Server().Addr = cfg.Runtime.Addr
 		}
 		return launcher, nil
-	case harnessruntime.RuntimeNodeRoleGateway:
-		return nil, fmt.Errorf("gateway role does not start a runtime worker server; use cmd/langgraph for API serving")
 	default:
-		return nil, fmt.Errorf("unsupported runtime node role %q", cfg.Role)
+		return nil, cfg.Runtime.ValidateForRuntimeNode()
 	}
-}
-
-func normalizeRole(role string) harnessruntime.RuntimeNodeRole {
-	switch strings.ToLower(strings.TrimSpace(role)) {
-	case string(harnessruntime.RuntimeNodeRoleAllInOne):
-		return harnessruntime.RuntimeNodeRoleAllInOne
-	case string(harnessruntime.RuntimeNodeRoleGateway):
-		return harnessruntime.RuntimeNodeRoleGateway
-	default:
-		return harnessruntime.RuntimeNodeRoleWorker
-	}
-}
-
-func normalizeAddr(addr string) string {
-	addr = strings.TrimSpace(addr)
-	if addr == "" {
-		return ":8081"
-	}
-	if strings.HasPrefix(addr, ":") {
-		return addr
-	}
-	return ":" + addr
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
-
-func intFromEnv(name string, fallback int) int {
-	raw := strings.TrimSpace(os.Getenv(name))
-	if raw == "" {
-		return fallback
-	}
-	var value int
-	if _, err := fmt.Sscanf(raw, "%d", &value); err != nil {
-		return fallback
-	}
-	return value
 }

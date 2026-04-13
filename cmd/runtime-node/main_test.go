@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"github.com/axeprpr/deerflow-go/internal/runtimecmd"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 )
 
@@ -19,7 +20,7 @@ func TestNormalizeRole(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		if got := normalizeRole(tc.in); got != tc.want {
+		if got := runtimecmd.NormalizeRole(tc.in, harnessruntime.RuntimeNodeRoleWorker); got != tc.want {
 			t.Fatalf("normalizeRole(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
@@ -36,7 +37,7 @@ func TestNormalizeAddr(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		if got := normalizeAddr(tc.in); got != tc.want {
+		if got := runtimecmd.NormalizeAddr(tc.in, ":8081"); got != tc.want {
 			t.Fatalf("normalizeAddr(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}

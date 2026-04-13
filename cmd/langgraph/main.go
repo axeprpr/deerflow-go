@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/axeprpr/deerflow-go/internal/runtimecmd"
 	"github.com/axeprpr/deerflow-go/pkg/langgraphcompat"
 )
 
@@ -26,6 +27,12 @@ func main() {
 	dbURL := flag.String("db", cfg.DatabaseURL, "Database URL (postgres or sqlite)")
 	model := flag.String("model", cfg.Model, "Default LLM model")
 	provider := flag.String("provider", cfg.Provider, "Default LLM provider")
+	runtimeRole := flag.String("runtime-role", string(cfg.Runtime.Role), "Runtime node role: all-in-one|gateway")
+	runtimeName := flag.String("runtime-name", cfg.Runtime.Name, "Runtime node name")
+	runtimeRoot := flag.String("runtime-root", cfg.Runtime.Root, "Runtime node root")
+	runtimeWorkerAddr := flag.String("runtime-worker-addr", cfg.Runtime.Addr, "Embedded runtime worker listen address")
+	runtimeWorkerEndpoint := flag.String("runtime-worker-endpoint", cfg.Runtime.Endpoint, "Remote worker endpoint for gateway runtime role")
+	maxTurns := flag.Int("max-turns", cfg.Runtime.MaxTurns, "Default agent max turns")
 	flag.Parse()
 
 	logger := log.Default()
@@ -56,6 +63,19 @@ func main() {
 	if *provider != "" {
 		os.Setenv("DEFAULT_LLM_PROVIDER", *provider)
 	}
+	runtimeConfig := runtimecmd.NodeConfig{
+		Role:     runtimecmd.NormalizeRole(*runtimeRole, cfg.Runtime.Role),
+		Addr:     runtimecmd.NormalizeAddr(*runtimeWorkerAddr, cfg.Runtime.Addr),
+		Name:     strings.TrimSpace(*runtimeName),
+		Root:     strings.TrimSpace(*runtimeRoot),
+		DataRoot: cfg.Runtime.DataRoot,
+		Provider: strings.TrimSpace(*provider),
+		Endpoint: strings.TrimSpace(*runtimeWorkerEndpoint),
+		MaxTurns: *maxTurns,
+	}
+	if err := runtimeConfig.ValidateForLangGraph(); err != nil {
+		logger.Fatalf("Invalid runtime configuration: %v", err)
+	}
 
 	logger.Printf("Starting deerflow-go server...")
 	logger.Printf("  YOLO mode: %v", *yolo)
@@ -63,13 +83,17 @@ func main() {
 	logger.Printf("  Database: %s", describeDB(*dbURL))
 	logger.Printf("  Provider: %s", *provider)
 	logger.Printf("  Model:    %s", *model)
+	logger.Printf("  Runtime:  role=%s worker_addr=%s worker_endpoint=%s", runtimeConfig.Role, runtimeConfig.Addr, firstNonEmpty(runtimeConfig.Endpoint, "(local)"))
 	logger.Printf("  Auth:     %s", describeAuth(*authToken, *yolo))
 	logger.Printf("  Version: %s (%s, %s)", version, commit, buildTime)
 	if level := strings.TrimSpace(os.Getenv("LOG_LEVEL")); level != "" {
 		logger.Printf("  Log Level: %s", level)
 	}
 
-	server, err := langgraphcompat.NewServer(*addr, *dbURL, *model)
+	server, err := langgraphcompat.NewServer(*addr, *dbURL, *model,
+		langgraphcompat.WithRuntimeNodeConfig(runtimeConfig.RuntimeNodeConfig()),
+		langgraphcompat.WithMaxTurns(runtimeConfig.MaxTurns),
+	)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}
@@ -100,6 +124,7 @@ type config struct {
 	DatabaseURL string
 	Provider    string
 	Model       string
+	Runtime     runtimecmd.NodeConfig
 }
 
 func defaultConfig() config {
@@ -109,6 +134,7 @@ func defaultConfig() config {
 		DatabaseURL: firstNonEmpty(os.Getenv("DATABASE_URL"), os.Getenv("POSTGRES_URL")),
 		Provider:    firstNonEmpty(os.Getenv("DEFAULT_LLM_PROVIDER"), "siliconflow"),
 		Model:       firstNonEmpty(os.Getenv("DEFAULT_LLM_MODEL"), "qwen/Qwen3.5-9B"),
+		Runtime:     runtimecmd.DefaultLangGraphNodeConfig(),
 	}
 }
 
