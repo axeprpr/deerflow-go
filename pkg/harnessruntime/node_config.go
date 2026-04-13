@@ -11,6 +11,19 @@ import (
 type RuntimeNodeConfig struct {
 	Sandbox   SandboxManagerConfig
 	Transport WorkerTransportConfig
+	State     RuntimeStateStoreConfig
+}
+
+type RuntimeStateStoreBackend string
+
+const (
+	RuntimeStateStoreBackendInMemory RuntimeStateStoreBackend = "in-memory"
+	RuntimeStateStoreBackendFile     RuntimeStateStoreBackend = "file"
+)
+
+type RuntimeStateStoreConfig struct {
+	Backend RuntimeStateStoreBackend
+	Root    string
 }
 
 func DefaultRuntimeNodeConfig(name, root string) RuntimeNodeConfig {
@@ -30,6 +43,9 @@ func DefaultRuntimeNodeConfig(name, root string) RuntimeNodeConfig {
 			Buffer:  defaultRunQueueBuffer,
 			Workers: workers,
 		},
+		State: RuntimeStateStoreConfig{
+			Backend: RuntimeStateStoreBackendInMemory,
+		},
 	}
 }
 
@@ -46,6 +62,24 @@ func (c RuntimeNodeConfig) BuildDispatcher(runtime DispatchRuntimeConfig) RunDis
 	}, runtime)
 }
 
+func (c RuntimeNodeConfig) BuildRunSnapshotStore() RunSnapshotStore {
+	switch c.normalizedStateBackend() {
+	case RuntimeStateStoreBackendFile:
+		return NewJSONFileRunStore(c.State.Root)
+	default:
+		return NewInMemoryRunStore()
+	}
+}
+
+func (c RuntimeNodeConfig) BuildThreadStateStore() ThreadStateStore {
+	switch c.normalizedStateBackend() {
+	case RuntimeStateStoreBackendFile:
+		return NewJSONFileThreadStateStore(c.State.Root)
+	default:
+		return NewInMemoryThreadStateStore()
+	}
+}
+
 func transportTopology(backend WorkerTransportBackend) DispatchTopology {
 	switch normalizeTransportBackend(backend) {
 	case WorkerTransportBackendDirect:
@@ -54,5 +88,14 @@ func transportTopology(backend WorkerTransportBackend) DispatchTopology {
 		return DispatchTopologyRemote
 	default:
 		return DispatchTopologyQueued
+	}
+}
+
+func (c RuntimeNodeConfig) normalizedStateBackend() RuntimeStateStoreBackend {
+	switch c.State.Backend {
+	case RuntimeStateStoreBackendFile:
+		return RuntimeStateStoreBackendFile
+	default:
+		return RuntimeStateStoreBackendInMemory
 	}
 }

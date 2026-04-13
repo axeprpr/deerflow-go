@@ -441,8 +441,8 @@ func (s *Server) loadPersistedRuns() {
 			},
 			Events: persisted.Events,
 		}
-		if store, ok := s.ensureSnapshotStore().(*compatRunStateStore); ok && store.memory != nil {
-			store.memory.SaveRunSnapshot(snapshot)
+		if store := s.ensureSnapshotStore(); store != nil {
+			store.SaveRunSnapshot(snapshot)
 		}
 		s.saveRunSnapshotState(snapshot, false)
 	}

@@ -8,7 +8,7 @@ import (
 
 type compatThreadStateStore struct {
 	server *Server
-	memory *harnessruntime.InMemoryThreadStateStore
+	store  harnessruntime.ThreadStateStore
 }
 
 func (s *Server) ensureThreadStateStore() harnessruntime.ThreadStateStore {
@@ -24,9 +24,16 @@ func (s *Server) ensureThreadStateStore() harnessruntime.ThreadStateStore {
 }
 
 func newCompatThreadStateStore(server *Server) harnessruntime.ThreadStateStore {
+	var store harnessruntime.ThreadStateStore
+	if server != nil {
+		store = server.runtimeNode.BuildThreadStateStore()
+	}
+	if store == nil {
+		store = harnessruntime.NewInMemoryThreadStateStore()
+	}
 	return &compatThreadStateStore{
 		server: server,
-		memory: harnessruntime.NewInMemoryThreadStateStore(),
+		store:  store,
 	}
 }
 
@@ -47,10 +54,10 @@ func newCompatThreadRuntimeState(session *Session) harnessruntime.ThreadRuntimeS
 }
 
 func (s *compatThreadStateStore) LoadThreadRuntimeState(threadID string) (harnessruntime.ThreadRuntimeState, bool) {
-	if s == nil || s.memory == nil {
+	if s == nil || s.store == nil {
 		return harnessruntime.ThreadRuntimeState{}, false
 	}
-	if state, ok := s.memory.LoadThreadRuntimeState(threadID); ok {
+	if state, ok := s.store.LoadThreadRuntimeState(threadID); ok {
 		return state, true
 	}
 	if s.server == nil {
@@ -63,7 +70,7 @@ func (s *compatThreadStateStore) LoadThreadRuntimeState(threadID string) (harnes
 		return harnessruntime.ThreadRuntimeState{}, false
 	}
 	state := newCompatThreadRuntimeState(session)
-	s.memory.SaveThreadRuntimeState(state)
+	s.store.SaveThreadRuntimeState(state)
 	return state, true
 }
 
@@ -77,18 +84,18 @@ func (s *compatThreadStateStore) ListThreadRuntimeStates() []harnessruntime.Thre
 	for _, session := range s.server.sessions {
 		state := newCompatThreadRuntimeState(session)
 		out = append(out, state)
-		if s.memory != nil {
-			s.memory.SaveThreadRuntimeState(state)
+		if s.store != nil {
+			s.store.SaveThreadRuntimeState(state)
 		}
 	}
 	return out
 }
 
 func (s *compatThreadStateStore) SaveThreadRuntimeState(state harnessruntime.ThreadRuntimeState) {
-	if s == nil || s.server == nil || s.memory == nil {
+	if s == nil || s.server == nil || s.store == nil {
 		return
 	}
-	s.memory.SaveThreadRuntimeState(state)
+	s.store.SaveThreadRuntimeState(state)
 	session := s.server.ensureSession(state.ThreadID, nil)
 	session.Metadata = normalizePersistedThreadMetadata(copyMetadataMap(state.Metadata))
 	if session.Metadata == nil {

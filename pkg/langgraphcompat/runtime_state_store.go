@@ -9,7 +9,8 @@ import (
 
 type compatRunStateStore struct {
 	server *Server
-	memory *harnessruntime.InMemoryRunStore
+	store  harnessruntime.RunSnapshotStore
+	events harnessruntime.RunEventStore
 }
 
 func (s *Server) ensureSnapshotStore() harnessruntime.RunSnapshotStore {
@@ -40,51 +41,62 @@ func (s *Server) ensureEventStore() harnessruntime.RunEventStore {
 }
 
 func newCompatRunStateStore(server *Server) *compatRunStateStore {
+	var store harnessruntime.RunSnapshotStore
+	var events harnessruntime.RunEventStore
+	if server != nil {
+		store = server.runtimeNode.BuildRunSnapshotStore()
+		events, _ = store.(harnessruntime.RunEventStore)
+	}
+	if store == nil {
+		store = harnessruntime.NewInMemoryRunStore()
+		events = store.(harnessruntime.RunEventStore)
+	}
 	return &compatRunStateStore{
 		server: server,
-		memory: harnessruntime.NewInMemoryRunStore(),
+		store:  store,
+		events: events,
 	}
 }
 
 func (s *compatRunStateStore) LoadRunSnapshot(runID string) (harnessruntime.RunSnapshot, bool) {
-	if s == nil || s.memory == nil {
+	if s == nil || s.store == nil {
 		return harnessruntime.RunSnapshot{}, false
 	}
-	return s.memory.LoadRunSnapshot(runID)
+	return s.store.LoadRunSnapshot(runID)
 }
 
 func (s *compatRunStateStore) ListRunSnapshots(threadID string) []harnessruntime.RunSnapshot {
-	if s == nil || s.memory == nil {
+	if s == nil || s.store == nil {
 		return nil
 	}
-	return s.memory.ListRunSnapshots(threadID)
+	return s.store.ListRunSnapshots(threadID)
 }
 
 func (s *compatRunStateStore) SaveRunSnapshot(snapshot harnessruntime.RunSnapshot) {
-	if s == nil || s.memory == nil {
+	if s == nil || s.store == nil {
 		return
 	}
 	if strings.TrimSpace(snapshot.Record.RunID) == "" {
 		return
 	}
-	s.memory.SaveRunSnapshot(snapshot)
+	s.store.SaveRunSnapshot(snapshot)
 	if s.server != nil {
 		s.server.saveRunSnapshotState(snapshot, true)
 	}
 }
 
 func (s *compatRunStateStore) NextRunEventIndex(runID string) int {
-	if s == nil || s.memory == nil {
+	if s == nil || s.events == nil {
 		return 1
 	}
-	return s.memory.NextRunEventIndex(runID)
+	return s.events.NextRunEventIndex(runID)
 }
 
 func (s *compatRunStateStore) AppendRunEvent(runID string, event harnessruntime.RunEvent) {
-	if s == nil || s.memory == nil {
+	if s == nil || s.store == nil {
 		return
 	}
-	snapshot, ok := s.memory.LoadRunSnapshot(runID)
+	snapshot, ok := s.store.LoadRunSnapshot(runID)
 	if !ok {
 		snapshot = harnessruntime.RunSnapshot{}
 	}
@@ -100,9 +112,8 @@ func (s *compatRunStateStore) AppendRunEvent(runID string, event harnessruntime.
 }
 
 func (s *compatRunStateStore) LoadRunEvents(runID string) []harnessruntime.RunEvent {
-	if s == nil || s.memory == nil {
+	if s == nil || s.events == nil {
 		return nil
 	}
-	return s.memory.LoadRunEvents(runID)
+	return s.events.LoadRunEvents(runID)
 }
-
