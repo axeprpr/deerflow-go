@@ -147,6 +147,14 @@ func (n *RuntimeNode) ConfiguredSandboxRuntime() harness.SandboxRuntime {
 	return n.SandboxRuntime(n.Config.Sandbox.Policy)
 }
 
+func (n *RuntimeNode) ConfiguredSandboxProvider() harness.SandboxProvider {
+	runtime := n.ConfiguredSandboxRuntime()
+	if runtime == nil {
+		return nil
+	}
+	return runtime.Provider()
+}
+
 func (n *RuntimeNode) SandboxRuntime(policy harness.SandboxPolicy) harness.SandboxRuntime {
 	if n == nil || n.Sandbox == nil {
 		return nil

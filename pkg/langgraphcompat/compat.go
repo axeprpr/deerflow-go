@@ -198,8 +198,8 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	if err != nil {
 		return nil, err
 	}
-	sandboxManager := runtimeNodeInstance.Sandbox
-	sandboxRuntime := sandboxManager.Runtime(runtimeNode.Sandbox.Policy)
+	sandboxManager := runtimeNodeInstance.SandboxManager()
+	sandboxRuntime := runtimeNodeInstance.ConfiguredSandboxRuntime()
 	toolRuntime := harnessruntime.NewDefaultToolRuntime(provider, clarifyManager, sandboxRuntime)
 	registry := toolRuntime.Registry()
 	sandboxRoot := filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
@@ -241,7 +241,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		runs:           make(map[string]*Run),
 		runRegistry:    newRunRegistry(),
 		runtimeSystem:  runtimeNodeInstance,
-		runDispatcher:  runtimeNodeInstance.Dispatcher,
+		runDispatcher:  runtimeNodeInstance.RunDispatcher(),
 		sandboxManager: sandboxManager,
 		runtimeNode:    runtimeNode,
 		dataRoot:       dataRootAbs,
@@ -427,6 +427,11 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 func (s *Server) defaultSandboxProvider(existing harness.SandboxProvider) harness.SandboxProvider {
 	if existing != nil {
 		return existing
+	}
+	if node := s.ensureRuntimeSystem(); node != nil {
+		if provider := node.ConfiguredSandboxProvider(); provider != nil {
+			return provider
+		}
 	}
 	runtime := s.defaultSandboxRuntime(nil)
 	if runtime == nil {
