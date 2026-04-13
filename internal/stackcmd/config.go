@@ -83,23 +83,25 @@ func (c Config) withDefaults() Config {
 	if strings.TrimSpace(cfg.Worker.StateRoot) == "" {
 		cfg.Worker.StateRoot = cfg.Gateway.Runtime.StateRoot
 	}
-	if strings.TrimSpace(cfg.Worker.StateStoreURL) == "" {
+	if strings.TrimSpace(cfg.Worker.StateStoreURL) == "" && !gatewayUsesRemoteState(cfg.Gateway.Runtime) {
 		cfg.Worker.StateStoreURL = cfg.Gateway.Runtime.StateStoreURL
 	}
-	if strings.TrimSpace(cfg.Worker.SnapshotStoreURL) == "" {
+	if strings.TrimSpace(cfg.Worker.SnapshotStoreURL) == "" && !gatewayUsesRemoteState(cfg.Gateway.Runtime) {
 		cfg.Worker.SnapshotStoreURL = cfg.Gateway.Runtime.SnapshotStoreURL
 	}
-	if strings.TrimSpace(cfg.Worker.EventStoreURL) == "" {
+	if strings.TrimSpace(cfg.Worker.EventStoreURL) == "" && !gatewayUsesRemoteState(cfg.Gateway.Runtime) {
 		cfg.Worker.EventStoreURL = cfg.Gateway.Runtime.EventStoreURL
 	}
-	if strings.TrimSpace(cfg.Worker.ThreadStoreURL) == "" {
+	if strings.TrimSpace(cfg.Worker.ThreadStoreURL) == "" && !gatewayUsesRemoteState(cfg.Gateway.Runtime) {
 		cfg.Worker.ThreadStoreURL = cfg.Gateway.Runtime.ThreadStoreURL
 	}
 	cfg.Worker.TransportBackend = firstNonEmptyTransport(cfg.Worker.TransportBackend, harnessruntime.WorkerTransportBackendQueue)
-	cfg.Worker.StateBackend = firstNonEmptyState(cfg.Worker.StateBackend, cfg.Gateway.Runtime.StateBackend)
-	cfg.Worker.SnapshotBackend = firstNonEmptyState(cfg.Worker.SnapshotBackend, cfg.Gateway.Runtime.SnapshotBackend)
-	cfg.Worker.EventBackend = firstNonEmptyState(cfg.Worker.EventBackend, cfg.Gateway.Runtime.EventBackend)
-	cfg.Worker.ThreadBackend = firstNonEmptyState(cfg.Worker.ThreadBackend, cfg.Gateway.Runtime.ThreadBackend)
+	if !gatewayUsesRemoteState(cfg.Gateway.Runtime) {
+		cfg.Worker.StateBackend = firstNonEmptyState(cfg.Worker.StateBackend, cfg.Gateway.Runtime.StateBackend)
+		cfg.Worker.SnapshotBackend = firstNonEmptyState(cfg.Worker.SnapshotBackend, cfg.Gateway.Runtime.SnapshotBackend)
+		cfg.Worker.EventBackend = firstNonEmptyState(cfg.Worker.EventBackend, cfg.Gateway.Runtime.EventBackend)
+		cfg.Worker.ThreadBackend = firstNonEmptyState(cfg.Worker.ThreadBackend, cfg.Gateway.Runtime.ThreadBackend)
+	}
 
 	cfg.Worker.Role = harnessruntime.RuntimeNodeRoleWorker
 	cfg.Gateway.Runtime.Role = harnessruntime.RuntimeNodeRoleGateway
@@ -111,18 +113,30 @@ func (c Config) withDefaults() Config {
 	if cfg.Gateway.Runtime.StateProvider == "" {
 		cfg.Gateway.Runtime.StateProvider = cfg.Worker.StateProvider
 	}
-	cfg.Gateway.Runtime.StateRoot = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.StateRoot), strings.TrimSpace(cfg.Worker.StateRoot))
-	cfg.Gateway.Runtime.StateStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.StateStoreURL), strings.TrimSpace(cfg.Worker.StateStoreURL))
-	cfg.Gateway.Runtime.SnapshotStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.SnapshotStoreURL), strings.TrimSpace(cfg.Worker.SnapshotStoreURL))
-	cfg.Gateway.Runtime.EventStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.EventStoreURL), strings.TrimSpace(cfg.Worker.EventStoreURL))
-	cfg.Gateway.Runtime.ThreadStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.ThreadStoreURL), strings.TrimSpace(cfg.Worker.ThreadStoreURL))
-	cfg.Gateway.Runtime.StateBackend = firstNonEmptyState(cfg.Gateway.Runtime.StateBackend, cfg.Worker.StateBackend)
-	cfg.Gateway.Runtime.SnapshotBackend = firstNonEmptyState(cfg.Gateway.Runtime.SnapshotBackend, cfg.Worker.SnapshotBackend)
-	cfg.Gateway.Runtime.EventBackend = firstNonEmptyState(cfg.Gateway.Runtime.EventBackend, cfg.Worker.EventBackend)
-	cfg.Gateway.Runtime.ThreadBackend = firstNonEmptyState(cfg.Gateway.Runtime.ThreadBackend, cfg.Worker.ThreadBackend)
+	if gatewayUsesRemoteState(cfg.Gateway.Runtime) {
+		cfg.Gateway.Runtime.StateBackend = harnessruntime.RuntimeStateStoreBackendRemote
+		cfg.Gateway.Runtime.SnapshotBackend = firstNonEmptyState(cfg.Gateway.Runtime.SnapshotBackend, harnessruntime.RuntimeStateStoreBackendRemote)
+		cfg.Gateway.Runtime.EventBackend = firstNonEmptyState(cfg.Gateway.Runtime.EventBackend, harnessruntime.RuntimeStateStoreBackendRemote)
+		cfg.Gateway.Runtime.ThreadBackend = firstNonEmptyState(cfg.Gateway.Runtime.ThreadBackend, harnessruntime.RuntimeStateStoreBackendRemote)
+		cfg.Gateway.Runtime.StateStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.StateStoreURL), workerStateEndpoint(cfg.Worker.Addr))
+	} else {
+		cfg.Gateway.Runtime.StateRoot = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.StateRoot), strings.TrimSpace(cfg.Worker.StateRoot))
+		cfg.Gateway.Runtime.StateStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.StateStoreURL), strings.TrimSpace(cfg.Worker.StateStoreURL))
+		cfg.Gateway.Runtime.SnapshotStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.SnapshotStoreURL), strings.TrimSpace(cfg.Worker.SnapshotStoreURL))
+		cfg.Gateway.Runtime.EventStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.EventStoreURL), strings.TrimSpace(cfg.Worker.EventStoreURL))
+		cfg.Gateway.Runtime.ThreadStoreURL = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.ThreadStoreURL), strings.TrimSpace(cfg.Worker.ThreadStoreURL))
+		cfg.Gateway.Runtime.StateBackend = firstNonEmptyState(cfg.Gateway.Runtime.StateBackend, cfg.Worker.StateBackend)
+		cfg.Gateway.Runtime.SnapshotBackend = firstNonEmptyState(cfg.Gateway.Runtime.SnapshotBackend, cfg.Worker.SnapshotBackend)
+		cfg.Gateway.Runtime.EventBackend = firstNonEmptyState(cfg.Gateway.Runtime.EventBackend, cfg.Worker.EventBackend)
+		cfg.Gateway.Runtime.ThreadBackend = firstNonEmptyState(cfg.Gateway.Runtime.ThreadBackend, cfg.Worker.ThreadBackend)
+	}
 	cfg.Gateway.Runtime.Endpoint = workerDispatchEndpoint(cfg.Worker.Addr)
 
-	if cfg.Gateway.Runtime.StateProvider == harnessruntime.RuntimeStateProviderModeSharedSQLite {
+	if gatewayUsesRemoteState(cfg.Gateway.Runtime) {
+		if cfg.Gateway.Runtime.StateProvider == harnessruntime.RuntimeStateProviderModeSharedSQLite {
+			cfg.Gateway.Runtime.StateProvider = harnessruntime.RuntimeStateProviderModeAuto
+		}
+	} else if cfg.Gateway.Runtime.StateProvider == harnessruntime.RuntimeStateProviderModeSharedSQLite {
 		cfg = cfg.alignSharedStateStores()
 	}
 	return cfg
@@ -175,6 +189,17 @@ func workerDispatchEndpoint(addr string) string {
 	return strings.TrimRight(addr, "/") + harnessruntime.DefaultRemoteWorkerDispatchPath
 }
 
+func workerStateEndpoint(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if strings.HasPrefix(addr, ":") {
+		addr = "127.0.0.1" + addr
+	}
+	if !strings.HasPrefix(addr, "http://") && !strings.HasPrefix(addr, "https://") {
+		addr = "http://" + addr
+	}
+	return strings.TrimRight(addr, "/") + harnessruntime.DefaultRemoteStateBasePath
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
@@ -200,6 +225,19 @@ func firstNonEmptyTransport(values ...harnessruntime.WorkerTransportBackend) har
 		}
 	}
 	return ""
+}
+
+func gatewayUsesRemoteState(cfg runtimecmd.NodeConfig) bool {
+	if cfg.StateBackend == harnessruntime.RuntimeStateStoreBackendRemote ||
+		cfg.SnapshotBackend == harnessruntime.RuntimeStateStoreBackendRemote ||
+		cfg.EventBackend == harnessruntime.RuntimeStateStoreBackendRemote ||
+		cfg.ThreadBackend == harnessruntime.RuntimeStateStoreBackendRemote {
+		return true
+	}
+	if strings.HasPrefix(strings.TrimSpace(cfg.StateStoreURL), "http://") || strings.HasPrefix(strings.TrimSpace(cfg.StateStoreURL), "https://") {
+		return true
+	}
+	return false
 }
 
 func stateRootFromDataRoot(dataRoot string) string {

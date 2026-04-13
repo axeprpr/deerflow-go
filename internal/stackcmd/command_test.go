@@ -74,3 +74,26 @@ func TestPrepareCommandRejectsConflictingSharedStateFlags(t *testing.T) {
 		t.Fatalf("PrepareCommand() error = %v", err)
 	}
 }
+
+func TestPrepareCommandAcceptsRemoteStateBackendFlags(t *testing.T) {
+	prepared, err := PrepareCommand(flag.NewFlagSet("runtime-stack", flag.ContinueOnError), langgraphcmd.BuildInfo{}, CommandOptions{
+		Stderr: new(strings.Builder),
+		Args: []string{
+			"-state-backend=remote",
+			"-snapshot-backend=remote",
+			"-event-backend=remote",
+			"-thread-backend=remote",
+			"-worker-addr=:19081",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareCommand() error = %v", err)
+	}
+	if prepared == nil {
+		t.Fatal("PrepareCommand() = nil")
+	}
+	joined := strings.Join(prepared.ReadyLines, "\n")
+	if !strings.Contains(joined, harnessruntime.DefaultRemoteStateHealthPath) {
+		t.Fatalf("ReadyLines = %#v", prepared.ReadyLines)
+	}
+}

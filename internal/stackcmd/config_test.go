@@ -57,3 +57,25 @@ func TestConfigValidateRejectsRemoteWorkerTransport(t *testing.T) {
 		t.Fatalf("Validate() error = %v", err)
 	}
 }
+
+func TestConfigWithRemoteGatewayStateKeepsWorkerLocalState(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Worker.Addr = ":19081"
+	cfg.Gateway.Runtime.StateBackend = harnessruntime.RuntimeStateStoreBackendRemote
+	cfg.Gateway.Runtime.SnapshotBackend = harnessruntime.RuntimeStateStoreBackendRemote
+	cfg.Gateway.Runtime.EventBackend = harnessruntime.RuntimeStateStoreBackendRemote
+	cfg.Gateway.Runtime.ThreadBackend = harnessruntime.RuntimeStateStoreBackendRemote
+	cfg.Gateway.Runtime.StateStoreURL = ""
+
+	cfg = cfg.withDefaults()
+
+	if cfg.Gateway.Runtime.StateStoreURL != "http://127.0.0.1:19081"+harnessruntime.DefaultRemoteStateBasePath {
+		t.Fatalf("gateway state store = %q", cfg.Gateway.Runtime.StateStoreURL)
+	}
+	if cfg.Worker.StateBackend == harnessruntime.RuntimeStateStoreBackendRemote {
+		t.Fatalf("worker state backend = %q", cfg.Worker.StateBackend)
+	}
+	if cfg.Worker.StateStoreURL == cfg.Gateway.Runtime.StateStoreURL {
+		t.Fatalf("worker state store unexpectedly mirrored remote endpoint: %q", cfg.Worker.StateStoreURL)
+	}
+}
