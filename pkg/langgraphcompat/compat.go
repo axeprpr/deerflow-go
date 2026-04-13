@@ -352,18 +352,7 @@ func (s *Server) ensureRuntimeSystem() *harnessruntime.RuntimeNode {
 	if s.runtimeSystem != nil {
 		return s.runtimeSystem
 	}
-	config := s.runtimeNode
-	if config.Transport.Backend == "" {
-		root := strings.TrimSpace(s.sandboxRoot)
-		if root == "" {
-			root = filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
-		}
-		name := strings.TrimSpace(s.sandboxName)
-		if name == "" {
-			name = "langgraph"
-		}
-		config = harnessruntime.DefaultRuntimeNodeConfig(name, root)
-	}
+	config := s.runtimeNodeConfig()
 	node, err := config.BuildRuntimeNode(harnessruntime.DispatchRuntimeConfig{})
 	if err != nil {
 		return nil
@@ -374,17 +363,12 @@ func (s *Server) ensureRuntimeSystem() *harnessruntime.RuntimeNode {
 	return node
 }
 
-func (s *Server) defaultSandboxRuntime(existing harness.SandboxRuntime) harness.SandboxRuntime {
-	if existing != nil {
-		return existing
+func (s *Server) runtimeNodeConfig() harnessruntime.RuntimeNodeConfig {
+	if s == nil {
+		return harnessruntime.DefaultRuntimeNodeConfig("langgraph", filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox"))
 	}
-	if node := s.ensureRuntimeSystem(); node != nil {
-		if runtime := node.SandboxRuntime(node.Config.Sandbox.Policy); runtime != nil {
-			return runtime
-		}
-	}
-	if s != nil && s.sandboxManager != nil {
-		return s.sandboxManager.Runtime(s.runtimeNode.Sandbox.Policy)
+	if s.runtimeNode.Transport.Backend != "" {
+		return s.runtimeNode
 	}
 	root := strings.TrimSpace(s.sandboxRoot)
 	if root == "" {
@@ -394,7 +378,23 @@ func (s *Server) defaultSandboxRuntime(existing harness.SandboxRuntime) harness.
 	if name == "" {
 		name = "langgraph"
 	}
-	config := harnessruntime.DefaultRuntimeNodeConfig(name, root)
+	s.runtimeNode = harnessruntime.DefaultRuntimeNodeConfig(name, root)
+	return s.runtimeNode
+}
+
+func (s *Server) defaultSandboxRuntime(existing harness.SandboxRuntime) harness.SandboxRuntime {
+	if existing != nil {
+		return existing
+	}
+	if node := s.ensureRuntimeSystem(); node != nil {
+		if runtime := node.ConfiguredSandboxRuntime(); runtime != nil {
+			return runtime
+		}
+	}
+	if s != nil && s.sandboxManager != nil {
+		return s.sandboxManager.Runtime(s.runtimeNode.Sandbox.Policy)
+	}
+	config := s.runtimeNodeConfig()
 	manager, err := config.BuildSandboxManager()
 	if err != nil {
 		return nil
@@ -419,17 +419,7 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 		s.runDispatcher = node.RunDispatcher()
 		return s.runDispatcher
 	}
-	if s.runtimeNode.Transport.Backend == "" {
-		root := strings.TrimSpace(s.sandboxRoot)
-		if root == "" {
-			root = filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
-		}
-		name := strings.TrimSpace(s.sandboxName)
-		if name == "" {
-			name = "langgraph"
-		}
-		s.runtimeNode = harnessruntime.DefaultRuntimeNodeConfig(name, root)
-	}
+	s.runtimeNode = s.runtimeNodeConfig()
 	s.runDispatcher = s.runtimeNode.BuildDispatcher(s.runtimeNode.BuildDispatchRuntime(s.runtimeView, s.runtimeWorkerSpecAdapter()))
 	return s.runDispatcher
 }
