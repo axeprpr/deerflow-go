@@ -195,12 +195,13 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	clarifyManager := clarification.NewManager(32)
 	sandboxRoot := filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
 	runtimeNode := harnessruntime.DefaultRuntimeNodeConfig("langgraph", sandboxRoot)
-	runtimeNodeInstance, err := runtimeNode.BuildRuntimeNode(harnessruntime.DispatchRuntimeConfig{})
+	bootstrap, err := harnessruntime.BuildDefaultRuntimeBootstrap(runtimeNode, provider, clarifyManager)
 	if err != nil {
 		return nil, err
 	}
-	sandboxRuntime := runtimeNodeInstance.ConfiguredSandboxRuntime()
-	toolRuntime := harnessruntime.NewDefaultToolRuntime(provider, clarifyManager, sandboxRuntime)
+	runtimeNodeInstance := bootstrap.Node
+	sandboxRuntime := bootstrap.SandboxRuntime
+	toolRuntime := bootstrap.ToolRuntime
 	registry := toolRuntime.Registry()
 	subagentPool := toolRuntime.Subagents()
 
