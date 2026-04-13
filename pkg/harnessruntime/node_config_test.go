@@ -228,6 +228,29 @@ func TestRuntimeNodeConfigBuildRuntimeNodeWiresCoreServices(t *testing.T) {
 	}
 }
 
+func TestRuntimeNodeConfigBuildRuntimeNodeWithoutDispatchBindingsLeavesTransportUnbound(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	node, err := config.BuildRuntimeNode(DispatchRuntimeConfig{})
+	if err != nil {
+		t.Fatalf("BuildRuntimeNode() error = %v", err)
+	}
+	if node == nil {
+		t.Fatal("node is nil")
+	}
+	if node.Sandbox == nil {
+		t.Fatal("node.Sandbox is nil")
+	}
+	if node.State.Snapshots == nil || node.State.Events == nil || node.State.Threads == nil {
+		t.Fatalf("state = %#v", node.State)
+	}
+	if node.Dispatcher != nil {
+		t.Fatalf("Dispatcher = %#v, want nil before BindDispatch", node.Dispatcher)
+	}
+	if node.RemoteWorker != nil {
+		t.Fatalf("RemoteWorker = %#v, want nil before BindDispatch", node.RemoteWorker)
+	}
+}
+
 func TestRuntimeNodeConfigBuildDispatchRuntimeSuppliesNodeDefaults(t *testing.T) {
 	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
 	runtime := config.BuildDispatchRuntime(nil, nil)

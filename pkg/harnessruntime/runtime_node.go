@@ -93,19 +93,16 @@ func (c RuntimeNodeConfig) BuildRuntimeNodeWithProviders(runtime DispatchRuntime
 	if err != nil {
 		return nil, err
 	}
-	transport := providers.Transport.Build(c.Transport, runtime)
-	protocol := runtime.Protocol
-	if protocol == nil {
-		protocol = providers.Remote.Protocol.Build(c, runtime.Results)
-	}
-	return &RuntimeNode{
+	node := &RuntimeNode{
 		Config:       c,
 		Providers:    providers,
 		State:        providers.StatePlane.Build(c),
-		Dispatcher:   transportRunDispatcher{transport: transport, codec: DispatchEnvelopeCodec{Plans: runtime.Codec}},
 		Sandbox:      sandboxManager,
-		RemoteWorker: NewHTTPRemoteWorkerNode(c.BuildRemoteWorkerHTTPServerWithProviders(transport, protocol, providers.Remote)),
-	}, nil
+	}
+	if runtime.hasBindings() {
+		node.BindDispatch(runtime)
+	}
+	return node, nil
 }
 
 func (n *RuntimeNode) SnapshotStore() RunSnapshotStore {
@@ -184,6 +181,17 @@ func (n *RuntimeNode) BindDispatch(runtime DispatchRuntimeConfig) {
 	}
 	n.Dispatcher = transportRunDispatcher{transport: transport, codec: DispatchEnvelopeCodec{Plans: runtime.Codec}}
 	n.RemoteWorker = NewHTTPRemoteWorkerNode(n.Config.BuildRemoteWorkerHTTPServerWithProviders(transport, protocol, providers.Remote))
+}
+
+func (c DispatchRuntimeConfig) hasBindings() bool {
+	return c.Executor != nil ||
+		c.Runtime != nil ||
+		c.Specs != nil ||
+		c.Codec != nil ||
+		c.Results != nil ||
+		c.Transport != nil ||
+		c.Remote != nil ||
+		c.Protocol != nil
 }
 
 func (n *RuntimeNode) Close(ctx context.Context) error {
