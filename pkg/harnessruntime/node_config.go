@@ -208,15 +208,15 @@ func (c RuntimeNodeConfig) BuildRemoteWorkerNode(runtime DispatchRuntimeConfig) 
 }
 
 func (c RuntimeNodeConfig) BuildRunSnapshotStore() RunSnapshotStore {
-	return defaultRuntimeSnapshotStoreFactory().Build(c)
+	return DefaultRuntimeStatePlaneProviders().buildSnapshotStore(c)
 }
 
 func (c RuntimeNodeConfig) BuildThreadStateStore() ThreadStateStore {
-	return defaultRuntimeThreadStateStoreFactory().Build(c)
+	return DefaultRuntimeStatePlaneProviders().buildThreadStateStore(c)
 }
 
 func (c RuntimeNodeConfig) BuildRunEventStore() RunEventStore {
-	return defaultRuntimeEventStoreFactory().Build(c)
+	return DefaultRuntimeStatePlaneProviders().buildEventStore(c)
 }
 
 func (c RuntimeNodeConfig) BuildStatePlane() RuntimeStatePlane {
@@ -224,23 +224,7 @@ func (c RuntimeNodeConfig) BuildStatePlane() RuntimeStatePlane {
 }
 
 func (c RuntimeNodeConfig) BuildStatePlaneWithProviders(providers RuntimeStatePlaneProviders) RuntimeStatePlane {
-	if providers.Plane != nil {
-		return providers.Plane.Build(c)
-	}
-	if providers.Snapshots == nil {
-		providers.Snapshots = DefaultRuntimeStatePlaneProviders().Snapshots
-	}
-	if providers.Events == nil {
-		providers.Events = DefaultRuntimeStatePlaneProviders().Events
-	}
-	if providers.Threads == nil {
-		providers.Threads = DefaultRuntimeStatePlaneProviders().Threads
-	}
-	return RuntimeStatePlane{
-		Snapshots: providers.Snapshots.Build(c),
-		Events:    providers.Events.Build(c),
-		Threads:   providers.Threads.Build(c),
-	}
+	return providers.buildPlane(c)
 }
 
 func transportTopology(backend WorkerTransportBackend) DispatchTopology {

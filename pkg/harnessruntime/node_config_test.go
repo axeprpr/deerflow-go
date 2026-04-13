@@ -472,6 +472,41 @@ func TestRuntimeNodeConfigBuildRuntimeNodeWithProvidersOverridesDefaultBuilders(
 	}
 }
 
+func TestRuntimeNodeConfigBuildRuntimeNodeWithProvidersUsesStateBackendRegistry(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	config.State = RuntimeStateStoreConfig{
+		Backend:         RuntimeStateStoreBackendSQLite,
+		SnapshotBackend: RuntimeStateStoreBackendSQLite,
+		EventBackend:    RuntimeStateStoreBackendSQLite,
+		ThreadBackend:   RuntimeStateStoreBackendSQLite,
+		URL:             "sqlite://" + filepath.Join(t.TempDir(), "runtime.sqlite3"),
+	}
+	customState := RuntimeStatePlane{
+		Snapshots: NewInMemoryRunStore(),
+		Events:    NewInMemoryRunEventStore(),
+		Threads:   NewInMemoryThreadStateStore(),
+	}
+	node, err := config.BuildRuntimeNodeWithProviders(DispatchRuntimeConfig{}, RuntimeNodeProviders{
+		StateStores: RuntimeStatePlaneProviders{
+			Backends: RuntimeStateBackendProviders{
+				SQLite: fakeStateBackendProvider{plane: customState},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildRuntimeNodeWithProviders() error = %v", err)
+	}
+	if node.State.Snapshots != customState.Snapshots {
+		t.Fatalf("Snapshots = %T", node.State.Snapshots)
+	}
+	if node.State.Events != customState.Events {
+		t.Fatalf("Events = %T", node.State.Events)
+	}
+	if node.State.Threads != customState.Threads {
+		t.Fatalf("Threads = %T", node.State.Threads)
+	}
+}
+
 func TestRuntimeNodeConfigBuildStatePlaneWithProvidersOverridesDefaultStores(t *testing.T) {
 	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
 	customSnapshots := NewInMemoryRunStore()
@@ -490,6 +525,99 @@ func TestRuntimeNodeConfigBuildStatePlaneWithProvidersOverridesDefaultStores(t *
 	}
 	if plane.Threads != customThreads {
 		t.Fatalf("Threads = %T", plane.Threads)
+	}
+}
+
+type fakeStateBackendProvider struct {
+	plane     RuntimeStatePlane
+	snapshots RunSnapshotStore
+	events    RunEventStore
+	threads   ThreadStateStore
+}
+
+func (p fakeStateBackendProvider) BuildPlane(RuntimeNodeConfig) (RuntimeStatePlane, bool) {
+	if p.plane.Snapshots == nil || p.plane.Events == nil || p.plane.Threads == nil {
+		return RuntimeStatePlane{}, false
+	}
+	return p.plane, true
+}
+
+func (p fakeStateBackendProvider) BuildSnapshotStore(RuntimeNodeConfig) RunSnapshotStore {
+	if p.snapshots != nil {
+		return p.snapshots
+	}
+	return NewInMemoryRunStore()
+}
+
+func (p fakeStateBackendProvider) BuildEventStore(RuntimeNodeConfig) RunEventStore {
+	if p.events != nil {
+		return p.events
+	}
+	return NewInMemoryRunEventStore()
+}
+
+func (p fakeStateBackendProvider) BuildThreadStateStore(RuntimeNodeConfig) ThreadStateStore {
+	if p.threads != nil {
+		return p.threads
+	}
+	return NewInMemoryThreadStateStore()
+}
+
+func TestRuntimeNodeConfigBuildStatePlaneWithProvidersOverridesBackendRegistry(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	config.State = RuntimeStateStoreConfig{
+		Backend:         RuntimeStateStoreBackendSQLite,
+		SnapshotBackend: RuntimeStateStoreBackendSQLite,
+		EventBackend:    RuntimeStateStoreBackendSQLite,
+		ThreadBackend:   RuntimeStateStoreBackendSQLite,
+		URL:             "sqlite://" + filepath.Join(t.TempDir(), "shared.sqlite3"),
+	}
+	customPlane := RuntimeStatePlane{
+		Snapshots: NewInMemoryRunStore(),
+		Events:    NewInMemoryRunEventStore(),
+		Threads:   NewInMemoryThreadStateStore(),
+	}
+	plane := config.BuildStatePlaneWithProviders(RuntimeStatePlaneProviders{
+		Backends: RuntimeStateBackendProviders{
+			SQLite: fakeStateBackendProvider{plane: customPlane},
+		},
+	})
+	if plane.Snapshots != customPlane.Snapshots {
+		t.Fatalf("Snapshots = %T", plane.Snapshots)
+	}
+	if plane.Events != customPlane.Events {
+		t.Fatalf("Events = %T", plane.Events)
+	}
+	if plane.Threads != customPlane.Threads {
+		t.Fatalf("Threads = %T", plane.Threads)
+	}
+}
+
+func TestRuntimeNodeConfigBuildRunStoresUseBackendProviders(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	config.State = RuntimeStateStoreConfig{
+		SnapshotBackend: RuntimeStateStoreBackendFile,
+		EventBackend:    RuntimeStateStoreBackendSQLite,
+		ThreadBackend:   RuntimeStateStoreBackendInMemory,
+	}
+	customSnapshots := NewInMemoryRunStore()
+	customEvents := NewInMemoryRunEventStore()
+	customThreads := NewInMemoryThreadStateStore()
+	providers := RuntimeStatePlaneProviders{
+		Backends: RuntimeStateBackendProviders{
+			File:     fakeStateBackendProvider{snapshots: customSnapshots},
+			SQLite:   fakeStateBackendProvider{events: customEvents},
+			InMemory: fakeStateBackendProvider{threads: customThreads},
+		},
+	}
+	if got := providers.buildSnapshotStore(config); got != customSnapshots {
+		t.Fatalf("buildSnapshotStore() = %T", got)
+	}
+	if got := providers.buildEventStore(config); got != customEvents {
+		t.Fatalf("buildEventStore() = %T", got)
+	}
+	if got := providers.buildThreadStateStore(config); got != customThreads {
+		t.Fatalf("buildThreadStateStore() = %T", got)
 	}
 }
 

@@ -42,18 +42,21 @@ func (f SandboxManagerFactoryFunc) Build(config SandboxManagerConfig) (*SandboxR
 }
 
 type RuntimeNodeProviders struct {
-	StatePlane RuntimeStatePlaneFactory
-	Transport  WorkerTransportFactory
-	Sandbox    SandboxManagerBuilder
-	Remote     RemoteWorkerProviders
-	RemoteSB   RemoteSandboxProviders
+	StatePlane  RuntimeStatePlaneFactory
+	StateStores RuntimeStatePlaneProviders
+	Transport   WorkerTransportFactory
+	Sandbox     SandboxManagerBuilder
+	Remote      RemoteWorkerProviders
+	RemoteSB    RemoteSandboxProviders
 }
 
 func DefaultRuntimeNodeProviders() RuntimeNodeProviders {
+	stateProviders := DefaultRuntimeStatePlaneProviders()
 	return RuntimeNodeProviders{
 		StatePlane: RuntimeStatePlaneFactoryFunc(func(config RuntimeNodeConfig) RuntimeStatePlane {
-			return config.BuildStatePlaneWithProviders(DefaultRuntimeStatePlaneProviders())
+			return config.BuildStatePlaneWithProviders(stateProviders)
 		}),
+		StateStores: stateProviders,
 		Transport: WorkerTransportFactoryFunc(func(config WorkerTransportConfig, runtime DispatchRuntimeConfig) WorkerTransport {
 			return buildWorkerTransport(config, runtime)
 		}),
@@ -81,30 +84,7 @@ func (c RuntimeNodeConfig) BuildRuntimeNode(runtime DispatchRuntimeConfig) (*Run
 }
 
 func (c RuntimeNodeConfig) BuildRuntimeNodeWithProviders(runtime DispatchRuntimeConfig, providers RuntimeNodeProviders) (*RuntimeNode, error) {
-	if providers.StatePlane == nil {
-		providers.StatePlane = DefaultRuntimeNodeProviders().StatePlane
-	}
-	if providers.Transport == nil {
-		providers.Transport = DefaultRuntimeNodeProviders().Transport
-	}
-	if providers.Sandbox == nil {
-		providers.Sandbox = DefaultRuntimeNodeProviders().Sandbox
-	}
-	if providers.Remote.Client == nil {
-		providers.Remote.Client = DefaultRemoteWorkerProviders().Client
-	}
-	if providers.Remote.Protocol == nil {
-		providers.Remote.Protocol = DefaultRemoteWorkerProviders().Protocol
-	}
-	if providers.Remote.Server == nil {
-		providers.Remote.Server = DefaultRemoteWorkerProviders().Server
-	}
-	if providers.RemoteSB.Protocol == nil {
-		providers.RemoteSB.Protocol = DefaultRemoteSandboxProviders().Protocol
-	}
-	if providers.RemoteSB.Server == nil {
-		providers.RemoteSB.Server = DefaultRemoteSandboxProviders().Server
-	}
+	providers = normalizeRuntimeNodeProviders(providers)
 	sandboxManager, err := providers.Sandbox.Build(c.Sandbox)
 	if err != nil {
 		return nil, err
@@ -119,6 +99,43 @@ func (c RuntimeNodeConfig) BuildRuntimeNodeWithProviders(runtime DispatchRuntime
 		node.BindDispatch(runtime)
 	}
 	return node, nil
+}
+
+func normalizeRuntimeNodeProviders(providers RuntimeNodeProviders) RuntimeNodeProviders {
+	defaults := DefaultRuntimeNodeProviders()
+	providers.StateStores = providers.StateStores.normalized()
+	if providers.StatePlane == nil {
+		stateProviders := providers.StateStores
+		if stateProviders.Backends.Default == nil && stateProviders.Backends.InMemory == nil &&
+			stateProviders.Backends.File == nil && stateProviders.Backends.SQLite == nil {
+			stateProviders = defaults.StateStores
+		}
+		providers.StatePlane = RuntimeStatePlaneFactoryFunc(func(config RuntimeNodeConfig) RuntimeStatePlane {
+			return config.BuildStatePlaneWithProviders(stateProviders)
+		})
+	}
+	if providers.Transport == nil {
+		providers.Transport = defaults.Transport
+	}
+	if providers.Sandbox == nil {
+		providers.Sandbox = defaults.Sandbox
+	}
+	if providers.Remote.Client == nil {
+		providers.Remote.Client = defaults.Remote.Client
+	}
+	if providers.Remote.Protocol == nil {
+		providers.Remote.Protocol = defaults.Remote.Protocol
+	}
+	if providers.Remote.Server == nil {
+		providers.Remote.Server = defaults.Remote.Server
+	}
+	if providers.RemoteSB.Protocol == nil {
+		providers.RemoteSB.Protocol = defaults.RemoteSB.Protocol
+	}
+	if providers.RemoteSB.Server == nil {
+		providers.RemoteSB.Server = defaults.RemoteSB.Server
+	}
+	return providers
 }
 
 func (n *RuntimeNode) SnapshotStore() RunSnapshotStore {
