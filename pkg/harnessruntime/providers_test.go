@@ -534,6 +534,11 @@ func TestRunStateServiceTransitionsRecords(t *testing.T) {
 	service.now = func() time.Time { return now }
 
 	record := RunRecord{RunID: "run-1", ThreadID: "thread-1", Status: "running"}
+	record = service.Begin(record)
+	if record.Status != "running" || record.Outcome.RunStatus != "running" || runtime.threadStatus != "thread-1:busy" {
+		t.Fatalf("begin record = %+v runtime=%+v", record, runtime)
+	}
+
 	record = service.MarkError(record, context.DeadlineExceeded)
 	if record.Status != "error" || record.Outcome.RunStatus != "error" || runtime.threadStatus != "thread-1:error" {
 		t.Fatalf("error record = %+v runtime=%+v", record, runtime)

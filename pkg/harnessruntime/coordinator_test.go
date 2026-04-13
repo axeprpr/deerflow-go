@@ -21,6 +21,11 @@ func (d *fakeDispatcher) Dispatch(_ context.Context, req DispatchRequest) (*Disp
 	d.plan = RunPlan{
 		ThreadID:         req.Plan.ThreadID,
 		AssistantID:      req.Plan.AssistantID,
+		RunID:            req.Plan.RunID,
+		SubmittedAt:      req.Plan.SubmittedAt,
+		Attempt:          req.Plan.Attempt,
+		ResumeFromEvent:  req.Plan.ResumeFromEvent,
+		ResumeReason:     req.Plan.ResumeReason,
 		Model:            req.Plan.Model,
 		AgentName:        req.Plan.AgentName,
 		Spec:             req.Plan.Spec.AgentSpec(),
@@ -135,5 +140,58 @@ func TestCoordinatorSubmitUsesInjectedDispatcher(t *testing.T) {
 	}
 	if dispatcher.plan.ThreadID != "thread-1" || dispatcher.plan.AssistantID != "lead_agent" {
 		t.Fatalf("dispatcher plan = %#v", dispatcher.plan)
+	}
+}
+
+func TestCoordinatorResumeSubmitsRecoveredPlan(t *testing.T) {
+	dispatcher := &fakeDispatcher{}
+	runState := &fakeRunStateRuntime{}
+	coordinator := NewCoordinator(CoordinatorDeps{
+		Dispatcher: dispatcher,
+		RunState:   runState,
+	})
+	coordinator.runState.now = func() time.Time { return time.Unix(20, 0).UTC() }
+
+	record, result, err := coordinator.Resume(context.Background(), RunPlan{
+		Model:     "model-1",
+		AgentName: "lead_agent",
+		Spec:      harness.AgentSpec{},
+		Features:  harness.FeatureSet{Sandbox: true},
+		Messages: []models.Message{{
+			Role:      models.RoleHuman,
+			Content:   "resume",
+			SessionID: "thread-1",
+		}},
+	}, RunRecord{
+		RunID:       "run-1",
+		ThreadID:    "thread-1",
+		AssistantID: "lead_agent",
+		Attempt:     1,
+		Status:      "interrupted",
+		Outcome:     RunOutcomeDescriptor{RunStatus: "interrupted", Attempt: 1},
+	}, 7, "worker-retry")
+	if err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+	if result == nil || result.Handle == nil || result.Lifecycle == nil {
+		t.Fatalf("result = %#v", result)
+	}
+	if !dispatcher.called {
+		t.Fatal("dispatcher was not called")
+	}
+	if record.Attempt != 2 || record.ResumeFromEvent != 7 || record.ResumeReason != "worker-retry" {
+		t.Fatalf("record = %+v", record)
+	}
+	if record.Status != "running" || record.Outcome.RunStatus != "running" {
+		t.Fatalf("record outcome = %+v", record)
+	}
+	if dispatcher.plan.RunID != "run-1" || dispatcher.plan.Attempt != 2 || dispatcher.plan.ResumeFromEvent != 7 || dispatcher.plan.ResumeReason != "worker-retry" {
+		t.Fatalf("dispatcher plan = %#v", dispatcher.plan)
+	}
+	if runState.threadStatus != "thread-1:busy" {
+		t.Fatalf("runState threadStatus = %q", runState.threadStatus)
+	}
+	if runState.saved.Attempt != 2 || runState.saved.Status != "running" {
+		t.Fatalf("runState saved = %+v", runState.saved)
 	}
 }

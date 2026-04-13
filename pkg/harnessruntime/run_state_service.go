@@ -34,6 +34,21 @@ func (s RunStateService) MarkError(record RunRecord, err error) RunRecord {
 	return record
 }
 
+func (s RunStateService) Begin(record RunRecord) RunRecord {
+	if record.Status == "" {
+		record.Status = "running"
+	}
+	if record.Outcome.RunStatus == "" {
+		record.Outcome = NewOutcomeService().Describe(record, RunOutcome{RunStatus: "running"}, "")
+	}
+	record.UpdatedAt = s.now()
+	if s.runtime != nil {
+		s.runtime.SaveRunRecord(record)
+		s.runtime.MarkThreadStatus(record.ThreadID, "busy")
+	}
+	return record
+}
+
 func (s RunStateService) MarkCanceled(record RunRecord) RunRecord {
 	outcome := NewOutcomeService().Describe(record, RunOutcome{RunStatus: "interrupted", Interrupted: true}, "")
 	record.Status = outcome.RunStatus

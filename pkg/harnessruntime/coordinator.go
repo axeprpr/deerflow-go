@@ -97,6 +97,21 @@ func (c Coordinator) Submit(ctx context.Context, plan RunPlan) (*DispatchResult,
 	})
 }
 
+func (c Coordinator) Resume(ctx context.Context, plan RunPlan, record RunRecord, afterEvent int, reason string) (RunRecord, *DispatchResult, error) {
+	record = c.runState.Begin(c.recovery.NextRecord(record, afterEvent, reason))
+	plan.RunID = record.RunID
+	plan.ThreadID = record.ThreadID
+	plan.AssistantID = record.AssistantID
+	plan.Attempt = record.Attempt
+	plan.ResumeFromEvent = record.ResumeFromEvent
+	plan.ResumeReason = record.ResumeReason
+	result, err := c.Submit(ctx, plan)
+	if err != nil {
+		return record, nil, err
+	}
+	return record, result, nil
+}
+
 func (c Coordinator) ResumePlan(plan RunPlan, record RunRecord, afterEvent int, reason string) RunPlan {
 	return c.recovery.ResumePlan(plan, record, afterEvent, reason)
 }
