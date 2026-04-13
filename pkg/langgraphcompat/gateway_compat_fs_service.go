@@ -329,8 +329,8 @@ func (s *Server) deleteGatewayAgent(ctx context.Context, name string) (int, stri
 	if err := os.RemoveAll(s.agentDir(normalized)); err != nil {
 		return http.StatusInternalServerError, fmt.Sprintf("Failed to delete agent: %v", err)
 	}
-	if s.runtime != nil && s.runtime.Memory() != nil && s.runtime.Memory().Store() != nil {
-		if deleter, ok := any(s.runtime.Memory().Store()).(interface {
+	if runtimeMemory := s.runtimeMemory(); runtimeMemory != nil && runtimeMemory.Store() != nil {
+		if deleter, ok := any(runtimeMemory.Store()).(interface {
 			Delete(context.Context, string) error
 		}); ok {
 			_ = deleter.Delete(ctx, deriveMemorySessionID("", normalized))

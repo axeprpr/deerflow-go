@@ -343,6 +343,25 @@ func (s *Server) subagentPool() *subagent.Pool {
 	return s.subagents
 }
 
+func (s *Server) currentRuntime() *harness.Runtime {
+	if s == nil {
+		return nil
+	}
+	if node := s.runtimeSystem; node != nil {
+		if runtime := node.RuntimeView(); runtime != nil {
+			return runtime
+		}
+	}
+	return s.runtime
+}
+
+func (s *Server) runtimeMemory() *harness.MemoryRuntime {
+	if runtime := s.currentRuntime(); runtime != nil {
+		return runtime.Memory()
+	}
+	return nil
+}
+
 func (s *Server) runtimeView() *harness.Runtime {
 	if s == nil {
 		return nil
