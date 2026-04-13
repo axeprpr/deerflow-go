@@ -279,6 +279,9 @@ func TestGatewayRoleDispatchesRunsToRemoteWorker(t *testing.T) {
 	if !strings.Contains(resp.Body.String(), `event: chunk`) || !strings.Contains(resp.Body.String(), `hello from fake llm`) {
 		t.Fatalf("body missing remote replayed chunk: %q", resp.Body.String())
 	}
+	if got := strings.Count(resp.Body.String(), "event: end"); got != 1 {
+		t.Fatalf("end event count = %d body=%q", got, resp.Body.String())
+	}
 
 	var stored *Run
 	deadline := time.Now().Add(5 * time.Second)
@@ -295,6 +298,22 @@ func TestGatewayRoleDispatchesRunsToRemoteWorker(t *testing.T) {
 	}
 	if stored.Status != "success" {
 		t.Fatalf("run status = %q err=%q", stored.Status, stored.Error)
+	}
+	record, ok := gateway.ensureSnapshotStore().LoadRunSnapshot(stored.RunID)
+	if !ok {
+		t.Fatal("shared snapshot missing")
+	}
+	if record.Record.Outcome.RunStatus != "success" {
+		t.Fatalf("snapshot outcome = %+v", record.Record.Outcome)
+	}
+	endCount := 0
+	for _, event := range gateway.ensureEventStore().LoadRunEvents(stored.RunID) {
+		if event.Event == "end" {
+			endCount++
+		}
+	}
+	if endCount != 1 {
+		t.Fatalf("stored end event count = %d", endCount)
 	}
 }
 

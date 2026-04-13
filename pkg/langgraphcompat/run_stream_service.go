@@ -87,7 +87,7 @@ func (e runStreamEmitter) FinalMessages(existingMessages []models.Message, resul
 	e.server.emitFinalMessagesTuple(e.w, e.flusher, e.run, e.filter, existingMessages, resultMessages, usage)
 }
 
-func (e runStreamEmitter) Completion(completed *completedRun, usage *agent.Usage) {
+func (e runStreamEmitter) Completion(completed *completedRun, usage *agent.Usage, includeEnd bool) {
 	if completed == nil || completed.State == nil {
 		return
 	}
@@ -99,10 +99,12 @@ func (e runStreamEmitter) Completion(completed *completedRun, usage *agent.Usage
 		},
 	})
 	e.server.recordAndSendEventFiltered(e.w, e.flusher, e.run, e.filter, "values", completed.State.Values)
-	e.server.recordAndSendEventFiltered(e.w, e.flusher, e.run, e.filter, "end", map[string]any{
-		"run_id": e.run.RunID,
-		"usage":  usage,
-	})
+	if includeEnd {
+		e.server.recordAndSendEventFiltered(e.w, e.flusher, e.run, e.filter, "end", map[string]any{
+			"run_id": e.run.RunID,
+			"usage":  usage,
+		})
+	}
 }
 
 func (s runReplayStreamer) Replay(run *Run) bool {

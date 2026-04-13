@@ -118,6 +118,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 
 	var remoteReplayDone chan struct{}
 	var remoteReplayResult chan bool
+	remoteReplayedEnd := false
 	if s.usesRemoteDispatch() {
 		remoteReplayDone = make(chan struct{})
 		remoteReplayResult = make(chan bool, 1)
@@ -129,7 +130,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	preparedExecution, err := s.buildRunExecution(r.Context(), prepared, req)
 	if remoteReplayDone != nil {
 		close(remoteReplayDone)
-		<-remoteReplayResult
+		remoteReplayedEnd = <-remoteReplayResult
 	}
 	if err != nil {
 		s.markRunError(prepared.Run, prepared.ThreadID, err)
@@ -180,7 +181,7 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 
 	completed := s.finalizeCompletedRun(ctx, prepared, result)
 	emitter.FinalMessages(prepared.ExistingMessages, result.Messages, result.Usage)
-	emitter.Completion(completed, result.Usage)
+	emitter.Completion(completed, result.Usage, !remoteReplayedEnd)
 }
 
 func (s *Server) handleRunStream(w http.ResponseWriter, r *http.Request) {
