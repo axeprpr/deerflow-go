@@ -52,6 +52,7 @@ type Server struct {
 	threadStateStore harnessruntime.ThreadStateStore
 	runDispatcher    harnessruntime.RunDispatcher
 	sandboxManager   *harnessruntime.SandboxResourceManager
+	runtimeSystem    *harnessruntime.RuntimeNode
 	runtimeNode      harnessruntime.RuntimeNodeConfig
 	dataRoot         string
 	uiStateMu        sync.RWMutex
@@ -240,6 +241,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		sessions:       make(map[string]*Session),
 		runs:           make(map[string]*Run),
 		runRegistry:    newRunRegistry(),
+		runtimeSystem:  runtimeNodeInstance,
 		runDispatcher:  runtimeNodeInstance.Dispatcher,
 		sandboxManager: sandboxManager,
 		runtimeNode:    runtimeNode,
@@ -335,6 +337,9 @@ func (s *Server) defaultSandboxRuntime(existing harness.SandboxRuntime) harness.
 	if existing != nil {
 		return existing
 	}
+	if s != nil && s.runtimeSystem != nil && s.runtimeSystem.Sandbox != nil {
+		return s.runtimeSystem.Sandbox.Runtime(s.runtimeNode.Sandbox.Policy)
+	}
 	if s != nil && s.sandboxManager != nil {
 		return s.sandboxManager.Runtime(s.runtimeNode.Sandbox.Policy)
 	}
@@ -353,6 +358,11 @@ func (s *Server) defaultSandboxRuntime(existing harness.SandboxRuntime) harness.
 	}
 	if s != nil {
 		s.sandboxManager = manager
+		s.runtimeSystem = &harnessruntime.RuntimeNode{
+			Config:     config,
+			Sandbox:    manager,
+			Dispatcher: s.runDispatcher,
+		}
 		s.runtimeNode.Sandbox = config.Sandbox
 	}
 	return manager.Runtime(config.Sandbox.Policy)
@@ -363,6 +373,10 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 		return harnessruntime.NewInProcessRunDispatcher()
 	}
 	if s.runDispatcher != nil {
+		return s.runDispatcher
+	}
+	if s.runtimeSystem != nil && s.runtimeSystem.Dispatcher != nil {
+		s.runDispatcher = s.runtimeSystem.Dispatcher
 		return s.runDispatcher
 	}
 	if s.runtimeNode.Transport.Backend == "" {
@@ -380,6 +394,9 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 		Runtime: s.runtimeView,
 		Specs:   s.runtimeWorkerSpecAdapter(),
 	})
+	if s.runtimeSystem != nil {
+		s.runtimeSystem.Dispatcher = s.runDispatcher
+	}
 	return s.runDispatcher
 }
 
@@ -476,14 +493,20 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	s.closeGatewayMCPClients()
 	s.stopGatewayChannels()
-	if closer, ok := s.runDispatcher.(interface{ Close() error }); ok {
-		if err := closer.Close(); err != nil && shutdownErr == nil {
+	if s.runtimeSystem != nil {
+		if err := s.runtimeSystem.Close(ctx); err != nil && shutdownErr == nil {
 			shutdownErr = err
 		}
-	}
-	if s.sandboxManager != nil {
-		if err := s.sandboxManager.Close(); err != nil && shutdownErr == nil {
-			shutdownErr = err
+	} else {
+		if closer, ok := s.runDispatcher.(interface{ Close() error }); ok {
+			if err := closer.Close(); err != nil && shutdownErr == nil {
+				shutdownErr = err
+			}
+		}
+		if s.sandboxManager != nil {
+			if err := s.sandboxManager.Close(); err != nil && shutdownErr == nil {
+				shutdownErr = err
+			}
 		}
 	}
 	return shutdownErr
