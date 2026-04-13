@@ -68,6 +68,7 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 	checkpoint := checkpointObjectFromMetadata(session.Metadata, "")
 	parentCheckpoint := checkpointObjectFromMetadata(session.Metadata, "parent_")
 	configurable := s.threadConfigurable(session)
+	scope := threadMemoryScopeFromMetadata(session.Metadata).Merge(threadMemoryScopeFromConfigurable(configurable))
 	next := stringSliceFromAny(session.Metadata["next"])
 	tasks := anySlice(session.Metadata["tasks"])
 	interrupts := anySlice(session.Metadata["interrupts"])
@@ -102,6 +103,7 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 		"thread_data":                 values["thread_data"],
 		"uploaded_files":              values["uploaded_files"],
 		"viewed_images":               values["viewed_images"],
+		"memory_scope":                scope.Response(),
 		"next":                        append([]string(nil), next...),
 		"tasks":                       append([]any(nil), tasks...),
 		"interrupts":                  append([]any(nil), interrupts...),

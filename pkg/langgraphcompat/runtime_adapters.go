@@ -2,7 +2,6 @@ package langgraphcompat
 
 import (
 	"context"
-	"strings"
 	"sync"
 
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
@@ -136,9 +135,10 @@ func (a runtimeMemoryAdapter) PlanMemoryScopes(threadID string, agentName string
 	}
 	if store := a.server.ensureThreadStateStore(); store != nil {
 		if state, ok := store.LoadThreadRuntimeState(threadID); ok {
-			hints.UserID = strings.TrimSpace(stringValue(state.Metadata["memory_user_id"]))
-			hints.GroupID = strings.TrimSpace(stringValue(state.Metadata["memory_group_id"]))
-			hints.Namespace = strings.TrimSpace(stringValue(state.Metadata["memory_namespace"]))
+			scope := threadMemoryScopeFromMetadata(state.Metadata)
+			hints.UserID = scope.UserID
+			hints.GroupID = scope.GroupID
+			hints.Namespace = scope.Namespace
 		}
 	}
 	return harnessruntime.NewMemoryScopeService(nil).Plan(hints)

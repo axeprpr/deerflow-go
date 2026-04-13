@@ -67,6 +67,7 @@ func (s *Server) threadConfigurable(session *Session) map[string]any {
 	if mode == "" {
 		mode = deriveThreadMode(session.Metadata)
 	}
+	scope := threadMemoryScopeFromMetadata(session.Metadata).Merge(threadMemoryScopeFromConfigurable(session.Configurable))
 	thinkingEnabled := mode != "flash"
 	isPlanMode := mode == "pro" || mode == "ultra"
 	subagentEnabled := mode == "ultra"
@@ -80,9 +81,9 @@ func (s *Server) threadConfigurable(session *Session) map[string]any {
 		"is_plan_mode":     isPlanMode,
 		"thinking_enabled": thinkingEnabled,
 		"subagent_enabled": subagentEnabled,
-		"memory_user_id":   stringValue(session.Metadata["memory_user_id"]),
-		"memory_group_id":  stringValue(session.Metadata["memory_group_id"]),
-		"memory_namespace": stringValue(session.Metadata["memory_namespace"]),
+		"memory_user_id":   scope.UserID,
+		"memory_group_id":  scope.GroupID,
+		"memory_namespace": scope.Namespace,
 	} {
 		if _, exists := configurable[key]; !exists || configurable[key] == "" {
 			configurable[key] = value

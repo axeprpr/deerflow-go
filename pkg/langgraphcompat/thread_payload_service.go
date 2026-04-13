@@ -33,6 +33,7 @@ func applyThreadConfigurable(session *Session, raw map[string]any) {
 	if session.Configurable == nil {
 		session.Configurable = defaultThreadConfig(session.ThreadID)
 	}
+	scope := threadMemoryScopeFromConfigurable(configurable)
 	for _, key := range []string{
 		"thread_id",
 		"agent_type",
@@ -54,6 +55,8 @@ func applyThreadConfigurable(session *Session, raw map[string]any) {
 			session.Configurable[key] = value
 		}
 	}
+	scope.ApplyMetadata(session.Metadata)
+	scope.ApplyConfigurable(session.Configurable)
 	if _, ok := session.Configurable["thread_id"]; !ok {
 		session.Configurable["thread_id"] = session.ThreadID
 	}

@@ -1231,3 +1231,36 @@ func TestThreadConfigurableIncludesMemoryScopeHints(t *testing.T) {
 		t.Fatalf("memory_namespace=%q", got)
 	}
 }
+
+func TestThreadResponseIncludesMemoryScopeView(t *testing.T) {
+	s, err := NewServer(":0", "", "test-model")
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	now := time.Now().UTC()
+	session := &Session{
+		ThreadID:  "thread-1",
+		CreatedAt: now,
+		UpdatedAt: now,
+		Metadata: map[string]any{
+			"memory_user_id":   "user-1",
+			"memory_group_id":  "group-1",
+			"memory_namespace": "workspace-a",
+		},
+	}
+
+	resp := s.threadResponse(session)
+	scope, ok := resp["memory_scope"].(map[string]any)
+	if !ok {
+		t.Fatalf("memory_scope=%T", resp["memory_scope"])
+	}
+	if got := stringValue(scope["user_id"]); got != "user-1" {
+		t.Fatalf("memory_scope.user_id=%q", got)
+	}
+	if got := stringValue(scope["group_id"]); got != "group-1" {
+		t.Fatalf("memory_scope.group_id=%q", got)
+	}
+	if got := stringValue(scope["namespace"]); got != "workspace-a" {
+		t.Fatalf("memory_scope.namespace=%q", got)
+	}
+}

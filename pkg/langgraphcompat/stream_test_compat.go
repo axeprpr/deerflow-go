@@ -53,27 +53,10 @@ func threadMetadataFromRuntimeContext(runtimeContext map[string]any, cfg runConf
 		if agentName := stringFromAny(runtimeContext["agent_name"]); agentName != "" {
 			out["agent_name"] = agentName
 		}
-		if userID := firstNonEmpty(stringFromAny(runtimeContext["memory_user_id"]), stringFromAny(runtimeContext["memoryUserId"])); userID != "" {
-			out["memory_user_id"] = userID
-		}
-		if groupID := firstNonEmpty(stringFromAny(runtimeContext["memory_group_id"]), stringFromAny(runtimeContext["memoryGroupId"])); groupID != "" {
-			out["memory_group_id"] = groupID
-		}
-		if namespace := firstNonEmpty(stringFromAny(runtimeContext["memory_namespace"]), stringFromAny(runtimeContext["memoryNamespace"])); namespace != "" {
-			out["memory_namespace"] = namespace
-		}
 	}
+	threadMemoryScopeFromRuntimeContext(runtimeContext, cfg).ApplyMetadata(out)
 	if out["agent_name"] == nil && strings.TrimSpace(cfg.AgentName) != "" {
 		out["agent_name"] = cfg.AgentName
-	}
-	if out["memory_user_id"] == nil && strings.TrimSpace(cfg.MemoryUserID) != "" {
-		out["memory_user_id"] = cfg.MemoryUserID
-	}
-	if out["memory_group_id"] == nil && strings.TrimSpace(cfg.MemoryGroupID) != "" {
-		out["memory_group_id"] = cfg.MemoryGroupID
-	}
-	if out["memory_namespace"] == nil && strings.TrimSpace(cfg.MemoryNamespace) != "" {
-		out["memory_namespace"] = cfg.MemoryNamespace
 	}
 	if strings.TrimSpace(string(cfg.AgentType)) != "" {
 		out["agent_type"] = string(cfg.AgentType)
