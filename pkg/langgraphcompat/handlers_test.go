@@ -1264,3 +1264,89 @@ func TestThreadResponseIncludesMemoryScopeView(t *testing.T) {
 		t.Fatalf("memory_scope.namespace=%q", got)
 	}
 }
+
+func TestApplyThreadConfigurableAcceptsTopLevelMemoryScope(t *testing.T) {
+	session := &Session{
+		ThreadID: "thread-1",
+		Metadata: map[string]any{},
+	}
+
+	applyThreadConfigurable(session, map[string]any{
+		"memory_scope": map[string]any{
+			"user_id":   "user-1",
+			"group_id":  "group-1",
+			"namespace": "workspace-a",
+		},
+		"configurable": map[string]any{
+			"agent_name": "planner",
+		},
+	})
+
+	if got := stringValue(session.Metadata["memory_user_id"]); got != "user-1" {
+		t.Fatalf("memory_user_id=%q", got)
+	}
+	if got := stringValue(session.Metadata["memory_group_id"]); got != "group-1" {
+		t.Fatalf("memory_group_id=%q", got)
+	}
+	if got := stringValue(session.Metadata["memory_namespace"]); got != "workspace-a" {
+		t.Fatalf("memory_namespace=%q", got)
+	}
+}
+
+func TestCreateThreadAcceptsTopLevelMemoryScope(t *testing.T) {
+	s, err := NewServer(":0", "", "test-model")
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	thread, code, detail := s.createThread(map[string]any{
+		"thread_id": "thread-memory-scope",
+		"memory_scope": map[string]any{
+			"user_id":   "user-1",
+			"group_id":  "group-1",
+			"namespace": "workspace-a",
+		},
+	})
+	if code != 0 || detail != "" {
+		t.Fatalf("createThread() code=%d detail=%q", code, detail)
+	}
+	scope, _ := thread["memory_scope"].(map[string]any)
+	if got := stringValue(scope["user_id"]); got != "user-1" {
+		t.Fatalf("memory_scope.user_id=%q", got)
+	}
+	if got := stringValue(scope["group_id"]); got != "group-1" {
+		t.Fatalf("memory_scope.group_id=%q", got)
+	}
+	if got := stringValue(scope["namespace"]); got != "workspace-a" {
+		t.Fatalf("memory_scope.namespace=%q", got)
+	}
+}
+
+func TestUpdateThreadAcceptsTopLevelMemoryScope(t *testing.T) {
+	s, err := NewServer(":0", "", "test-model")
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	s.ensureSession("thread-memory-update", nil)
+
+	thread, code, detail := s.updateThread("thread-memory-update", map[string]any{
+		"memory_scope": map[string]any{
+			"user_id":   "user-2",
+			"group_id":  "group-2",
+			"namespace": "workspace-b",
+		},
+	})
+	if code != 0 || detail != "" {
+		t.Fatalf("updateThread() code=%d detail=%q", code, detail)
+	}
+	scope, _ := thread["memory_scope"].(map[string]any)
+	if got := stringValue(scope["user_id"]); got != "user-2" {
+		t.Fatalf("memory_scope.user_id=%q", got)
+	}
+	if got := stringValue(scope["group_id"]); got != "group-2" {
+		t.Fatalf("memory_scope.group_id=%q", got)
+	}
+	if got := stringValue(scope["namespace"]); got != "workspace-b" {
+		t.Fatalf("memory_scope.namespace=%q", got)
+	}
+}

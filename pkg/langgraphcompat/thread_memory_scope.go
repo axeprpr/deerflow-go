@@ -50,6 +50,38 @@ func threadMemoryScopeFromRuntimeContext(runtimeContext map[string]any, cfg runC
 	}
 }
 
+func threadMemoryScopeFromAny(raw any) threadMemoryScope {
+	scope := mapFromAny(raw)
+	if len(scope) == 0 {
+		return threadMemoryScope{}
+	}
+	return threadMemoryScope{
+		UserID: strings.TrimSpace(firstNonEmpty(
+			stringValue(scope["user_id"]),
+			stringValue(scope["userId"]),
+		)),
+		GroupID: strings.TrimSpace(firstNonEmpty(
+			stringValue(scope["group_id"]),
+			stringValue(scope["groupId"]),
+		)),
+		Namespace: strings.TrimSpace(firstNonEmpty(
+			stringValue(scope["namespace"]),
+		)),
+	}
+}
+
+func threadMemoryScopeFromRaw(raw map[string]any) threadMemoryScope {
+	if len(raw) == 0 {
+		return threadMemoryScope{}
+	}
+	scope := threadMemoryScopeFromAny(firstNonNil(raw["memory_scope"], raw["memoryScope"]))
+	values := mapFromAny(raw["values"])
+	if len(values) > 0 {
+		scope = scope.Merge(threadMemoryScopeFromAny(firstNonNil(values["memory_scope"], values["memoryScope"])))
+	}
+	return scope
+}
+
 func (s threadMemoryScope) IsZero() bool {
 	return s.UserID == "" && s.GroupID == "" && s.Namespace == ""
 }
