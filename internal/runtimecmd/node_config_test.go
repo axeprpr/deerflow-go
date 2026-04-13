@@ -63,6 +63,32 @@ func TestDefaultLangGraphNodeConfigUsesEnvironmentOverrides(t *testing.T) {
 	}
 }
 
+func TestDefaultLangGraphNodeConfigUsesSharedSQLiteForGatewayRole(t *testing.T) {
+	t.Setenv("DEERFLOW_DATA_ROOT", "/tmp/shared-data")
+	t.Setenv("RUNTIME_NODE_ROLE", "gateway")
+	t.Setenv("RUNTIME_NODE_ENDPOINT", "http://worker:8081/dispatch")
+
+	cfg := DefaultLangGraphNodeConfig()
+	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendSQLite {
+		t.Fatalf("StateBackend = %q", cfg.StateBackend)
+	}
+	if cfg.StateRoot != "/tmp/shared-data/runtime-state" {
+		t.Fatalf("StateRoot = %q", cfg.StateRoot)
+	}
+}
+
+func TestDefaultRuntimeWorkerNodeConfigUsesSharedSQLiteState(t *testing.T) {
+	t.Setenv("DEERFLOW_DATA_ROOT", "/tmp/shared-data")
+
+	cfg := DefaultRuntimeWorkerNodeConfig()
+	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendSQLite {
+		t.Fatalf("StateBackend = %q", cfg.StateBackend)
+	}
+	if cfg.StateRoot != "/tmp/shared-data/runtime-state" {
+		t.Fatalf("StateRoot = %q", cfg.StateRoot)
+	}
+}
+
 func TestNormalizeStateBackendSupportsSQLite(t *testing.T) {
 	if got := NormalizeStateBackend("sqlite", harnessruntime.RuntimeStateStoreBackendInMemory); got != harnessruntime.RuntimeStateStoreBackendSQLite {
 		t.Fatalf("NormalizeStateBackend() = %q", got)

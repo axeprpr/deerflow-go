@@ -44,7 +44,7 @@ type NodeConfig struct {
 
 func DefaultNodeConfig(defaults NodeDefaults) NodeConfig {
 	role := NormalizeRole(os.Getenv("RUNTIME_NODE_ROLE"), defaults.Role)
-	return NodeConfig{
+	config := NodeConfig{
 		Role:             role,
 		Addr:             NormalizeAddr(firstNonEmpty(os.Getenv("RUNTIME_NODE_ADDR"), defaults.Addr), defaults.Addr),
 		Name:             firstNonEmpty(os.Getenv("RUNTIME_NODE_NAME"), defaults.Name),
@@ -63,6 +63,7 @@ func DefaultNodeConfig(defaults NodeDefaults) NodeConfig {
 		EventBackend:     NormalizeStateBackend(os.Getenv("RUNTIME_NODE_EVENT_BACKEND"), ""),
 		ThreadBackend:    NormalizeStateBackend(os.Getenv("RUNTIME_NODE_THREAD_BACKEND"), ""),
 	}
+	return config.withRoleDefaults()
 }
 
 func DefaultLangGraphNodeConfig() NodeConfig {
@@ -135,10 +136,31 @@ func (c NodeConfig) RuntimeNodeConfig() harnessruntime.RuntimeNodeConfig {
 	}
 	if strings.TrimSpace(c.StateRoot) != "" {
 		config.State.Root = strings.TrimSpace(c.StateRoot)
-	} else if usesFileStateBackend(config.State) {
+	} else if usesPersistentStateBackend(config.State) {
 		config.State.Root = filepath.Join(root, "state")
 	}
 	return config
+}
+
+func (c NodeConfig) withRoleDefaults() NodeConfig {
+	if c.DataRoot == "" {
+		c.DataRoot = tools.DataRootFromEnv()
+	}
+	switch c.Role {
+	case harnessruntime.RuntimeNodeRoleGateway, harnessruntime.RuntimeNodeRoleWorker:
+		if c.StateBackend == "" || c.StateBackend == harnessruntime.RuntimeStateStoreBackendInMemory {
+			c.StateBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+		}
+		if strings.TrimSpace(c.StateRoot) == "" && strings.TrimSpace(c.DataRoot) != "" && usesPersistentStateBackend(harnessruntime.RuntimeStateStoreConfig{
+			Backend:         c.StateBackend,
+			SnapshotBackend: c.SnapshotBackend,
+			EventBackend:    c.EventBackend,
+			ThreadBackend:   c.ThreadBackend,
+		}) {
+			c.StateRoot = filepath.Join(strings.TrimSpace(c.DataRoot), "runtime-state")
+		}
+	}
+	return c
 }
 
 func (c NodeConfig) ValidateForLangGraph() error {
@@ -262,7 +284,7 @@ func intFromEnv(name string, fallback int) int {
 	return value
 }
 
-func usesFileStateBackend(config harnessruntime.RuntimeStateStoreConfig) bool {
+func usesPersistentStateBackend(config harnessruntime.RuntimeStateStoreConfig) bool {
 	backends := []harnessruntime.RuntimeStateStoreBackend{
 		config.Backend,
 		config.SnapshotBackend,
@@ -270,7 +292,7 @@ func usesFileStateBackend(config harnessruntime.RuntimeStateStoreConfig) bool {
 		config.ThreadBackend,
 	}
 	for _, backend := range backends {
-		if backend == harnessruntime.RuntimeStateStoreBackendFile {
+		if backend == harnessruntime.RuntimeStateStoreBackendFile || backend == harnessruntime.RuntimeStateStoreBackendSQLite {
 			return true
 		}
 	}

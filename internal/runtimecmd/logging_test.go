@@ -18,4 +18,7 @@ func TestNodeConfigStartupLines(t *testing.T) {
 	if !strings.Contains(joined, "worker_addr=") {
 		t.Fatalf("StartupLines() = %q", joined)
 	}
+	if !strings.Contains(joined, "root=") {
+		t.Fatalf("StartupLines() = %q", joined)
+	}
 }
