@@ -1,6 +1,7 @@
 package langgraphcompat
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,7 +10,21 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
+	"github.com/axeprpr/deerflow-go/pkg/llm"
+	"github.com/axeprpr/deerflow-go/pkg/models"
 )
+
+type testLLMProvider struct{}
+
+func (testLLMProvider) Chat(context.Context, llm.ChatRequest) (llm.ChatResponse, error) {
+	return llm.ChatResponse{Message: models.Message{Role: models.RoleAI}}, nil
+}
+
+func (testLLMProvider) Stream(context.Context, llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	ch := make(chan llm.StreamChunk)
+	close(ch)
+	return ch, nil
+}
 
 func TestNewServerDefersSandboxCreation(t *testing.T) {
 	tmp := t.TempDir()
@@ -161,6 +176,19 @@ func TestNewServerWithMaxTurnsAppliesBeforeBootstrap(t *testing.T) {
 	}
 	if s.runtime == nil {
 		t.Fatal("runtime = nil")
+	}
+}
+
+func TestNewServerWithLLMProviderAppliesBeforeBootstrap(t *testing.T) {
+	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
+
+	provider := testLLMProvider{}
+	s, err := NewServer(":0", "", "test-model", WithLLMProvider(provider))
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	if s.llmProvider != provider {
+		t.Fatalf("llmProvider = %#v, want %#v", s.llmProvider, provider)
 	}
 }
 

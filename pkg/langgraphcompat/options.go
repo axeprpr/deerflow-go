@@ -1,6 +1,11 @@
 package langgraphcompat
 
-import "github.com/axeprpr/deerflow-go/pkg/harnessruntime"
+import (
+	"strings"
+
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
+	"github.com/axeprpr/deerflow-go/pkg/llm"
+)
 
 func WithRuntimeNodeConfig(config harnessruntime.RuntimeNodeConfig) ServerOption {
 	return func(s *Server) {
@@ -24,4 +29,21 @@ func WithMaxTurns(maxTurns int) ServerOption {
 		}
 		s.maxTurns = maxTurns
 	}
+}
+
+func WithLLMProvider(provider llm.LLMProvider) ServerOption {
+	return func(s *Server) {
+		if s == nil || provider == nil {
+			return
+		}
+		s.llmProvider = provider
+	}
+}
+
+func WithLLMProviderName(name string) ServerOption {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	return WithLLMProvider(llm.NewProvider(name))
 }

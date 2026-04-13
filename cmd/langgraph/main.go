@@ -9,8 +9,8 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/axeprpr/deerflow-go/internal/langgraphcmd"
 	"github.com/axeprpr/deerflow-go/internal/runtimecmd"
-	"github.com/axeprpr/deerflow-go/pkg/langgraphcompat"
 )
 
 var (
@@ -21,7 +21,7 @@ var (
 
 func main() {
 	yolo := flag.Bool("yolo", false, "YOLO mode: no auth, defaults for all settings")
-	cfg := defaultConfig()
+	cfg := langgraphcmd.DefaultConfig(defaultAddr())
 	authToken := flag.String("auth-token", cfg.AuthToken, "Bearer token for API auth (env: DEERFLOW_AUTH_TOKEN)")
 	addr := flag.String("addr", cfg.Addr, "Server address")
 	dbURL := flag.String("db", cfg.DatabaseURL, "Database URL (postgres or sqlite)")
@@ -42,8 +42,6 @@ func main() {
 	if *yolo {
 		os.Setenv("DEERFLOW_YOLO", "1")
 		os.Setenv("ADDR", ":8080")
-		os.Setenv("DEFAULT_LLM_PROVIDER", "siliconflow")
-		os.Setenv("DEFAULT_LLM_MODEL", "qwen/Qwen3.5-9B")
 		os.Setenv("DEERFLOW_DATA_ROOT", "./data")
 		os.Setenv("LOG_LEVEL", "info")
 		if *addr == "" || *addr == ":8080" {
@@ -60,40 +58,41 @@ func main() {
 	if *authToken != "" {
 		os.Setenv("DEERFLOW_AUTH_TOKEN", *authToken)
 	}
-	if *provider != "" {
-		os.Setenv("DEFAULT_LLM_PROVIDER", *provider)
+	cfg = langgraphcmd.Config{
+		AuthToken:   strings.TrimSpace(*authToken),
+		Addr:        strings.TrimSpace(*addr),
+		DatabaseURL: strings.TrimSpace(*dbURL),
+		Provider:    strings.TrimSpace(*provider),
+		Model:       strings.TrimSpace(*model),
+		Runtime: runtimecmd.NodeConfig{
+			Role:     runtimecmd.NormalizeRole(*runtimeRole, cfg.Runtime.Role),
+			Addr:     runtimecmd.NormalizeAddr(*runtimeWorkerAddr, cfg.Runtime.Addr),
+			Name:     strings.TrimSpace(*runtimeName),
+			Root:     strings.TrimSpace(*runtimeRoot),
+			DataRoot: cfg.Runtime.DataRoot,
+			Provider: strings.TrimSpace(*provider),
+			Endpoint: strings.TrimSpace(*runtimeWorkerEndpoint),
+			MaxTurns: *maxTurns,
+		},
 	}
-	runtimeConfig := runtimecmd.NodeConfig{
-		Role:     runtimecmd.NormalizeRole(*runtimeRole, cfg.Runtime.Role),
-		Addr:     runtimecmd.NormalizeAddr(*runtimeWorkerAddr, cfg.Runtime.Addr),
-		Name:     strings.TrimSpace(*runtimeName),
-		Root:     strings.TrimSpace(*runtimeRoot),
-		DataRoot: cfg.Runtime.DataRoot,
-		Provider: strings.TrimSpace(*provider),
-		Endpoint: strings.TrimSpace(*runtimeWorkerEndpoint),
-		MaxTurns: *maxTurns,
-	}
-	if err := runtimeConfig.ValidateForLangGraph(); err != nil {
+	if err := cfg.Validate(); err != nil {
 		logger.Fatalf("Invalid runtime configuration: %v", err)
 	}
 
 	logger.Printf("Starting deerflow-go server...")
 	logger.Printf("  YOLO mode: %v", *yolo)
-	logger.Printf("  Address:   %s", *addr)
-	logger.Printf("  Database: %s", describeDB(*dbURL))
-	logger.Printf("  Provider: %s", *provider)
-	logger.Printf("  Model:    %s", *model)
-	logger.Printf("  Runtime:  role=%s worker_addr=%s worker_endpoint=%s", runtimeConfig.Role, runtimeConfig.Addr, firstNonEmpty(runtimeConfig.Endpoint, "(local)"))
+	logger.Printf("  Address:   %s", cfg.Addr)
+	logger.Printf("  Database: %s", describeDB(cfg.DatabaseURL))
+	logger.Printf("  Provider: %s", cfg.Provider)
+	logger.Printf("  Model:    %s", cfg.Model)
+	logger.Printf("  Runtime:  role=%s worker_addr=%s worker_endpoint=%s", cfg.Runtime.Role, cfg.Runtime.Addr, firstNonEmpty(cfg.Runtime.Endpoint, "(local)"))
 	logger.Printf("  Auth:     %s", describeAuth(*authToken, *yolo))
 	logger.Printf("  Version: %s (%s, %s)", version, commit, buildTime)
 	if level := strings.TrimSpace(os.Getenv("LOG_LEVEL")); level != "" {
 		logger.Printf("  Log Level: %s", level)
 	}
 
-	server, err := langgraphcompat.NewServer(*addr, *dbURL, *model,
-		langgraphcompat.WithRuntimeNodeConfig(runtimeConfig.RuntimeNodeConfig()),
-		langgraphcompat.WithMaxTurns(runtimeConfig.MaxTurns),
-	)
+	server, err := cfg.BuildServer()
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}
@@ -111,30 +110,10 @@ func main() {
 		server.Shutdown(ctx)
 	}()
 
-	logger.Printf("Server ready on %s", *addr)
-	logger.Printf("  API docs: http://%s/docs", *addr)
+	logger.Printf("Server ready on %s", cfg.Addr)
+	logger.Printf("  API docs: http://%s/docs", cfg.Addr)
 	if err := server.Start(); err != nil {
 		logger.Fatalf("Server error: %v", err)
-	}
-}
-
-type config struct {
-	AuthToken   string
-	Addr        string
-	DatabaseURL string
-	Provider    string
-	Model       string
-	Runtime     runtimecmd.NodeConfig
-}
-
-func defaultConfig() config {
-	return config{
-		AuthToken:   strings.TrimSpace(os.Getenv("DEERFLOW_AUTH_TOKEN")),
-		Addr:        defaultAddr(),
-		DatabaseURL: firstNonEmpty(os.Getenv("DATABASE_URL"), os.Getenv("POSTGRES_URL")),
-		Provider:    firstNonEmpty(os.Getenv("DEFAULT_LLM_PROVIDER"), "siliconflow"),
-		Model:       firstNonEmpty(os.Getenv("DEFAULT_LLM_MODEL"), "qwen/Qwen3.5-9B"),
-		Runtime:     runtimecmd.DefaultLangGraphNodeConfig(),
 	}
 }
 

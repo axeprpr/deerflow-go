@@ -188,9 +188,6 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	logger := log.Default()
 	ctx := context.Background()
 
-	// Create LLM provider
-	provider := llm.NewProvider(defaultRuntimeProvider())
-
 	clarifyManager := clarification.NewManager(32)
 	sandboxRoot := filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
 	runtimeNode := harnessruntime.DefaultRuntimeNodeConfig("langgraph", sandboxRoot)
@@ -204,7 +201,6 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	}
 	s := &Server{
 		logger:        logger,
-		llmProvider:   provider,
 		sandboxName:   "langgraph",
 		sandboxRoot:   sandboxRoot,
 		clarify:       clarifyManager,
@@ -231,6 +227,10 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 			option(s)
 		}
 	}
+	if s.llmProvider == nil {
+		s.llmProvider = llm.NewProvider(defaultRuntimeProvider())
+	}
+	provider := s.llmProvider
 	runtimeNode = s.runtimeNodeConfig()
 
 	bootstrap, launcher, err := harnessruntime.BuildDefaultRuntimeSystemLauncherWithMemory(ctx, runtimeNode, dataRootAbs, provider, clarifyManager, s.maxTurns, s.runtimeProfileBuilder, s.runtimeView, s.runtimeWorkerSpecAdapter())
