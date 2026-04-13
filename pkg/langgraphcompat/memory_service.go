@@ -123,6 +123,18 @@ func (s *Server) resolveThreadMemoryScope(threadID string) (threadMemoryScope, b
 	return threadMemoryScope{}, false
 }
 
+func (s *Server) gatewayMemoryScopeFromThreadID(threadID string) (pkgmemory.Scope, error) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return pkgmemory.Scope{}, fmt.Errorf("thread ID required")
+	}
+	threadScope, ok := s.resolveThreadMemoryScope(threadID)
+	if !ok {
+		return pkgmemory.Scope{}, fmt.Errorf("memory thread_id not found")
+	}
+	return defaultGatewayMemoryScopeFromThread(threadID, threadScope), nil
+}
+
 func defaultMemoryScopeTypeFromThread(scope threadMemoryScope) pkgmemory.ScopeType {
 	switch {
 	case strings.TrimSpace(scope.GroupID) != "":

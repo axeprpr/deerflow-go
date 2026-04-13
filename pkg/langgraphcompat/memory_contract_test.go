@@ -616,3 +616,72 @@ func TestMemoryScopeFromThreadRejectsUnknownThread(t *testing.T) {
 		t.Fatalf("body=%s", resp.Body.String())
 	}
 }
+
+func TestThreadScopedMemoryEndpointsUseDerivedScope(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	session := s.ensureSession("thread-memory-endpoints", nil)
+	session.Metadata["memory_group_id"] = "team-9"
+	session.Metadata["memory_namespace"] = "workspace-q"
+
+	store, err := memory.NewFileStore(filepath.Join(s.dataRoot, "memory-store"))
+	if err != nil {
+		t.Fatalf("new file store: %v", err)
+	}
+	if err := store.AutoMigrate(context.Background()); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	s.runtime = harness.NewRuntime(harness.RuntimeDeps{
+		LLMProvider:     s.llmProvider,
+		Tools:           s.tools,
+		DefaultMaxTurns: s.maxTurns,
+		SandboxProvider: harness.NewLocalSandboxProvider(s.sandboxName, s.sandboxRoot),
+	}, harness.NewMemoryRuntime(store, nil))
+
+	body := `{
+		"version":"1",
+		"user":{"topOfMind":{"summary":"thread endpoint memory","updatedAt":"2026-04-13T14:00:00Z"}},
+		"history":{"recentMonths":{"summary":"","updatedAt":""},"earlierContext":{"summary":"","updatedAt":""},"longTermBackground":{"summary":"","updatedAt":""}},
+		"facts":[]
+	}`
+	importResp := performCompatRequest(t, handler, http.MethodPost, "/threads/thread-memory-endpoints/memory/import", strings.NewReader(body), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if importResp.Code != http.StatusOK {
+		t.Fatalf("import status=%d body=%s", importResp.Code, importResp.Body.String())
+	}
+
+	createResp := performCompatRequest(t, handler, http.MethodPost, "/threads/thread-memory-endpoints/memory/facts", strings.NewReader(`{"content":"Scoped fact","category":"context","confidence":0.9}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if createResp.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", createResp.Code, createResp.Body.String())
+	}
+	var created gatewayMemoryResponse
+	if err := json.Unmarshal(createResp.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create body: %v", err)
+	}
+	if len(created.Facts) != 1 {
+		t.Fatalf("facts=%#v", created.Facts)
+	}
+	factID := created.Facts[0].ID
+
+	getResp := performCompatRequest(t, handler, http.MethodGet, "/threads/thread-memory-endpoints/memory", nil, nil)
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", getResp.Code, getResp.Body.String())
+	}
+	var got gatewayMemoryResponse
+	if err := json.Unmarshal(getResp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode get body: %v", err)
+	}
+	if got.User.TopOfMind.Summary != "thread endpoint memory" {
+		t.Fatalf("summary=%q", got.User.TopOfMind.Summary)
+	}
+	if len(got.Facts) != 1 || got.Facts[0].Content != "Scoped fact" {
+		t.Fatalf("facts=%#v", got.Facts)
+	}
+
+	deleteResp := performCompatRequest(t, handler, http.MethodDelete, "/threads/thread-memory-endpoints/memory/facts/"+factID, nil, nil)
+	if deleteResp.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", deleteResp.Code, deleteResp.Body.String())
+	}
+}
