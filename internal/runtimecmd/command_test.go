@@ -44,4 +44,7 @@ func TestPrepareCommandBuildsReadyLines(t *testing.T) {
 	if len(prepared.ReadyLines) != 1 || !strings.Contains(prepared.ReadyLines[0], ":19081") {
 		t.Fatalf("PrepareCommand().ReadyLines = %#v", prepared.ReadyLines)
 	}
+	if prepared.Ready == nil {
+		t.Fatal("PrepareCommand().Ready = nil")
+	}
 }

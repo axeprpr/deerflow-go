@@ -16,6 +16,10 @@ type Lifecycle interface {
 }
 
 func Run(logger *log.Logger, lifecycle Lifecycle, shutdownTimeout time.Duration, ignored ...error) error {
+	return RunWithReady(logger, lifecycle, nil, 0, shutdownTimeout, ignored...)
+}
+
+func RunWithReady(logger *log.Logger, lifecycle Lifecycle, ready ReadyFunc, readyTimeout time.Duration, shutdownTimeout time.Duration, ignored ...error) error {
 	if lifecycle == nil {
 		return nil
 	}
@@ -26,6 +30,41 @@ func Run(logger *log.Logger, lifecycle Lifecycle, shutdownTimeout time.Duration,
 	go func() {
 		errCh <- lifecycle.Start()
 	}()
+
+	if ready != nil {
+		if readyTimeout <= 0 {
+			readyTimeout = 15 * time.Second
+		}
+		readyCtx, cancel := context.WithTimeout(ctx, readyTimeout)
+		readyCh := make(chan error, 1)
+		go func() {
+			readyCh <- ready(readyCtx)
+		}()
+		select {
+		case err := <-errCh:
+			cancel()
+			if shouldIgnore(err, ignored...) {
+				return nil
+			}
+			return err
+		case err := <-readyCh:
+			cancel()
+			if err != nil {
+				shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+				defer shutdownCancel()
+				_ = lifecycle.Close(shutdownCtx)
+				return err
+			}
+		case <-ctx.Done():
+			cancel()
+			if logger != nil {
+				logger.Println("Shutting down...")
+			}
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			defer shutdownCancel()
+			return lifecycle.Close(shutdownCtx)
+		}
+	}
 
 	select {
 	case err := <-errCh:

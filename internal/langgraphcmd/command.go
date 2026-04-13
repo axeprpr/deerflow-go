@@ -61,6 +61,8 @@ func PrepareCommand(fs *flag.FlagSet, build BuildInfo, options CommandOptions) (
 		Lifecycle:       launcher,
 		StartupLines:    cfg.StartupLines(build, *yolo, strings.TrimSpace(os.Getenv("LOG_LEVEL"))),
 		ReadyLines:      cfg.ReadyLines(),
+		Ready:           cfg.ReadyProbe(),
+		ReadyTimeout:    15 * time.Second,
 		ShutdownTimeout: 15 * time.Second,
 		IgnoredErrors:   []error{http.ErrServerClosed},
 	}, nil

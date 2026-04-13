@@ -25,6 +25,9 @@ func TestPrepareCommandBuildsSplitReadyLines(t *testing.T) {
 	if !strings.Contains(strings.Join(prepared.ReadyLines, "\n"), ":19081") {
 		t.Fatalf("ReadyLines = %#v", prepared.ReadyLines)
 	}
+	if prepared.Ready == nil {
+		t.Fatal("PrepareCommand().Ready = nil")
+	}
 }
 
 func TestPrepareCommandAcceptsSharedBackendFlags(t *testing.T) {

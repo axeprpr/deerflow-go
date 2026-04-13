@@ -33,6 +33,9 @@ func TestPrepareCommandBuildsReadyLines(t *testing.T) {
 	if len(prepared.ReadyLines) == 0 || !strings.Contains(strings.Join(prepared.ReadyLines, "\n"), ":19080") {
 		t.Fatalf("PrepareCommand().ReadyLines = %#v", prepared.ReadyLines)
 	}
+	if prepared.Ready == nil {
+		t.Fatal("PrepareCommand().Ready = nil")
+	}
 }
 
 func TestFirstNonEmpty(t *testing.T) {

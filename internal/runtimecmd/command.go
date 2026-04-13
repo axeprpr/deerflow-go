@@ -55,6 +55,8 @@ func PrepareCommand(fs *flag.FlagSet, options CommandOptions) (*commandrun.Prepa
 		Lifecycle:       launcher,
 		StartupLines:    cfg.StartupLines(),
 		ReadyLines:      []string{readyLine},
+		Ready:           cfg.ReadyProbe(spec),
+		ReadyTimeout:    15 * time.Second,
 		ShutdownTimeout: 15 * time.Second,
 		IgnoredErrors:   []error{http.ErrServerClosed, context.Canceled},
 	}, nil
