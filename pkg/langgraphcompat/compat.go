@@ -230,9 +230,6 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	if err != nil {
 		return nil, err
 	}
-	runtimeNodeInstance := bootstrap.Node
-	s.tools = runtimeNodeInstance.ToolRegistry()
-	s.subagents = runtimeNodeInstance.Subagents()
 	if bootstrap.MemoryErr != nil {
 		logger.Printf("Warning: failed to configure memory store: %v", bootstrap.MemoryErr)
 	}
@@ -246,11 +243,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		}
 	}
 
-	s.attachRuntimeSystem(runtimeNodeInstance)
-	s.snapshotStore = newCompatRunStateStore(s, runtimeNodeInstance.SnapshotStore(), runtimeNodeInstance.EventStore())
-	s.eventStore = s.snapshotStore.(harnessruntime.RunEventStore)
-	s.threadStateStore = newCompatThreadStateStore(s, runtimeNodeInstance.ThreadStateStore())
-	s.runtime = bootstrap.Runtime
+	s.attachRuntimeBootstrap(bootstrap)
 	s.bindRuntimeNodeDispatch()
 	s.skills = s.discoverGatewaySkills(nil)
 	for _, option := range options {
@@ -276,6 +269,26 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	}
 
 	return s, nil
+}
+
+func (s *Server) attachRuntimeBootstrap(bootstrap *harnessruntime.RuntimeBootstrap) {
+	if s == nil || bootstrap == nil || bootstrap.Node == nil {
+		return
+	}
+	if bootstrap.Runtime != nil {
+		s.runtime = bootstrap.Runtime
+		bootstrap.Node.BindRuntime(bootstrap.Runtime)
+	}
+	s.attachRuntimeSystem(bootstrap.Node)
+	if registry := bootstrap.Node.ToolRegistry(); registry != nil {
+		s.tools = registry
+	}
+	if pool := bootstrap.Node.Subagents(); pool != nil {
+		s.subagents = pool
+	}
+	s.snapshotStore = newCompatRunStateStore(s, bootstrap.Node.SnapshotStore(), bootstrap.Node.EventStore())
+	s.eventStore = s.snapshotStore.(harnessruntime.RunEventStore)
+	s.threadStateStore = newCompatThreadStateStore(s, bootstrap.Node.ThreadStateStore())
 }
 
 func (s *Server) attachRuntimeSystem(node *harnessruntime.RuntimeNode) {
