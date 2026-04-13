@@ -16,6 +16,7 @@ type NodeFlagBinding struct {
 	sandboxBackend   *string
 	sandboxEndpoint  *string
 	sandboxImage     *string
+	memoryStore      *string
 	stateRoot        *string
 	stateBackend     *string
 	snapshotBackend  *string
@@ -41,6 +42,7 @@ func BindFlags(fs *flag.FlagSet, defaults NodeConfig, prefix, label string) *Nod
 		sandboxBackend:   fs.String(flagName(prefix, "sandbox-backend"), string(defaults.SandboxBackend), label+"sandbox backend: local-linux|container|remote|windows-restricted"),
 		sandboxEndpoint:  fs.String(flagName(prefix, "sandbox-endpoint"), defaults.SandboxEndpoint, label+"sandbox endpoint for remote backend"),
 		sandboxImage:     fs.String(flagName(prefix, "sandbox-image"), defaults.SandboxImage, label+"sandbox image for container backend"),
+		memoryStore:      fs.String(flagName(prefix, "memory-store"), defaults.MemoryStoreURL, label+"shared memory store URL"),
 		stateRoot:        fs.String(flagName(prefix, "state-root"), defaults.StateRoot, label+"state root"),
 		stateBackend:     fs.String(flagName(prefix, "state-backend"), string(defaults.StateBackend), label+"state backend: in-memory|file|sqlite"),
 		snapshotBackend:  fs.String(flagName(prefix, "snapshot-backend"), string(defaults.SnapshotBackend), label+"snapshot backend override: in-memory|file|sqlite"),
@@ -67,6 +69,7 @@ func (b *NodeFlagBinding) Config() NodeConfig {
 		SandboxBackend:   NormalizeSandboxBackend(valueOrEmpty(b.sandboxBackend), defaults.SandboxBackend),
 		SandboxEndpoint:  valueOrEmpty(b.sandboxEndpoint),
 		SandboxImage:     valueOrEmpty(b.sandboxImage),
+		MemoryStoreURL:   valueOrEmpty(b.memoryStore),
 		StateRoot:        valueOrEmpty(b.stateRoot),
 		StateBackend:     NormalizeStateBackend(valueOrEmpty(b.stateBackend), defaults.StateBackend),
 		SnapshotBackend:  NormalizeStateBackend(valueOrEmpty(b.snapshotBackend), defaults.SnapshotBackend),

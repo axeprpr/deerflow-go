@@ -17,6 +17,7 @@ func TestBindFlagsBuildsNodeConfig(t *testing.T) {
 		"-transport-backend=direct",
 		"-sandbox-backend=container",
 		"-sandbox-image=debian:bookworm",
+		"-memory-store=sqlite:///tmp/memory.sqlite3",
 		"-state-backend=file",
 		"-state-root=/tmp/state",
 	}); err != nil {
@@ -38,6 +39,9 @@ func TestBindFlagsBuildsNodeConfig(t *testing.T) {
 	}
 	if cfg.SandboxImage != "debian:bookworm" {
 		t.Fatalf("SandboxImage = %q", cfg.SandboxImage)
+	}
+	if cfg.MemoryStoreURL != "sqlite:///tmp/memory.sqlite3" {
+		t.Fatalf("MemoryStoreURL = %q", cfg.MemoryStoreURL)
 	}
 	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendFile {
 		t.Fatalf("StateBackend = %q", cfg.StateBackend)

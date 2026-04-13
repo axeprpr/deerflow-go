@@ -33,7 +33,22 @@ func applyThreadConfigurable(session *Session, raw map[string]any) {
 	if session.Configurable == nil {
 		session.Configurable = defaultThreadConfig(session.ThreadID)
 	}
-	for _, key := range []string{"thread_id", "agent_type", "agent_name", "model_name", "mode", "reasoning_effort", "thinking_enabled", "is_plan_mode", "subagent_enabled", "temperature", "max_tokens"} {
+	for _, key := range []string{
+		"thread_id",
+		"agent_type",
+		"agent_name",
+		"model_name",
+		"mode",
+		"reasoning_effort",
+		"thinking_enabled",
+		"is_plan_mode",
+		"subagent_enabled",
+		"temperature",
+		"max_tokens",
+		"memory_user_id",
+		"memory_group_id",
+		"memory_namespace",
+	} {
 		if value, ok := configurable[key]; ok {
 			session.Metadata[key] = value
 			session.Configurable[key] = value

@@ -80,6 +80,9 @@ func (s *Server) threadConfigurable(session *Session) map[string]any {
 		"is_plan_mode":     isPlanMode,
 		"thinking_enabled": thinkingEnabled,
 		"subagent_enabled": subagentEnabled,
+		"memory_user_id":   stringValue(session.Metadata["memory_user_id"]),
+		"memory_group_id":  stringValue(session.Metadata["memory_group_id"]),
+		"memory_namespace": stringValue(session.Metadata["memory_namespace"]),
 	} {
 		if _, exists := configurable[key]; !exists || configurable[key] == "" {
 			configurable[key] = value

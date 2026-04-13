@@ -1177,3 +1177,57 @@ func TestThreadMetadataFromRuntimeContextFallsBackToRunConfigMemoryScope(t *test
 		t.Fatalf("memory_namespace=%q", got)
 	}
 }
+
+func TestApplyThreadConfigurablePersistsMemoryScope(t *testing.T) {
+	session := &Session{
+		ThreadID: "thread-1",
+		Metadata: map[string]any{},
+	}
+
+	applyThreadConfigurable(session, map[string]any{
+		"configurable": map[string]any{
+			"memory_user_id":   "user-1",
+			"memory_group_id":  "group-1",
+			"memory_namespace": "workspace-a",
+		},
+	})
+
+	if got := stringValue(session.Metadata["memory_user_id"]); got != "user-1" {
+		t.Fatalf("memory_user_id=%q", got)
+	}
+	if got := stringValue(session.Metadata["memory_group_id"]); got != "group-1" {
+		t.Fatalf("memory_group_id=%q", got)
+	}
+	if got := stringValue(session.Metadata["memory_namespace"]); got != "workspace-a" {
+		t.Fatalf("memory_namespace=%q", got)
+	}
+	if got := stringValue(session.Configurable["memory_user_id"]); got != "user-1" {
+		t.Fatalf("configurable.memory_user_id=%q", got)
+	}
+}
+
+func TestThreadConfigurableIncludesMemoryScopeHints(t *testing.T) {
+	s, err := NewServer(":0", "", "test-model")
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	session := &Session{
+		ThreadID: "thread-1",
+		Metadata: map[string]any{
+			"memory_user_id":   "user-1",
+			"memory_group_id":  "group-1",
+			"memory_namespace": "workspace-a",
+		},
+	}
+
+	configurable := s.threadConfigurable(session)
+	if got := stringValue(configurable["memory_user_id"]); got != "user-1" {
+		t.Fatalf("memory_user_id=%q", got)
+	}
+	if got := stringValue(configurable["memory_group_id"]); got != "group-1" {
+		t.Fatalf("memory_group_id=%q", got)
+	}
+	if got := stringValue(configurable["memory_namespace"]); got != "workspace-a" {
+		t.Fatalf("memory_namespace=%q", got)
+	}
+}
