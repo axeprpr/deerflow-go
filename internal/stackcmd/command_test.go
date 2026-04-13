@@ -36,7 +36,8 @@ func TestPrepareCommandAcceptsSharedBackendFlags(t *testing.T) {
 		Args: []string{
 			"-state-backend=sqlite",
 			"-state-store=sqlite:///tmp/runtime.sqlite3",
-			"-event-backend=file",
+			"-snapshot-backend=sqlite",
+			"-event-backend=sqlite",
 			"-thread-backend=sqlite",
 			"-worker-transport=queue",
 		},
@@ -49,5 +50,19 @@ func TestPrepareCommandAcceptsSharedBackendFlags(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(prepared.StartupLines, "\n"), "store=sqlite:///tmp/runtime.sqlite3") {
 		t.Fatalf("StartupLines = %#v", prepared.StartupLines)
+	}
+}
+
+func TestPrepareCommandRejectsConflictingSharedStateFlags(t *testing.T) {
+	_, err := PrepareCommand(flag.NewFlagSet("runtime-stack", flag.ContinueOnError), langgraphcmd.BuildInfo{}, CommandOptions{
+		Stderr: new(strings.Builder),
+		Args: []string{
+			"-state-backend=sqlite",
+			"-state-store=sqlite:///tmp/runtime.sqlite3",
+			"-event-backend=file",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "state-store requires sqlite") {
+		t.Fatalf("PrepareCommand() error = %v", err)
 	}
 }

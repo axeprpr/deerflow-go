@@ -193,6 +193,17 @@ func (c NodeConfig) withRoleDefaults() NodeConfig {
 			if strings.TrimSpace(c.StateStoreURL) == "" && c.StateBackend == harnessruntime.RuntimeStateStoreBackendSQLite {
 				c.StateStoreURL = "sqlite://" + filepath.Join(stateRoot, "runtime.sqlite3")
 			}
+			if strings.TrimSpace(c.StateStoreURL) != "" && c.StateBackend == harnessruntime.RuntimeStateStoreBackendSQLite {
+				if strings.TrimSpace(c.SnapshotStoreURL) == "" && effectiveStateBackend(c.SnapshotBackend, c.StateBackend) == harnessruntime.RuntimeStateStoreBackendSQLite {
+					c.SnapshotStoreURL = c.StateStoreURL
+				}
+				if strings.TrimSpace(c.EventStoreURL) == "" && effectiveStateBackend(c.EventBackend, c.StateBackend) == harnessruntime.RuntimeStateStoreBackendSQLite {
+					c.EventStoreURL = c.StateStoreURL
+				}
+				if strings.TrimSpace(c.ThreadStoreURL) == "" && effectiveStateBackend(c.ThreadBackend, c.StateBackend) == harnessruntime.RuntimeStateStoreBackendSQLite {
+					c.ThreadStoreURL = c.StateStoreURL
+				}
+			}
 			if strings.TrimSpace(c.SnapshotStoreURL) == "" && effectiveStateBackend(c.SnapshotBackend, c.StateBackend) == harnessruntime.RuntimeStateStoreBackendSQLite {
 				c.SnapshotStoreURL = "sqlite://" + filepath.Join(stateRoot, "snapshots.sqlite3")
 			}
@@ -211,6 +222,9 @@ func (c NodeConfig) withRoleDefaults() NodeConfig {
 }
 
 func (c NodeConfig) ValidateForLangGraph() error {
+	if err := c.validateStateConfig(); err != nil {
+		return err
+	}
 	node := c.RuntimeNodeConfig()
 	switch c.Role {
 	case harnessruntime.RuntimeNodeRoleAllInOne:
@@ -234,6 +248,9 @@ func (c NodeConfig) ValidateForRuntimeNode() error {
 		return fmt.Errorf("gateway role does not start a runtime worker server; use cmd/langgraph for API serving")
 	default:
 		return fmt.Errorf("unsupported runtime node role %q", c.Role)
+	}
+	if err := c.validateStateConfig(); err != nil {
+		return err
 	}
 	node := c.RuntimeNodeConfig()
 	if node.Transport.Backend == harnessruntime.WorkerTransportBackendRemote && strings.TrimSpace(node.Transport.Endpoint) == "" {
@@ -351,4 +368,33 @@ func effectiveStateBackend(override harnessruntime.RuntimeStateStoreBackend, fal
 		return override
 	}
 	return fallback
+}
+
+func (c NodeConfig) validateStateConfig() error {
+	if strings.TrimSpace(c.StateStoreURL) == "" {
+		return nil
+	}
+	if effectiveStateBackend(c.SnapshotBackend, c.StateBackend) != harnessruntime.RuntimeStateStoreBackendSQLite ||
+		effectiveStateBackend(c.EventBackend, c.StateBackend) != harnessruntime.RuntimeStateStoreBackendSQLite ||
+		effectiveStateBackend(c.ThreadBackend, c.StateBackend) != harnessruntime.RuntimeStateStoreBackendSQLite {
+		return fmt.Errorf("state-store requires sqlite snapshot/event/thread backends")
+	}
+	stateStore := normalizeStoreLocation(c.StateStoreURL)
+	for name, value := range map[string]string{
+		"snapshot-store": c.SnapshotStoreURL,
+		"event-store":    c.EventStoreURL,
+		"thread-store":   c.ThreadStoreURL,
+	} {
+		if trimmed := strings.TrimSpace(value); trimmed != "" && normalizeStoreLocation(trimmed) != stateStore {
+			return fmt.Errorf("%s must match state-store when using shared sqlite state", name)
+		}
+	}
+	return nil
+}
+
+func normalizeStoreLocation(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	trimmed = strings.TrimPrefix(trimmed, "sqlite://")
+	trimmed = strings.TrimPrefix(trimmed, "file://")
+	return trimmed
 }

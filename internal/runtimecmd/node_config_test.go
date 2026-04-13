@@ -1,6 +1,7 @@
 package runtimecmd
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
@@ -101,13 +102,13 @@ func TestDefaultLangGraphNodeConfigUsesSharedSQLiteForGatewayRole(t *testing.T) 
 	if cfg.StateStoreURL != "sqlite:///tmp/shared-data/runtime-state/runtime.sqlite3" {
 		t.Fatalf("StateStoreURL = %q", cfg.StateStoreURL)
 	}
-	if cfg.SnapshotStoreURL != "sqlite:///tmp/shared-data/runtime-state/snapshots.sqlite3" {
+	if cfg.SnapshotStoreURL != cfg.StateStoreURL {
 		t.Fatalf("SnapshotStoreURL = %q", cfg.SnapshotStoreURL)
 	}
-	if cfg.EventStoreURL != "sqlite:///tmp/shared-data/runtime-state/events.sqlite3" {
+	if cfg.EventStoreURL != cfg.StateStoreURL {
 		t.Fatalf("EventStoreURL = %q", cfg.EventStoreURL)
 	}
-	if cfg.ThreadStoreURL != "sqlite:///tmp/shared-data/runtime-state/threads.sqlite3" {
+	if cfg.ThreadStoreURL != cfg.StateStoreURL {
 		t.Fatalf("ThreadStoreURL = %q", cfg.ThreadStoreURL)
 	}
 }
@@ -128,13 +129,13 @@ func TestDefaultRuntimeWorkerNodeConfigUsesSharedSQLiteState(t *testing.T) {
 	if cfg.StateStoreURL != "sqlite:///tmp/shared-data/runtime-state/runtime.sqlite3" {
 		t.Fatalf("StateStoreURL = %q", cfg.StateStoreURL)
 	}
-	if cfg.SnapshotStoreURL != "sqlite:///tmp/shared-data/runtime-state/snapshots.sqlite3" {
+	if cfg.SnapshotStoreURL != cfg.StateStoreURL {
 		t.Fatalf("SnapshotStoreURL = %q", cfg.SnapshotStoreURL)
 	}
-	if cfg.EventStoreURL != "sqlite:///tmp/shared-data/runtime-state/events.sqlite3" {
+	if cfg.EventStoreURL != cfg.StateStoreURL {
 		t.Fatalf("EventStoreURL = %q", cfg.EventStoreURL)
 	}
-	if cfg.ThreadStoreURL != "sqlite:///tmp/shared-data/runtime-state/threads.sqlite3" {
+	if cfg.ThreadStoreURL != cfg.StateStoreURL {
 		t.Fatalf("ThreadStoreURL = %q", cfg.ThreadStoreURL)
 	}
 }
@@ -209,5 +210,28 @@ func TestNodeConfigValidateForLangGraph(t *testing.T) {
 	}
 	if err := (NodeConfig{Role: harnessruntime.RuntimeNodeRoleAllInOne, SandboxBackend: harnessruntime.SandboxBackendContainer}).ValidateForLangGraph(); err == nil {
 		t.Fatal("container sandbox without image should fail")
+	}
+}
+
+func TestNodeConfigValidateRejectsConflictingSharedStateStores(t *testing.T) {
+	cfg := NodeConfig{
+		Role:          harnessruntime.RuntimeNodeRoleWorker,
+		StateBackend:  harnessruntime.RuntimeStateStoreBackendSQLite,
+		StateStoreURL: "sqlite:///tmp/runtime.sqlite3",
+		EventStoreURL: "sqlite:///tmp/events.sqlite3",
+	}
+	if err := cfg.ValidateForRuntimeNode(); err == nil || !strings.Contains(err.Error(), "event-store must match state-store") {
+		t.Fatalf("ValidateForRuntimeNode() error = %v", err)
+	}
+}
+
+func TestNodeConfigValidateRejectsSharedStateStoreWithoutSQLiteBackends(t *testing.T) {
+	cfg := NodeConfig{
+		Role:          harnessruntime.RuntimeNodeRoleWorker,
+		StateBackend:  harnessruntime.RuntimeStateStoreBackendFile,
+		StateStoreURL: "sqlite:///tmp/runtime.sqlite3",
+	}
+	if err := cfg.ValidateForRuntimeNode(); err == nil || !strings.Contains(err.Error(), "state-store requires sqlite") {
+		t.Fatalf("ValidateForRuntimeNode() error = %v", err)
 	}
 }
