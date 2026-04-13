@@ -812,6 +812,7 @@ func parseRunConfig(raw map[string]any) runConfig {
 	}
 
 	configurable, _ := raw["configurable"].(map[string]any)
+	scope := threadMemoryScopeFromRaw(raw).Merge(threadMemoryScopeFromAny(firstNonNil(configurable["memory_scope"], configurable["memoryScope"])))
 	cfg := runConfig{
 		ModelName: firstNonEmpty(
 			stringFromAny(raw["model_name"]),
@@ -850,6 +851,7 @@ func parseRunConfig(raw map[string]any) runConfig {
 			stringFromAny(configurable["memory_user_id"]),
 			stringFromAny(configurable["memoryUserId"]),
 			stringFromAny(configurable["memoryUserID"]),
+			scope.UserID,
 		),
 		MemoryGroupID: firstNonEmpty(
 			stringFromAny(raw["memory_group_id"]),
@@ -858,12 +860,14 @@ func parseRunConfig(raw map[string]any) runConfig {
 			stringFromAny(configurable["memory_group_id"]),
 			stringFromAny(configurable["memoryGroupId"]),
 			stringFromAny(configurable["memoryGroupID"]),
+			scope.GroupID,
 		),
 		MemoryNamespace: firstNonEmpty(
 			stringFromAny(raw["memory_namespace"]),
 			stringFromAny(raw["memoryNamespace"]),
 			stringFromAny(configurable["memory_namespace"]),
 			stringFromAny(configurable["memoryNamespace"]),
+			scope.Namespace,
 		),
 		MaxTurns: intPointerFromAny(firstNonNil(
 			raw["recursion_limit"],

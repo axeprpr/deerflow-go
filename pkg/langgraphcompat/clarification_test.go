@@ -61,6 +61,49 @@ func TestParseRunConfigMemoryScopeHints(t *testing.T) {
 	}
 }
 
+func TestParseRunConfigAcceptsTopLevelMemoryScope(t *testing.T) {
+	cfg := parseRunConfig(map[string]any{
+		"memory_scope": map[string]any{
+			"user_id":   "user-2",
+			"group_id":  "group-2",
+			"namespace": "workspace-b",
+		},
+	})
+	if cfg.MemoryUserID != "user-2" {
+		t.Fatalf("MemoryUserID = %q", cfg.MemoryUserID)
+	}
+	if cfg.MemoryGroupID != "group-2" {
+		t.Fatalf("MemoryGroupID = %q", cfg.MemoryGroupID)
+	}
+	if cfg.MemoryNamespace != "workspace-b" {
+		t.Fatalf("MemoryNamespace = %q", cfg.MemoryNamespace)
+	}
+}
+
+func TestParseRunConfigPrefersLegacyMemoryKeysOverTopLevelMemoryScope(t *testing.T) {
+	cfg := parseRunConfig(map[string]any{
+		"memory_scope": map[string]any{
+			"user_id":   "scope-user",
+			"group_id":  "scope-group",
+			"namespace": "scope-space",
+		},
+		"configurable": map[string]any{
+			"memory_user_id":   "legacy-user",
+			"memory_group_id":  "legacy-group",
+			"memory_namespace": "legacy-space",
+		},
+	})
+	if cfg.MemoryUserID != "legacy-user" {
+		t.Fatalf("MemoryUserID = %q", cfg.MemoryUserID)
+	}
+	if cfg.MemoryGroupID != "legacy-group" {
+		t.Fatalf("MemoryGroupID = %q", cfg.MemoryGroupID)
+	}
+	if cfg.MemoryNamespace != "legacy-space" {
+		t.Fatalf("MemoryNamespace = %q", cfg.MemoryNamespace)
+	}
+}
+
 func TestThreadClarificationHandlers(t *testing.T) {
 	manager := clarification.NewManager(4)
 	root := t.TempDir()
