@@ -36,6 +36,7 @@ type RuntimeNodeProviders struct {
 	StatePlane RuntimeStatePlaneFactory
 	Transport  WorkerTransportFactory
 	Sandbox    SandboxManagerBuilder
+	Remote     RemoteWorkerProviders
 }
 
 func DefaultRuntimeNodeProviders() RuntimeNodeProviders {
@@ -47,6 +48,7 @@ func DefaultRuntimeNodeProviders() RuntimeNodeProviders {
 			return buildWorkerTransport(config, runtime)
 		}),
 		Sandbox: DefaultSandboxManagerFactory(),
+		Remote:  DefaultRemoteWorkerProviders(),
 	}
 }
 
@@ -72,18 +74,30 @@ func (c RuntimeNodeConfig) BuildRuntimeNodeWithProviders(runtime DispatchRuntime
 	if providers.Sandbox == nil {
 		providers.Sandbox = DefaultRuntimeNodeProviders().Sandbox
 	}
+	if providers.Remote.Client == nil {
+		providers.Remote.Client = DefaultRemoteWorkerProviders().Client
+	}
+	if providers.Remote.Protocol == nil {
+		providers.Remote.Protocol = DefaultRemoteWorkerProviders().Protocol
+	}
+	if providers.Remote.Server == nil {
+		providers.Remote.Server = DefaultRemoteWorkerProviders().Server
+	}
 	sandboxManager, err := providers.Sandbox.Build(c.Sandbox)
 	if err != nil {
 		return nil, err
 	}
 	transport := providers.Transport.Build(c.Transport, runtime)
-	protocol := defaultRemoteWorkerProtocol(runtime.Protocol, runtime.Results)
+	protocol := runtime.Protocol
+	if protocol == nil {
+		protocol = providers.Remote.Protocol.Build(c, runtime.Results)
+	}
 	return &RuntimeNode{
 		Config:       c,
 		State:        providers.StatePlane.Build(c),
 		Dispatcher:   transportRunDispatcher{transport: transport, codec: DispatchEnvelopeCodec{Plans: runtime.Codec}},
 		Sandbox:      sandboxManager,
-		RemoteWorker: NewHTTPRemoteWorkerNode(c.BuildRemoteWorkerHTTPServerWithTransport(transport, protocol)),
+		RemoteWorker: NewHTTPRemoteWorkerNode(c.BuildRemoteWorkerHTTPServerWithProviders(transport, protocol, providers.Remote)),
 	}, nil
 }
 

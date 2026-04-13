@@ -2,6 +2,7 @@ package harnessruntime
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -305,4 +306,76 @@ func TestRuntimeNodeConfigBuildStatePlaneWithProvidersOverridesDefaultStores(t *
 	if plane.Threads != customThreads {
 		t.Fatalf("Threads = %T", plane.Threads)
 	}
+}
+
+func TestRuntimeNodeConfigBuildDispatchRuntimeWithProvidersOverridesRemoteWiring(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	client := &fakeRemoteClient{}
+	protocol := fakeRemoteProtocol{}
+	runtime := config.BuildDispatchRuntimeWithProviders(nil, nil, RemoteWorkerProviders{
+		Client: RemoteWorkerClientFactoryFunc(func(RuntimeNodeConfig) RemoteWorkerClient {
+			return client
+		}),
+		Protocol: RemoteWorkerProtocolFactoryFunc(func(RuntimeNodeConfig, DispatchResultMarshaler) RemoteWorkerProtocol {
+			return protocol
+		}),
+	})
+	if runtime.Remote != client {
+		t.Fatalf("runtime.Remote = %#v", runtime.Remote)
+	}
+	if runtime.Protocol == nil {
+		t.Fatal("runtime.Protocol is nil")
+	}
+	if _, ok := runtime.Protocol.(fakeRemoteProtocol); !ok {
+		t.Fatalf("runtime.Protocol = %T", runtime.Protocol)
+	}
+}
+
+func TestRuntimeNodeConfigBuildRuntimeNodeWithProvidersOverridesRemoteServerFactory(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	node, err := config.BuildRuntimeNodeWithProviders(DispatchRuntimeConfig{
+		Executor: &fakeExecutor{},
+	}, RuntimeNodeProviders{
+		StatePlane: DefaultRuntimeNodeProviders().StatePlane,
+		Transport:  DefaultRuntimeNodeProviders().Transport,
+		Sandbox:    DefaultRuntimeNodeProviders().Sandbox,
+		Remote: RemoteWorkerProviders{
+			Client:   DefaultRemoteWorkerProviders().Client,
+			Protocol: DefaultRemoteWorkerProviders().Protocol,
+			Server: RemoteWorkerHTTPServerFactoryFunc(func(_ RemoteWorkerServerConfig, _ WorkerTransport, _ RemoteWorkerProtocol) *http.Server {
+				return &http.Server{Addr: "127.0.0.1:29081", Handler: http.NewServeMux()}
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildRuntimeNodeWithProviders() error = %v", err)
+	}
+	if node.RemoteWorker == nil || node.RemoteWorker.Server() == nil {
+		t.Fatalf("remote worker = %#v", node.RemoteWorker)
+	}
+	if node.RemoteWorker.Server().Addr != "127.0.0.1:29081" {
+		t.Fatalf("remote worker addr = %q", node.RemoteWorker.Server().Addr)
+	}
+}
+
+type fakeRemoteProtocol struct{}
+
+func (fakeRemoteProtocol) EncodeRequest(env WorkerDispatchEnvelope) ([]byte, error) {
+	return json.Marshal(RemoteWorkerRequest{Envelope: env})
+}
+
+func (fakeRemoteProtocol) DecodeRequest(data []byte) (WorkerDispatchEnvelope, error) {
+	var req RemoteWorkerRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return WorkerDispatchEnvelope{}, err
+	}
+	return req.Envelope, nil
+}
+
+func (fakeRemoteProtocol) EncodeResponse(result *DispatchResult) ([]byte, error) {
+	return json.Marshal(RemoteWorkerResponse{Result: []byte("ok")})
+}
+
+func (fakeRemoteProtocol) DecodeResponse(_ []byte) (*DispatchResult, error) {
+	return &DispatchResult{}, nil
 }

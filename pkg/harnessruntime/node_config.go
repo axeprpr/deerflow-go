@@ -72,11 +72,22 @@ func (c RuntimeNodeConfig) BuildSandboxManager() (*SandboxResourceManager, error
 }
 
 func (c RuntimeNodeConfig) BuildDispatchRuntime(source func() *harness.Runtime, specs WorkerSpecRuntime) DispatchRuntimeConfig {
+	return c.BuildDispatchRuntimeWithProviders(source, specs, DefaultRemoteWorkerProviders())
+}
+
+func (c RuntimeNodeConfig) BuildDispatchRuntimeWithProviders(source func() *harness.Runtime, specs WorkerSpecRuntime, providers RemoteWorkerProviders) DispatchRuntimeConfig {
+	if providers.Client == nil {
+		providers.Client = DefaultRemoteWorkerProviders().Client
+	}
+	if providers.Protocol == nil {
+		providers.Protocol = DefaultRemoteWorkerProviders().Protocol
+	}
 	return DispatchRuntimeConfig{
-		Runtime: source,
-		Specs:   specs,
-		Results: DispatchResultCodec{Handles: NewInMemoryExecutionHandleRegistry()},
-		Remote:  NewHTTPRemoteWorkerClient(nil),
+		Runtime:  source,
+		Specs:    specs,
+		Results:  DispatchResultCodec{Handles: NewInMemoryExecutionHandleRegistry()},
+		Remote:   providers.Client.Build(c),
+		Protocol: providers.Protocol.Build(c, DispatchResultCodec{Handles: NewInMemoryExecutionHandleRegistry()}),
 	}
 }
 
@@ -108,24 +119,18 @@ func (c RuntimeNodeConfig) BuildRemoteWorkerHandler(runtime DispatchRuntimeConfi
 }
 
 func (c RuntimeNodeConfig) BuildRemoteWorkerHTTPServer(runtime DispatchRuntimeConfig) *http.Server {
-	return c.BuildRemoteWorkerHTTPServerWithTransport(c.BuildWorkerTransport(runtime), defaultRemoteWorkerProtocol(runtime.Protocol, runtime.Results))
+	return c.BuildRemoteWorkerHTTPServerWithProviders(c.BuildWorkerTransport(runtime), defaultRemoteWorkerProtocol(runtime.Protocol, runtime.Results), DefaultRemoteWorkerProviders())
 }
 
 func (c RuntimeNodeConfig) BuildRemoteWorkerHTTPServerWithTransport(transport WorkerTransport, protocol RemoteWorkerProtocol) *http.Server {
-	config := c.RemoteWorker
-	addr := config.Addr
-	if addr == "" {
-		addr = ":8081"
+	return c.BuildRemoteWorkerHTTPServerWithProviders(transport, protocol, DefaultRemoteWorkerProviders())
+}
+
+func (c RuntimeNodeConfig) BuildRemoteWorkerHTTPServerWithProviders(transport WorkerTransport, protocol RemoteWorkerProtocol, providers RemoteWorkerProviders) *http.Server {
+	if providers.Server == nil {
+		providers.Server = DefaultRemoteWorkerProviders().Server
 	}
-	timeout := config.ReadHeaderTimeout
-	if timeout <= 0 {
-		timeout = 10 * time.Second
-	}
-	return &http.Server{
-		Addr:              addr,
-		Handler:           NewHTTPRemoteWorkerServer(transport, protocol).Handler(),
-		ReadHeaderTimeout: timeout,
-	}
+	return providers.Server.Build(c.RemoteWorker, transport, protocol)
 }
 
 func (c RuntimeNodeConfig) BuildRemoteWorkerNode(runtime DispatchRuntimeConfig) *HTTPRemoteWorkerNode {
