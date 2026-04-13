@@ -522,8 +522,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	s.closeGatewayMCPClients()
 	s.stopGatewayChannels()
-	if s.runtimeSystem != nil {
-		if err := s.runtimeSystem.Close(ctx); err != nil && shutdownErr == nil {
+	if node := s.ensureRuntimeSystem(); node != nil {
+		if err := node.Close(ctx); err != nil && shutdownErr == nil {
 			shutdownErr = err
 		}
 	} else {
