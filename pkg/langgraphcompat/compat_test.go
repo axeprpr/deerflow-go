@@ -82,6 +82,9 @@ func TestNewServerUsesStableRuntimeBoundaries(t *testing.T) {
 	if s.defaultSandboxRuntime(nil) == nil {
 		t.Fatal("defaultSandboxRuntime() = nil")
 	}
+	if s.runtimeSystem == nil || s.runtimeSystem.RemoteWorker == nil || s.runtimeSystem.RemoteWorker.Server() == nil {
+		t.Fatalf("runtimeSystem remote worker = %#v", s.runtimeSystem)
+	}
 }
 
 func TestNewServerDoesNotServeFrontendAtRoot(t *testing.T) {

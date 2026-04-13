@@ -279,6 +279,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	}, memoryRuntime,
 		harness.WithProfileBuilder(s.runtimeProfileBuilder(memoryRuntime, toolRuntime, sandboxRuntime)),
 	)
+	s.bindRuntimeNodeDispatch()
 	s.skills = s.discoverGatewaySkills(nil)
 	for _, option := range options {
 		if option != nil {
@@ -331,6 +332,16 @@ func (s *Server) runtimeView() *harness.Runtime {
 		harness.WithProfileBuilder(s.runtimeProfileBuilder(memoryRuntime, toolRuntime, s.defaultSandboxRuntime(sandboxRuntime))),
 	)
 	return s.runtime
+}
+
+func (s *Server) bindRuntimeNodeDispatch() {
+	if s == nil || s.runtimeSystem == nil {
+		return
+	}
+	dispatchRuntime := s.runtimeNode.BuildDispatchRuntime(s.runtimeView, s.runtimeWorkerSpecAdapter())
+	s.runDispatcher = s.runtimeNode.BuildDispatcher(dispatchRuntime)
+	s.runtimeSystem.Dispatcher = s.runDispatcher
+	s.runtimeSystem.RemoteWorker = s.runtimeNode.BuildRemoteWorkerNode(dispatchRuntime)
 }
 
 func (s *Server) defaultSandboxRuntime(existing harness.SandboxRuntime) harness.SandboxRuntime {
@@ -393,6 +404,7 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 	s.runDispatcher = s.runtimeNode.BuildDispatcher(s.runtimeNode.BuildDispatchRuntime(s.runtimeView, s.runtimeWorkerSpecAdapter()))
 	if s.runtimeSystem != nil {
 		s.runtimeSystem.Dispatcher = s.runDispatcher
+		s.runtimeSystem.RemoteWorker = s.runtimeNode.BuildRemoteWorkerNode(s.runtimeNode.BuildDispatchRuntime(s.runtimeView, s.runtimeWorkerSpecAdapter()))
 	}
 	return s.runDispatcher
 }
