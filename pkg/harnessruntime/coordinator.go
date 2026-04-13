@@ -45,6 +45,7 @@ type CompletionResult struct {
 type Coordinator struct {
 	runtime      *harness.Runtime
 	dispatcher   RunDispatcher
+	recovery     RecoveryPlanner
 	preflight    PreflightService
 	context      ContextService
 	runState     RunStateService
@@ -57,6 +58,7 @@ func NewCoordinator(deps CoordinatorDeps) Coordinator {
 	return Coordinator{
 		runtime:      deps.Runtime,
 		dispatcher:   deps.Dispatcher,
+		recovery:     NewRecoveryPlanner(),
 		preflight:    NewPreflightService(deps.Preflight),
 		context:      NewContextService(deps.Context, deps.Runtime),
 		runState:     NewRunStateService(deps.RunState),
@@ -93,6 +95,10 @@ func (c Coordinator) Submit(ctx context.Context, plan RunPlan) (*DispatchResult,
 	return dispatcher.Dispatch(ctx, DispatchRequest{
 		Plan: NewWorkerExecutionPlan(plan),
 	})
+}
+
+func (c Coordinator) ResumePlan(plan RunPlan, record RunRecord, afterEvent int, reason string) RunPlan {
+	return c.recovery.ResumePlan(plan, record, afterEvent, reason)
 }
 
 func (c Coordinator) BindContext(ctx context.Context, threadID string, taskSink func(subagent.TaskEvent), clarificationSink func(*clarification.Clarification)) context.Context {
