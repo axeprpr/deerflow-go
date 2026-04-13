@@ -26,3 +26,21 @@ func TestPrepareCommandBuildsSplitReadyLines(t *testing.T) {
 		t.Fatalf("ReadyLines = %#v", prepared.ReadyLines)
 	}
 }
+
+func TestPrepareCommandAcceptsSharedBackendFlags(t *testing.T) {
+	prepared, err := PrepareCommand(flag.NewFlagSet("runtime-stack", flag.ContinueOnError), langgraphcmd.BuildInfo{}, CommandOptions{
+		Stderr: new(strings.Builder),
+		Args: []string{
+			"-state-backend=sqlite",
+			"-event-backend=file",
+			"-thread-backend=sqlite",
+			"-worker-transport=queue",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareCommand() error = %v", err)
+	}
+	if prepared == nil {
+		t.Fatal("PrepareCommand() = nil")
+	}
+}

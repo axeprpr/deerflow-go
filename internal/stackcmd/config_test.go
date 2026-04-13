@@ -33,3 +33,11 @@ func TestConfigBuildLauncherUsesSplitRoles(t *testing.T) {
 		t.Fatal("BuildLauncher() = nil")
 	}
 }
+
+func TestConfigValidateRejectsRemoteWorkerTransport(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Worker.TransportBackend = harnessruntime.WorkerTransportBackendRemote
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "cannot be remote") {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}

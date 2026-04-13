@@ -48,10 +48,14 @@ func DefaultConfig() Config {
 }
 
 func (c Config) Validate() error {
-	if err := c.Worker.ValidateForRuntimeNode(); err != nil {
+	cfg := c.withDefaults()
+	if cfg.Worker.TransportBackend == harnessruntime.WorkerTransportBackendRemote {
+		return fmt.Errorf("invalid worker config: split stack worker transport cannot be remote")
+	}
+	if err := cfg.Worker.ValidateForRuntimeNode(); err != nil {
 		return fmt.Errorf("invalid worker config: %w", err)
 	}
-	if err := c.Gateway.Validate(); err != nil {
+	if err := cfg.Gateway.Validate(); err != nil {
 		return fmt.Errorf("invalid gateway config: %w", err)
 	}
 	return nil
@@ -83,6 +87,11 @@ func (c Config) withDefaults() Config {
 	if strings.TrimSpace(cfg.Worker.ThreadStoreURL) == "" {
 		cfg.Worker.ThreadStoreURL = cfg.Gateway.Runtime.ThreadStoreURL
 	}
+	cfg.Worker.TransportBackend = firstNonEmptyTransport(cfg.Worker.TransportBackend, harnessruntime.WorkerTransportBackendQueue)
+	cfg.Worker.StateBackend = firstNonEmptyState(cfg.Worker.StateBackend, cfg.Gateway.Runtime.StateBackend)
+	cfg.Worker.SnapshotBackend = firstNonEmptyState(cfg.Worker.SnapshotBackend, cfg.Gateway.Runtime.SnapshotBackend)
+	cfg.Worker.EventBackend = firstNonEmptyState(cfg.Worker.EventBackend, cfg.Gateway.Runtime.EventBackend)
+	cfg.Worker.ThreadBackend = firstNonEmptyState(cfg.Worker.ThreadBackend, cfg.Gateway.Runtime.ThreadBackend)
 
 	cfg.Worker.Role = harnessruntime.RuntimeNodeRoleWorker
 	cfg.Gateway.Runtime.Role = harnessruntime.RuntimeNodeRoleGateway
@@ -143,6 +152,15 @@ func firstNonEmpty(values ...string) string {
 }
 
 func firstNonEmptyState(values ...harnessruntime.RuntimeStateStoreBackend) harnessruntime.RuntimeStateStoreBackend {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstNonEmptyTransport(values ...harnessruntime.WorkerTransportBackend) harnessruntime.WorkerTransportBackend {
 	for _, value := range values {
 		if value != "" {
 			return value
