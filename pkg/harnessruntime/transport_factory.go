@@ -30,16 +30,22 @@ type DispatchRuntimeConfig struct {
 	Results   DispatchResultMarshaler
 	Transport WorkerTransport
 	Remote    RemoteWorkerClient
+	Protocol  RemoteWorkerProtocol
 }
 
 type RemoteWorkerClient interface {
-	Submit(context.Context, string, WorkerDispatchEnvelope) ([]byte, error)
+	Submit(context.Context, string, []byte) ([]byte, error)
+}
+
+type RemoteWorkerProtocol interface {
+	EncodeRequest(WorkerDispatchEnvelope) ([]byte, error)
+	DecodeResponse([]byte) (*DispatchResult, error)
 }
 
 type remoteWorkerTransport struct {
 	endpoint string
 	client   RemoteWorkerClient
-	results  DispatchResultMarshaler
+	protocol RemoteWorkerProtocol
 }
 
 func (t remoteWorkerTransport) Submit(ctx context.Context, env WorkerDispatchEnvelope) (*DispatchResult, error) {
@@ -49,15 +55,19 @@ func (t remoteWorkerTransport) Submit(ctx context.Context, env WorkerDispatchEnv
 	if t.client == nil {
 		return nil, errors.New("remote worker client is not configured")
 	}
-	payload, err := t.client.Submit(ctx, t.endpoint, env)
+	protocol := t.protocol
+	if protocol == nil {
+		protocol = JSONRemoteWorkerProtocol{Results: defaultDispatchResultCodec(nil)}
+	}
+	request, err := protocol.EncodeRequest(env)
 	if err != nil {
 		return nil, err
 	}
-	results := t.results
-	if results == nil {
-		results = defaultDispatchResultCodec(nil)
+	payload, err := t.client.Submit(ctx, t.endpoint, request)
+	if err != nil {
+		return nil, err
 	}
-	return results.Decode(payload)
+	return protocol.DecodeResponse(payload)
 }
 
 func buildWorkerTransport(config WorkerTransportConfig, runtime DispatchRuntimeConfig) WorkerTransport {
@@ -74,7 +84,7 @@ func buildWorkerTransport(config WorkerTransportConfig, runtime DispatchRuntimeC
 		return remoteWorkerTransport{
 			endpoint: config.Endpoint,
 			client:   runtime.Remote,
-			results:  defaultDispatchResultCodec(runtime.Results),
+			protocol: defaultRemoteWorkerProtocol(runtime.Protocol, runtime.Results),
 		}
 	default:
 		return NewInProcessRunQueueWithCodec(executor, config.Buffer, config.Workers, runtime.Codec, runtime.Results)

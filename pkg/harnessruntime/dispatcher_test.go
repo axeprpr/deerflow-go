@@ -2,6 +2,7 @@ package harnessruntime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync/atomic"
 	"testing"
@@ -18,8 +19,8 @@ type fakeExecutor struct {
 type fakeRemoteClient struct {
 	called   bool
 	endpoint string
-	envelope WorkerDispatchEnvelope
-	payload  []byte
+	request  []byte
+	response []byte
 	err      error
 }
 
@@ -33,14 +34,14 @@ func (e *fakeExecutor) Execute(_ context.Context, req DispatchRequest) (*Dispatc
 	}, nil
 }
 
-func (c *fakeRemoteClient) Submit(_ context.Context, endpoint string, env WorkerDispatchEnvelope) ([]byte, error) {
+func (c *fakeRemoteClient) Submit(_ context.Context, endpoint string, payload []byte) ([]byte, error) {
 	c.called = true
 	c.endpoint = endpoint
-	c.envelope = env
+	c.request = append([]byte(nil), payload...)
 	if c.err != nil {
 		return nil, c.err
 	}
-	return append([]byte(nil), c.payload...), nil
+	return append([]byte(nil), c.response...), nil
 }
 
 func TestInlineDispatchQueueUsesInjectedExecutor(t *testing.T) {
@@ -195,7 +196,15 @@ func TestRuntimeDispatcherRemoteTopologyUsesClientAndResultCodec(t *testing.T) {
 			Execution: ExecutionDescriptor{Kind: ExecutionKindLocalPrepared, SessionID: "thread-remote"},
 		},
 	}
-	client := &fakeRemoteClient{payload: []byte("remote-result")}
+	encodedResult, err := results.Encode(results.last)
+	if err != nil {
+		t.Fatalf("results.Encode() error = %v", err)
+	}
+	response, err := json.Marshal(RemoteWorkerResponse{Result: encodedResult})
+	if err != nil {
+		t.Fatalf("Marshal(response) error = %v", err)
+	}
+	client := &fakeRemoteClient{response: response}
 	dispatcher := NewRuntimeDispatcher(DispatchConfig{
 		Topology: DispatchTopologyRemote,
 		Endpoint: "http://worker",
@@ -207,7 +216,11 @@ func TestRuntimeDispatcherRemoteTopologyUsesClientAndResultCodec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dispatch() error = %v", err)
 	}
-	if !client.called || client.endpoint != "http://worker" || client.envelope.RunID != "run-remote" {
+	var request RemoteWorkerRequest
+	if err := json.Unmarshal(client.request, &request); err != nil {
+		t.Fatalf("json.Unmarshal(client.request) error = %v", err)
+	}
+	if !client.called || client.endpoint != "http://worker" || request.Envelope.RunID != "run-remote" {
 		t.Fatalf("client = %+v", client)
 	}
 	if !results.decoded {
