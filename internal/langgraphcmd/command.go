@@ -43,15 +43,7 @@ func RunCommand(fs *flag.FlagSet, build BuildInfo, options CommandOptions) error
 		os.Setenv("ADDR", ":8080")
 		os.Setenv("DEERFLOW_DATA_ROOT", "./data")
 		os.Setenv("LOG_LEVEL", "info")
-		if cfg.Addr == "" || cfg.Addr == ":8080" {
-			cfg.Addr = ":8080"
-		}
-		if cfg.Model == "" {
-			cfg.Model = "qwen/Qwen3.5-9B"
-		}
-		if cfg.Provider == "" {
-			cfg.Provider = "siliconflow"
-		}
+		cfg.ApplyYoloDefaults(true)
 	}
 
 	if cfg.AuthToken != "" {
@@ -61,25 +53,17 @@ func RunCommand(fs *flag.FlagSet, build BuildInfo, options CommandOptions) error
 		return fmt.Errorf("invalid runtime configuration: %w", err)
 	}
 
-	logger.Printf("Starting deerflow-go server...")
-	logger.Printf("  YOLO mode: %v", *yolo)
-	logger.Printf("  Address:   %s", cfg.Addr)
-	logger.Printf("  Database: %s", describeDB(cfg.DatabaseURL))
-	logger.Printf("  Provider: %s", cfg.Provider)
-	logger.Printf("  Model:    %s", cfg.Model)
-	logger.Printf("  Runtime:  role=%s transport=%s worker_addr=%s worker_endpoint=%s sandbox=%s state=%s", cfg.Runtime.Role, cfg.Runtime.TransportBackend, cfg.Runtime.Addr, firstNonEmpty(cfg.Runtime.Endpoint, "(local)"), cfg.Runtime.SandboxBackend, firstNonEmpty(string(cfg.Runtime.StateBackend), "(default)"))
-	logger.Printf("  Auth:     %s", describeAuth(cfg.AuthToken, *yolo))
-	logger.Printf("  Version: %s (%s, %s)", build.Version, build.Commit, build.BuildTime)
-	if level := strings.TrimSpace(os.Getenv("LOG_LEVEL")); level != "" {
-		logger.Printf("  Log Level: %s", level)
+	for _, line := range cfg.StartupLines(build, *yolo, strings.TrimSpace(os.Getenv("LOG_LEVEL"))) {
+		logger.Print(line)
 	}
 
 	launcher, err := cfg.BuildLauncher()
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
 	}
-	logger.Printf("Server ready on %s", cfg.Addr)
-	logger.Printf("  API docs: http://%s/docs", cfg.Addr)
+	for _, line := range cfg.ReadyLines() {
+		logger.Print(line)
+	}
 	return commandrun.Run(logger, launcher, 15*time.Second, http.ErrServerClosed)
 }
 
