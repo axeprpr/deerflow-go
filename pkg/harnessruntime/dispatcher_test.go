@@ -15,6 +15,14 @@ type fakeExecutor struct {
 	req    DispatchRequest
 }
 
+type fakeRemoteClient struct {
+	called   bool
+	endpoint string
+	envelope WorkerDispatchEnvelope
+	payload  []byte
+	err      error
+}
+
 func (e *fakeExecutor) Execute(_ context.Context, req DispatchRequest) (*DispatchResult, error) {
 	e.called = true
 	e.req = req
@@ -23,6 +31,16 @@ func (e *fakeExecutor) Execute(_ context.Context, req DispatchRequest) (*Dispatc
 		Handle:    NewStaticExecutionHandle(&harness.Execution{}, req.Plan.ThreadID),
 		Execution: ExecutionDescriptor{Kind: ExecutionKindLocalPrepared, SessionID: req.Plan.ThreadID},
 	}, nil
+}
+
+func (c *fakeRemoteClient) Submit(_ context.Context, endpoint string, env WorkerDispatchEnvelope) ([]byte, error) {
+	c.called = true
+	c.endpoint = endpoint
+	c.envelope = env
+	if c.err != nil {
+		return nil, c.err
+	}
+	return append([]byte(nil), c.payload...), nil
 }
 
 func TestInlineDispatchQueueUsesInjectedExecutor(t *testing.T) {
@@ -114,6 +132,20 @@ func TestRuntimeDispatcherRemoteTopologyRequiresEndpoint(t *testing.T) {
 	}
 }
 
+func TestRuntimeDispatcherRemoteTopologyRequiresClient(t *testing.T) {
+	dispatcher := NewRuntimeDispatcher(DispatchConfig{
+		Topology: DispatchTopologyRemote,
+		Endpoint: "http://worker",
+	}, DispatchRuntimeConfig{})
+
+	_, err := dispatcher.Dispatch(context.Background(), DispatchRequest{
+		Plan: WorkerExecutionPlan{ThreadID: "thread-remote"},
+	})
+	if err == nil || err.Error() != "remote worker client is not configured" {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+}
+
 func TestRuntimeDispatcherUsesEnvelopeCodec(t *testing.T) {
 	executor := &fakeExecutor{}
 	codec := &fakePlanCodec{}
@@ -135,6 +167,57 @@ func TestRuntimeDispatcherUsesEnvelopeCodec(t *testing.T) {
 	}
 }
 
+func TestRuntimeDispatcherDirectTopologyUsesResultCodec(t *testing.T) {
+	executor := &fakeExecutor{}
+	results := &fakeResultCodec{}
+	dispatcher := NewRuntimeDispatcher(DispatchConfig{
+		Topology: DispatchTopologyDirect,
+	}, DispatchRuntimeConfig{Executor: executor, Results: results})
+
+	result, err := dispatcher.Dispatch(context.Background(), DispatchRequest{
+		Plan: WorkerExecutionPlan{ThreadID: "thread-results"},
+	})
+	if err != nil {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+	if !results.encoded || !results.decoded {
+		t.Fatalf("result codec usage = encode:%v decode:%v", results.encoded, results.decoded)
+	}
+	if result == nil || result.Lifecycle == nil || result.Lifecycle.ThreadID != "thread-results" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestRuntimeDispatcherRemoteTopologyUsesClientAndResultCodec(t *testing.T) {
+	results := &fakeResultCodec{
+		last: &DispatchResult{
+			Lifecycle: &harness.RunState{ThreadID: "thread-remote"},
+			Execution: ExecutionDescriptor{Kind: ExecutionKindLocalPrepared, SessionID: "thread-remote"},
+		},
+	}
+	client := &fakeRemoteClient{payload: []byte("remote-result")}
+	dispatcher := NewRuntimeDispatcher(DispatchConfig{
+		Topology: DispatchTopologyRemote,
+		Endpoint: "http://worker",
+	}, DispatchRuntimeConfig{Remote: client, Results: results})
+
+	result, err := dispatcher.Dispatch(context.Background(), DispatchRequest{
+		Plan: WorkerExecutionPlan{ThreadID: "thread-remote", RunID: "run-remote"},
+	})
+	if err != nil {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+	if !client.called || client.endpoint != "http://worker" || client.envelope.RunID != "run-remote" {
+		t.Fatalf("client = %+v", client)
+	}
+	if !results.decoded {
+		t.Fatalf("result codec usage = encode:%v decode:%v", results.encoded, results.decoded)
+	}
+	if result == nil || result.Lifecycle == nil || result.Lifecycle.ThreadID != "thread-remote" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 type blockingExecutor struct {
 	started chan string
 	release chan struct{}
@@ -146,6 +229,13 @@ type fakePlanCodec struct {
 	decoded bool
 	fail    error
 	last    WorkerExecutionPlan
+}
+
+type fakeResultCodec struct {
+	encoded bool
+	decoded bool
+	fail    error
+	last    *DispatchResult
 }
 
 func (c *fakePlanCodec) Encode(plan WorkerExecutionPlan) ([]byte, error) {
@@ -163,6 +253,26 @@ func (c *fakePlanCodec) Decode(data []byte) (WorkerExecutionPlan, error) {
 	}
 	c.decoded = true
 	return c.last, nil
+}
+
+func (c *fakeResultCodec) Encode(result *DispatchResult) ([]byte, error) {
+	if c.fail != nil {
+		return nil, c.fail
+	}
+	c.encoded = true
+	c.last = result
+	return []byte("result"), nil
+}
+
+func (c *fakeResultCodec) Decode(data []byte) (*DispatchResult, error) {
+	if c.fail != nil {
+		return nil, c.fail
+	}
+	c.decoded = true
+	if c.last != nil {
+		return c.last, nil
+	}
+	return &DispatchResult{}, nil
 }
 
 func (e *blockingExecutor) Execute(_ context.Context, req DispatchRequest) (*DispatchResult, error) {
