@@ -312,7 +312,7 @@ func (s *Server) bindRuntimeNodeDispatch() {
 	if node == nil {
 		return
 	}
-	node.BindDispatchSource(s.runtimeView, s.runtimeWorkerSpecAdapter())
+	node.EnsureDispatchSource(s.runtimeView, s.runtimeWorkerSpecAdapter())
 	s.attachRuntimeSystem(node)
 }
 
@@ -356,9 +356,7 @@ func (s *Server) defaultSandboxRuntime(existing harness.SandboxRuntime) harness.
 		return existing
 	}
 	if node := s.ensureRuntimeSystem(); node != nil {
-		if runtime := node.ConfiguredSandboxRuntime(); runtime != nil {
-			return runtime
-		}
+		return node.ConfiguredSandboxRuntime()
 	}
 	return nil
 }
@@ -372,7 +370,7 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 	}
 	node := s.ensureRuntimeSystem()
 	if node != nil {
-		node.BindDispatchSource(s.runtimeView, s.runtimeWorkerSpecAdapter())
+		s.runDispatcher = node.EnsureDispatchSource(s.runtimeView, s.runtimeWorkerSpecAdapter())
 		s.attachRuntimeSystem(node)
 		return s.runDispatcher
 	}
@@ -384,15 +382,9 @@ func (s *Server) defaultSandboxProvider(existing harness.SandboxProvider) harnes
 		return existing
 	}
 	if node := s.ensureRuntimeSystem(); node != nil {
-		if provider := node.ConfiguredSandboxProvider(); provider != nil {
-			return provider
-		}
+		return node.ConfiguredSandboxProvider()
 	}
-	runtime := s.defaultSandboxRuntime(nil)
-	if runtime == nil {
-		return nil
-	}
-	return runtime.Provider()
+	return nil
 }
 
 func (s *Server) newAgent(spec harness.AgentSpec) *agent.Agent {

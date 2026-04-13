@@ -288,6 +288,16 @@ func (n *RuntimeNode) BindDispatchSource(source func() *harness.Runtime, specs W
 	n.BindDispatch(n.Config.BuildDispatchRuntimeWithProviders(source, specs, n.Providers.Remote))
 }
 
+func (n *RuntimeNode) EnsureDispatchSource(source func() *harness.Runtime, specs WorkerSpecRuntime) RunDispatcher {
+	if n == nil {
+		return nil
+	}
+	if n.Dispatcher == nil {
+		n.BindDispatchSource(source, specs)
+	}
+	return n.Dispatcher
+}
+
 func (n *RuntimeNode) BindMemoryService(service *MemoryService) {
 	if n == nil {
 		return
