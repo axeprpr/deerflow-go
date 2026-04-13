@@ -17,7 +17,7 @@ type Config struct {
 
 func DefaultConfig() Config {
 	gateway := langgraphcmd.DefaultConfig()
-	worker := runtimecmd.DefaultRuntimeWorkerNodeConfig()
+	worker := runtimecmd.DefaultSplitWorkerNodeConfig()
 
 	sharedDataRoot := firstNonEmpty(strings.TrimSpace(gateway.Runtime.DataRoot), strings.TrimSpace(worker.DataRoot))
 	if sharedDataRoot != "" {
@@ -26,7 +26,7 @@ func DefaultConfig() Config {
 	}
 	worker.Provider = gateway.Provider
 	worker.MaxTurns = gateway.Runtime.MaxTurns
-	worker.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
+	gateway.Runtime = runtimecmd.DefaultSplitGatewayNodeConfig(workerDispatchEndpoint(worker.Addr))
 	worker.StateBackend = gateway.Runtime.StateBackend
 	worker.SnapshotBackend = gateway.Runtime.SnapshotBackend
 	worker.EventBackend = gateway.Runtime.EventBackend
@@ -38,9 +38,6 @@ func DefaultConfig() Config {
 	worker.ThreadStoreURL = gateway.Runtime.ThreadStoreURL
 	worker.MemoryStoreURL = gateway.Runtime.MemoryStoreURL
 
-	gateway.Runtime.Role = harnessruntime.RuntimeNodeRoleGateway
-	gateway.Runtime.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
-	gateway.Runtime.StateProvider = harnessruntime.RuntimeStateProviderModeSharedSQLite
 	worker.StateProvider = gateway.Runtime.StateProvider
 	gateway.Runtime.Addr = worker.Addr
 	gateway.Runtime.Endpoint = workerDispatchEndpoint(worker.Addr)
@@ -124,7 +121,27 @@ func (c Config) withDefaults() Config {
 	cfg.Gateway.Runtime.EventBackend = firstNonEmptyState(cfg.Gateway.Runtime.EventBackend, cfg.Worker.EventBackend)
 	cfg.Gateway.Runtime.ThreadBackend = firstNonEmptyState(cfg.Gateway.Runtime.ThreadBackend, cfg.Worker.ThreadBackend)
 	cfg.Gateway.Runtime.Endpoint = workerDispatchEndpoint(cfg.Worker.Addr)
+
+	if cfg.Gateway.Runtime.StateProvider == harnessruntime.RuntimeStateProviderModeSharedSQLite {
+		cfg = cfg.alignSharedStateStores()
+	}
 	return cfg
+}
+
+func (c Config) alignSharedStateStores() Config {
+	stateStore := firstNonEmpty(strings.TrimSpace(c.Gateway.Runtime.StateStoreURL), strings.TrimSpace(c.Worker.StateStoreURL))
+	if stateStore == "" {
+		return c
+	}
+	c.Gateway.Runtime.StateStoreURL = stateStore
+	c.Worker.StateStoreURL = stateStore
+	c.Gateway.Runtime.SnapshotStoreURL = stateStore
+	c.Gateway.Runtime.EventStoreURL = stateStore
+	c.Gateway.Runtime.ThreadStoreURL = stateStore
+	c.Worker.SnapshotStoreURL = stateStore
+	c.Worker.EventStoreURL = stateStore
+	c.Worker.ThreadStoreURL = stateStore
+	return c
 }
 
 func (c Config) StartupLines(build langgraphcmd.BuildInfo, yolo bool, logLevel string) []string {

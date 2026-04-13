@@ -157,6 +157,39 @@ func TestDefaultRuntimeWorkerNodeConfigUsesSharedSQLiteState(t *testing.T) {
 	}
 }
 
+func TestDefaultNodeConfigForRoleUsesRoleSpecificNames(t *testing.T) {
+	if cfg := DefaultNodeConfigForRole(harnessruntime.RuntimeNodeRoleAllInOne); cfg.Name != "langgraph" {
+		t.Fatalf("all-in-one Name = %q", cfg.Name)
+	}
+	if cfg := DefaultNodeConfigForRole(harnessruntime.RuntimeNodeRoleGateway); cfg.Name != "langgraph-gateway" {
+		t.Fatalf("gateway Name = %q", cfg.Name)
+	}
+	if cfg := DefaultNodeConfigForRole(harnessruntime.RuntimeNodeRoleWorker); cfg.Name != "runtime-node" {
+		t.Fatalf("worker Name = %q", cfg.Name)
+	}
+}
+
+func TestDefaultSplitNodeConfigsUseSharedSQLitePreset(t *testing.T) {
+	gateway := DefaultSplitGatewayNodeConfig("http://worker:8081/dispatch")
+	if gateway.Preset != RuntimeNodePresetSharedSQLite {
+		t.Fatalf("gateway Preset = %q", gateway.Preset)
+	}
+	if gateway.StateProvider != harnessruntime.RuntimeStateProviderModeSharedSQLite {
+		t.Fatalf("gateway StateProvider = %q", gateway.StateProvider)
+	}
+	if gateway.Endpoint != "http://worker:8081/dispatch" {
+		t.Fatalf("gateway Endpoint = %q", gateway.Endpoint)
+	}
+
+	worker := DefaultSplitWorkerNodeConfig()
+	if worker.Preset != RuntimeNodePresetSharedSQLite {
+		t.Fatalf("worker Preset = %q", worker.Preset)
+	}
+	if worker.StateProvider != harnessruntime.RuntimeStateProviderModeSharedSQLite {
+		t.Fatalf("worker StateProvider = %q", worker.StateProvider)
+	}
+}
+
 func TestNormalizeStateBackendSupportsSQLite(t *testing.T) {
 	if got := NormalizeStateBackend("sqlite", harnessruntime.RuntimeStateStoreBackendInMemory); got != harnessruntime.RuntimeStateStoreBackendSQLite {
 		t.Fatalf("NormalizeStateBackend() = %q", got)
@@ -204,6 +237,9 @@ func TestFastLocalPresetKeepsWorkerOnFastPath(t *testing.T) {
 	}
 	if cfg.MemoryStoreURL != "" {
 		t.Fatalf("MemoryStoreURL = %q", cfg.MemoryStoreURL)
+	}
+	if cfg.StateProvider != harnessruntime.RuntimeStateProviderModeIsolated {
+		t.Fatalf("StateProvider = %q", cfg.StateProvider)
 	}
 }
 

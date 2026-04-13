@@ -90,33 +90,11 @@ func DefaultNodeConfig(defaults NodeDefaults) NodeConfig {
 }
 
 func DefaultLangGraphNodeConfig() NodeConfig {
-	return DefaultNodeConfig(NodeDefaults{
-		Preset:           RuntimeNodePresetAuto,
-		Role:             harnessruntime.RuntimeNodeRoleAllInOne,
-		Addr:             ":8081",
-		Name:             "langgraph",
-		Root:             filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox"),
-		Endpoint:         "",
-		MaxTurns:         100,
-		TransportBackend: harnessruntime.WorkerTransportBackendQueue,
-		SandboxBackend:   harnessruntime.SandboxBackendLocalLinux,
-		StateBackend:     harnessruntime.RuntimeStateStoreBackendInMemory,
-	})
+	return DefaultNodeConfigForRole(harnessruntime.RuntimeNodeRoleAllInOne)
 }
 
 func DefaultRuntimeWorkerNodeConfig() NodeConfig {
-	return DefaultNodeConfig(NodeDefaults{
-		Preset:           RuntimeNodePresetAuto,
-		Role:             harnessruntime.RuntimeNodeRoleWorker,
-		Addr:             ":8081",
-		Name:             "runtime-node",
-		Root:             filepath.Join(os.TempDir(), "deerflow-runtime-node"),
-		Endpoint:         "",
-		MaxTurns:         100,
-		TransportBackend: harnessruntime.WorkerTransportBackendQueue,
-		SandboxBackend:   harnessruntime.SandboxBackendLocalLinux,
-		StateBackend:     harnessruntime.RuntimeStateStoreBackendInMemory,
-	})
+	return DefaultNodeConfigForRole(harnessruntime.RuntimeNodeRoleWorker)
 }
 
 func (c NodeConfig) RuntimeNodeConfig() harnessruntime.RuntimeNodeConfig {
@@ -199,31 +177,7 @@ func NormalizeStateProvider(value string, fallback harnessruntime.RuntimeStatePr
 }
 
 func (c NodeConfig) withRoleDefaults() NodeConfig {
-	if c.DataRoot == "" {
-		c.DataRoot = tools.DataRootFromEnv()
-	}
-	if c.Preset == "" {
-		c.Preset = RuntimeNodePresetAuto
-	}
-	switch c.effectivePreset() {
-	case RuntimeNodePresetSharedSQLite:
-		c = c.applySharedSQLiteDefaults()
-	case RuntimeNodePresetFastLocal:
-		// Preserve the fast path: local sandbox, in-memory state, and no derived shared stores.
-	default:
-		if c.Role == harnessruntime.RuntimeNodeRoleGateway || c.Role == harnessruntime.RuntimeNodeRoleWorker {
-			c = c.applySharedSQLiteDefaults()
-		}
-	}
-	if c.StateProvider == "" || c.StateProvider == harnessruntime.RuntimeStateProviderModeAuto {
-		switch c.effectivePreset() {
-		case RuntimeNodePresetSharedSQLite:
-			c.StateProvider = harnessruntime.RuntimeStateProviderModeSharedSQLite
-		default:
-			c.StateProvider = harnessruntime.RuntimeStateProviderModeAuto
-		}
-	}
-	return c.deriveStateBackendsFromStoreURLs()
+	return ApplyNodePresetDefaults(c)
 }
 
 func (c NodeConfig) applySharedSQLiteDefaults() NodeConfig {
