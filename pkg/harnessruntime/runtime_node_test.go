@@ -23,6 +23,11 @@ func TestRuntimeNodeLaunchSpec(t *testing.T) {
 			Name: "sandbox-test",
 			Root: t.TempDir(),
 		}, nil),
+		RemoteState: NewHTTPRemoteStateServer(RuntimeStatePlane{
+			Snapshots: NewInMemoryRunStore(),
+			Events:    NewInMemoryRunEventStore(),
+			Threads:   NewInMemoryThreadStateStore(),
+		}, nil),
 	}
 	spec := node.LaunchSpec()
 	if spec.Role != RuntimeNodeRoleWorker {
@@ -39,6 +44,12 @@ func TestRuntimeNodeLaunchSpec(t *testing.T) {
 	}
 	if spec.RemoteSandboxAddr != "127.0.0.1:49081" {
 		t.Fatalf("RemoteSandboxAddr = %q", spec.RemoteSandboxAddr)
+	}
+	if !spec.ServesRemoteState {
+		t.Fatal("ServesRemoteState = false, want true")
+	}
+	if spec.RemoteStateAddr != "127.0.0.1:49081" {
+		t.Fatalf("RemoteStateAddr = %q", spec.RemoteStateAddr)
 	}
 }
 
@@ -138,6 +149,9 @@ func TestRuntimeNodeServeExposesRemoteSandbox(t *testing.T) {
 	if node.RemoteSandbox == nil {
 		t.Fatal("RemoteSandbox = nil")
 	}
+	if node.RemoteState == nil {
+		t.Fatal("RemoteState = nil")
+	}
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -190,6 +204,13 @@ func TestRuntimeNodeServeExposesRemoteSandbox(t *testing.T) {
 	}
 	if err := client.Release(context.Background(), "http://"+listener.Addr().String(), leaseResp.LeaseID); err != nil {
 		t.Fatalf("Release() error = %v", err)
+	}
+
+	remoteSnapshots := NewRemoteRunSnapshotStore("http://"+listener.Addr().String(), nil, nil)
+	remoteSnapshots.SaveRunSnapshot(RunSnapshot{Record: RunRecord{RunID: "run-state", ThreadID: "thread-state", Status: "running"}})
+	snapshot, ok := remoteSnapshots.LoadRunSnapshot("run-state")
+	if !ok || snapshot.Record.ThreadID != "thread-state" {
+		t.Fatalf("LoadRunSnapshot() = %+v, %v", snapshot, ok)
 	}
 }
 

@@ -14,6 +14,7 @@ type RuntimeStateBackendProviders struct {
 	InMemory RuntimeStateBackendProvider
 	File     RuntimeStateBackendProvider
 	SQLite   RuntimeStateBackendProvider
+	Remote   RuntimeStateBackendProvider
 }
 
 func DefaultRuntimeStateBackendProviders() RuntimeStateBackendProviders {
@@ -21,6 +22,7 @@ func DefaultRuntimeStateBackendProviders() RuntimeStateBackendProviders {
 		InMemory: runtimeInMemoryStateBackendProvider{},
 		File:     runtimeFileStateBackendProvider{},
 		SQLite:   runtimeSQLiteStateBackendProvider{},
+		Remote:   runtimeRemoteStateBackendProvider{providers: DefaultRemoteStateProviders()},
 	}
 }
 
@@ -33,6 +35,10 @@ func (p RuntimeStateBackendProviders) Resolve(backend RuntimeStateStoreBackend) 
 	case RuntimeStateStoreBackendSQLite:
 		if p.SQLite != nil {
 			return p.SQLite
+		}
+	case RuntimeStateStoreBackendRemote:
+		if p.Remote != nil {
+			return p.Remote
 		}
 	default:
 		if p.InMemory != nil {
@@ -115,4 +121,39 @@ func (runtimeSQLiteStateBackendProvider) BuildThreadStateStore(config RuntimeNod
 		return store
 	}
 	return NewInMemoryThreadStateStore()
+}
+
+type runtimeRemoteStateBackendProvider struct {
+	providers RemoteStateProviders
+}
+
+func (p runtimeRemoteStateBackendProvider) BuildPlane(config RuntimeNodeConfig) (RuntimeStatePlane, bool) {
+	if config.normalizedSnapshotBackend() != RuntimeStateStoreBackendRemote ||
+		config.normalizedEventBackend() != RuntimeStateStoreBackendRemote ||
+		config.normalizedThreadBackend() != RuntimeStateStoreBackendRemote {
+		return RuntimeStatePlane{}, false
+	}
+	endpoint := resolveStateStoreURL(config.State.URL, "")
+	if endpoint == "" {
+		return RuntimeStatePlane{}, false
+	}
+	client := p.providers.Client.Build(config)
+	protocol := p.providers.Protocol.Build(config)
+	return RuntimeStatePlane{
+		Snapshots: NewRemoteRunSnapshotStore(endpoint, client, protocol),
+		Events:    NewRemoteRunEventStore(endpoint, client, protocol),
+		Threads:   NewRemoteThreadStateStore(endpoint, client, protocol),
+	}, true
+}
+
+func (p runtimeRemoteStateBackendProvider) BuildSnapshotStore(config RuntimeNodeConfig) RunSnapshotStore {
+	return NewRemoteRunSnapshotStore(resolveStateStoreURL(config.State.SnapshotURL, resolveStateStoreURL(config.State.URL, "")), p.providers.Client.Build(config), p.providers.Protocol.Build(config))
+}
+
+func (p runtimeRemoteStateBackendProvider) BuildEventStore(config RuntimeNodeConfig) RunEventStore {
+	return NewRemoteRunEventStore(resolveStateStoreURL(config.State.EventURL, resolveStateStoreURL(config.State.URL, "")), p.providers.Client.Build(config), p.providers.Protocol.Build(config))
+}
+
+func (p runtimeRemoteStateBackendProvider) BuildThreadStateStore(config RuntimeNodeConfig) ThreadStateStore {
+	return NewRemoteThreadStateStore(resolveStateStoreURL(config.State.ThreadURL, resolveStateStoreURL(config.State.URL, "")), p.providers.Client.Build(config), p.providers.Protocol.Build(config))
 }

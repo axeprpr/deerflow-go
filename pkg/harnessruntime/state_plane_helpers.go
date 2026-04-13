@@ -14,6 +14,9 @@ func (p RuntimeStatePlaneProviders) normalized() RuntimeStatePlaneProviders {
 	if p.Backends.SQLite == nil {
 		p.Backends.SQLite = defaults.Backends.SQLite
 	}
+	if p.Backends.Remote == nil {
+		p.Backends.Remote = defaults.Backends.Remote
+	}
 	return p
 }
 

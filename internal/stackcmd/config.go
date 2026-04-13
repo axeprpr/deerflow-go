@@ -160,6 +160,7 @@ func (c Config) ReadyLines() []string {
 	lines := cfg.Gateway.ReadyLines()
 	lines = append(lines, fmt.Sprintf("  Worker server: http://%s%s", cfg.Worker.Addr, harnessruntime.DefaultRemoteWorkerDispatchPath))
 	lines = append(lines, fmt.Sprintf("  Worker sandbox: http://%s%s", cfg.Worker.Addr, harnessruntime.DefaultRemoteSandboxHealthPath))
+	lines = append(lines, fmt.Sprintf("  Worker state: http://%s%s", cfg.Worker.Addr, harnessruntime.DefaultRemoteStateHealthPath))
 	return lines
 }
 

@@ -15,11 +15,13 @@ func TestNodeConfigReadyLine(t *testing.T) {
 		RemoteWorkerAddr:    ":9999",
 		ServesRemoteSandbox: true,
 		RemoteSandboxAddr:   ":9999",
+		ServesRemoteState:   true,
+		RemoteStateAddr:     ":9999",
 	})
 	if err != nil {
 		t.Fatalf("ReadyLine() error = %v", err)
 	}
-	if !strings.Contains(line, "role=worker") || !strings.Contains(line, "addr=:9999") || !strings.Contains(line, "sandbox=true") {
+	if !strings.Contains(line, "role=worker") || !strings.Contains(line, "addr=:9999") || !strings.Contains(line, "sandbox=true") || !strings.Contains(line, "state=true") {
 		t.Fatalf("ReadyLine() = %q", line)
 	}
 }

@@ -84,6 +84,14 @@ func resolveStateStorePath(raw string, fallback string) string {
 	return raw
 }
 
+func resolveStateStoreURL(raw string, fallback string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return strings.TrimSpace(fallback)
+	}
+	return raw
+}
+
 type RuntimeStatePlane struct {
 	Snapshots RunSnapshotStore
 	Events    RunEventStore

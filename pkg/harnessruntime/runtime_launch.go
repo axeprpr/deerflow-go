@@ -14,6 +14,8 @@ type RuntimeNodeLaunchSpec struct {
 	RemoteWorkerAddr    string
 	ServesRemoteSandbox bool
 	RemoteSandboxAddr   string
+	ServesRemoteState   bool
+	RemoteStateAddr     string
 }
 
 type RuntimeNodeLauncher struct {
@@ -62,6 +64,10 @@ func (n *RuntimeNode) LaunchSpec() RuntimeNodeLaunchSpec {
 	if n.RemoteSandbox != nil {
 		spec.ServesRemoteSandbox = true
 		spec.RemoteSandboxAddr = spec.RemoteWorkerAddr
+	}
+	if n.RemoteState != nil {
+		spec.ServesRemoteState = true
+		spec.RemoteStateAddr = spec.RemoteWorkerAddr
 	}
 	return spec
 }

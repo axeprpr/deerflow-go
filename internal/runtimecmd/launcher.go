@@ -42,5 +42,5 @@ func (c NodeConfig) ReadyLine(spec harnessruntime.RuntimeNodeLaunchSpec) (string
 	if !spec.ServesRemoteWorker {
 		return "", fmt.Errorf("runtime node role %q does not expose a remote worker server", spec.Role)
 	}
-	return fmt.Sprintf("runtime node ready role=%s addr=%s sandbox=%t", spec.Role, spec.RemoteWorkerAddr, spec.ServesRemoteSandbox), nil
+	return fmt.Sprintf("runtime node ready role=%s addr=%s sandbox=%t state=%t", spec.Role, spec.RemoteWorkerAddr, spec.ServesRemoteSandbox, spec.ServesRemoteState), nil
 }

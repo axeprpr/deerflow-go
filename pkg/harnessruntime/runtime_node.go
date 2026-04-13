@@ -49,6 +49,7 @@ type RuntimeNodeProviders struct {
 	Sandbox      SandboxManagerBuilder
 	Remote       RemoteWorkerProviders
 	RemoteSB     RemoteSandboxProviders
+	RemoteState  RemoteStateProviders
 }
 
 func DefaultRuntimeNodeProviders() RuntimeNodeProviders {
@@ -57,9 +58,10 @@ func DefaultRuntimeNodeProviders() RuntimeNodeProviders {
 		Transport: WorkerTransportFactoryFunc(func(config WorkerTransportConfig, runtime DispatchRuntimeConfig) WorkerTransport {
 			return buildWorkerTransport(config, runtime)
 		}),
-		Sandbox:  DefaultSandboxManagerFactory(),
-		Remote:   DefaultRemoteWorkerProviders(),
-		RemoteSB: DefaultRemoteSandboxProviders(),
+		Sandbox:     DefaultSandboxManagerFactory(),
+		Remote:      DefaultRemoteWorkerProviders(),
+		RemoteSB:    DefaultRemoteSandboxProviders(),
+		RemoteState: DefaultRemoteStateProviders(),
 	}
 }
 
@@ -71,6 +73,7 @@ type RuntimeNode struct {
 	Sandbox       *SandboxResourceManager
 	RemoteWorker  *HTTPRemoteWorkerNode
 	RemoteSandbox *HTTPRemoteSandboxServer
+	RemoteState   *HTTPRemoteStateServer
 	Memory        *MemoryService
 	Tools         harness.ToolRuntime
 	Runtime       *harness.Runtime
@@ -137,6 +140,15 @@ func normalizeRuntimeNodeProviders(config RuntimeNodeConfig, providers RuntimeNo
 	}
 	if providers.RemoteSB.Server == nil {
 		providers.RemoteSB.Server = defaults.RemoteSB.Server
+	}
+	if providers.RemoteState.Protocol == nil {
+		providers.RemoteState.Protocol = defaults.RemoteState.Protocol
+	}
+	if providers.RemoteState.Client == nil {
+		providers.RemoteState.Client = defaults.RemoteState.Client
+	}
+	if providers.RemoteState.Server == nil {
+		providers.RemoteState.Server = defaults.RemoteState.Server
 	}
 	return providers
 }
@@ -261,8 +273,15 @@ func (n *RuntimeNode) RemoteSandboxHandler() http.Handler {
 	return n.RemoteSandbox.Handler()
 }
 
+func (n *RuntimeNode) RemoteStateHandler() http.Handler {
+	if n == nil || n.RemoteState == nil {
+		return nil
+	}
+	return n.RemoteState.Handler()
+}
+
 func (n *RuntimeNode) Start() error {
-	if spec := n.LaunchSpec(); !spec.ServesRemoteWorker && !spec.ServesRemoteSandbox {
+	if spec := n.LaunchSpec(); !spec.ServesRemoteWorker && !spec.ServesRemoteSandbox && !spec.ServesRemoteState {
 		return nil
 	}
 	return n.StartRemoteWorker()
@@ -276,7 +295,7 @@ func (n *RuntimeNode) StartRemoteWorker() error {
 }
 
 func (n *RuntimeNode) Serve(listener net.Listener) error {
-	if spec := n.LaunchSpec(); !spec.ServesRemoteWorker && !spec.ServesRemoteSandbox {
+	if spec := n.LaunchSpec(); !spec.ServesRemoteWorker && !spec.ServesRemoteSandbox && !spec.ServesRemoteState {
 		return nil
 	}
 	return n.ServeRemoteWorker(listener)
@@ -311,6 +330,12 @@ func (n *RuntimeNode) BindDispatch(runtime DispatchRuntimeConfig) {
 	}
 	if providers.RemoteSB.Server == nil {
 		providers.RemoteSB.Server = DefaultRemoteSandboxProviders().Server
+	}
+	if providers.RemoteState.Protocol == nil {
+		providers.RemoteState.Protocol = DefaultRemoteStateProviders().Protocol
+	}
+	if providers.RemoteState.Server == nil {
+		providers.RemoteState.Server = DefaultRemoteStateProviders().Server
 	}
 	transport := providers.Transport.Build(n.Config.Transport, runtime)
 	protocol := runtime.Protocol
@@ -375,6 +400,12 @@ func (n *RuntimeNode) BindRemoteWorker(runtime DispatchRuntimeConfig) {
 	if providers.RemoteSB.Server == nil {
 		providers.RemoteSB.Server = DefaultRemoteSandboxProviders().Server
 	}
+	if providers.RemoteState.Protocol == nil {
+		providers.RemoteState.Protocol = DefaultRemoteStateProviders().Protocol
+	}
+	if providers.RemoteState.Server == nil {
+		providers.RemoteState.Server = DefaultRemoteStateProviders().Server
+	}
 	transport := providers.Transport.Build(n.Config.Transport, runtime)
 	protocol := runtime.Protocol
 	if protocol == nil {
@@ -391,22 +422,45 @@ func (n *RuntimeNode) buildRemoteHTTPServer(transport WorkerTransport, protocol 
 	if n.Config.servesRemoteSandbox() {
 		sandboxProtocol := providers.RemoteSB.Protocol.Build(n.Config)
 		n.RemoteSandbox = providers.RemoteSB.Server.Build(n.Config.Sandbox, sandboxProtocol)
-		server.Handler = mergeRemoteNodeHandlers(server.Handler, n.RemoteSandbox.Handler())
 	} else {
 		n.RemoteSandbox = nil
 	}
+	if n.Config.servesRemoteState() {
+		stateProtocol := providers.RemoteState.Protocol.Build(n.Config)
+		n.RemoteState = providers.RemoteState.Server.Build(n.State, stateProtocol)
+	} else {
+		n.RemoteState = nil
+	}
+	server.Handler = mergeRemoteNodeHandlers(server.Handler, n.RemoteSandboxHandler(), n.RemoteStateHandler())
 	return server
 }
 
-func mergeRemoteNodeHandlers(base http.Handler, sandbox http.Handler) http.Handler {
-	if sandbox == nil {
+func mergeRemoteNodeHandlers(base http.Handler, handlers ...http.Handler) http.Handler {
+	hasExtra := false
+	for _, handler := range handlers {
+		if handler != nil {
+			hasExtra = true
+			break
+		}
+	}
+	if !hasExtra {
 		return base
 	}
 	if base == nil {
-		return sandbox
+		for _, handler := range handlers {
+			if handler != nil {
+				return handler
+			}
+		}
+		return nil
 	}
 	mux := http.NewServeMux()
-	mux.Handle("/sandbox/", sandbox)
+	if len(handlers) > 0 && handlers[0] != nil {
+		mux.Handle("/sandbox/", handlers[0])
+	}
+	if len(handlers) > 1 && handlers[1] != nil {
+		mux.Handle("/state/", handlers[1])
+	}
 	mux.Handle("/", base)
 	return mux
 }

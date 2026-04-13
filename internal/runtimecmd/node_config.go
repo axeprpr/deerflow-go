@@ -350,6 +350,8 @@ func NormalizeStateBackend(value string, fallback harnessruntime.RuntimeStateSto
 		return harnessruntime.RuntimeStateStoreBackendSQLite
 	case string(harnessruntime.RuntimeStateStoreBackendFile):
 		return harnessruntime.RuntimeStateStoreBackendFile
+	case string(harnessruntime.RuntimeStateStoreBackendRemote):
+		return harnessruntime.RuntimeStateStoreBackendRemote
 	case string(harnessruntime.RuntimeStateStoreBackendInMemory):
 		return harnessruntime.RuntimeStateStoreBackendInMemory
 	default:
@@ -364,6 +366,8 @@ func deriveStateBackendFromStoreURL(raw string, fallback harnessruntime.RuntimeS
 		return harnessruntime.RuntimeStateStoreBackendSQLite
 	case strings.HasPrefix(trimmed, "file://"):
 		return harnessruntime.RuntimeStateStoreBackendFile
+	case strings.HasPrefix(trimmed, "http://"), strings.HasPrefix(trimmed, "https://"):
+		return harnessruntime.RuntimeStateStoreBackendRemote
 	default:
 		return fallback
 	}
@@ -432,10 +436,22 @@ func (c NodeConfig) validateStateConfig() error {
 	if strings.TrimSpace(c.StateStoreURL) == "" {
 		return nil
 	}
-	if effectiveStateBackend(c.SnapshotBackend, c.StateBackend) != harnessruntime.RuntimeStateStoreBackendSQLite ||
-		effectiveStateBackend(c.EventBackend, c.StateBackend) != harnessruntime.RuntimeStateStoreBackendSQLite ||
-		effectiveStateBackend(c.ThreadBackend, c.StateBackend) != harnessruntime.RuntimeStateStoreBackendSQLite {
-		return fmt.Errorf("state-store requires sqlite snapshot/event/thread backends")
+	backend := effectiveStateBackend(c.StateBackend, "")
+	switch backend {
+	case harnessruntime.RuntimeStateStoreBackendSQLite:
+		if effectiveStateBackend(c.SnapshotBackend, c.StateBackend) != harnessruntime.RuntimeStateStoreBackendSQLite ||
+			effectiveStateBackend(c.EventBackend, c.StateBackend) != harnessruntime.RuntimeStateStoreBackendSQLite ||
+			effectiveStateBackend(c.ThreadBackend, c.StateBackend) != harnessruntime.RuntimeStateStoreBackendSQLite {
+			return fmt.Errorf("state-store requires sqlite snapshot/event/thread backends")
+		}
+	case harnessruntime.RuntimeStateStoreBackendRemote:
+		if effectiveStateBackend(c.SnapshotBackend, c.StateBackend) != harnessruntime.RuntimeStateStoreBackendRemote ||
+			effectiveStateBackend(c.EventBackend, c.StateBackend) != harnessruntime.RuntimeStateStoreBackendRemote ||
+			effectiveStateBackend(c.ThreadBackend, c.StateBackend) != harnessruntime.RuntimeStateStoreBackendRemote {
+			return fmt.Errorf("state-store requires remote snapshot/event/thread backends")
+		}
+	default:
+		return fmt.Errorf("state-store requires sqlite or remote snapshot/event/thread backends")
 	}
 	stateStore := normalizeStoreLocation(c.StateStoreURL)
 	for name, value := range map[string]string{
@@ -452,6 +468,8 @@ func (c NodeConfig) validateStateConfig() error {
 
 func normalizeStoreLocation(raw string) string {
 	trimmed := strings.TrimSpace(raw)
+	trimmed = strings.TrimPrefix(trimmed, "https://")
+	trimmed = strings.TrimPrefix(trimmed, "http://")
 	trimmed = strings.TrimPrefix(trimmed, "sqlite://")
 	trimmed = strings.TrimPrefix(trimmed, "file://")
 	return trimmed

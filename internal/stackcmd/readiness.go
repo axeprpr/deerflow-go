@@ -17,6 +17,7 @@ func (c Config) ReadyProbe() commandrun.ReadyFunc {
 	if cfg.Worker.SandboxBackend != harnessruntime.SandboxBackendRemote {
 		targets = append(targets, commandrun.HTTPURL(cfg.Worker.Addr)+harnessruntime.DefaultRemoteSandboxHealthPath)
 	}
+	targets = append(targets, commandrun.HTTPURL(cfg.Worker.Addr)+harnessruntime.DefaultRemoteStateHealthPath)
 	filtered := make([]string, 0, len(targets))
 	for _, target := range targets {
 		if trimmed := strings.TrimSpace(target); trimmed != "" {

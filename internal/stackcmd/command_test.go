@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/axeprpr/deerflow-go/internal/langgraphcmd"
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 )
 
 func TestPrepareCommandBuildsSplitReadyLines(t *testing.T) {
@@ -19,10 +20,14 @@ func TestPrepareCommandBuildsSplitReadyLines(t *testing.T) {
 	if prepared == nil {
 		t.Fatal("PrepareCommand() = nil")
 	}
-	if len(prepared.ReadyLines) < 2 {
+	if len(prepared.ReadyLines) < 3 {
 		t.Fatalf("ReadyLines = %#v", prepared.ReadyLines)
 	}
-	if !strings.Contains(strings.Join(prepared.ReadyLines, "\n"), ":19081") {
+	joined := strings.Join(prepared.ReadyLines, "\n")
+	if !strings.Contains(joined, ":19081") {
+		t.Fatalf("ReadyLines = %#v", prepared.ReadyLines)
+	}
+	if !strings.Contains(joined, harnessruntime.DefaultRemoteStateHealthPath) {
 		t.Fatalf("ReadyLines = %#v", prepared.ReadyLines)
 	}
 	if prepared.Ready == nil {

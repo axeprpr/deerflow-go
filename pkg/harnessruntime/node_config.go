@@ -36,6 +36,7 @@ const (
 	RuntimeStateStoreBackendInMemory RuntimeStateStoreBackend = "in-memory"
 	RuntimeStateStoreBackendFile     RuntimeStateStoreBackend = "file"
 	RuntimeStateStoreBackendSQLite   RuntimeStateStoreBackend = "sqlite"
+	RuntimeStateStoreBackendRemote   RuntimeStateStoreBackend = "remote"
 )
 
 type RuntimeStateStoreConfig struct {
@@ -146,6 +147,15 @@ func (c RuntimeNodeConfig) servesRemoteSandbox() bool {
 	return c.Sandbox.Normalized().Backend == SandboxBackendLocalLinux
 }
 
+func (c RuntimeNodeConfig) servesRemoteState() bool {
+	if !c.servesRemoteWorker() {
+		return false
+	}
+	return c.normalizedSnapshotBackend() != RuntimeStateStoreBackendRemote ||
+		c.normalizedEventBackend() != RuntimeStateStoreBackendRemote ||
+		c.normalizedThreadBackend() != RuntimeStateStoreBackendRemote
+}
+
 func (c RuntimeNodeConfig) BuildSandboxManager() (*SandboxResourceManager, error) {
 	return NewSandboxManagerFromConfig(c.Sandbox)
 }
@@ -253,6 +263,8 @@ func (c RuntimeNodeConfig) normalizedStateBackend(value RuntimeStateStoreBackend
 		return RuntimeStateStoreBackendFile
 	case RuntimeStateStoreBackendSQLite:
 		return RuntimeStateStoreBackendSQLite
+	case RuntimeStateStoreBackendRemote:
+		return RuntimeStateStoreBackendRemote
 	default:
 		return RuntimeStateStoreBackendInMemory
 	}
