@@ -405,3 +405,103 @@ func TestMemoryReloadPrefersMemoryStoreState(t *testing.T) {
 		t.Fatalf("facts=%#v", got.Facts)
 	}
 }
+
+func TestScopedMemoryImportAndReadUsesSelectedScope(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	store, err := memory.NewFileStore(filepath.Join(s.dataRoot, "memory-store"))
+	if err != nil {
+		t.Fatalf("new file store: %v", err)
+	}
+	if err := store.AutoMigrate(context.Background()); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	s.runtime = harness.NewRuntime(harness.RuntimeDeps{
+		LLMProvider:     s.llmProvider,
+		Tools:           s.tools,
+		DefaultMaxTurns: s.maxTurns,
+		SandboxProvider: harness.NewLocalSandboxProvider(s.sandboxName, s.sandboxRoot),
+	}, harness.NewMemoryRuntime(store, nil))
+
+	body := `{
+		"version":"1",
+		"user":{"topOfMind":{"summary":"shared user memory","updatedAt":"2026-04-11T05:06:07Z"}},
+		"history":{"recentMonths":{"summary":"","updatedAt":""},"earlierContext":{"summary":"","updatedAt":""},"longTermBackground":{"summary":"","updatedAt":""}},
+		"facts":[{"id":"fact-user","content":"User scoped fact","category":"preference","confidence":0.7,"createdAt":"2026-04-11T05:06:07Z","source":"manual"}]
+	}`
+	importResp := performCompatRequest(t, handler, http.MethodPost, "/api/memory/import?scope=user&scope_id=user-42&namespace=workspace-a", strings.NewReader(body), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if importResp.Code != http.StatusOK {
+		t.Fatalf("import status=%d body=%s", importResp.Code, importResp.Body.String())
+	}
+
+	doc, err := store.Load(context.Background(), memory.Scope{Type: memory.ScopeUser, ID: "user-42", Namespace: "workspace-a"}.Key())
+	if err != nil {
+		t.Fatalf("load scoped doc: %v", err)
+	}
+	if doc.User.TopOfMind != "shared user memory" {
+		t.Fatalf("topOfMind=%q", doc.User.TopOfMind)
+	}
+
+	getResp := performCompatRequest(t, handler, http.MethodGet, "/api/memory?scope=user&scope_id=user-42&namespace=workspace-a", nil, nil)
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", getResp.Code, getResp.Body.String())
+	}
+	var got gatewayMemoryResponse
+	if err := json.Unmarshal(getResp.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode get body: %v", err)
+	}
+	if got.User.TopOfMind.Summary != "shared user memory" {
+		t.Fatalf("topOfMind=%q", got.User.TopOfMind.Summary)
+	}
+	if len(got.Facts) != 1 || got.Facts[0].ID != "fact-user" {
+		t.Fatalf("facts=%#v", got.Facts)
+	}
+}
+
+func TestScopedMemoryFactLifecycleUsesSelectedScope(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+
+	store, err := memory.NewFileStore(filepath.Join(s.dataRoot, "memory-store"))
+	if err != nil {
+		t.Fatalf("new file store: %v", err)
+	}
+	if err := store.AutoMigrate(context.Background()); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	s.runtime = harness.NewRuntime(harness.RuntimeDeps{
+		LLMProvider:     s.llmProvider,
+		Tools:           s.tools,
+		DefaultMaxTurns: s.maxTurns,
+		SandboxProvider: harness.NewLocalSandboxProvider(s.sandboxName, s.sandboxRoot),
+	}, harness.NewMemoryRuntime(store, nil))
+
+	createResp := performCompatRequest(t, handler, http.MethodPost, "/api/memory/facts?scope=group&scope_id=team-1&namespace=workspace-a", strings.NewReader(`{"content":"Group scoped fact","category":"context","confidence":0.8}`), map[string]string{
+		"Content-Type": "application/json",
+	})
+	if createResp.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", createResp.Code, createResp.Body.String())
+	}
+	var created gatewayMemoryResponse
+	if err := json.Unmarshal(createResp.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create body: %v", err)
+	}
+	if len(created.Facts) != 1 {
+		t.Fatalf("facts len=%d", len(created.Facts))
+	}
+	factID := created.Facts[0].ID
+
+	deleteResp := performCompatRequest(t, handler, http.MethodDelete, "/api/memory/facts/"+factID+"?scope=group&scope_id=team-1&namespace=workspace-a", nil, nil)
+	if deleteResp.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", deleteResp.Code, deleteResp.Body.String())
+	}
+
+	doc, err := store.Load(context.Background(), memory.Scope{Type: memory.ScopeGroup, ID: "team-1", Namespace: "workspace-a"}.Key())
+	if err != nil {
+		t.Fatalf("load scoped doc: %v", err)
+	}
+	if len(doc.Facts) != 0 {
+		t.Fatalf("facts=%#v", doc.Facts)
+	}
+}

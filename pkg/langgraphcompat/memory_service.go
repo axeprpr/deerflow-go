@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,48 @@ type memoryFactPatchRequest struct {
 	Content    *string  `json:"content"`
 	Category   *string  `json:"category"`
 	Confidence *float64 `json:"confidence"`
+}
+
+func isGatewayGlobalMemoryScope(scope pkgmemory.Scope) bool {
+	return strings.TrimSpace(string(scope.Type)) == "" &&
+		strings.TrimSpace(scope.ID) == "" &&
+		strings.TrimSpace(scope.Namespace) == ""
+}
+
+func gatewayMemoryScopeFromRequest(r *http.Request) (pkgmemory.Scope, error) {
+	if r == nil || r.URL == nil {
+		return pkgmemory.Scope{}, nil
+	}
+	query := r.URL.Query()
+	scopeType := strings.TrimSpace(firstNonEmpty(query.Get("scope")))
+	scopeID := strings.TrimSpace(firstNonEmpty(query.Get("scope_id"), query.Get("scopeId")))
+	namespace := strings.TrimSpace(firstNonEmpty(query.Get("namespace")))
+	if scopeType == "" && scopeID == "" && namespace == "" {
+		return pkgmemory.Scope{}, nil
+	}
+	if strings.EqualFold(scopeType, "global") {
+		if scopeID != "" || namespace != "" {
+			return pkgmemory.Scope{}, fmt.Errorf("global memory scope cannot use scope_id or namespace")
+		}
+		return pkgmemory.Scope{}, nil
+	}
+	if scopeType == "" {
+		scopeType = string(pkgmemory.ScopeSession)
+	}
+	if scopeID == "" {
+		return pkgmemory.Scope{}, fmt.Errorf("memory scope_id required")
+	}
+	scope := pkgmemory.Scope{
+		Type:      pkgmemory.ScopeType(scopeType),
+		ID:        scopeID,
+		Namespace: namespace,
+	}.Normalized()
+	switch scope.Type {
+	case pkgmemory.ScopeSession, pkgmemory.ScopeUser, pkgmemory.ScopeGroup, pkgmemory.ScopeAgent:
+		return scope, nil
+	default:
+		return pkgmemory.Scope{}, fmt.Errorf("unsupported memory scope %q", scopeType)
+	}
 }
 
 func (s *Server) bootstrapGatewayMemory(ctx context.Context) error {
@@ -51,7 +94,16 @@ func (s *Server) bootstrapGatewayMemory(ctx context.Context) error {
 	return s.persistGatewayMemoryToStore(ctx, current)
 }
 
-func (s *Server) gatewayMemoryGet() gatewayMemoryResponse {
+func (s *Server) gatewayMemoryGet(ctx context.Context, scope pkgmemory.Scope) gatewayMemoryResponse {
+	if !isGatewayGlobalMemoryScope(scope) {
+		scope = scope.Normalized()
+		mem, ok, err := s.loadScopedMemoryFromStore(ctx, scope)
+		if err != nil || !ok {
+			return defaultGatewayMemory()
+		}
+		mem.Facts = s.memoryFactsWithSourceThreads(mem.Facts)
+		return mem
+	}
 	s.uiStateMu.RLock()
 	mem := s.getMemoryLocked()
 	s.uiStateMu.RUnlock()
@@ -107,11 +159,20 @@ func (s *Server) gatewayMemorySnapshotLocked() gatewayMemoryResponse {
 	return s.getMemoryLocked()
 }
 
-func (s *Server) gatewayMemoryExport() gatewayMemoryResponse {
-	return s.gatewayMemoryGet()
+func (s *Server) gatewayMemoryExport(ctx context.Context, scope pkgmemory.Scope) gatewayMemoryResponse {
+	return s.gatewayMemoryGet(ctx, scope)
 }
 
-func (s *Server) gatewayMemoryReload(ctx context.Context) (gatewayMemoryResponse, error) {
+func (s *Server) gatewayMemoryReload(ctx context.Context, scope pkgmemory.Scope) (gatewayMemoryResponse, error) {
+	if !isGatewayGlobalMemoryScope(scope) {
+		scope = scope.Normalized()
+		if mem, ok, err := s.loadScopedMemoryFromStore(ctx, scope); err != nil {
+			return gatewayMemoryResponse{}, err
+		} else if ok {
+			return mem, nil
+		}
+		return defaultGatewayMemory(), nil
+	}
 	if mem, ok, err := s.loadGatewayMemoryFromStore(ctx); err != nil {
 		return gatewayMemoryResponse{}, err
 	} else if ok {
@@ -124,7 +185,7 @@ func (s *Server) gatewayMemoryReload(ctx context.Context) (gatewayMemoryResponse
 		if err := s.persistGatewayState(); err != nil {
 			return gatewayMemoryResponse{}, err
 		}
-		return s.gatewayMemoryGet(), nil
+		return s.gatewayMemoryGet(ctx, pkgmemory.Scope{}), nil
 	}
 	if mem, ok, err := s.loadMemoryFromFileStrict(); err != nil {
 		return gatewayMemoryResponse{}, err
@@ -139,10 +200,21 @@ func (s *Server) gatewayMemoryReload(ctx context.Context) (gatewayMemoryResponse
 			return gatewayMemoryResponse{}, err
 		}
 	}
-	return s.gatewayMemoryGet(), nil
+	return s.gatewayMemoryGet(ctx, pkgmemory.Scope{}), nil
 }
 
-func (s *Server) gatewayMemoryImport(ctx context.Context, mem gatewayMemoryResponse) (gatewayMemoryResponse, error) {
+func (s *Server) gatewayMemoryImport(ctx context.Context, scope pkgmemory.Scope, mem gatewayMemoryResponse) (gatewayMemoryResponse, error) {
+	if !isGatewayGlobalMemoryScope(scope) {
+		scope = scope.Normalized()
+		normalized := normalizeGatewayMemoryResponse(mem)
+		if normalized.LastUpdated == "" {
+			normalized.LastUpdated = time.Now().UTC().Format(time.RFC3339)
+		}
+		if err := s.persistScopedMemoryToStore(ctx, scope, normalized); err != nil {
+			return gatewayMemoryResponse{}, err
+		}
+		return s.gatewayMemoryGet(ctx, scope), nil
+	}
 	normalized := normalizeGatewayMemoryResponse(mem)
 	if normalized.LastUpdated == "" {
 		normalized.LastUpdated = time.Now().UTC().Format(time.RFC3339)
@@ -150,23 +222,35 @@ func (s *Server) gatewayMemoryImport(ctx context.Context, mem gatewayMemoryRespo
 	if err := s.setAndPersistGatewayMemory(ctx, normalized); err != nil {
 		return gatewayMemoryResponse{}, err
 	}
-	return s.gatewayMemoryGet(), nil
+	return s.gatewayMemoryGet(ctx, pkgmemory.Scope{}), nil
 }
 
-func (s *Server) gatewayMemoryClear(ctx context.Context) (gatewayMemoryResponse, error) {
+func (s *Server) gatewayMemoryClear(ctx context.Context, scope pkgmemory.Scope) (gatewayMemoryResponse, error) {
+	if !isGatewayGlobalMemoryScope(scope) {
+		scope = scope.Normalized()
+		mem := defaultGatewayMemory()
+		mem.LastUpdated = time.Now().UTC().Format(time.RFC3339)
+		if err := s.persistScopedMemoryToStore(ctx, scope, mem); err != nil {
+			return gatewayMemoryResponse{}, err
+		}
+		return s.gatewayMemoryGet(ctx, scope), nil
+	}
 	if err := s.setAndPersistGatewayMemory(ctx, defaultGatewayMemory()); err != nil {
 		return gatewayMemoryResponse{}, err
 	}
-	return s.gatewayMemoryGet(), nil
+	return s.gatewayMemoryGet(ctx, pkgmemory.Scope{}), nil
 }
 
-func (s *Server) gatewayMemoryDeleteFact(ctx context.Context, factID string) (gatewayMemoryResponse, error) {
+func (s *Server) gatewayMemoryDeleteFact(ctx context.Context, scope pkgmemory.Scope, factID string) (gatewayMemoryResponse, error) {
 	factID = strings.TrimSpace(factID)
 	if factID == "" {
 		return gatewayMemoryResponse{}, fmt.Errorf("Memory fact '%s' not found", factID)
 	}
+	mem, err := s.gatewayMemoryEditable(ctx, scope)
+	if err != nil {
+		return gatewayMemoryResponse{}, err
+	}
 	s.uiStateMu.Lock()
-	mem := s.getMemoryLocked()
 	newFacts := make([]memoryFact, 0, len(mem.Facts))
 	found := false
 	for _, fact := range mem.Facts {
@@ -183,13 +267,13 @@ func (s *Server) gatewayMemoryDeleteFact(ctx context.Context, factID string) (ga
 	mem.Facts = newFacts
 	mem.LastUpdated = time.Now().UTC().Format(time.RFC3339)
 	s.uiStateMu.Unlock()
-	if err := s.setAndPersistGatewayMemory(ctx, mem); err != nil {
+	if err := s.persistGatewayMemorySelection(ctx, scope, mem); err != nil {
 		return gatewayMemoryResponse{}, err
 	}
-	return s.gatewayMemoryGet(), nil
+	return s.gatewayMemoryGet(ctx, scope), nil
 }
 
-func (s *Server) gatewayMemoryCreateFact(ctx context.Context, req memoryFactCreateRequest) (gatewayMemoryResponse, error) {
+func (s *Server) gatewayMemoryCreateFact(ctx context.Context, scope pkgmemory.Scope, req memoryFactCreateRequest) (gatewayMemoryResponse, error) {
 	content := strings.TrimSpace(req.Content)
 	if content == "" {
 		return gatewayMemoryResponse{}, fmt.Errorf("Memory fact content cannot be empty.")
@@ -202,9 +286,12 @@ func (s *Server) gatewayMemoryCreateFact(ctx context.Context, req memoryFactCrea
 		category = "context"
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
+	mem, err := s.gatewayMemoryEditable(ctx, scope)
+	if err != nil {
+		return gatewayMemoryResponse{}, err
+	}
 
 	s.uiStateMu.Lock()
-	mem := s.getMemoryLocked()
 	mem.Facts = append(mem.Facts, memoryFact{
 		ID:         fmt.Sprintf("fact_%d", time.Now().UTC().UnixNano()),
 		Content:    content,
@@ -216,20 +303,23 @@ func (s *Server) gatewayMemoryCreateFact(ctx context.Context, req memoryFactCrea
 	mem.LastUpdated = now
 	s.uiStateMu.Unlock()
 
-	if err := s.setAndPersistGatewayMemory(ctx, mem); err != nil {
+	if err := s.persistGatewayMemorySelection(ctx, scope, mem); err != nil {
 		return gatewayMemoryResponse{}, err
 	}
-	return s.gatewayMemoryGet(), nil
+	return s.gatewayMemoryGet(ctx, scope), nil
 }
 
-func (s *Server) gatewayMemoryUpdateFact(ctx context.Context, factID string, req memoryFactPatchRequest) (gatewayMemoryResponse, error) {
+func (s *Server) gatewayMemoryUpdateFact(ctx context.Context, scope pkgmemory.Scope, factID string, req memoryFactPatchRequest) (gatewayMemoryResponse, error) {
 	factID = strings.TrimSpace(factID)
 	if factID == "" {
 		return gatewayMemoryResponse{}, fmt.Errorf("Memory fact '%s' not found", factID)
 	}
+	mem, err := s.gatewayMemoryEditable(ctx, scope)
+	if err != nil {
+		return gatewayMemoryResponse{}, err
+	}
 
 	s.uiStateMu.Lock()
-	mem := s.getMemoryLocked()
 	found := false
 	for i := range mem.Facts {
 		if mem.Facts[i].ID != factID {
@@ -267,10 +357,10 @@ func (s *Server) gatewayMemoryUpdateFact(ctx context.Context, factID string, req
 	mem.LastUpdated = time.Now().UTC().Format(time.RFC3339)
 	s.uiStateMu.Unlock()
 
-	if err := s.setAndPersistGatewayMemory(ctx, mem); err != nil {
+	if err := s.persistGatewayMemorySelection(ctx, scope, mem); err != nil {
 		return gatewayMemoryResponse{}, err
 	}
-	return s.gatewayMemoryGet(), nil
+	return s.gatewayMemoryGet(ctx, scope), nil
 }
 
 func (s *Server) loadGatewayMemoryFromStore(ctx context.Context) (gatewayMemoryResponse, bool, error) {
@@ -294,6 +384,53 @@ func (s *Server) persistGatewayMemoryToStore(ctx context.Context, mem gatewayMem
 		return nil
 	}
 	return runtimeMemory.SaveDocument(ctx, gatewayMemoryDocument(mem))
+}
+
+func (s *Server) loadScopedMemoryFromStore(ctx context.Context, scope pkgmemory.Scope) (gatewayMemoryResponse, bool, error) {
+	runtimeMemory := s.runtimeMemory()
+	if s == nil || runtimeMemory == nil || !runtimeMemory.Enabled() {
+		return gatewayMemoryResponse{}, false, nil
+	}
+	doc, ok, err := runtimeMemory.LoadScopeDocument(ctx, scope.Normalized())
+	if err != nil {
+		return gatewayMemoryResponse{}, false, err
+	}
+	if !ok {
+		return gatewayMemoryResponse{}, false, nil
+	}
+	return gatewayMemoryResponseFromDocument(doc), true, nil
+}
+
+func (s *Server) persistScopedMemoryToStore(ctx context.Context, scope pkgmemory.Scope, mem gatewayMemoryResponse) error {
+	runtimeMemory := s.runtimeMemory()
+	if s == nil || runtimeMemory == nil || !runtimeMemory.Enabled() {
+		return fmt.Errorf("memory runtime is not configured")
+	}
+	return runtimeMemory.SaveScopeDocument(ctx, scope.Normalized(), gatewayMemoryDocument(mem))
+}
+
+func (s *Server) gatewayMemoryEditable(ctx context.Context, scope pkgmemory.Scope) (gatewayMemoryResponse, error) {
+	if isGatewayGlobalMemoryScope(scope) {
+		s.uiStateMu.RLock()
+		mem := s.getMemoryLocked()
+		s.uiStateMu.RUnlock()
+		return mem, nil
+	}
+	scope = scope.Normalized()
+	if mem, ok, err := s.loadScopedMemoryFromStore(ctx, scope); err != nil {
+		return gatewayMemoryResponse{}, err
+	} else if ok {
+		return mem, nil
+	}
+	return defaultGatewayMemory(), nil
+}
+
+func (s *Server) persistGatewayMemorySelection(ctx context.Context, scope pkgmemory.Scope, mem gatewayMemoryResponse) error {
+	if isGatewayGlobalMemoryScope(scope) {
+		return s.setAndPersistGatewayMemory(ctx, mem)
+	}
+	scope = scope.Normalized()
+	return s.persistScopedMemoryToStore(ctx, scope, mem)
 }
 
 func (s *Server) setAndPersistGatewayMemory(ctx context.Context, mem gatewayMemoryResponse) error {
