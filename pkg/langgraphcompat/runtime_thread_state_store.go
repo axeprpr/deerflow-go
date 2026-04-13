@@ -19,8 +19,8 @@ func (s *Server) ensureThreadStateStore() harnessruntime.ThreadStateStore {
 	defer s.sessionsMu.Unlock()
 	if s.threadStateStore == nil {
 		var store harnessruntime.ThreadStateStore
-		if s.runtimeSystem != nil {
-			store = s.runtimeSystem.ThreadStateStore()
+		if node := s.ensureRuntimeSystem(); node != nil {
+			store = node.ThreadStateStore()
 		}
 		s.threadStateStore = newCompatThreadStateStore(s, store)
 	}
@@ -30,8 +30,8 @@ func (s *Server) ensureThreadStateStore() harnessruntime.ThreadStateStore {
 func newCompatThreadStateStore(server *Server, initial harnessruntime.ThreadStateStore) harnessruntime.ThreadStateStore {
 	var store harnessruntime.ThreadStateStore = initial
 	if store == nil && server != nil {
-		if server.runtimeSystem != nil {
-			store = server.runtimeSystem.ThreadStateStore()
+		if node := server.ensureRuntimeSystem(); node != nil {
+			store = node.ThreadStateStore()
 		}
 	}
 	if store == nil && server != nil {

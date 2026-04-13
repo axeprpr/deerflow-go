@@ -334,20 +334,53 @@ func (s *Server) runtimeView() *harness.Runtime {
 }
 
 func (s *Server) bindRuntimeNodeDispatch() {
-	if s == nil || s.runtimeSystem == nil {
+	if s == nil {
+		return
+	}
+	node := s.ensureRuntimeSystem()
+	if node == nil {
 		return
 	}
 	dispatchRuntime := s.runtimeNode.BuildDispatchRuntime(s.runtimeView, s.runtimeWorkerSpecAdapter())
-	s.runtimeSystem.BindDispatch(dispatchRuntime)
-	s.runDispatcher = s.runtimeSystem.Dispatcher
+	node.BindDispatch(dispatchRuntime)
+	s.runDispatcher = node.Dispatcher
+}
+
+func (s *Server) ensureRuntimeSystem() *harnessruntime.RuntimeNode {
+	if s == nil {
+		return nil
+	}
+	if s.runtimeSystem != nil {
+		return s.runtimeSystem
+	}
+	config := s.runtimeNode
+	if config.Transport.Backend == "" {
+		root := strings.TrimSpace(s.sandboxRoot)
+		if root == "" {
+			root = filepath.Join(os.TempDir(), "deerflow-langgraph-sandbox")
+		}
+		name := strings.TrimSpace(s.sandboxName)
+		if name == "" {
+			name = "langgraph"
+		}
+		config = harnessruntime.DefaultRuntimeNodeConfig(name, root)
+	}
+	node, err := config.BuildRuntimeNode(harnessruntime.DispatchRuntimeConfig{})
+	if err != nil {
+		return nil
+	}
+	s.runtimeSystem = node
+	s.runtimeNode = node.Config
+	s.sandboxManager = node.Sandbox
+	return node
 }
 
 func (s *Server) defaultSandboxRuntime(existing harness.SandboxRuntime) harness.SandboxRuntime {
 	if existing != nil {
 		return existing
 	}
-	if s != nil && s.runtimeSystem != nil {
-		if runtime := s.runtimeSystem.SandboxRuntime(s.runtimeNode.Sandbox.Policy); runtime != nil {
+	if node := s.ensureRuntimeSystem(); node != nil {
+		if runtime := node.SandboxRuntime(node.Config.Sandbox.Policy); runtime != nil {
 			return runtime
 		}
 	}
@@ -369,11 +402,6 @@ func (s *Server) defaultSandboxRuntime(existing harness.SandboxRuntime) harness.
 	}
 	if s != nil {
 		s.sandboxManager = manager
-		s.runtimeSystem = &harnessruntime.RuntimeNode{
-			Config:     config,
-			Sandbox:    manager,
-			Dispatcher: s.runDispatcher,
-		}
 		s.runtimeNode.Sandbox = config.Sandbox
 	}
 	return manager.Runtime(config.Sandbox.Policy)
@@ -386,10 +414,7 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 	if s.runDispatcher != nil {
 		return s.runDispatcher
 	}
-	if s.runtimeSystem != nil && s.runtimeSystem.Dispatcher != nil {
-		s.runDispatcher = s.runtimeSystem.Dispatcher
-		return s.runDispatcher
-	}
+	node := s.ensureRuntimeSystem()
 	if s.runtimeNode.Transport.Backend == "" {
 		root := strings.TrimSpace(s.sandboxRoot)
 		if root == "" {
@@ -402,9 +427,9 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 		s.runtimeNode = harnessruntime.DefaultRuntimeNodeConfig(name, root)
 	}
 	s.runDispatcher = s.runtimeNode.BuildDispatcher(s.runtimeNode.BuildDispatchRuntime(s.runtimeView, s.runtimeWorkerSpecAdapter()))
-	if s.runtimeSystem != nil {
-		s.runtimeSystem.BindDispatch(s.runtimeNode.BuildDispatchRuntime(s.runtimeView, s.runtimeWorkerSpecAdapter()))
-		s.runDispatcher = s.runtimeSystem.Dispatcher
+	if node != nil {
+		node.BindDispatch(s.runtimeNode.BuildDispatchRuntime(s.runtimeView, s.runtimeWorkerSpecAdapter()))
+		s.runDispatcher = node.Dispatcher
 	}
 	return s.runDispatcher
 }

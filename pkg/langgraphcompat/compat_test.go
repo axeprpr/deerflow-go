@@ -87,6 +87,35 @@ func TestNewServerUsesStableRuntimeBoundaries(t *testing.T) {
 	}
 }
 
+func TestCompatFallbacksRebuildRuntimeSystemFromNodeConfig(t *testing.T) {
+	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
+
+	s, err := NewServer(":0", "", "test-model")
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	s.runtimeSystem = nil
+	s.runDispatcher = nil
+	s.sandboxManager = nil
+
+	if got := s.defaultRunDispatcher(); got == nil {
+		t.Fatal("defaultRunDispatcher() = nil")
+	}
+	if got := s.defaultSandboxRuntime(nil); got == nil {
+		t.Fatal("defaultSandboxRuntime() = nil")
+	}
+	if s.runtimeSystem == nil {
+		t.Fatal("runtimeSystem = nil after fallback rebuild")
+	}
+	if s.runtimeSystem.Dispatcher != s.runDispatcher {
+		t.Fatal("dispatcher was not rebound through runtimeSystem")
+	}
+	if s.runtimeSystem.RemoteWorker == nil || s.runtimeSystem.RemoteWorker.Server() == nil {
+		t.Fatalf("runtimeSystem remote worker = %#v", s.runtimeSystem.RemoteWorker)
+	}
+}
+
 func TestNewServerDoesNotServeFrontendAtRoot(t *testing.T) {
 	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
 

@@ -25,9 +25,9 @@ func (s *Server) ensureSnapshotStore() harnessruntime.RunSnapshotStore {
 			snapshots harnessruntime.RunSnapshotStore
 			events    harnessruntime.RunEventStore
 		)
-		if s.runtimeSystem != nil {
-			snapshots = s.runtimeSystem.SnapshotStore()
-			events = s.runtimeSystem.EventStore()
+		if node := s.ensureRuntimeSystem(); node != nil {
+			snapshots = node.SnapshotStore()
+			events = node.EventStore()
 		}
 		s.snapshotStore = newCompatRunStateStore(s, snapshots, events)
 	}
@@ -46,9 +46,9 @@ func (s *Server) ensureEventStore() harnessruntime.RunEventStore {
 				snapshots harnessruntime.RunSnapshotStore
 				events    harnessruntime.RunEventStore
 			)
-			if s.runtimeSystem != nil {
-				snapshots = s.runtimeSystem.SnapshotStore()
-				events = s.runtimeSystem.EventStore()
+			if node := s.ensureRuntimeSystem(); node != nil {
+				snapshots = node.SnapshotStore()
+				events = node.EventStore()
 			}
 			s.snapshotStore = newCompatRunStateStore(s, snapshots, events)
 		}
@@ -60,8 +60,8 @@ func (s *Server) ensureEventStore() harnessruntime.RunEventStore {
 func newCompatRunStateStore(server *Server, snapshots harnessruntime.RunSnapshotStore, events harnessruntime.RunEventStore) *compatRunStateStore {
 	var store harnessruntime.RunSnapshotStore = snapshots
 	if store == nil && server != nil {
-		if server.runtimeSystem != nil {
-			store = server.runtimeSystem.SnapshotStore()
+		if node := server.ensureRuntimeSystem(); node != nil {
+			store = node.SnapshotStore()
 		}
 	}
 	if store == nil && server != nil {
@@ -71,8 +71,8 @@ func newCompatRunStateStore(server *Server, snapshots harnessruntime.RunSnapshot
 		store = harnessruntime.NewInMemoryRunStore()
 	}
 	if events == nil && server != nil {
-		if server.runtimeSystem != nil {
-			events = server.runtimeSystem.EventStore()
+		if node := server.ensureRuntimeSystem(); node != nil {
+			events = node.EventStore()
 		}
 	}
 	if events == nil && server != nil {
