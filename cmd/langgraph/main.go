@@ -20,10 +20,12 @@ var (
 
 func main() {
 	yolo := flag.Bool("yolo", false, "YOLO mode: no auth, defaults for all settings")
-	authToken := flag.String("auth-token", os.Getenv("DEERFLOW_AUTH_TOKEN"), "Bearer token for API auth (env: DEERFLOW_AUTH_TOKEN)")
-	addr := flag.String("addr", defaultAddr(), "Server address")
-	dbURL := flag.String("db", firstNonEmpty(os.Getenv("DATABASE_URL"), os.Getenv("POSTGRES_URL")), "Database URL (postgres or sqlite)")
-	model := flag.String("model", firstNonEmpty(os.Getenv("DEFAULT_LLM_MODEL"), "qwen/Qwen3.5-9B"), "Default LLM model")
+	cfg := defaultConfig()
+	authToken := flag.String("auth-token", cfg.AuthToken, "Bearer token for API auth (env: DEERFLOW_AUTH_TOKEN)")
+	addr := flag.String("addr", cfg.Addr, "Server address")
+	dbURL := flag.String("db", cfg.DatabaseURL, "Database URL (postgres or sqlite)")
+	model := flag.String("model", cfg.Model, "Default LLM model")
+	provider := flag.String("provider", cfg.Provider, "Default LLM provider")
 	flag.Parse()
 
 	logger := log.Default()
@@ -33,6 +35,7 @@ func main() {
 	if *yolo {
 		os.Setenv("DEERFLOW_YOLO", "1")
 		os.Setenv("ADDR", ":8080")
+		os.Setenv("DEFAULT_LLM_PROVIDER", "siliconflow")
 		os.Setenv("DEFAULT_LLM_MODEL", "qwen/Qwen3.5-9B")
 		os.Setenv("DEERFLOW_DATA_ROOT", "./data")
 		os.Setenv("LOG_LEVEL", "info")
@@ -42,16 +45,23 @@ func main() {
 		if *model == "" {
 			*model = "qwen/Qwen3.5-9B"
 		}
+		if *provider == "" {
+			*provider = "siliconflow"
+		}
 	}
 
 	if *authToken != "" {
 		os.Setenv("DEERFLOW_AUTH_TOKEN", *authToken)
+	}
+	if *provider != "" {
+		os.Setenv("DEFAULT_LLM_PROVIDER", *provider)
 	}
 
 	logger.Printf("Starting deerflow-go server...")
 	logger.Printf("  YOLO mode: %v", *yolo)
 	logger.Printf("  Address:   %s", *addr)
 	logger.Printf("  Database: %s", describeDB(*dbURL))
+	logger.Printf("  Provider: %s", *provider)
 	logger.Printf("  Model:    %s", *model)
 	logger.Printf("  Auth:     %s", describeAuth(*authToken, *yolo))
 	logger.Printf("  Version: %s (%s, %s)", version, commit, buildTime)
@@ -81,6 +91,24 @@ func main() {
 	logger.Printf("  API docs: http://%s/docs", *addr)
 	if err := server.Start(); err != nil {
 		logger.Fatalf("Server error: %v", err)
+	}
+}
+
+type config struct {
+	AuthToken   string
+	Addr        string
+	DatabaseURL string
+	Provider    string
+	Model       string
+}
+
+func defaultConfig() config {
+	return config{
+		AuthToken:   strings.TrimSpace(os.Getenv("DEERFLOW_AUTH_TOKEN")),
+		Addr:        defaultAddr(),
+		DatabaseURL: firstNonEmpty(os.Getenv("DATABASE_URL"), os.Getenv("POSTGRES_URL")),
+		Provider:    firstNonEmpty(os.Getenv("DEFAULT_LLM_PROVIDER"), "siliconflow"),
+		Model:       firstNonEmpty(os.Getenv("DEFAULT_LLM_MODEL"), "qwen/Qwen3.5-9B"),
 	}
 }
 

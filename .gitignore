@@ -9,7 +9,7 @@ sandbox.test.exe
 .playwright-cli/
 
 # Compiled binaries
-langgraph
+/langgraph
 # Thread session data (runtime)
 pkg/langgraphcompat/threads/
 pkg/langgraphcompat/runs/
