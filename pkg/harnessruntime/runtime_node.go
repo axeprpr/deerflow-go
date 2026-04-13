@@ -143,11 +143,25 @@ func (n *RuntimeNode) RemoteWorkerAddr() string {
 	return n.RemoteWorker.Addr()
 }
 
+func (n *RuntimeNode) Start() error {
+	if n == nil {
+		return nil
+	}
+	return n.StartRemoteWorker()
+}
+
 func (n *RuntimeNode) StartRemoteWorker() error {
 	if n == nil || n.RemoteWorker == nil {
 		return nil
 	}
 	return n.RemoteWorker.Start()
+}
+
+func (n *RuntimeNode) Serve(listener net.Listener) error {
+	if n == nil {
+		return nil
+	}
+	return n.ServeRemoteWorker(listener)
 }
 
 func (n *RuntimeNode) ServeRemoteWorker(listener net.Listener) error {

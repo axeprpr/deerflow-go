@@ -15,6 +15,13 @@ func TestRuntimeNodeRemoteWorkerAddr(t *testing.T) {
 	}
 }
 
+func TestRuntimeNodeStartDelegatesToRemoteWorker(t *testing.T) {
+	node := &RuntimeNode{}
+	if err := node.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+}
+
 func TestRuntimeNodeServeRemoteWorkerBridgesDispatch(t *testing.T) {
 	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
 	executor := &fakeExecutor{}
@@ -38,7 +45,7 @@ func TestRuntimeNodeServeRemoteWorkerBridgesDispatch(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- node.ServeRemoteWorker(listener)
+		errCh <- node.Serve(listener)
 	}()
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
