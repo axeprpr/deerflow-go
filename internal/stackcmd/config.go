@@ -8,6 +8,7 @@ import (
 	"github.com/axeprpr/deerflow-go/internal/commandrun"
 	"github.com/axeprpr/deerflow-go/internal/langgraphcmd"
 	"github.com/axeprpr/deerflow-go/internal/runtimecmd"
+	"github.com/axeprpr/deerflow-go/internal/sandboxcmd"
 	"github.com/axeprpr/deerflow-go/internal/statecmd"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 )
@@ -17,6 +18,7 @@ type Config struct {
 	Gateway langgraphcmd.Config
 	Worker  runtimecmd.NodeConfig
 	State   statecmd.Config
+	Sandbox sandboxcmd.Config
 }
 
 type StackPreset string
@@ -31,12 +33,14 @@ func DefaultConfig() Config {
 	gateway := langgraphcmd.DefaultConfig()
 	worker := runtimecmd.DefaultSplitWorkerNodeConfig()
 	state := statecmd.DefaultConfig()
+	sb := sandboxcmd.DefaultConfig()
 
 	sharedDataRoot := firstNonEmpty(strings.TrimSpace(gateway.Runtime.DataRoot), strings.TrimSpace(worker.DataRoot))
 	if sharedDataRoot != "" {
 		gateway.Runtime.DataRoot = sharedDataRoot
 		worker.DataRoot = sharedDataRoot
 		state.Runtime.DataRoot = sharedDataRoot
+		sb.Runtime.DataRoot = sharedDataRoot
 	}
 	worker.Provider = gateway.Provider
 	worker.MaxTurns = gateway.Runtime.MaxTurns
@@ -62,6 +66,7 @@ func DefaultConfig() Config {
 		Gateway: gateway,
 		Worker:  worker,
 		State:   state,
+		Sandbox: sb,
 	}
 }
 
@@ -79,6 +84,9 @@ func (c Config) Validate() error {
 	if cfg.usesDedicatedStateService() {
 		if err := cfg.State.Validate(); err != nil {
 			return fmt.Errorf("invalid state config: %w", err)
+		}
+		if err := cfg.Sandbox.Validate(); err != nil {
+			return fmt.Errorf("invalid sandbox config: %w", err)
 		}
 	}
 	return nil
@@ -98,6 +106,9 @@ func (c Config) withDefaults() Config {
 	}
 	if strings.TrimSpace(cfg.State.Runtime.DataRoot) == "" {
 		cfg.State.Runtime.DataRoot = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.DataRoot), strings.TrimSpace(cfg.Worker.DataRoot))
+	}
+	if strings.TrimSpace(cfg.Sandbox.Runtime.DataRoot) == "" {
+		cfg.Sandbox.Runtime.DataRoot = firstNonEmpty(strings.TrimSpace(cfg.Gateway.Runtime.DataRoot), strings.TrimSpace(cfg.Worker.DataRoot))
 	}
 	if strings.TrimSpace(cfg.Worker.MemoryStoreURL) == "" {
 		cfg.Worker.MemoryStoreURL = cfg.Gateway.Runtime.MemoryStoreURL
@@ -143,6 +154,7 @@ func (c Config) withDefaults() Config {
 	if cfg.usesDedicatedStateService() {
 		stateURL := stateServiceEndpoint(cfg.State.Runtime.Addr)
 		cfg.State = cfg.State.WithDefaults()
+		cfg.Sandbox = cfg.Sandbox.WithDefaults()
 		cfg.Gateway.Runtime.StateProvider = harnessruntime.RuntimeStateProviderModeAuto
 		cfg.Gateway.Runtime.StateBackend = harnessruntime.RuntimeStateStoreBackendRemote
 		cfg.Gateway.Runtime.SnapshotBackend = harnessruntime.RuntimeStateStoreBackendRemote
@@ -164,6 +176,8 @@ func (c Config) withDefaults() Config {
 		cfg.Worker.EventStoreURL = ""
 		cfg.Worker.ThreadStoreURL = ""
 		cfg.Worker.StateRoot = ""
+		cfg.Worker.SandboxBackend = harnessruntime.SandboxBackendRemote
+		cfg.Worker.SandboxEndpoint = sandboxServiceEndpoint(cfg.Sandbox.Runtime.Addr)
 	} else if gatewayUsesRemoteState(cfg.Gateway.Runtime) {
 		cfg.Gateway.Runtime.StateBackend = harnessruntime.RuntimeStateStoreBackendRemote
 		cfg.Gateway.Runtime.SnapshotBackend = firstNonEmptyState(cfg.Gateway.Runtime.SnapshotBackend, harnessruntime.RuntimeStateStoreBackendRemote)
@@ -206,6 +220,7 @@ func (c Config) applyPresetDefaults() Config {
 		c.Gateway.Runtime.Preset = runtimecmd.RuntimeNodePresetSharedRemote
 		c.Worker.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
 		c.State.Runtime.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
+		c.Sandbox.Runtime.Preset = runtimecmd.RuntimeNodePresetFastLocal
 	case StackPresetSharedSQLite:
 		c.Gateway.Runtime.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
 		c.Worker.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
@@ -220,6 +235,7 @@ func (c Config) applyPresetDefaults() Config {
 	c.Gateway.Runtime = runtimecmd.ApplyNodePresetDefaults(c.Gateway.Runtime)
 	c.Worker = runtimecmd.ApplyNodePresetDefaults(c.Worker)
 	c.State.Runtime = runtimecmd.ApplyNodePresetDefaults(c.State.Runtime)
+	c.Sandbox.Runtime = runtimecmd.ApplyNodePresetDefaults(c.Sandbox.Runtime)
 	return c
 }
 
@@ -258,6 +274,7 @@ func (c Config) StartupLines(build langgraphcmd.BuildInfo, yolo bool, logLevel s
 	)
 	if cfg.usesDedicatedStateService() {
 		lines = append(lines, fmt.Sprintf("  State service: addr=%s provider=%s store=%s", cfg.State.Runtime.Addr, cfg.State.Runtime.StateProvider, firstNonEmpty(cfg.State.Runtime.StateStoreURL, "(derived)")))
+		lines = append(lines, fmt.Sprintf("  Sandbox service: addr=%s backend=%s", cfg.Sandbox.Runtime.Addr, cfg.Sandbox.Runtime.SandboxBackend))
 	}
 	return lines
 }
@@ -266,10 +283,11 @@ func (c Config) ReadyLines() []string {
 	cfg := c.withDefaults()
 	lines := cfg.Gateway.ReadyLines()
 	lines = append(lines, fmt.Sprintf("  Worker server: %s%s", commandrun.HTTPURL(cfg.Worker.Addr), harnessruntime.DefaultRemoteWorkerDispatchPath))
-	lines = append(lines, fmt.Sprintf("  Worker sandbox: %s%s", commandrun.HTTPURL(cfg.Worker.Addr), harnessruntime.DefaultRemoteSandboxHealthPath))
 	if cfg.usesDedicatedStateService() {
 		lines = append(lines, fmt.Sprintf("  State server: %s%s", commandrun.HTTPURL(cfg.State.Runtime.Addr), harnessruntime.DefaultRemoteStateHealthPath))
+		lines = append(lines, fmt.Sprintf("  Sandbox server: %s%s", commandrun.HTTPURL(cfg.Sandbox.Runtime.Addr), harnessruntime.DefaultRemoteSandboxHealthPath))
 	} else {
+		lines = append(lines, fmt.Sprintf("  Worker sandbox: %s%s", commandrun.HTTPURL(cfg.Worker.Addr), harnessruntime.DefaultRemoteSandboxHealthPath))
 		lines = append(lines, fmt.Sprintf("  Worker state: %s%s", commandrun.HTTPURL(cfg.Worker.Addr), harnessruntime.DefaultRemoteStateHealthPath))
 	}
 	return lines
@@ -369,4 +387,15 @@ func stateServiceEndpoint(addr string) string {
 		addr = "http://" + addr
 	}
 	return strings.TrimRight(addr, "/") + harnessruntime.DefaultRemoteStateBasePath
+}
+
+func sandboxServiceEndpoint(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if strings.HasPrefix(addr, ":") {
+		addr = "127.0.0.1" + addr
+	}
+	if !strings.HasPrefix(addr, "http://") && !strings.HasPrefix(addr, "https://") {
+		addr = "http://" + addr
+	}
+	return strings.TrimRight(addr, "/")
 }

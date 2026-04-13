@@ -6,6 +6,7 @@ import (
 	"github.com/axeprpr/deerflow-go/internal/commandrun"
 	"github.com/axeprpr/deerflow-go/internal/langgraphcmd"
 	"github.com/axeprpr/deerflow-go/internal/runtimecmd"
+	"github.com/axeprpr/deerflow-go/internal/sandboxcmd"
 	"github.com/axeprpr/deerflow-go/internal/statecmd"
 )
 
@@ -14,14 +15,16 @@ type Launcher struct {
 	gateway *langgraphcmd.Launcher
 	worker  *runtimecmd.NodeConfig
 	state   *statecmd.Config
+	sandbox *sandboxcmd.Config
 }
 
-func NewLauncher(gateway *langgraphcmd.Launcher, worker commandrun.Lifecycle, workerConfig *runtimecmd.NodeConfig, state commandrun.Lifecycle, stateConfig *statecmd.Config) *Launcher {
+func NewLauncher(gateway *langgraphcmd.Launcher, worker commandrun.Lifecycle, workerConfig *runtimecmd.NodeConfig, state commandrun.Lifecycle, stateConfig *statecmd.Config, sandbox commandrun.Lifecycle, sandboxConfig *sandboxcmd.Config) *Launcher {
 	return &Launcher{
-		group:   commandrun.NewLifecycleGroup(state, worker, gateway),
+		group:   commandrun.NewLifecycleGroup(state, sandbox, worker, gateway),
 		gateway: gateway,
 		worker:  workerConfig,
 		state:   stateConfig,
+		sandbox: sandboxConfig,
 	}
 }
 
@@ -50,6 +53,8 @@ func (c Config) BuildLauncher(ctx context.Context) (*Launcher, error) {
 	}
 	var stateLauncher commandrun.Lifecycle
 	var stateConfig *statecmd.Config
+	var sandboxLauncher commandrun.Lifecycle
+	var sandboxConfig *sandboxcmd.Config
 	if cfg.usesDedicatedStateService() {
 		launcher, err := cfg.State.BuildLauncher()
 		if err != nil {
@@ -58,11 +63,19 @@ func (c Config) BuildLauncher(ctx context.Context) (*Launcher, error) {
 		stateLauncher = launcher
 		stateCopy := cfg.State
 		stateConfig = &stateCopy
+
+		sbLauncher, err := cfg.Sandbox.BuildLauncher()
+		if err != nil {
+			return nil, err
+		}
+		sandboxLauncher = sbLauncher
+		sbCopy := cfg.Sandbox
+		sandboxConfig = &sbCopy
 	}
 	gatewayLauncher, err := cfg.Gateway.BuildLauncher()
 	if err != nil {
 		return nil, err
 	}
 	workerConfig := cfg.Worker
-	return NewLauncher(gatewayLauncher, workerLauncher, &workerConfig, stateLauncher, stateConfig), nil
+	return NewLauncher(gatewayLauncher, workerLauncher, &workerConfig, stateLauncher, stateConfig, sandboxLauncher, sandboxConfig), nil
 }
