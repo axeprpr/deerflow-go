@@ -8,6 +8,7 @@ import (
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	pkgmemory "github.com/axeprpr/deerflow-go/pkg/memory"
+	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
 
 type RuntimeBootstrap struct {
@@ -66,44 +67,7 @@ func BuildDefaultHarnessRuntime(bootstrap *RuntimeBootstrap, provider llm.LLMPro
 	if bootstrap == nil {
 		return nil
 	}
-	node := bootstrap.Node
-	var memoryRuntime *harness.MemoryRuntime
-	if bootstrap.MemoryService != nil {
-		memoryRuntime = bootstrap.MemoryService.Runtime()
-	}
-	toolRuntime := bootstrap.ToolRuntime
-	sandboxRuntime := bootstrap.SandboxRuntime
-	if node != nil {
-		if runtime := node.MemoryRuntime(); runtime != nil {
-			memoryRuntime = runtime
-		}
-		if runtime := node.ToolRuntime(); runtime != nil {
-			toolRuntime = runtime
-		}
-		if runtime := node.ConfiguredSandboxRuntime(); runtime != nil {
-			sandboxRuntime = runtime
-		}
-	}
-	var sandboxProvider harness.SandboxProvider
-	if sandboxRuntime != nil {
-		sandboxProvider = sandboxRuntime.Provider()
-	}
-	var options []harness.RuntimeOption
-	if profileBuilder != nil {
-		options = append(options, harness.WithProfileBuilder(profileBuilder(memoryRuntime, toolRuntime, sandboxRuntime)))
-	}
-	runtime := harness.NewRuntime(harness.RuntimeDeps{
-		LLMProvider:     provider,
-		Tools:           toolRuntime.Registry(),
-		ToolRuntime:     toolRuntime,
-		DefaultMaxTurns: maxTurns,
-		ProfileResolver: NewModeProfileResolver(),
-		SandboxRuntime:  sandboxRuntime,
-		SandboxProvider: sandboxProvider,
-	}, memoryRuntime, options...)
-	if node != nil {
-		node.BindRuntime(runtime)
-	}
+	runtime := RefreshHarnessRuntime(bootstrap.Node, provider, maxTurns, bootstrap.Runtime, profileBuilder)
 	bootstrap.Runtime = runtime
 	return runtime
 }
@@ -115,4 +79,53 @@ func BuildDefaultRuntimeSystemWithMemory(ctx context.Context, config RuntimeNode
 	}
 	BuildDefaultHarnessRuntime(bootstrap, provider, maxTurns, profileBuilder)
 	return bootstrap, nil
+}
+
+func RefreshHarnessRuntime(node *RuntimeNode, provider llm.LLMProvider, maxTurns int, current *harness.Runtime, profileBuilder RuntimeProfileBuilderFactory) *harness.Runtime {
+	var (
+		memoryRuntime  *harness.MemoryRuntime
+		sandboxRuntime harness.SandboxRuntime
+		toolRuntime    harness.ToolRuntime
+	)
+	if node != nil {
+		memoryRuntime = node.MemoryRuntime()
+		sandboxRuntime = node.ConfiguredSandboxRuntime()
+		toolRuntime = node.ToolRuntime()
+	}
+	if current != nil {
+		if runtime := current.Memory(); runtime != nil {
+			memoryRuntime = runtime
+		}
+		if runtime := current.SandboxRuntime(); runtime != nil {
+			sandboxRuntime = runtime
+		}
+		if runtime := current.ToolRuntime(); runtime != nil {
+			toolRuntime = runtime
+		}
+	}
+	var sandboxProvider harness.SandboxProvider
+	if sandboxRuntime != nil {
+		sandboxProvider = sandboxRuntime.Provider()
+	}
+	var toolRegistry *tools.Registry
+	if toolRuntime != nil {
+		toolRegistry = toolRuntime.Registry()
+	}
+	var options []harness.RuntimeOption
+	if profileBuilder != nil {
+		options = append(options, harness.WithProfileBuilder(profileBuilder(memoryRuntime, toolRuntime, sandboxRuntime)))
+	}
+	runtime := harness.NewRuntime(harness.RuntimeDeps{
+		LLMProvider:     provider,
+		Tools:           toolRegistry,
+		ToolRuntime:     toolRuntime,
+		DefaultMaxTurns: maxTurns,
+		ProfileResolver: NewModeProfileResolver(),
+		SandboxRuntime:  sandboxRuntime,
+		SandboxProvider: sandboxProvider,
+	}, memoryRuntime, options...)
+	if node != nil {
+		node.BindRuntime(runtime)
+	}
+	return runtime
 }

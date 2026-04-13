@@ -300,41 +300,7 @@ func (s *Server) runtimeView() *harness.Runtime {
 	if s == nil {
 		return nil
 	}
-	var (
-		memoryRuntime  *harness.MemoryRuntime
-		sandboxRuntime harness.SandboxRuntime
-		toolRuntime    harness.ToolRuntime
-	)
-	if node := s.ensureRuntimeSystem(); node != nil {
-		memoryRuntime = node.MemoryRuntime()
-		sandboxRuntime = node.ConfiguredSandboxRuntime()
-		toolRuntime = node.ToolRuntime()
-	}
-	if s.runtime != nil {
-		if current := s.runtime.Memory(); current != nil {
-			memoryRuntime = current
-		}
-		if current := s.runtime.SandboxRuntime(); current != nil {
-			sandboxRuntime = current
-		}
-		if current := s.runtime.ToolRuntime(); current != nil {
-			toolRuntime = current
-		}
-	}
-	s.runtime = harness.NewRuntime(harness.RuntimeDeps{
-		LLMProvider:     s.llmProvider,
-		Tools:           s.tools,
-		ToolRuntime:     toolRuntime,
-		DefaultMaxTurns: s.maxTurns,
-		ProfileResolver: harnessruntime.NewModeProfileResolver(),
-		SandboxRuntime:  s.defaultSandboxRuntime(sandboxRuntime),
-		SandboxProvider: s.defaultSandboxProvider(nil),
-	}, memoryRuntime,
-		harness.WithProfileBuilder(s.runtimeProfileBuilder(memoryRuntime, toolRuntime, s.defaultSandboxRuntime(sandboxRuntime))),
-	)
-	if node := s.runtimeSystem; node != nil {
-		node.BindRuntime(s.runtime)
-	}
+	s.runtime = harnessruntime.RefreshHarnessRuntime(s.ensureRuntimeSystem(), s.llmProvider, s.maxTurns, s.runtime, s.runtimeProfileBuilder)
 	return s.runtime
 }
 

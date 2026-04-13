@@ -108,3 +108,30 @@ func TestBuildDefaultRuntimeSystemWithMemoryBuildsRuntime(t *testing.T) {
 		t.Fatalf("node runtime = %#v want %#v", bootstrap.Node.RuntimeView(), bootstrap.Runtime)
 	}
 }
+
+func TestRefreshHarnessRuntimePrefersCurrentOverrides(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	bootstrap, err := BuildDefaultRuntimeBootstrapWithMemory(context.Background(), config, t.TempDir(), nil, clarification.NewManager(4))
+	if err != nil {
+		t.Fatalf("BuildDefaultRuntimeBootstrapWithMemory() error = %v", err)
+	}
+	base := BuildDefaultHarnessRuntime(bootstrap, nil, 100, nil)
+	if base == nil {
+		t.Fatal("base runtime = nil")
+	}
+	overrideTools := harness.NewStaticToolRuntime(bootstrap.Node.ToolRegistry(), nil, nil)
+	current := harness.NewRuntime(harness.RuntimeDeps{
+		ToolRuntime:     overrideTools,
+		DefaultMaxTurns: 100,
+	}, bootstrap.Node.MemoryRuntime())
+	refreshed := RefreshHarnessRuntime(bootstrap.Node, nil, 100, current, nil)
+	if refreshed == nil {
+		t.Fatal("refreshed runtime = nil")
+	}
+	if refreshed.ToolRuntime() != overrideTools {
+		t.Fatalf("refreshed tool runtime = %#v want %#v", refreshed.ToolRuntime(), overrideTools)
+	}
+	if bootstrap.Node.RuntimeView() != refreshed {
+		t.Fatalf("node runtime = %#v want %#v", bootstrap.Node.RuntimeView(), refreshed)
+	}
+}
