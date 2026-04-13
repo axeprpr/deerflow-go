@@ -124,6 +124,22 @@ func TestBuildDefaultRuntimeSystemWithMemoryBuildsRuntime(t *testing.T) {
 	}
 }
 
+func TestBuildDefaultRuntimeSystemLauncherWithMemoryBuildsLauncher(t *testing.T) {
+	bootstrap, launcher, err := BuildDefaultRuntimeSystemLauncherWithMemory(context.Background(), DefaultRuntimeNodeConfig("runtime-test", t.TempDir()), t.TempDir(), nil, clarification.NewManager(4), 100, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("BuildDefaultRuntimeSystemLauncherWithMemory() error = %v", err)
+	}
+	if bootstrap == nil || bootstrap.Runtime == nil {
+		t.Fatalf("bootstrap = %#v", bootstrap)
+	}
+	if launcher == nil || launcher.Node() == nil {
+		t.Fatalf("launcher = %#v", launcher)
+	}
+	if launcher.Node().RunDispatcher() == nil {
+		t.Fatal("dispatcher = nil")
+	}
+}
+
 func TestRefreshHarnessRuntimePrefersCurrentOverrides(t *testing.T) {
 	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
 	bootstrap, err := BuildDefaultRuntimeBootstrapWithMemory(context.Background(), config, t.TempDir(), nil, clarification.NewManager(4))

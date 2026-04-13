@@ -96,6 +96,14 @@ func BuildDefaultRuntimeSystemWithMemory(ctx context.Context, config RuntimeNode
 	return bootstrap, nil
 }
 
+func BuildDefaultRuntimeSystemLauncherWithMemory(ctx context.Context, config RuntimeNodeConfig, dataRoot string, provider llm.LLMProvider, clarify *clarification.Manager, maxTurns int, profileBuilder RuntimeProfileBuilderFactory, source func() *harness.Runtime, specs WorkerSpecRuntime) (*RuntimeBootstrap, *RuntimeNodeLauncher, error) {
+	bootstrap, err := BuildDefaultRuntimeSystemWithMemory(ctx, config, dataRoot, provider, clarify, maxTurns, profileBuilder)
+	if err != nil {
+		return nil, nil, err
+	}
+	return bootstrap, bootstrap.EnsureLauncher(source, specs), nil
+}
+
 func RefreshHarnessRuntime(node *RuntimeNode, provider llm.LLMProvider, maxTurns int, current *harness.Runtime, profileBuilder RuntimeProfileBuilderFactory) *harness.Runtime {
 	var (
 		memoryRuntime  *harness.MemoryRuntime

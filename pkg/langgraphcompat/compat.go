@@ -226,7 +226,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 		channels:      defaultGatewayChannelsStatus(),
 	}
 
-	bootstrap, err := harnessruntime.BuildDefaultRuntimeSystemWithMemory(ctx, runtimeNode, dataRootAbs, provider, clarifyManager, s.maxTurns, s.runtimeProfileBuilder)
+	bootstrap, launcher, err := harnessruntime.BuildDefaultRuntimeSystemLauncherWithMemory(ctx, runtimeNode, dataRootAbs, provider, clarifyManager, s.maxTurns, s.runtimeProfileBuilder, s.runtimeView, s.runtimeWorkerSpecAdapter())
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +244,7 @@ func NewServer(addr string, dbURL string, defaultModel string, options ...Server
 	}
 
 	s.attachRuntimeBootstrap(bootstrap)
-	if launcher := bootstrap.EnsureLauncher(s.runtimeView, s.runtimeWorkerSpecAdapter()); launcher != nil {
+	if launcher != nil {
 		s.attachRuntimeSystem(launcher.Node())
 	}
 	s.skills = s.discoverGatewaySkills(nil)
