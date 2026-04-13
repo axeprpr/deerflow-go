@@ -2,6 +2,7 @@ package langgraphcompat
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -108,15 +109,47 @@ func (s runReplayStreamer) Replay(run *Run) bool {
 	if run == nil {
 		return false
 	}
-	events, replayedEnd := harnessruntime.NewEventFeedService(s.server.runtimeEventAdapter()).ReplayFrom(run.RunID, run.ResumeFromEvent)
+	_, replayedEnd := s.replayFrom(run, run.ResumeFromEvent)
+	s.flusher.Flush()
+	return replayedEnd
+}
+
+func (s runReplayStreamer) Poll(run *Run, done <-chan struct{}) bool {
+	if run == nil {
+		return false
+	}
+	last := run.ResumeFromEvent
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var replayedEnd bool
+		last, replayedEnd = s.replayFrom(run, last)
+		if replayedEnd {
+			return true
+		}
+		select {
+		case <-done:
+			_, replayedEnd = s.replayFrom(run, last)
+			return replayedEnd
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s runReplayStreamer) replayFrom(run *Run, afterEventIndex int) (int, bool) {
+	events, replayedEnd := harnessruntime.NewEventFeedService(s.server.runtimeEventAdapter()).ReplayFrom(run.RunID, afterEventIndex)
+	last := afterEventIndex
 	for _, event := range events {
+		if idx := harnessruntimeEventIndex(event); idx > last {
+			last = idx
+		}
 		if !s.filter.allows(event.Event) {
 			continue
 		}
 		s.server.sendSSEEvent(s.w, s.flusher, streamEventFromRuntimeEvent(event))
 	}
 	s.flusher.Flush()
-	return replayedEnd
+	return last, replayedEnd
 }
 
 func (s runReplayStreamer) Join(run *Run) {
@@ -309,4 +342,20 @@ func (s *Server) forwardTaskEvent(w http.ResponseWriter, flusher http.Flusher, r
 		"error":          evt.Error,
 	}
 	s.recordAndSendEventFiltered(w, flusher, run, filter, evt.Type, data)
+}
+
+func harnessruntimeEventIndex(event harnessruntime.RunEvent) int {
+	return harnessruntimeEventIndexFromID(event.ID)
+}
+
+func harnessruntimeEventIndexFromID(id string) int {
+	parts := strings.Split(id, ":")
+	if len(parts) == 0 {
+		return 0
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(parts[len(parts)-1]))
+	if err != nil || value <= 0 {
+		return 0
+	}
+	return value
 }

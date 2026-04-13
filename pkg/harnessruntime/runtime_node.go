@@ -290,7 +290,7 @@ func (n *RuntimeNode) BindDispatchSource(source func() *harness.Runtime, specs W
 	n.BindDispatch(runtime)
 	if n.Config.servesRemoteWorker() {
 		remoteRuntime := runtime
-		remoteRuntime.Executor = NewCompletingRuntimeWorkerSource(source, specs)
+		remoteRuntime.Executor = NewCompletingRuntimeWorkerSource(source, specs, n.EventStore())
 		n.BindRemoteWorker(remoteRuntime)
 	}
 }

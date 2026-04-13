@@ -15,6 +15,7 @@ type RuntimeWorker struct {
 	runtime  func() *harness.Runtime
 	specs    WorkerSpecRuntime
 	complete bool
+	events   RunEventRecorder
 }
 
 func NewRuntimeWorker() RunExecutor {
@@ -25,8 +26,8 @@ func NewRuntimeWorkerSource(source func() *harness.Runtime, specs WorkerSpecRunt
 	return RuntimeWorker{runtime: source, specs: specs}
 }
 
-func NewCompletingRuntimeWorkerSource(source func() *harness.Runtime, specs WorkerSpecRuntime) RunExecutor {
-	return RuntimeWorker{runtime: source, specs: specs, complete: true}
+func NewCompletingRuntimeWorkerSource(source func() *harness.Runtime, specs WorkerSpecRuntime, events RunEventRecorder) RunExecutor {
+	return RuntimeWorker{runtime: source, specs: specs, complete: true, events: events}
 }
 
 func (w RuntimeWorker) Execute(ctx context.Context, req DispatchRequest) (*DispatchResult, error) {
@@ -47,7 +48,16 @@ func (w RuntimeWorker) execute(ctx context.Context, req DispatchRequest) (*Dispa
 	}
 	handle := NewStaticExecutionHandle(prepared.Execution, prepared.Lifecycle.ThreadID)
 	if w.complete {
+		eventsDone := make(chan struct{})
+		go func() {
+			defer close(eventsDone)
+			recorder := NewWorkerRunEventRecorder(w.events)
+			for evt := range prepared.Execution.Events() {
+				recorder.RecordAgentEvent(req.Plan, evt)
+			}
+		}()
 		result, err := prepared.Execution.Run(ctx)
+		<-eventsDone
 		if err != nil {
 			return nil, err
 		}

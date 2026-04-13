@@ -211,13 +211,19 @@ func TestServerStartStartsAllInOneRemoteWorker(t *testing.T) {
 func TestGatewayRoleDispatchesRunsToRemoteWorker(t *testing.T) {
 	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
 
+	sharedRoot := t.TempDir()
 	workerAddr := freeTCPAddr(t)
-	workerConfig := harnessruntime.DefaultWorkerRuntimeNodeConfig("remote-worker", t.TempDir())
+	workerConfig := harnessruntime.DefaultWorkerRuntimeNodeConfig("remote-worker", sharedRoot)
 	workerConfig.RemoteWorker.Addr = workerAddr
+	workerConfig.State.Backend = harnessruntime.RuntimeStateStoreBackendSQLite
+	workerConfig.State.SnapshotBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	workerConfig.State.EventBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	workerConfig.State.ThreadBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	workerConfig.State.Root = filepath.Join(sharedRoot, "runtime-state")
 	_, workerLauncher, err := harnessruntime.BuildDefaultRuntimeSystemLauncherWithMemory(
 		context.Background(),
 		workerConfig,
-		t.TempDir(),
+		sharedRoot,
 		fakeLLMProvider{},
 		nil,
 		32,
@@ -245,7 +251,12 @@ func TestGatewayRoleDispatchesRunsToRemoteWorker(t *testing.T) {
 		}
 	}()
 
-	gatewayConfig := harnessruntime.DefaultGatewayRuntimeNodeConfig("remote-gateway", t.TempDir(), "http://"+workerAddr+harnessruntime.DefaultRemoteWorkerDispatchPath)
+	gatewayConfig := harnessruntime.DefaultGatewayRuntimeNodeConfig("remote-gateway", sharedRoot, "http://"+workerAddr+harnessruntime.DefaultRemoteWorkerDispatchPath)
+	gatewayConfig.State.Backend = harnessruntime.RuntimeStateStoreBackendSQLite
+	gatewayConfig.State.SnapshotBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	gatewayConfig.State.EventBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	gatewayConfig.State.ThreadBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	gatewayConfig.State.Root = filepath.Join(sharedRoot, "runtime-state")
 	gateway, err := NewServer(":0", "", "test-model", WithRuntimeNodeConfig(gatewayConfig), WithLLMProvider(failingLLMProvider{}))
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)
@@ -262,6 +273,9 @@ func TestGatewayRoleDispatchesRunsToRemoteWorker(t *testing.T) {
 	}
 	if !strings.Contains(resp.Body.String(), `event: metadata`) {
 		t.Fatalf("body = %q", resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), `event: chunk`) || !strings.Contains(resp.Body.String(), `hello from fake llm`) {
+		t.Fatalf("body missing remote replayed chunk: %q", resp.Body.String())
 	}
 
 	var stored *Run

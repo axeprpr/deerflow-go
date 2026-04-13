@@ -116,7 +116,21 @@ func (s *Server) handleStreamRequest(w http.ResponseWriter, r *http.Request, rou
 	emitter := s.newRunStreamEmitter(w, flusher, prepared.Run, filter)
 	emitter.Metadata(prepared.ThreadID, prepared.AssistantID)
 
+	var remoteReplayDone chan struct{}
+	var remoteReplayResult chan bool
+	if s.usesRemoteDispatch() {
+		remoteReplayDone = make(chan struct{})
+		remoteReplayResult = make(chan bool, 1)
+		go func() {
+			remoteReplayResult <- s.newRunReplayStreamer(w, flusher, filter).Poll(prepared.Run, remoteReplayDone)
+		}()
+	}
+
 	preparedExecution, err := s.buildRunExecution(r.Context(), prepared, req)
+	if remoteReplayDone != nil {
+		close(remoteReplayDone)
+		<-remoteReplayResult
+	}
 	if err != nil {
 		s.markRunError(prepared.Run, prepared.ThreadID, err)
 		return
@@ -300,4 +314,12 @@ func (s *Server) streamRecordedRun(w http.ResponseWriter, r *http.Request, threa
 	}
 
 	s.newRunReplayStreamer(w, flusher, newStreamModeFilter(streamModeFromQuery(r))).Replay(run)
+}
+
+func (s *Server) usesRemoteDispatch() bool {
+	node := s.ensureRuntimeSystem()
+	if node == nil {
+		return false
+	}
+	return node.Config.Transport.Backend == harnessruntime.WorkerTransportBackendRemote
 }
