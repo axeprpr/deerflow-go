@@ -1,14 +1,14 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"log"
+	"net/http"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
+	"time"
 
+	"github.com/axeprpr/deerflow-go/internal/commandrun"
 	"github.com/axeprpr/deerflow-go/internal/langgraphcmd"
 	"github.com/axeprpr/deerflow-go/internal/runtimecmd"
 )
@@ -110,27 +110,14 @@ func main() {
 		logger.Printf("  Log Level: %s", level)
 	}
 
-	server, err := cfg.BuildServer()
+	launcher, err := cfg.BuildLauncher()
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigChan
-		logger.Println("Shutting down...")
-		cancel()
-		server.Shutdown(ctx)
-	}()
-
 	logger.Printf("Server ready on %s", cfg.Addr)
 	logger.Printf("  API docs: http://%s/docs", cfg.Addr)
-	if err := server.Start(); err != nil {
+	if err := commandrun.Run(logger, launcher, 15*time.Second, http.ErrServerClosed); err != nil {
 		logger.Fatalf("Server error: %v", err)
 	}
 }

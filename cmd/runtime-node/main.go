@@ -2,15 +2,13 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"log"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
+	"github.com/axeprpr/deerflow-go/internal/commandrun"
 	"github.com/axeprpr/deerflow-go/internal/runtimecmd"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
@@ -26,7 +24,7 @@ func main() {
 	cfg := parseConfig()
 	logger := log.New(os.Stderr, cfg.LogPrefix, log.LstdFlags)
 
-	launcher, err := buildLauncher(context.Background(), cfg)
+	launcher, err := buildLauncher(cfg)
 	if err != nil {
 		logger.Fatal(err)
 	}
@@ -36,27 +34,9 @@ func main() {
 		logger.Fatalf("runtime node role %q does not expose a remote worker server", spec.Role)
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- launcher.Start()
-	}()
-
 	logger.Printf("runtime node ready role=%s addr=%s", spec.Role, spec.RemoteWorkerAddr)
-
-	select {
-	case err := <-errCh:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Fatal(err)
-		}
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := launcher.Close(shutdownCtx); err != nil {
-			logger.Fatal(err)
-		}
+	if err := commandrun.Run(logger, launcher, 15*time.Second, http.ErrServerClosed); err != nil {
+		logger.Fatal(err)
 	}
 }
 
@@ -105,7 +85,7 @@ func parseConfig() config {
 	}
 }
 
-func buildLauncher(ctx context.Context, cfg config) (*harnessruntime.RuntimeNodeLauncher, error) {
+func buildLauncher(cfg config) (*harnessruntime.RuntimeNodeLauncher, error) {
 	if err := cfg.Runtime.ValidateForRuntimeNode(); err != nil {
 		return nil, err
 	}
@@ -113,7 +93,7 @@ func buildLauncher(ctx context.Context, cfg config) (*harnessruntime.RuntimeNode
 	clarify := clarification.NewManager(32)
 
 	_, launcher, err := harnessruntime.BuildDefaultRuntimeSystemLauncherForRoleWithMemory(
-		ctx,
+		context.Background(),
 		cfg.Runtime.Role,
 		cfg.Runtime.Name,
 		cfg.Runtime.Root,
