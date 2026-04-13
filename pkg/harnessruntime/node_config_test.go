@@ -178,6 +178,34 @@ func TestRuntimeNodeConfigBuildStatePlane(t *testing.T) {
 	}
 }
 
+func TestRuntimeNodeConfigBuildStatePlaneUsesSharedSQLitePlaneWhenURLsMatch(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "runtime.sqlite3")
+	config := DefaultRuntimeNodeConfig("runtime-test", root)
+	config.State = RuntimeStateStoreConfig{
+		Backend:         RuntimeStateStoreBackendSQLite,
+		SnapshotBackend: RuntimeStateStoreBackendSQLite,
+		EventBackend:    RuntimeStateStoreBackendSQLite,
+		ThreadBackend:   RuntimeStateStoreBackendSQLite,
+		Root:            root,
+		SnapshotURL:     "sqlite://" + path,
+		EventURL:        "sqlite://" + path,
+		ThreadURL:       "sqlite://" + path,
+	}
+	plane := config.BuildStatePlane()
+	defer func() { _ = closeRuntimeStatePlane(plane) }()
+
+	if _, ok := plane.Snapshots.(*sqlitePlaneRunSnapshotStore); !ok {
+		t.Fatalf("Snapshots = %T", plane.Snapshots)
+	}
+	if _, ok := plane.Events.(*sqlitePlaneRunEventStore); !ok {
+		t.Fatalf("Events = %T", plane.Events)
+	}
+	if _, ok := plane.Threads.(*sqlitePlaneThreadStateStore); !ok {
+		t.Fatalf("Threads = %T", plane.Threads)
+	}
+}
+
 func TestRuntimeNodeConfigBuildWorkerTransportFallsBackFromRemoteToLocalWorker(t *testing.T) {
 	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
 	config.Transport = WorkerTransportConfig{

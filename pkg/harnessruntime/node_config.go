@@ -223,6 +223,9 @@ func (c RuntimeNodeConfig) BuildStatePlane() RuntimeStatePlane {
 }
 
 func (c RuntimeNodeConfig) BuildStatePlaneWithProviders(providers RuntimeStatePlaneProviders) RuntimeStatePlane {
+	if providers.Plane != nil {
+		return providers.Plane.Build(c)
+	}
 	if providers.Snapshots == nil {
 		providers.Snapshots = DefaultRuntimeStatePlaneProviders().Snapshots
 	}

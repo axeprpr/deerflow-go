@@ -36,6 +36,7 @@ func (f ThreadStateStoreFactoryFunc) Build(config RuntimeNodeConfig) ThreadState
 }
 
 type RuntimeStatePlaneProviders struct {
+	Plane     RuntimeStatePlaneFactory
 	Snapshots RunSnapshotStoreFactory
 	Events    RunEventStoreFactory
 	Threads   ThreadStateStoreFactory
@@ -43,49 +44,92 @@ type RuntimeStatePlaneProviders struct {
 
 func DefaultRuntimeStatePlaneProviders() RuntimeStatePlaneProviders {
 	return RuntimeStatePlaneProviders{
-		Snapshots: RunSnapshotStoreFactoryFunc(func(config RuntimeNodeConfig) RunSnapshotStore {
-			switch config.normalizedSnapshotBackend() {
-			case RuntimeStateStoreBackendFile:
-				return NewJSONFileRunStore(resolveStateStorePath(config.State.SnapshotURL, filepath.Join(config.State.Root, "runs")))
-			case RuntimeStateStoreBackendSQLite:
-				store, err := NewSQLiteRunSnapshotStore(resolveStateStorePath(config.State.SnapshotURL, filepath.Join(config.State.Root, "snapshots.sqlite3")))
+		Plane: RuntimeStatePlaneFactoryFunc(func(config RuntimeNodeConfig) RuntimeStatePlane {
+			if path, ok := sharedSQLiteStatePlanePath(config); ok {
+				plane, err := newSQLiteRuntimeStatePlane(path)
 				if err == nil {
-					return store
+					return plane
 				}
-				return NewInMemoryRunStore()
-			default:
-				return NewInMemoryRunStore()
+			}
+			return RuntimeStatePlane{
+				Snapshots: defaultRuntimeSnapshotStoreFactory().Build(config),
+				Events:    defaultRuntimeEventStoreFactory().Build(config),
+				Threads:   defaultRuntimeThreadStateStoreFactory().Build(config),
 			}
 		}),
-		Events: RunEventStoreFactoryFunc(func(config RuntimeNodeConfig) RunEventStore {
-			switch config.normalizedEventBackend() {
-			case RuntimeStateStoreBackendFile:
-				return NewJSONFileRunEventStore(resolveStateStorePath(config.State.EventURL, filepath.Join(config.State.Root, "events")))
-			case RuntimeStateStoreBackendSQLite:
-				store, err := NewSQLiteRunEventStore(resolveStateStorePath(config.State.EventURL, filepath.Join(config.State.Root, "events.sqlite3")))
-				if err == nil {
-					return store
-				}
-				return NewInMemoryRunEventStore()
-			default:
-				return NewInMemoryRunEventStore()
-			}
-		}),
-		Threads: ThreadStateStoreFactoryFunc(func(config RuntimeNodeConfig) ThreadStateStore {
-			switch config.normalizedThreadBackend() {
-			case RuntimeStateStoreBackendFile:
-				return NewJSONFileThreadStateStore(resolveStateStorePath(config.State.ThreadURL, filepath.Join(config.State.Root, "threads")))
-			case RuntimeStateStoreBackendSQLite:
-				store, err := NewSQLiteThreadStateStore(resolveStateStorePath(config.State.ThreadURL, filepath.Join(config.State.Root, "threads.sqlite3")))
-				if err == nil {
-					return store
-				}
-				return NewInMemoryThreadStateStore()
-			default:
-				return NewInMemoryThreadStateStore()
-			}
-		}),
+		Snapshots: defaultRuntimeSnapshotStoreFactory(),
+		Events:    defaultRuntimeEventStoreFactory(),
+		Threads:   defaultRuntimeThreadStateStoreFactory(),
 	}
+}
+
+func defaultRuntimeSnapshotStoreFactory() RunSnapshotStoreFactory {
+	return RunSnapshotStoreFactoryFunc(func(config RuntimeNodeConfig) RunSnapshotStore {
+		switch config.normalizedSnapshotBackend() {
+		case RuntimeStateStoreBackendFile:
+			return NewJSONFileRunStore(resolveStateStorePath(config.State.SnapshotURL, filepath.Join(config.State.Root, "runs")))
+		case RuntimeStateStoreBackendSQLite:
+			store, err := NewSQLiteRunSnapshotStore(resolveStateStorePath(config.State.SnapshotURL, filepath.Join(config.State.Root, "snapshots.sqlite3")))
+			if err == nil {
+				return store
+			}
+			return NewInMemoryRunStore()
+		default:
+			return NewInMemoryRunStore()
+		}
+	})
+}
+
+func defaultRuntimeEventStoreFactory() RunEventStoreFactory {
+	return RunEventStoreFactoryFunc(func(config RuntimeNodeConfig) RunEventStore {
+		switch config.normalizedEventBackend() {
+		case RuntimeStateStoreBackendFile:
+			return NewJSONFileRunEventStore(resolveStateStorePath(config.State.EventURL, filepath.Join(config.State.Root, "events")))
+		case RuntimeStateStoreBackendSQLite:
+			store, err := NewSQLiteRunEventStore(resolveStateStorePath(config.State.EventURL, filepath.Join(config.State.Root, "events.sqlite3")))
+			if err == nil {
+				return store
+			}
+			return NewInMemoryRunEventStore()
+		default:
+			return NewInMemoryRunEventStore()
+		}
+	})
+}
+
+func defaultRuntimeThreadStateStoreFactory() ThreadStateStoreFactory {
+	return ThreadStateStoreFactoryFunc(func(config RuntimeNodeConfig) ThreadStateStore {
+		switch config.normalizedThreadBackend() {
+		case RuntimeStateStoreBackendFile:
+			return NewJSONFileThreadStateStore(resolveStateStorePath(config.State.ThreadURL, filepath.Join(config.State.Root, "threads")))
+		case RuntimeStateStoreBackendSQLite:
+			store, err := NewSQLiteThreadStateStore(resolveStateStorePath(config.State.ThreadURL, filepath.Join(config.State.Root, "threads.sqlite3")))
+			if err == nil {
+				return store
+			}
+			return NewInMemoryThreadStateStore()
+		default:
+			return NewInMemoryThreadStateStore()
+		}
+	})
+}
+
+func sharedSQLiteStatePlanePath(config RuntimeNodeConfig) (string, bool) {
+	if config.normalizedSnapshotBackend() != RuntimeStateStoreBackendSQLite ||
+		config.normalizedEventBackend() != RuntimeStateStoreBackendSQLite ||
+		config.normalizedThreadBackend() != RuntimeStateStoreBackendSQLite {
+		return "", false
+	}
+	snapshotPath := resolveStateStorePath(config.State.SnapshotURL, filepath.Join(config.State.Root, "snapshots.sqlite3"))
+	eventPath := resolveStateStorePath(config.State.EventURL, filepath.Join(config.State.Root, "events.sqlite3"))
+	threadPath := resolveStateStorePath(config.State.ThreadURL, filepath.Join(config.State.Root, "threads.sqlite3"))
+	if snapshotPath == "" || eventPath == "" || threadPath == "" {
+		return "", false
+	}
+	if snapshotPath != eventPath || snapshotPath != threadPath {
+		return "", false
+	}
+	return snapshotPath, true
 }
 
 func resolveStateStorePath(raw string, fallback string) string {

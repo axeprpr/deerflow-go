@@ -91,3 +91,31 @@ func TestSQLiteThreadStateStorePersistsState(t *testing.T) {
 		t.Fatalf("state = %#v", state)
 	}
 }
+
+func TestSQLiteRuntimeStatePlaneSharesOneDatabase(t *testing.T) {
+	path := t.TempDir() + "/runtime-state.sqlite3"
+	plane, err := newSQLiteRuntimeStatePlane(path)
+	if err != nil {
+		t.Fatalf("newSQLiteRuntimeStatePlane() error = %v", err)
+	}
+	defer func() { _ = closeRuntimeStatePlane(plane) }()
+
+	plane.Snapshots.SaveRunSnapshot(RunSnapshot{
+		Record: RunRecord{RunID: "run-1", ThreadID: "thread-1", Status: "running"},
+	})
+	plane.Events.AppendRunEvent("run-1", RunEvent{ID: "run-1:1", Event: "updates", RunID: "run-1", ThreadID: "thread-1"})
+	plane.Threads.MarkThreadStatus("thread-1", "busy")
+
+	snapshot, ok := plane.Snapshots.LoadRunSnapshot("run-1")
+	if !ok || snapshot.Record.Status != "running" {
+		t.Fatalf("snapshot = %#v ok=%v", snapshot, ok)
+	}
+	events := plane.Events.LoadRunEvents("run-1")
+	if len(events) != 1 || events[0].Event != "updates" {
+		t.Fatalf("events = %#v", events)
+	}
+	thread, ok := plane.Threads.LoadThreadRuntimeState("thread-1")
+	if !ok || thread.Status != "busy" {
+		t.Fatalf("thread = %#v ok=%v", thread, ok)
+	}
+}

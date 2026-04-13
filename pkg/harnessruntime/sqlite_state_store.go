@@ -49,6 +49,31 @@ create table if not exists thread_states (
 );
 `
 
+const sqliteRuntimeStateSchemaSQL = sqliteRunSnapshotSchemaSQL + "\n" + sqliteRunEventSchemaSQL + "\n" + sqliteThreadStateSchemaSQL
+
+type sqliteStateCloser struct {
+	db   *sql.DB
+	mu   sync.Mutex
+	done bool
+}
+
+func newSQLiteStateCloser(db *sql.DB) *sqliteStateCloser {
+	return &sqliteStateCloser{db: db}
+}
+
+func (c *sqliteStateCloser) Close() error {
+	if c == nil || c.db == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.done {
+		return nil
+	}
+	c.done = true
+	return c.db.Close()
+}
+
 type SQLiteRunSnapshotStore struct {
 	db    *sql.DB
 	codec RunSnapshotMarshaler
@@ -59,10 +84,7 @@ func NewSQLiteRunSnapshotStore(path string) (*SQLiteRunSnapshotStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &SQLiteRunSnapshotStore{
-		db:    db,
-		codec: defaultRunSnapshotCodec(nil),
-	}, nil
+	return newSQLiteRunSnapshotStoreWithDB(db), nil
 }
 
 func (s *SQLiteRunSnapshotStore) Close() error {
@@ -152,12 +174,7 @@ func NewSQLiteRunEventStore(path string) (*SQLiteRunEventStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &SQLiteRunEventStore{
-		db:               db,
-		codec:            defaultRunEventLogCodec(nil),
-		streams:          map[string]map[uint64]chan RunEvent{},
-		nextSubscriberID: map[string]uint64{},
-	}, nil
+	return newSQLiteRunEventStoreWithDB(db), nil
 }
 
 func (s *SQLiteRunEventStore) Close() error {
@@ -350,10 +367,7 @@ func NewSQLiteThreadStateStore(path string) (*SQLiteThreadStateStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &SQLiteThreadStateStore{
-		db:    db,
-		codec: defaultThreadRuntimeStateCodec(nil),
-	}, nil
+	return newSQLiteThreadStateStoreWithDB(db), nil
 }
 
 func (s *SQLiteThreadStateStore) Close() error {
@@ -472,4 +486,27 @@ func openSQLiteStateDB(path string, schema string) (*sql.DB, error) {
 		return nil, fmt.Errorf("migrate sqlite runtime state schema: %w", err)
 	}
 	return db, nil
+}
+
+func newSQLiteRunSnapshotStoreWithDB(db *sql.DB) *SQLiteRunSnapshotStore {
+	return &SQLiteRunSnapshotStore{
+		db:    db,
+		codec: defaultRunSnapshotCodec(nil),
+	}
+}
+
+func newSQLiteRunEventStoreWithDB(db *sql.DB) *SQLiteRunEventStore {
+	return &SQLiteRunEventStore{
+		db:               db,
+		codec:            defaultRunEventLogCodec(nil),
+		streams:          map[string]map[uint64]chan RunEvent{},
+		nextSubscriberID: map[string]uint64{},
+	}
+}
+
+func newSQLiteThreadStateStoreWithDB(db *sql.DB) *SQLiteThreadStateStore {
+	return &SQLiteThreadStateStore{
+		db:    db,
+		codec: defaultThreadRuntimeStateCodec(nil),
+	}
 }
