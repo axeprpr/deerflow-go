@@ -1,6 +1,8 @@
 package harnessruntime
 
 import (
+	"context"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 )
@@ -87,5 +89,64 @@ func TestRuntimeNodeConfigBuildStatePlane(t *testing.T) {
 	}
 	if _, ok := plane.Threads.(*InMemoryThreadStateStore); !ok {
 		t.Fatalf("Threads = %T", plane.Threads)
+	}
+}
+
+func TestRuntimeNodeConfigBuildWorkerTransportFallsBackFromRemoteToLocalWorker(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	config.Transport = WorkerTransportConfig{
+		Backend:  WorkerTransportBackendRemote,
+		Endpoint: "http://should-not-be-used",
+	}
+	executor := &fakeExecutor{}
+	transport := config.BuildWorkerTransport(DispatchRuntimeConfig{
+		Executor: executor,
+		Results:  DispatchResultCodec{Handles: NewInMemoryExecutionHandleRegistry()},
+	})
+
+	result, err := transport.Submit(context.Background(), WorkerDispatchEnvelope{
+		Payload: mustEncodePlan(t, WorkerExecutionPlan{RunID: "run-1", ThreadID: "thread-1"}),
+	})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if !executor.called || executor.req.Plan.RunID != "run-1" {
+		t.Fatalf("executor req = %#v", executor.req)
+	}
+	if result == nil || result.Lifecycle == nil || result.Lifecycle.ThreadID != "thread-1" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestRuntimeNodeConfigBuildRemoteWorkerHandlerServesDispatchRequests(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	config.Transport.Backend = WorkerTransportBackendRemote
+	executor := &fakeExecutor{}
+	handler := config.BuildRemoteWorkerHandler(DispatchRuntimeConfig{
+		Executor: executor,
+		Results:  DispatchResultCodec{Handles: NewInMemoryExecutionHandleRegistry()},
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	dispatcher := NewRuntimeDispatcher(DispatchConfig{
+		Topology: DispatchTopologyRemote,
+		Endpoint: server.URL + DefaultRemoteWorkerDispatchPath,
+	}, DispatchRuntimeConfig{
+		Remote:  NewHTTPRemoteWorkerClient(nil),
+		Results: DispatchResultCodec{Handles: NewInMemoryExecutionHandleRegistry()},
+	})
+
+	result, err := dispatcher.Dispatch(context.Background(), DispatchRequest{
+		Plan: WorkerExecutionPlan{RunID: "run-2", ThreadID: "thread-2"},
+	})
+	if err != nil {
+		t.Fatalf("Dispatch() error = %v", err)
+	}
+	if !executor.called || executor.req.Plan.RunID != "run-2" {
+		t.Fatalf("executor req = %#v", executor.req)
+	}
+	if result == nil || result.Lifecycle == nil || result.Lifecycle.ThreadID != "thread-2" {
+		t.Fatalf("result = %#v", result)
 	}
 }

@@ -1,6 +1,7 @@
 package harnessruntime
 
 import (
+	"net/http"
 	"path/filepath"
 	goruntime "runtime"
 
@@ -67,6 +68,24 @@ func (c RuntimeNodeConfig) BuildDispatcher(runtime DispatchRuntimeConfig) RunDis
 		Buffer:   c.Transport.Buffer,
 		Workers:  c.Transport.Workers,
 	}, runtime)
+}
+
+func (c RuntimeNodeConfig) BuildWorkerTransport(runtime DispatchRuntimeConfig) WorkerTransport {
+	config := c.Transport
+	if normalizeTransportBackend(config.Backend) == WorkerTransportBackendRemote {
+		config.Backend = WorkerTransportBackendQueue
+		config.Endpoint = ""
+	}
+	return buildWorkerTransport(config, runtime)
+}
+
+func (c RuntimeNodeConfig) BuildRemoteWorkerServer(runtime DispatchRuntimeConfig) *HTTPRemoteWorkerServer {
+	return NewHTTPRemoteWorkerServer(c.BuildWorkerTransport(runtime), defaultRemoteWorkerProtocol(runtime.Protocol, runtime.Results))
+}
+
+func (c RuntimeNodeConfig) BuildRemoteWorkerHandler(runtime DispatchRuntimeConfig) http.Handler {
+	server := c.BuildRemoteWorkerServer(runtime)
+	return server.Handler()
 }
 
 func (c RuntimeNodeConfig) BuildRunSnapshotStore() RunSnapshotStore {
