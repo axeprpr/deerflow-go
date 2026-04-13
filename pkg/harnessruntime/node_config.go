@@ -72,6 +72,15 @@ func (c RuntimeNodeConfig) BuildSandboxManager() (*SandboxResourceManager, error
 	return NewSandboxManagerFromConfig(c.Sandbox)
 }
 
+func (c RuntimeNodeConfig) BuildDispatchRuntime(source func() *harness.Runtime, specs WorkerSpecRuntime) DispatchRuntimeConfig {
+	return DispatchRuntimeConfig{
+		Runtime: source,
+		Specs:   specs,
+		Results: DispatchResultCodec{Handles: NewInMemoryExecutionHandleRegistry()},
+		Remote:  NewHTTPRemoteWorkerClient(nil),
+	}
+}
+
 func (c RuntimeNodeConfig) BuildDispatcher(runtime DispatchRuntimeConfig) RunDispatcher {
 	return NewRuntimeDispatcher(DispatchConfig{
 		Topology: transportTopology(c.Transport.Backend),

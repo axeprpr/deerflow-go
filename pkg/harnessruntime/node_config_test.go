@@ -226,3 +226,14 @@ func TestRuntimeNodeConfigBuildRuntimeNodeWiresCoreServices(t *testing.T) {
 		t.Fatalf("Close() error = %v", err)
 	}
 }
+
+func TestRuntimeNodeConfigBuildDispatchRuntimeSuppliesNodeDefaults(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	runtime := config.BuildDispatchRuntime(nil, nil)
+	if runtime.Remote == nil {
+		t.Fatal("runtime.Remote is nil")
+	}
+	if runtime.Results == nil {
+		t.Fatal("runtime.Results is nil")
+	}
+}

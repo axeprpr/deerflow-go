@@ -390,10 +390,7 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 		}
 		s.runtimeNode = harnessruntime.DefaultRuntimeNodeConfig(name, root)
 	}
-	s.runDispatcher = s.runtimeNode.BuildDispatcher(harnessruntime.DispatchRuntimeConfig{
-		Runtime: s.runtimeView,
-		Specs:   s.runtimeWorkerSpecAdapter(),
-	})
+	s.runDispatcher = s.runtimeNode.BuildDispatcher(s.runtimeNode.BuildDispatchRuntime(s.runtimeView, s.runtimeWorkerSpecAdapter()))
 	if s.runtimeSystem != nil {
 		s.runtimeSystem.Dispatcher = s.runDispatcher
 	}
