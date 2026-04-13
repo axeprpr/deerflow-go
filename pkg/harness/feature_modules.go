@@ -25,6 +25,7 @@ type MemoryLifecycleConfig struct {
 	Runtime        *MemoryRuntime
 	SessionKey     string
 	ResolveSession func(*RunState) string
+	PlanScopes     func(*RunState) MemoryScopePlan
 }
 
 type ClarificationLifecycleConfig struct {
@@ -42,6 +43,10 @@ type MemorySessionResolver interface {
 
 type MemoryScopeResolver interface {
 	ResolveMemoryScope(*RunState) pkgmemory.Scope
+}
+
+type MemoryScopePlanner interface {
+	PlanMemoryScopes(*RunState) MemoryScopePlan
 }
 
 type Summarizer interface {
@@ -126,15 +131,15 @@ func MemoryLifecycleHooks(cfg MemoryLifecycleConfig) *LifecycleHooks {
 				if state == nil {
 					return nil
 				}
-				sessionID := strings.TrimSpace(cfg.ResolveSession(state))
-				if sessionID == "" {
+				plan := memoryLifecyclePlan(cfg, state)
+				if plan.Primary.Key() == "" {
 					return nil
 				}
 				if state.Metadata == nil {
 					state.Metadata = map[string]any{}
 				}
-				state.Metadata[key] = sessionID
-				injected := strings.TrimSpace(cfg.Runtime.Inject(ctx, sessionID, state.Spec.SystemPrompt))
+				state.Metadata[key] = plan.Primary.Key()
+				injected := strings.TrimSpace(injectMemoryScopes(ctx, cfg.Runtime, plan.Inject, state.Spec.SystemPrompt))
 				if injected == "" {
 					return nil
 				}
@@ -151,15 +156,14 @@ func MemoryLifecycleHooks(cfg MemoryLifecycleConfig) *LifecycleHooks {
 				if state == nil || result == nil || len(result.Messages) == 0 {
 					return nil
 				}
-				sessionID, _ := state.Metadata[key].(string)
-				sessionID = strings.TrimSpace(sessionID)
-				if sessionID == "" {
-					sessionID = strings.TrimSpace(cfg.ResolveSession(state))
-				}
-				if sessionID == "" {
+				plan := memoryLifecyclePlan(cfg, state)
+				if plan.Primary.Key() == "" || len(plan.Update) == 0 {
 					return nil
 				}
-				cfg.Runtime.ScheduleUpdate(sessionID, result.Messages)
+				state.Metadata[key] = plan.Primary.Key()
+				for _, scope := range plan.Update {
+					cfg.Runtime.ScheduleScopeUpdate(scope, result.Messages)
+				}
 				return nil
 			},
 		},
@@ -183,13 +187,65 @@ func MemoryLifecycleHooksWithScopeResolver(runtime *MemoryRuntime, resolver Memo
 	if resolver == nil {
 		return nil
 	}
+	return MemoryLifecycleHooksWithScopePlanner(runtime, memoryPlannerFunc(func(state *RunState) MemoryScopePlan {
+		scope := resolver.ResolveMemoryScope(state)
+		return NormalizeMemoryScopePlan(MemoryScopePlan{
+			Primary: scope,
+			Inject:  []pkgmemory.Scope{scope},
+			Update:  []pkgmemory.Scope{scope},
+		})
+	}), sessionKey)
+}
+
+type memoryPlannerFunc func(*RunState) MemoryScopePlan
+
+func (f memoryPlannerFunc) PlanMemoryScopes(state *RunState) MemoryScopePlan {
+	return f(state)
+}
+
+func MemoryLifecycleHooksWithScopePlanner(runtime *MemoryRuntime, planner MemoryScopePlanner, sessionKey string) *LifecycleHooks {
+	if planner == nil {
+		return nil
+	}
 	return MemoryLifecycleHooks(MemoryLifecycleConfig{
 		Runtime:    runtime,
 		SessionKey: sessionKey,
-		ResolveSession: func(state *RunState) string {
-			return resolver.ResolveMemoryScope(state).Key()
-		},
+		PlanScopes: func(state *RunState) MemoryScopePlan { return planner.PlanMemoryScopes(state) },
 	})
+}
+
+func memoryLifecyclePlan(cfg MemoryLifecycleConfig, state *RunState) MemoryScopePlan {
+	if cfg.PlanScopes != nil {
+		return NormalizeMemoryScopePlan(cfg.PlanScopes(state))
+	}
+	if cfg.ResolveSession == nil {
+		return MemoryScopePlan{}
+	}
+	sessionID := strings.TrimSpace(cfg.ResolveSession(state))
+	if sessionID == "" {
+		return MemoryScopePlan{}
+	}
+	scope := pkgmemory.ParseScopeKey(sessionID)
+	return NormalizeMemoryScopePlan(MemoryScopePlan{
+		Primary: scope,
+		Inject:  []pkgmemory.Scope{scope},
+		Update:  []pkgmemory.Scope{scope},
+	})
+}
+
+func injectMemoryScopes(ctx context.Context, runtime *MemoryRuntime, scopes []pkgmemory.Scope, currentPrompt string) string {
+	if runtime == nil || !runtime.Enabled() || len(scopes) == 0 {
+		return ""
+	}
+	sections := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		injected := strings.TrimSpace(runtime.InjectScope(ctx, scope, currentPrompt))
+		if injected == "" {
+			continue
+		}
+		sections = append(sections, injected)
+	}
+	return strings.TrimSpace(strings.Join(sections, "\n\n"))
 }
 
 func ClarificationInterruptFromMessages(messages []models.Message) map[string]any {

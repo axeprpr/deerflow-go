@@ -41,6 +41,18 @@ func (fakeSessionRuntime) ResolveMemoryScope(threadID string, agentName string) 
 	return pkgmemory.SessionScope(threadID)
 }
 
+func (fakeSessionRuntime) PlanMemoryScopes(threadID string, agentName string) harness.MemoryScopePlan {
+	scope := pkgmemory.SessionScope(threadID)
+	if agentName != "" {
+		scope = pkgmemory.AgentScope(agentName)
+	}
+	return harness.NormalizeMemoryScopePlan(harness.MemoryScopePlan{
+		Primary: scope,
+		Inject:  []pkgmemory.Scope{scope},
+		Update:  []pkgmemory.Scope{scope},
+	})
+}
+
 type fakeTitleRuntime struct{}
 
 func (fakeTitleRuntime) ComputeThreadTitle(_ context.Context, threadID string, modelName string, messages []models.Message) string {
@@ -246,6 +258,29 @@ func TestMemoryScopeResolverUsesThreadAndAgentNames(t *testing.T) {
 	}
 }
 
+func TestMemoryScopePlannerUsesThreadAndAgentNames(t *testing.T) {
+	t.Parallel()
+
+	planner := MemoryScopePlanner{
+		Plan: func(threadID string, agentName string) harness.MemoryScopePlan {
+			scope := pkgmemory.GroupScope(threadID + ":" + agentName)
+			return harness.NormalizeMemoryScopePlan(harness.MemoryScopePlan{
+				Primary: scope,
+				Inject:  []pkgmemory.Scope{scope},
+				Update:  []pkgmemory.Scope{scope},
+			})
+		},
+	}
+
+	plan := planner.PlanMemoryScopes(&harness.RunState{
+		ThreadID:  "thread-1",
+		AgentName: "lead_agent",
+	})
+	if plan.Primary.Type != pkgmemory.ScopeGroup || plan.Primary.ID != "thread-1:lead_agent" {
+		t.Fatalf("plan = %+v", plan)
+	}
+}
+
 func TestTitleGeneratorUsesRunResultMessages(t *testing.T) {
 	t.Parallel()
 
@@ -302,6 +337,13 @@ func TestConstructorsWrapRuntimeInterfaces(t *testing.T) {
 	})
 	if scope.Key() != "agent:lead_agent" {
 		t.Fatalf("scope key = %q", scope.Key())
+	}
+	plan := NewMemoryScopePlanner(fakeSessionRuntime{}).PlanMemoryScopes(&harness.RunState{
+		ThreadID:  "thread-1",
+		AgentName: "lead_agent",
+	})
+	if plan.Primary.Key() != "agent:lead_agent" || len(plan.Update) != 1 {
+		t.Fatalf("plan = %+v", plan)
 	}
 
 	title := NewTitleGenerator(fakeTitleRuntime{}).GenerateTitle(context.Background(), &harness.RunState{
@@ -440,7 +482,7 @@ func TestLifecycleConfigBuildHooks(t *testing.T) {
 	}.BuildHooks(features, LifecycleProviders{
 		MemoryRuntime:  &harness.MemoryRuntime{},
 		Summarizer:     Summarizer{},
-		MemoryResolver: MemoryScopeResolver{},
+		MemoryPlanner:  MemoryScopePlanner{},
 		TitleGenerator: TitleGenerator{},
 	})
 	if hooks == nil {

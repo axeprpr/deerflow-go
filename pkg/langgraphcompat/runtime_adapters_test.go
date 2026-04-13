@@ -34,6 +34,26 @@ func TestRuntimeMemoryAdapterResolveMemorySessionID(t *testing.T) {
 	}
 }
 
+func TestRuntimeMemoryAdapterPlansSharedScopesFromThreadMetadata(t *testing.T) {
+	server := &Server{
+		sessions: map[string]*Session{},
+		runs:     map[string]*Run{},
+	}
+	store := server.ensureThreadStateStore()
+	store.SetThreadMetadata("thread-1", "memory_user_id", "user-1")
+	store.SetThreadMetadata("thread-1", "memory_group_id", "group-1")
+	store.SetThreadMetadata("thread-1", "memory_namespace", "project-a")
+
+	plan := server.runtimeMemoryAdapter().PlanMemoryScopes("thread-1", "planner")
+	wantPrimary := "__scope__:agent:planner:project-a"
+	if plan.Primary.Key() != wantPrimary {
+		t.Fatalf("Primary = %q, want %q", plan.Primary.Key(), wantPrimary)
+	}
+	if len(plan.Inject) != 4 || len(plan.Update) != 4 {
+		t.Fatalf("plan = %+v", plan)
+	}
+}
+
 func TestRuntimeConversationAdapterCompactConversationUsesExistingImplementation(t *testing.T) {
 	server := &Server{
 		sessions: map[string]*Session{},

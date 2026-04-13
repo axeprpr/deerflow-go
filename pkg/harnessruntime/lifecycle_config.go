@@ -13,6 +13,7 @@ type LifecycleProviders struct {
 	MemoryRuntime  *harness.MemoryRuntime
 	Summarizer     harness.Summarizer
 	MemoryResolver harness.MemoryScopeResolver
+	MemoryPlanner  harness.MemoryScopePlanner
 	TitleGenerator harness.TitleGenerator
 }
 
@@ -27,9 +28,17 @@ func (c LifecycleConfig) BuildHooks(features harness.FeatureAssembly, providers 
 		titleHooks = harness.TitleLifecycleHooksWithGenerator(providers.TitleGenerator, titleMetadataKey)
 	}
 
+	var memoryHooks *harness.LifecycleHooks
+	switch {
+	case providers.MemoryPlanner != nil:
+		memoryHooks = harness.MemoryLifecycleHooksWithScopePlanner(providers.MemoryRuntime, providers.MemoryPlanner, c.MemorySessionKey)
+	case providers.MemoryResolver != nil:
+		memoryHooks = harness.MemoryLifecycleHooksWithScopeResolver(providers.MemoryRuntime, providers.MemoryResolver, c.MemorySessionKey)
+	}
+
 	return harness.MergeLifecycleHooks(
 		harness.SummarizationLifecycleHooksWithSummarizer(providers.Summarizer, c.SummaryMetadataKey),
-		harness.MemoryLifecycleHooksWithScopeResolver(providers.MemoryRuntime, providers.MemoryResolver, c.MemorySessionKey),
+		memoryHooks,
 		harness.ClarificationLifecycleHooks(harness.ClarificationLifecycleConfig{
 			InterruptMetadataKey: c.InterruptMetadataKey,
 		}),

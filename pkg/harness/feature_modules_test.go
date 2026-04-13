@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
+	pkgmemory "github.com/axeprpr/deerflow-go/pkg/memory"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
 
@@ -12,6 +13,7 @@ var providerStylePersistedSummary string
 
 type providerStyleSummarizerStub struct{}
 type providerStyleResolverStub struct{}
+type providerStylePlannerStub struct{}
 type providerStyleTitleStub struct{}
 
 func (providerStyleSummarizerStub) Compact(_ context.Context, state *RunState) (SummarizationCompaction, error) {
@@ -28,6 +30,15 @@ func (providerStyleSummarizerStub) PersistSummary(_ string, summary string) {
 
 func (providerStyleResolverStub) ResolveMemorySession(_ *RunState) string {
 	return "session-1"
+}
+
+func (providerStylePlannerStub) PlanMemoryScopes(_ *RunState) MemoryScopePlan {
+	scope := pkgmemory.AgentScope("planner")
+	return NormalizeMemoryScopePlan(MemoryScopePlan{
+		Primary: scope,
+		Inject:  []pkgmemory.Scope{pkgmemory.SessionScope("thread-1"), scope},
+		Update:  []pkgmemory.Scope{pkgmemory.SessionScope("thread-1"), scope},
+	})
 }
 
 func (providerStyleTitleStub) GenerateTitle(_ context.Context, _ *RunState, _ *agent.RunResult) string {
@@ -132,5 +143,12 @@ func TestProviderStyleLifecycleAdapters(t *testing.T) {
 	}
 	if got := stringValue(state.Metadata["title_key"]); got != "title" {
 		t.Fatalf("title metadata = %q", got)
+	}
+}
+
+func TestMemoryLifecycleHooksWithScopePlannerUsesPrimaryScope(t *testing.T) {
+	hooks := MemoryLifecycleHooksWithScopePlanner(&MemoryRuntime{}, providerStylePlannerStub{}, "memory_session_id")
+	if hooks != nil {
+		t.Fatal("memory hooks should be nil when runtime is disabled")
 	}
 }

@@ -75,12 +75,20 @@ type MemoryScopeRuntime interface {
 	ResolveMemoryScope(threadID string, agentName string) pkgmemory.Scope
 }
 
+type MemoryScopePlanRuntime interface {
+	PlanMemoryScopes(threadID string, agentName string) harness.MemoryScopePlan
+}
+
 type MemorySessionResolver struct {
 	Resolve MemorySessionIDResolver
 }
 
 type MemoryScopeResolver struct {
 	Resolve func(threadID string, agentName string) pkgmemory.Scope
+}
+
+type MemoryScopePlanner struct {
+	Plan func(threadID string, agentName string) harness.MemoryScopePlan
 }
 
 func NewMemorySessionResolver(runtime SessionRuntime) MemorySessionResolver {
@@ -97,6 +105,13 @@ func NewMemoryScopeResolver(runtime MemoryScopeRuntime) MemoryScopeResolver {
 	return MemoryScopeResolver{Resolve: runtime.ResolveMemoryScope}
 }
 
+func NewMemoryScopePlanner(runtime MemoryScopePlanRuntime) MemoryScopePlanner {
+	if runtime == nil {
+		return MemoryScopePlanner{}
+	}
+	return MemoryScopePlanner{Plan: runtime.PlanMemoryScopes}
+}
+
 func (r MemorySessionResolver) ResolveMemorySession(state *harness.RunState) string {
 	if state == nil || r.Resolve == nil {
 		return ""
@@ -109,6 +124,13 @@ func (r MemoryScopeResolver) ResolveMemoryScope(state *harness.RunState) pkgmemo
 		return pkgmemory.Scope{}
 	}
 	return r.Resolve(state.ThreadID, state.AgentName).Normalized()
+}
+
+func (r MemoryScopePlanner) PlanMemoryScopes(state *harness.RunState) harness.MemoryScopePlan {
+	if state == nil || r.Plan == nil {
+		return harness.MemoryScopePlan{}
+	}
+	return harness.NormalizeMemoryScopePlan(r.Plan(state.ThreadID, state.AgentName))
 }
 
 type TitleGeneratorFunc func(ctx context.Context, threadID string, modelName string, messages []models.Message) string

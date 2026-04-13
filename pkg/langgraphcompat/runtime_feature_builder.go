@@ -33,7 +33,7 @@ func (b serverRuntimeProfileBuilder) BuildProfile() harness.RuntimeProfile {
 		Lifecycle: harnessruntime.LifecycleProviders{
 			MemoryRuntime:  b.memoryRuntime,
 			Summarizer:     harnessruntime.NewSummarizer(b.server.runtimeConversationAdapter()),
-			MemoryResolver: harnessruntime.NewMemoryScopeResolver(b.server.runtimeMemoryAdapter()),
+			MemoryPlanner:  harnessruntime.NewMemoryScopePlanner(b.server.runtimeMemoryAdapter()),
 			TitleGenerator: harnessruntime.NewTitleGenerator(b.server.runtimeConversationAdapter()),
 		},
 	})
