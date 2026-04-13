@@ -374,8 +374,25 @@ func (n *RuntimeNode) Close(ctx context.Context) error {
 			closeErr = err
 		}
 	}
+	if err := closeRuntimeStatePlane(n.State); err != nil && closeErr == nil {
+		closeErr = err
+	}
 	if n.Sandbox != nil {
 		if err := n.Sandbox.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	return closeErr
+}
+
+func closeRuntimeStatePlane(state RuntimeStatePlane) error {
+	var closeErr error
+	for _, item := range []any{state.Snapshots, state.Events, state.Threads} {
+		closer, ok := item.(interface{ Close() error })
+		if !ok || closer == nil {
+			continue
+		}
+		if err := closer.Close(); err != nil && closeErr == nil {
 			closeErr = err
 		}
 	}

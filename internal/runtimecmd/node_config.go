@@ -230,6 +230,8 @@ func NormalizeSandboxBackend(value string, fallback harnessruntime.SandboxBacken
 
 func NormalizeStateBackend(value string, fallback harnessruntime.RuntimeStateStoreBackend) harnessruntime.RuntimeStateStoreBackend {
 	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(harnessruntime.RuntimeStateStoreBackendSQLite):
+		return harnessruntime.RuntimeStateStoreBackendSQLite
 	case string(harnessruntime.RuntimeStateStoreBackendFile):
 		return harnessruntime.RuntimeStateStoreBackendFile
 	case string(harnessruntime.RuntimeStateStoreBackendInMemory):

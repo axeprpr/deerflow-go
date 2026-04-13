@@ -83,6 +83,24 @@ func TestRuntimeNodeConfigBuildsFileBackedStateStores(t *testing.T) {
 	}
 }
 
+func TestRuntimeNodeConfigBuildsSQLiteBackedStateStores(t *testing.T) {
+	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
+	root := t.TempDir()
+	config.State = RuntimeStateStoreConfig{
+		Backend: RuntimeStateStoreBackendSQLite,
+		Root:    root,
+	}
+	if _, ok := config.BuildRunSnapshotStore().(*SQLiteRunSnapshotStore); !ok {
+		t.Fatalf("BuildRunSnapshotStore() returned %T", config.BuildRunSnapshotStore())
+	}
+	if _, ok := config.BuildThreadStateStore().(*SQLiteThreadStateStore); !ok {
+		t.Fatalf("BuildThreadStateStore() returned %T", config.BuildThreadStateStore())
+	}
+	if _, ok := config.BuildRunEventStore().(*SQLiteRunEventStore); !ok {
+		t.Fatalf("BuildRunEventStore() returned %T", config.BuildRunEventStore())
+	}
+}
+
 func TestRuntimeNodeConfigSupportsMixedStateBackends(t *testing.T) {
 	root := t.TempDir()
 	config := DefaultRuntimeNodeConfig("runtime-test", root)

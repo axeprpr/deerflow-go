@@ -42,10 +42,10 @@ func BindFlags(fs *flag.FlagSet, defaults NodeConfig, prefix, label string) *Nod
 		sandboxEndpoint:  fs.String(flagName(prefix, "sandbox-endpoint"), defaults.SandboxEndpoint, label+"sandbox endpoint for remote backend"),
 		sandboxImage:     fs.String(flagName(prefix, "sandbox-image"), defaults.SandboxImage, label+"sandbox image for container backend"),
 		stateRoot:        fs.String(flagName(prefix, "state-root"), defaults.StateRoot, label+"state root"),
-		stateBackend:     fs.String(flagName(prefix, "state-backend"), string(defaults.StateBackend), label+"state backend: in-memory|file"),
-		snapshotBackend:  fs.String(flagName(prefix, "snapshot-backend"), string(defaults.SnapshotBackend), label+"snapshot backend override: in-memory|file"),
-		eventBackend:     fs.String(flagName(prefix, "event-backend"), string(defaults.EventBackend), label+"event backend override: in-memory|file"),
-		threadBackend:    fs.String(flagName(prefix, "thread-backend"), string(defaults.ThreadBackend), label+"thread backend override: in-memory|file"),
+		stateBackend:     fs.String(flagName(prefix, "state-backend"), string(defaults.StateBackend), label+"state backend: in-memory|file|sqlite"),
+		snapshotBackend:  fs.String(flagName(prefix, "snapshot-backend"), string(defaults.SnapshotBackend), label+"snapshot backend override: in-memory|file|sqlite"),
+		eventBackend:     fs.String(flagName(prefix, "event-backend"), string(defaults.EventBackend), label+"event backend override: in-memory|file|sqlite"),
+		threadBackend:    fs.String(flagName(prefix, "thread-backend"), string(defaults.ThreadBackend), label+"thread backend override: in-memory|file|sqlite"),
 	}
 }
 

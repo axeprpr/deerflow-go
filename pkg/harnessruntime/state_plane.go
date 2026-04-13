@@ -44,6 +44,12 @@ func DefaultRuntimeStatePlaneProviders() RuntimeStatePlaneProviders {
 			switch config.normalizedSnapshotBackend() {
 			case RuntimeStateStoreBackendFile:
 				return NewJSONFileRunStore(filepath.Join(config.State.Root, "runs"))
+			case RuntimeStateStoreBackendSQLite:
+				store, err := NewSQLiteRunSnapshotStore(filepath.Join(config.State.Root, "snapshots.sqlite3"))
+				if err == nil {
+					return store
+				}
+				return NewInMemoryRunStore()
 			default:
 				return NewInMemoryRunStore()
 			}
@@ -52,6 +58,12 @@ func DefaultRuntimeStatePlaneProviders() RuntimeStatePlaneProviders {
 			switch config.normalizedEventBackend() {
 			case RuntimeStateStoreBackendFile:
 				return NewJSONFileRunEventStore(filepath.Join(config.State.Root, "events"))
+			case RuntimeStateStoreBackendSQLite:
+				store, err := NewSQLiteRunEventStore(filepath.Join(config.State.Root, "events.sqlite3"))
+				if err == nil {
+					return store
+				}
+				return NewInMemoryRunEventStore()
 			default:
 				return NewInMemoryRunEventStore()
 			}
@@ -60,6 +72,12 @@ func DefaultRuntimeStatePlaneProviders() RuntimeStatePlaneProviders {
 			switch config.normalizedThreadBackend() {
 			case RuntimeStateStoreBackendFile:
 				return NewJSONFileThreadStateStore(filepath.Join(config.State.Root, "threads"))
+			case RuntimeStateStoreBackendSQLite:
+				store, err := NewSQLiteThreadStateStore(filepath.Join(config.State.Root, "threads.sqlite3"))
+				if err == nil {
+					return store
+				}
+				return NewInMemoryThreadStateStore()
 			default:
 				return NewInMemoryThreadStateStore()
 			}

@@ -63,6 +63,12 @@ func TestDefaultLangGraphNodeConfigUsesEnvironmentOverrides(t *testing.T) {
 	}
 }
 
+func TestNormalizeStateBackendSupportsSQLite(t *testing.T) {
+	if got := NormalizeStateBackend("sqlite", harnessruntime.RuntimeStateStoreBackendInMemory); got != harnessruntime.RuntimeStateStoreBackendSQLite {
+		t.Fatalf("NormalizeStateBackend() = %q", got)
+	}
+}
+
 func TestNodeConfigRuntimeNodeConfigUsesRoleDefaults(t *testing.T) {
 	cfg := NodeConfig{
 		Role:             harnessruntime.RuntimeNodeRoleGateway,

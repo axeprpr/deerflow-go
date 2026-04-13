@@ -34,6 +34,7 @@ type RuntimeStateStoreBackend string
 const (
 	RuntimeStateStoreBackendInMemory RuntimeStateStoreBackend = "in-memory"
 	RuntimeStateStoreBackendFile     RuntimeStateStoreBackend = "file"
+	RuntimeStateStoreBackendSQLite   RuntimeStateStoreBackend = "sqlite"
 )
 
 type RuntimeStateStoreConfig struct {
@@ -238,6 +239,8 @@ func (c RuntimeNodeConfig) normalizedStateBackend(value RuntimeStateStoreBackend
 	switch value {
 	case RuntimeStateStoreBackendFile:
 		return RuntimeStateStoreBackendFile
+	case RuntimeStateStoreBackendSQLite:
+		return RuntimeStateStoreBackendSQLite
 	default:
 		return RuntimeStateStoreBackendInMemory
 	}
