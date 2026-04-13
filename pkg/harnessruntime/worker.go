@@ -14,10 +14,12 @@ type RunExecutor interface {
 }
 
 type RuntimeWorker struct {
-	runtime  func() *harness.Runtime
-	specs    WorkerSpecRuntime
-	complete bool
-	events   RunEventRecorder
+	runtime   func() *harness.Runtime
+	specs     WorkerSpecRuntime
+	complete  bool
+	events    RunEventRecorder
+	snapshots RunSnapshotStore
+	threads   ThreadStateStore
 }
 
 func NewRuntimeWorker() RunExecutor {
@@ -28,8 +30,8 @@ func NewRuntimeWorkerSource(source func() *harness.Runtime, specs WorkerSpecRunt
 	return RuntimeWorker{runtime: source, specs: specs}
 }
 
-func NewCompletingRuntimeWorkerSource(source func() *harness.Runtime, specs WorkerSpecRuntime, events RunEventRecorder) RunExecutor {
-	return RuntimeWorker{runtime: source, specs: specs, complete: true, events: events}
+func NewCompletingRuntimeWorkerSource(source func() *harness.Runtime, specs WorkerSpecRuntime, events RunEventRecorder, snapshots RunSnapshotStore, threads ThreadStateStore) RunExecutor {
+	return RuntimeWorker{runtime: source, specs: specs, complete: true, events: events, snapshots: snapshots, threads: threads}
 }
 
 func (w RuntimeWorker) Execute(ctx context.Context, req DispatchRequest) (*DispatchResult, error) {
@@ -52,6 +54,11 @@ func (w RuntimeWorker) execute(ctx context.Context, req DispatchRequest) (*Dispa
 	if w.complete {
 		recorder := NewWorkerRunEventRecorder(w.events)
 		ctx = bindWorkerExecutionContext(ctx, runtime, w.specs, req.Plan, recorder)
+		runState := NewRunStateService(workerRunStateRuntime{
+			snapshots: w.snapshots,
+			threads:   w.threads,
+		})
+		record := runState.Begin(loadWorkerRunRecord(req.Plan, w.snapshots))
 		eventsDone := make(chan struct{})
 		go func() {
 			defer close(eventsDone)
@@ -62,9 +69,17 @@ func (w RuntimeWorker) execute(ctx context.Context, req DispatchRequest) (*Dispa
 		result, err := prepared.Execution.Run(ctx)
 		<-eventsDone
 		if err != nil {
+			runState.MarkError(record, err)
 			return nil, err
 		}
 		recorder.RecordCompletion(req.Plan, result)
+		record = runState.Finalize(record, CompletionOutcome{
+			RunOutcome: NewOutcomeService().Resolve(false),
+			Descriptor: NewOutcomeService().Describe(record, NewOutcomeService().Resolve(false), ""),
+		})
+		if w.threads != nil {
+			w.threads.MarkThreadStatus(record.ThreadID, "idle")
+		}
 		return &DispatchResult{
 			Lifecycle: prepared.Lifecycle,
 			Execution: ExecutionDescriptor{

@@ -141,7 +141,14 @@ func (r WorkerRunEventRecorder) RecordCompletion(plan WorkerExecutionPlan, resul
 	if result != nil && result.Usage != nil {
 		payload["usage"] = result.Usage
 	}
-	EventLogService{store: r.store}.RecordWithContext(workerRunEventContext(plan), plan.RunID, plan.ThreadID, "end", payload)
+	ctx := workerRunEventContext(plan)
+	ctx.Outcome = RunOutcomeDescriptor{
+		RunStatus:       "success",
+		Attempt:         plan.Attempt,
+		ResumeFromEvent: plan.ResumeFromEvent,
+		ResumeReason:    plan.ResumeReason,
+	}
+	EventLogService{store: r.store}.RecordWithContext(ctx, plan.RunID, plan.ThreadID, "end", payload)
 }
 
 func workerRunEventContext(plan WorkerExecutionPlan) RunEventContext {
