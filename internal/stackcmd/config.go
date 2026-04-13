@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/axeprpr/deerflow-go/internal/commandrun"
 	"github.com/axeprpr/deerflow-go/internal/langgraphcmd"
 	"github.com/axeprpr/deerflow-go/internal/runtimecmd"
 	"github.com/axeprpr/deerflow-go/internal/sandboxcmd"
@@ -282,14 +281,7 @@ func (c Config) StartupLines(build langgraphcmd.BuildInfo, yolo bool, logLevel s
 func (c Config) ReadyLines() []string {
 	cfg := c.withDefaults()
 	lines := cfg.Gateway.ReadyLines()
-	lines = append(lines, fmt.Sprintf("  Worker server: %s%s", commandrun.HTTPURL(cfg.Worker.Addr), harnessruntime.DefaultRemoteWorkerDispatchPath))
-	if cfg.usesDedicatedStateService() {
-		lines = append(lines, fmt.Sprintf("  State server: %s%s", commandrun.HTTPURL(cfg.State.Runtime.Addr), harnessruntime.DefaultRemoteStateHealthPath))
-		lines = append(lines, fmt.Sprintf("  Sandbox server: %s%s", commandrun.HTTPURL(cfg.Sandbox.Runtime.Addr), harnessruntime.DefaultRemoteSandboxHealthPath))
-	} else {
-		lines = append(lines, fmt.Sprintf("  Worker sandbox: %s%s", commandrun.HTTPURL(cfg.Worker.Addr), harnessruntime.DefaultRemoteSandboxHealthPath))
-		lines = append(lines, fmt.Sprintf("  Worker state: %s%s", commandrun.HTTPURL(cfg.Worker.Addr), harnessruntime.DefaultRemoteStateHealthPath))
-	}
+	lines = append(lines, c.LaunchSpec().ReadyLines()...)
 	return lines
 }
 

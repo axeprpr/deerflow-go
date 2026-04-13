@@ -16,6 +16,7 @@ type Launcher struct {
 	worker  *runtimecmd.NodeConfig
 	state   *statecmd.Config
 	sandbox *sandboxcmd.Config
+	spec    LaunchSpec
 }
 
 func NewLauncher(gateway *langgraphcmd.Launcher, worker commandrun.Lifecycle, workerConfig *runtimecmd.NodeConfig, state commandrun.Lifecycle, stateConfig *statecmd.Config, sandbox commandrun.Lifecycle, sandboxConfig *sandboxcmd.Config) *Launcher {
@@ -26,6 +27,13 @@ func NewLauncher(gateway *langgraphcmd.Launcher, worker commandrun.Lifecycle, wo
 		state:   stateConfig,
 		sandbox: sandboxConfig,
 	}
+}
+
+func (l *Launcher) Spec() LaunchSpec {
+	if l == nil {
+		return LaunchSpec{}
+	}
+	return l.spec
 }
 
 func (l *Launcher) Start() error {
@@ -77,5 +85,7 @@ func (c Config) BuildLauncher(ctx context.Context) (*Launcher, error) {
 		return nil, err
 	}
 	workerConfig := cfg.Worker
-	return NewLauncher(gatewayLauncher, workerLauncher, &workerConfig, stateLauncher, stateConfig, sandboxLauncher, sandboxConfig), nil
+	launcher := NewLauncher(gatewayLauncher, workerLauncher, &workerConfig, stateLauncher, stateConfig, sandboxLauncher, sandboxConfig)
+	launcher.spec = cfg.LaunchSpec()
+	return launcher, nil
 }

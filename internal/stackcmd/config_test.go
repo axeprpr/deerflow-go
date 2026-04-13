@@ -54,6 +54,9 @@ func TestConfigBuildLauncherUsesSplitRoles(t *testing.T) {
 	if launcher == nil {
 		t.Fatal("BuildLauncher() = nil")
 	}
+	if launcher.Spec().WorkerAddr != ":19081" {
+		t.Fatalf("launcher.Spec().WorkerAddr = %q", launcher.Spec().WorkerAddr)
+	}
 }
 
 func TestConfigValidateRejectsRemoteWorkerTransport(t *testing.T) {
@@ -88,5 +91,11 @@ func TestConfigWithSharedRemotePresetUsesDedicatedStateService(t *testing.T) {
 	}
 	if cfg.State.Runtime.Preset != runtimecmd.RuntimeNodePresetSharedSQLite {
 		t.Fatalf("state preset = %q", cfg.State.Runtime.Preset)
+	}
+	if cfg.LaunchSpec().StateAddr != ":8082" {
+		t.Fatalf("state addr = %q", cfg.LaunchSpec().StateAddr)
+	}
+	if cfg.LaunchSpec().SandboxAddr != ":8083" {
+		t.Fatalf("sandbox addr = %q", cfg.LaunchSpec().SandboxAddr)
 	}
 }
