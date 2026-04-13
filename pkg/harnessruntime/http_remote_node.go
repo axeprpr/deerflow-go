@@ -3,6 +3,7 @@ package harnessruntime
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 )
 
@@ -21,11 +22,28 @@ func (n *HTTPRemoteWorkerNode) Server() *http.Server {
 	return n.server
 }
 
+func (n *HTTPRemoteWorkerNode) Addr() string {
+	if n == nil || n.server == nil {
+		return ""
+	}
+	return n.server.Addr
+}
+
 func (n *HTTPRemoteWorkerNode) Start() error {
 	if n == nil || n.server == nil {
 		return errors.New("remote worker server is not configured")
 	}
 	return n.server.ListenAndServe()
+}
+
+func (n *HTTPRemoteWorkerNode) Serve(listener net.Listener) error {
+	if n == nil || n.server == nil {
+		return errors.New("remote worker server is not configured")
+	}
+	if listener == nil {
+		return errors.New("remote worker listener is not configured")
+	}
+	return n.server.Serve(listener)
 }
 
 func (n *HTTPRemoteWorkerNode) Shutdown(ctx context.Context) error {

@@ -2,6 +2,7 @@ package harnessruntime
 
 import (
 	"context"
+	"net"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 )
@@ -136,6 +137,27 @@ func (n *RuntimeNode) SandboxRuntime(policy harness.SandboxPolicy) harness.Sandb
 		policy = harness.FeatureSandboxPolicy{}
 	}
 	return n.Sandbox.Runtime(policy)
+}
+
+func (n *RuntimeNode) RemoteWorkerAddr() string {
+	if n == nil || n.RemoteWorker == nil {
+		return ""
+	}
+	return n.RemoteWorker.Addr()
+}
+
+func (n *RuntimeNode) StartRemoteWorker() error {
+	if n == nil || n.RemoteWorker == nil {
+		return nil
+	}
+	return n.RemoteWorker.Start()
+}
+
+func (n *RuntimeNode) ServeRemoteWorker(listener net.Listener) error {
+	if n == nil || n.RemoteWorker == nil {
+		return nil
+	}
+	return n.RemoteWorker.Serve(listener)
 }
 
 func (n *RuntimeNode) BindDispatch(runtime DispatchRuntimeConfig) {
