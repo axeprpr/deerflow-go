@@ -3,6 +3,7 @@ package harnessruntime
 import (
 	"context"
 	"net"
+	"net/http"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -45,6 +46,7 @@ type RuntimeNodeProviders struct {
 	Transport  WorkerTransportFactory
 	Sandbox    SandboxManagerBuilder
 	Remote     RemoteWorkerProviders
+	RemoteSB   RemoteSandboxProviders
 }
 
 func DefaultRuntimeNodeProviders() RuntimeNodeProviders {
@@ -55,21 +57,23 @@ func DefaultRuntimeNodeProviders() RuntimeNodeProviders {
 		Transport: WorkerTransportFactoryFunc(func(config WorkerTransportConfig, runtime DispatchRuntimeConfig) WorkerTransport {
 			return buildWorkerTransport(config, runtime)
 		}),
-		Sandbox: DefaultSandboxManagerFactory(),
-		Remote:  DefaultRemoteWorkerProviders(),
+		Sandbox:  DefaultSandboxManagerFactory(),
+		Remote:   DefaultRemoteWorkerProviders(),
+		RemoteSB: DefaultRemoteSandboxProviders(),
 	}
 }
 
 type RuntimeNode struct {
-	Config       RuntimeNodeConfig
-	Providers    RuntimeNodeProviders
-	State        RuntimeStatePlane
-	Dispatcher   RunDispatcher
-	Sandbox      *SandboxResourceManager
-	RemoteWorker *HTTPRemoteWorkerNode
-	Memory       *MemoryService
-	Tools        harness.ToolRuntime
-	Runtime      *harness.Runtime
+	Config        RuntimeNodeConfig
+	Providers     RuntimeNodeProviders
+	State         RuntimeStatePlane
+	Dispatcher    RunDispatcher
+	Sandbox       *SandboxResourceManager
+	RemoteWorker  *HTTPRemoteWorkerNode
+	RemoteSandbox *HTTPRemoteSandboxServer
+	Memory        *MemoryService
+	Tools         harness.ToolRuntime
+	Runtime       *harness.Runtime
 }
 
 func (c RuntimeNodeConfig) BuildRuntimeNode(runtime DispatchRuntimeConfig) (*RuntimeNode, error) {
@@ -94,6 +98,12 @@ func (c RuntimeNodeConfig) BuildRuntimeNodeWithProviders(runtime DispatchRuntime
 	}
 	if providers.Remote.Server == nil {
 		providers.Remote.Server = DefaultRemoteWorkerProviders().Server
+	}
+	if providers.RemoteSB.Protocol == nil {
+		providers.RemoteSB.Protocol = DefaultRemoteSandboxProviders().Protocol
+	}
+	if providers.RemoteSB.Server == nil {
+		providers.RemoteSB.Server = DefaultRemoteSandboxProviders().Server
 	}
 	sandboxManager, err := providers.Sandbox.Build(c.Sandbox)
 	if err != nil {
@@ -224,8 +234,15 @@ func (n *RuntimeNode) RemoteWorkerAddr() string {
 	return n.LaunchSpec().RemoteWorkerAddr
 }
 
+func (n *RuntimeNode) RemoteSandboxHandler() http.Handler {
+	if n == nil || n.RemoteSandbox == nil {
+		return nil
+	}
+	return n.RemoteSandbox.Handler()
+}
+
 func (n *RuntimeNode) Start() error {
-	if spec := n.LaunchSpec(); !spec.ServesRemoteWorker {
+	if spec := n.LaunchSpec(); !spec.ServesRemoteWorker && !spec.ServesRemoteSandbox {
 		return nil
 	}
 	return n.StartRemoteWorker()
@@ -239,7 +256,7 @@ func (n *RuntimeNode) StartRemoteWorker() error {
 }
 
 func (n *RuntimeNode) Serve(listener net.Listener) error {
-	if spec := n.LaunchSpec(); !spec.ServesRemoteWorker {
+	if spec := n.LaunchSpec(); !spec.ServesRemoteWorker && !spec.ServesRemoteSandbox {
 		return nil
 	}
 	return n.ServeRemoteWorker(listener)
@@ -269,6 +286,12 @@ func (n *RuntimeNode) BindDispatch(runtime DispatchRuntimeConfig) {
 	if providers.Remote.Server == nil {
 		providers.Remote.Server = DefaultRemoteWorkerProviders().Server
 	}
+	if providers.RemoteSB.Protocol == nil {
+		providers.RemoteSB.Protocol = DefaultRemoteSandboxProviders().Protocol
+	}
+	if providers.RemoteSB.Server == nil {
+		providers.RemoteSB.Server = DefaultRemoteSandboxProviders().Server
+	}
 	transport := providers.Transport.Build(n.Config.Transport, runtime)
 	protocol := runtime.Protocol
 	if protocol == nil {
@@ -276,7 +299,7 @@ func (n *RuntimeNode) BindDispatch(runtime DispatchRuntimeConfig) {
 	}
 	n.Dispatcher = transportRunDispatcher{transport: transport, codec: DispatchEnvelopeCodec{Plans: runtime.Codec}}
 	if n.Config.servesRemoteWorker() {
-		n.RemoteWorker = NewHTTPRemoteWorkerNode(n.Config.BuildRemoteWorkerHTTPServerWithProviders(transport, protocol, providers.Remote))
+		n.RemoteWorker = NewHTTPRemoteWorkerNode(n.buildRemoteHTTPServer(transport, protocol, providers))
 	} else {
 		n.RemoteWorker = nil
 	}
@@ -326,12 +349,46 @@ func (n *RuntimeNode) BindRemoteWorker(runtime DispatchRuntimeConfig) {
 	if providers.Remote.Server == nil {
 		providers.Remote.Server = DefaultRemoteWorkerProviders().Server
 	}
+	if providers.RemoteSB.Protocol == nil {
+		providers.RemoteSB.Protocol = DefaultRemoteSandboxProviders().Protocol
+	}
+	if providers.RemoteSB.Server == nil {
+		providers.RemoteSB.Server = DefaultRemoteSandboxProviders().Server
+	}
 	transport := providers.Transport.Build(n.Config.Transport, runtime)
 	protocol := runtime.Protocol
 	if protocol == nil {
 		protocol = providers.Remote.Protocol.Build(n.Config, runtime.Results)
 	}
-	n.RemoteWorker = NewHTTPRemoteWorkerNode(n.Config.BuildRemoteWorkerHTTPServerWithProviders(transport, protocol, providers.Remote))
+	n.RemoteWorker = NewHTTPRemoteWorkerNode(n.buildRemoteHTTPServer(transport, protocol, providers))
+}
+
+func (n *RuntimeNode) buildRemoteHTTPServer(transport WorkerTransport, protocol RemoteWorkerProtocol, providers RuntimeNodeProviders) *http.Server {
+	if n == nil {
+		return nil
+	}
+	server := n.Config.BuildRemoteWorkerHTTPServerWithProviders(transport, protocol, providers.Remote)
+	if n.Config.servesRemoteSandbox() {
+		sandboxProtocol := providers.RemoteSB.Protocol.Build(n.Config)
+		n.RemoteSandbox = providers.RemoteSB.Server.Build(n.Config.Sandbox, sandboxProtocol)
+		server.Handler = mergeRemoteNodeHandlers(server.Handler, n.RemoteSandbox.Handler())
+	} else {
+		n.RemoteSandbox = nil
+	}
+	return server
+}
+
+func mergeRemoteNodeHandlers(base http.Handler, sandbox http.Handler) http.Handler {
+	if sandbox == nil {
+		return base
+	}
+	if base == nil {
+		return sandbox
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/sandbox/", sandbox)
+	mux.Handle("/", base)
+	return mux
 }
 
 func EnsureRuntimeNode(existing *RuntimeNode, config RuntimeNodeConfig) (*RuntimeNode, error) {
@@ -401,6 +458,11 @@ func (n *RuntimeNode) Close(ctx context.Context) error {
 	}
 	if n.RemoteWorker != nil {
 		if err := n.RemoteWorker.Shutdown(ctx); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	if n.RemoteSandbox != nil {
+		if err := n.RemoteSandbox.Close(ctx); err != nil && closeErr == nil {
 			closeErr = err
 		}
 	}

@@ -19,6 +19,10 @@ func TestRuntimeNodeLaunchSpec(t *testing.T) {
 	node := &RuntimeNode{
 		Config:       RuntimeNodeConfig{Role: RuntimeNodeRoleWorker},
 		RemoteWorker: NewHTTPRemoteWorkerNode(buildTestHTTPServer("127.0.0.1:49081")),
+		RemoteSandbox: NewHTTPRemoteSandboxServer(SandboxManagerConfig{
+			Name: "sandbox-test",
+			Root: t.TempDir(),
+		}, nil),
 	}
 	spec := node.LaunchSpec()
 	if spec.Role != RuntimeNodeRoleWorker {
@@ -29,6 +33,12 @@ func TestRuntimeNodeLaunchSpec(t *testing.T) {
 	}
 	if spec.RemoteWorkerAddr != "127.0.0.1:49081" {
 		t.Fatalf("RemoteWorkerAddr = %q", spec.RemoteWorkerAddr)
+	}
+	if !spec.ServesRemoteSandbox {
+		t.Fatal("ServesRemoteSandbox = false, want true")
+	}
+	if spec.RemoteSandboxAddr != "127.0.0.1:49081" {
+		t.Fatalf("RemoteSandboxAddr = %q", spec.RemoteSandboxAddr)
 	}
 }
 
@@ -115,6 +125,71 @@ func TestRuntimeNodeServeRemoteWorkerBridgesDispatch(t *testing.T) {
 	}
 	if result == nil || result.Lifecycle == nil || result.Lifecycle.ThreadID != "thread-node" {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestRuntimeNodeServeExposesRemoteSandbox(t *testing.T) {
+	config := DefaultWorkerRuntimeNodeConfig("runtime-test", t.TempDir())
+	node, err := config.BuildRuntimeNode(DispatchRuntimeConfig{Codec: WorkerPlanCodec{}})
+	if err != nil {
+		t.Fatalf("BuildRuntimeNode() error = %v", err)
+	}
+	node.BindDispatchSource(nil, nil)
+	if node.RemoteSandbox == nil {
+		t.Fatal("RemoteSandbox = nil")
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen() error = %v", err)
+	}
+	defer listener.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- node.Serve(listener)
+	}()
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = node.Close(shutdownCtx)
+		select {
+		case serveErr := <-errCh:
+			if serveErr != nil && serveErr != http.ErrServerClosed {
+				t.Fatalf("Serve() error = %v", serveErr)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("Serve() did not exit")
+		}
+	}()
+
+	client := NewHTTPRemoteSandboxClient(nil, nil)
+	leaseResp, err := client.Acquire(context.Background(), "http://"+listener.Addr().String())
+	if err != nil {
+		t.Fatalf("Acquire() error = %v", err)
+	}
+	if leaseResp.LeaseID == "" {
+		t.Fatal("lease id is empty")
+	}
+	if err := client.WriteFile(context.Background(), "http://"+listener.Addr().String(), leaseResp.LeaseID, "notes/hello.txt", []byte("hello")); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	data, err := client.ReadFile(context.Background(), "http://"+listener.Addr().String(), leaseResp.LeaseID, "notes/hello.txt")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "hello" {
+		t.Fatalf("ReadFile() = %q, want %q", string(data), "hello")
+	}
+	result, err := client.Exec(context.Background(), "http://"+listener.Addr().String(), leaseResp.LeaseID, "printf sandbox", time.Second)
+	if err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+	if got := result.Stdout(); got != "sandbox" {
+		t.Fatalf("stdout = %q, want %q", got, "sandbox")
+	}
+	if err := client.Release(context.Background(), "http://"+listener.Addr().String(), leaseResp.LeaseID); err != nil {
+		t.Fatalf("Release() error = %v", err)
 	}
 }
 

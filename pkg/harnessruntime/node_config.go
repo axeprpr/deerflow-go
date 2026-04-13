@@ -129,6 +129,13 @@ func (c RuntimeNodeConfig) servesRemoteWorker() bool {
 	}
 }
 
+func (c RuntimeNodeConfig) servesRemoteSandbox() bool {
+	if !c.servesRemoteWorker() {
+		return false
+	}
+	return c.Sandbox.Normalized().Backend == SandboxBackendLocalLinux
+}
+
 func (c RuntimeNodeConfig) BuildSandboxManager() (*SandboxResourceManager, error) {
 	return NewSandboxManagerFromConfig(c.Sandbox)
 }

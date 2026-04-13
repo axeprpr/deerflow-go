@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	_ "modernc.org/sqlite"
 )
@@ -139,8 +140,11 @@ func (s *SQLiteRunSnapshotStore) SaveRunSnapshot(snapshot RunSnapshot) {
 }
 
 type SQLiteRunEventStore struct {
-	db    *sql.DB
-	codec RunEventLogMarshaler
+	db               *sql.DB
+	codec            RunEventLogMarshaler
+	mu               sync.RWMutex
+	streams          map[string]map[uint64]chan RunEvent
+	nextSubscriberID map[string]uint64
 }
 
 func NewSQLiteRunEventStore(path string) (*SQLiteRunEventStore, error) {
@@ -149,8 +153,10 @@ func NewSQLiteRunEventStore(path string) (*SQLiteRunEventStore, error) {
 		return nil, err
 	}
 	return &SQLiteRunEventStore{
-		db:    db,
-		codec: defaultRunEventLogCodec(nil),
+		db:               db,
+		codec:            defaultRunEventLogCodec(nil),
+		streams:          map[string]map[uint64]chan RunEvent{},
+		nextSubscriberID: map[string]uint64{},
 	}, nil
 }
 
@@ -188,6 +194,18 @@ func (s *SQLiteRunEventStore) AppendRunEvent(runID string, event RunEvent) {
 			?
 		)
 	`, runID, runID, data)
+	s.mu.RLock()
+	subscribers := make([]chan RunEvent, 0, len(s.streams[runID]))
+	for _, subscriber := range s.streams[runID] {
+		subscribers = append(subscribers, subscriber)
+	}
+	s.mu.RUnlock()
+	for _, subscriber := range subscribers {
+		select {
+		case subscriber <- event:
+		default:
+		}
+	}
 }
 
 func (s *SQLiteRunEventStore) LoadRunEvents(runID string) []RunEvent {
@@ -243,9 +261,83 @@ func (s *SQLiteRunEventStore) ReplaceRunEvents(runID string, events []RunEvent) 
 }
 
 func (s *SQLiteRunEventStore) SubscribeRunEvents(runID string, buffer int) (<-chan RunEvent, func()) {
-	return newPollingRunEventSubscription(buffer, func() []RunEvent {
+	if buffer <= 0 {
+		buffer = 1
+	}
+	s.mu.Lock()
+	if s.streams[runID] == nil {
+		s.streams[runID] = map[uint64]chan RunEvent{}
+	}
+	s.nextSubscriberID[runID]++
+	id := s.nextSubscriberID[runID]
+	live := make(chan RunEvent, buffer)
+	s.streams[runID][id] = live
+	s.mu.Unlock()
+
+	polled, unsubscribePoll := newPollingRunEventSubscription(buffer, func() []RunEvent {
 		return s.LoadRunEvents(runID)
 	})
+	out := make(chan RunEvent, buffer)
+	done := make(chan struct{})
+	go func() {
+		defer close(out)
+		seen := map[string]struct{}{}
+		for {
+			select {
+			case <-done:
+				return
+			case event, ok := <-live:
+				if !ok {
+					live = nil
+					continue
+				}
+				key := runEventSubscriptionKey(-1, event)
+				if _, exists := seen[key]; exists {
+					continue
+				}
+				select {
+				case out <- event:
+					seen[key] = struct{}{}
+				case <-done:
+					return
+				}
+			case event, ok := <-polled:
+				if !ok {
+					polled = nil
+					continue
+				}
+				key := runEventSubscriptionKey(-1, event)
+				if _, exists := seen[key]; exists {
+					continue
+				}
+				select {
+				case out <- event:
+					seen[key] = struct{}{}
+				case <-done:
+					return
+				}
+			}
+			if live == nil && polled == nil {
+				return
+			}
+		}
+	}()
+	return out, func() {
+		close(done)
+		unsubscribePoll()
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if streams := s.streams[runID]; streams != nil {
+			if subscriber, ok := streams[id]; ok {
+				delete(streams, id)
+				close(subscriber)
+			}
+			if len(streams) == 0 {
+				delete(s.streams, runID)
+				delete(s.nextSubscriberID, runID)
+			}
+		}
+	}
 }
 
 type SQLiteThreadStateStore struct {

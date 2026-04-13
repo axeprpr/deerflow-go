@@ -279,6 +279,9 @@ func TestGatewayRuntimeNodeDoesNotExposeRemoteWorkerServer(t *testing.T) {
 	if node.RemoteWorker != nil {
 		t.Fatalf("remote worker = %#v, want nil", node.RemoteWorker)
 	}
+	if node.RemoteSandbox != nil {
+		t.Fatalf("remote sandbox = %#v, want nil", node.RemoteSandbox)
+	}
 }
 
 func TestWorkerRuntimeNodeExposesRemoteWorkerServer(t *testing.T) {
@@ -292,6 +295,26 @@ func TestWorkerRuntimeNodeExposesRemoteWorkerServer(t *testing.T) {
 	}
 	if node.RemoteWorker == nil || node.RemoteWorker.Server() == nil {
 		t.Fatalf("remote worker = %#v", node.RemoteWorker)
+	}
+	if node.RemoteSandbox == nil {
+		t.Fatal("remote sandbox = nil")
+	}
+}
+
+func TestRemoteSandboxBackendDoesNotExposeRemoteSandboxServer(t *testing.T) {
+	config := DefaultWorkerRuntimeNodeConfig("runtime-test", t.TempDir())
+	config.Sandbox.Backend = SandboxBackendRemote
+	config.Sandbox.Endpoint = "http://sandbox.internal"
+	node, err := config.BuildRuntimeNode(DispatchRuntimeConfig{})
+	if err != nil {
+		t.Fatalf("BuildRuntimeNode() error = %v", err)
+	}
+	node.BindDispatchSource(nil, nil)
+	if node.RemoteWorker == nil || node.RemoteWorker.Server() == nil {
+		t.Fatalf("remote worker = %#v", node.RemoteWorker)
+	}
+	if node.RemoteSandbox != nil {
+		t.Fatalf("remote sandbox = %#v, want nil", node.RemoteSandbox)
 	}
 }
 

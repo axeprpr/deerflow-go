@@ -9,9 +9,11 @@ import (
 )
 
 type RuntimeNodeLaunchSpec struct {
-	Role               RuntimeNodeRole
-	ServesRemoteWorker bool
-	RemoteWorkerAddr   string
+	Role                RuntimeNodeRole
+	ServesRemoteWorker  bool
+	RemoteWorkerAddr    string
+	ServesRemoteSandbox bool
+	RemoteSandboxAddr   string
 }
 
 type RuntimeNodeLauncher struct {
@@ -56,6 +58,10 @@ func (n *RuntimeNode) LaunchSpec() RuntimeNodeLaunchSpec {
 	if n.RemoteWorker != nil {
 		spec.ServesRemoteWorker = true
 		spec.RemoteWorkerAddr = n.RemoteWorker.Addr()
+	}
+	if n.RemoteSandbox != nil {
+		spec.ServesRemoteSandbox = true
+		spec.RemoteSandboxAddr = spec.RemoteWorkerAddr
 	}
 	return spec
 }
