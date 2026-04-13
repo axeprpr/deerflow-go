@@ -36,6 +36,9 @@ func TestBindFlagsBuildsNodeConfig(t *testing.T) {
 	if cfg.Preset != RuntimeNodePresetSharedSQLite {
 		t.Fatalf("Preset = %q", cfg.Preset)
 	}
+	if cfg.StateProvider != harnessruntime.RuntimeStateProviderModeSharedSQLite {
+		t.Fatalf("StateProvider = %q", cfg.StateProvider)
+	}
 	if cfg.Addr != ":9091" {
 		t.Fatalf("Addr = %q", cfg.Addr)
 	}

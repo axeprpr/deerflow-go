@@ -27,6 +27,9 @@ func TestDefaultRuntimeNodeConfigUsesQueuedLocalDefaults(t *testing.T) {
 	if config.State.SnapshotBackend != RuntimeStateStoreBackendInMemory || config.State.EventBackend != RuntimeStateStoreBackendInMemory || config.State.ThreadBackend != RuntimeStateStoreBackendInMemory {
 		t.Fatalf("state config = %+v", config.State)
 	}
+	if normalizeRuntimeStateProviderMode(config.State.Provider) != RuntimeStateProviderModeAuto {
+		t.Fatalf("state provider = %q", config.State.Provider)
+	}
 }
 
 func TestDefaultGatewayRuntimeNodeConfigUsesRemoteTransport(t *testing.T) {
@@ -203,6 +206,35 @@ func TestRuntimeNodeConfigBuildStatePlaneUsesSharedSQLitePlaneWhenURLsMatch(t *t
 	}
 	if _, ok := plane.Threads.(*sqlitePlaneThreadStateStore); !ok {
 		t.Fatalf("Threads = %T", plane.Threads)
+	}
+}
+
+func TestDefaultRuntimeStatePlaneProvidersForConfigHonorsIsolatedMode(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "runtime.sqlite3")
+	config := DefaultRuntimeNodeConfig("runtime-test", root)
+	config.State = RuntimeStateStoreConfig{
+		Provider:        RuntimeStateProviderModeIsolated,
+		Backend:         RuntimeStateStoreBackendSQLite,
+		SnapshotBackend: RuntimeStateStoreBackendSQLite,
+		EventBackend:    RuntimeStateStoreBackendSQLite,
+		ThreadBackend:   RuntimeStateStoreBackendSQLite,
+		Root:            root,
+		URL:             "sqlite://" + path,
+		SnapshotURL:     "sqlite://" + path,
+		EventURL:        "sqlite://" + path,
+		ThreadURL:       "sqlite://" + path,
+	}
+	plane := config.BuildStatePlaneWithProviders(DefaultRuntimeStatePlaneProvidersForConfig(config))
+	defer func() { _ = closeRuntimeStatePlane(plane) }()
+	if _, ok := plane.Snapshots.(*sqlitePlaneRunSnapshotStore); ok {
+		t.Fatalf("Snapshots = %T, want isolated sqlite snapshot store", plane.Snapshots)
+	}
+	if _, ok := plane.Events.(*sqlitePlaneRunEventStore); ok {
+		t.Fatalf("Events = %T, want isolated sqlite event store", plane.Events)
+	}
+	if _, ok := plane.Threads.(*sqlitePlaneThreadStateStore); ok {
+		t.Fatalf("Threads = %T, want isolated sqlite thread store", plane.Threads)
 	}
 }
 

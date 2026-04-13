@@ -36,11 +36,12 @@ func (f ThreadStateStoreFactoryFunc) Build(config RuntimeNodeConfig) ThreadState
 }
 
 type RuntimeStatePlaneProviders struct {
-	Backends  RuntimeStateBackendProviders
-	Plane     RuntimeStatePlaneFactory
-	Snapshots RunSnapshotStoreFactory
-	Events    RunEventStoreFactory
-	Threads   ThreadStateStoreFactory
+	Backends           RuntimeStateBackendProviders
+	Plane              RuntimeStatePlaneFactory
+	DisableSharedPlane bool
+	Snapshots          RunSnapshotStoreFactory
+	Events             RunEventStoreFactory
+	Threads            ThreadStateStoreFactory
 }
 
 func DefaultRuntimeStatePlaneProviders() RuntimeStatePlaneProviders {

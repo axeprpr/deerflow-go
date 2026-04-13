@@ -11,7 +11,7 @@ func (f RuntimeStatePlaneProvidersFactoryFunc) Build(config RuntimeNodeConfig) R
 }
 
 func DefaultRuntimeStatePlaneProvidersFactory() RuntimeStatePlaneProvidersFactory {
-	return RuntimeStatePlaneProvidersFactoryFunc(func(RuntimeNodeConfig) RuntimeStatePlaneProviders {
-		return DefaultRuntimeStatePlaneProviders()
+	return RuntimeStatePlaneProvidersFactoryFunc(func(config RuntimeNodeConfig) RuntimeStatePlaneProviders {
+		return DefaultRuntimeStatePlaneProvidersForConfig(config)
 	})
 }

@@ -33,6 +33,7 @@ const (
 
 type NodeConfig struct {
 	Preset           RuntimeNodePreset
+	StateProvider    harnessruntime.RuntimeStateProviderMode
 	Role             harnessruntime.RuntimeNodeRole
 	Addr             string
 	Name             string
@@ -61,6 +62,7 @@ func DefaultNodeConfig(defaults NodeDefaults) NodeConfig {
 	role := NormalizeRole(os.Getenv("RUNTIME_NODE_ROLE"), defaults.Role)
 	config := NodeConfig{
 		Preset:           NormalizePreset(firstNonEmpty(os.Getenv("RUNTIME_NODE_PRESET"), string(defaults.Preset)), defaults.Preset),
+		StateProvider:    NormalizeStateProvider(os.Getenv("RUNTIME_NODE_STATE_PROVIDER"), ""),
 		Role:             role,
 		Addr:             NormalizeAddr(firstNonEmpty(os.Getenv("RUNTIME_NODE_ADDR"), defaults.Addr), defaults.Addr),
 		Name:             firstNonEmpty(os.Getenv("RUNTIME_NODE_NAME"), defaults.Name),
@@ -151,6 +153,9 @@ func (c NodeConfig) RuntimeNodeConfig() harnessruntime.RuntimeNodeConfig {
 	if c.StateBackend != "" {
 		config.State.Backend = NormalizeStateBackend(string(c.StateBackend), config.State.Backend)
 	}
+	if c.StateProvider != "" {
+		config.State.Provider = NormalizeStateProvider(string(c.StateProvider), config.State.Provider)
+	}
 	if strings.TrimSpace(c.StateStoreURL) != "" {
 		config.State.URL = strings.TrimSpace(c.StateStoreURL)
 	}
@@ -180,6 +185,19 @@ func (c NodeConfig) RuntimeNodeConfig() harnessruntime.RuntimeNodeConfig {
 	return config
 }
 
+func NormalizeStateProvider(value string, fallback harnessruntime.RuntimeStateProviderMode) harnessruntime.RuntimeStateProviderMode {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(harnessruntime.RuntimeStateProviderModeIsolated):
+		return harnessruntime.RuntimeStateProviderModeIsolated
+	case string(harnessruntime.RuntimeStateProviderModeSharedSQLite):
+		return harnessruntime.RuntimeStateProviderModeSharedSQLite
+	case string(harnessruntime.RuntimeStateProviderModeAuto):
+		return harnessruntime.RuntimeStateProviderModeAuto
+	default:
+		return fallback
+	}
+}
+
 func (c NodeConfig) withRoleDefaults() NodeConfig {
 	if c.DataRoot == "" {
 		c.DataRoot = tools.DataRootFromEnv()
@@ -195,6 +213,14 @@ func (c NodeConfig) withRoleDefaults() NodeConfig {
 	default:
 		if c.Role == harnessruntime.RuntimeNodeRoleGateway || c.Role == harnessruntime.RuntimeNodeRoleWorker {
 			c = c.applySharedSQLiteDefaults()
+		}
+	}
+	if c.StateProvider == "" || c.StateProvider == harnessruntime.RuntimeStateProviderModeAuto {
+		switch c.effectivePreset() {
+		case RuntimeNodePresetSharedSQLite:
+			c.StateProvider = harnessruntime.RuntimeStateProviderModeSharedSQLite
+		default:
+			c.StateProvider = harnessruntime.RuntimeStateProviderModeAuto
 		}
 	}
 	return c.deriveStateBackendsFromStoreURLs()

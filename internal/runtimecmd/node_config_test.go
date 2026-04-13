@@ -163,6 +163,15 @@ func TestNormalizeStateBackendSupportsSQLite(t *testing.T) {
 	}
 }
 
+func TestNormalizeStateProviderSupportsKnownValues(t *testing.T) {
+	if got := NormalizeStateProvider("shared-sqlite", harnessruntime.RuntimeStateProviderModeAuto); got != harnessruntime.RuntimeStateProviderModeSharedSQLite {
+		t.Fatalf("NormalizeStateProvider() = %q", got)
+	}
+	if got := NormalizeStateProvider("isolated", harnessruntime.RuntimeStateProviderModeAuto); got != harnessruntime.RuntimeStateProviderModeIsolated {
+		t.Fatalf("NormalizeStateProvider() = %q", got)
+	}
+}
+
 func TestDeriveStateBackendFromStoreURL(t *testing.T) {
 	if got := deriveStateBackendFromStoreURL("sqlite:///tmp/runtime.sqlite3", harnessruntime.RuntimeStateStoreBackendInMemory); got != harnessruntime.RuntimeStateStoreBackendSQLite {
 		t.Fatalf("deriveStateBackendFromStoreURL(sqlite) = %q", got)
@@ -212,6 +221,9 @@ func TestSharedSQLitePresetPromotesAllInOneToSharedState(t *testing.T) {
 	}
 	if cfg.MemoryStoreURL == "" {
 		t.Fatal("MemoryStoreURL = empty")
+	}
+	if cfg.StateProvider != harnessruntime.RuntimeStateProviderModeSharedSQLite {
+		t.Fatalf("StateProvider = %q", cfg.StateProvider)
 	}
 }
 

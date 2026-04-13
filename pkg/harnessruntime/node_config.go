@@ -39,6 +39,7 @@ const (
 )
 
 type RuntimeStateStoreConfig struct {
+	Provider        RuntimeStateProviderMode
 	Backend         RuntimeStateStoreBackend
 	SnapshotBackend RuntimeStateStoreBackend
 	EventBackend    RuntimeStateStoreBackend
@@ -58,6 +59,14 @@ type RemoteWorkerServerConfig struct {
 type RuntimeMemoryConfig struct {
 	StoreURL string
 }
+
+type RuntimeStateProviderMode string
+
+const (
+	RuntimeStateProviderModeAuto         RuntimeStateProviderMode = "auto"
+	RuntimeStateProviderModeIsolated     RuntimeStateProviderMode = "isolated"
+	RuntimeStateProviderModeSharedSQLite RuntimeStateProviderMode = "shared-sqlite"
+)
 
 func DefaultRuntimeNodeConfig(name, root string) RuntimeNodeConfig {
 	workers := goruntime.GOMAXPROCS(0)

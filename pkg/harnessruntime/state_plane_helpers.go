@@ -25,7 +25,8 @@ func (p RuntimeStatePlaneProviders) buildPlane(config RuntimeNodeConfig) Runtime
 			return plane
 		}
 	}
-	if config.normalizedSnapshotBackend() == config.normalizedEventBackend() &&
+	if !p.DisableSharedPlane &&
+		config.normalizedSnapshotBackend() == config.normalizedEventBackend() &&
 		config.normalizedEventBackend() == config.normalizedThreadBackend() {
 		if plane, ok := p.Backends.Resolve(config.normalizedSnapshotBackend()).BuildPlane(config); ok {
 			return plane
