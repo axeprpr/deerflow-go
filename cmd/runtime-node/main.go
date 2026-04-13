@@ -92,29 +92,27 @@ func buildLauncher(ctx context.Context, cfg config) (*harnessruntime.RuntimeNode
 		return nil, err
 	}
 	provider := llm.NewProvider(cfg.Runtime.Provider)
-	role := cfg.Runtime.Role
 	clarify := clarification.NewManager(32)
 
-	switch role {
-	case harnessruntime.RuntimeNodeRoleAllInOne:
-		_, launcher, err := harnessruntime.BuildDefaultAllInOneRuntimeSystemLauncherWithMemory(ctx, cfg.Runtime.Name, cfg.Runtime.Root, cfg.Runtime.DataRoot, provider, clarify, cfg.Runtime.MaxTurns, nil, nil, nil)
-		if err != nil {
-			return nil, err
-		}
-		if launcher != nil && launcher.Node() != nil && launcher.Node().RemoteWorker != nil && launcher.Node().RemoteWorker.Server() != nil {
-			launcher.Node().RemoteWorker.Server().Addr = cfg.Runtime.Addr
-		}
-		return launcher, nil
-	case harnessruntime.RuntimeNodeRoleWorker:
-		_, launcher, err := harnessruntime.BuildDefaultWorkerRuntimeSystemLauncherWithMemory(ctx, cfg.Runtime.Name, cfg.Runtime.Root, cfg.Runtime.DataRoot, provider, clarify, cfg.Runtime.MaxTurns, nil, nil, nil)
-		if err != nil {
-			return nil, err
-		}
-		if launcher != nil && launcher.Node() != nil && launcher.Node().RemoteWorker != nil && launcher.Node().RemoteWorker.Server() != nil {
-			launcher.Node().RemoteWorker.Server().Addr = cfg.Runtime.Addr
-		}
-		return launcher, nil
-	default:
-		return nil, cfg.Runtime.ValidateForRuntimeNode()
+	_, launcher, err := harnessruntime.BuildDefaultRuntimeSystemLauncherForRoleWithMemory(
+		ctx,
+		cfg.Runtime.Role,
+		cfg.Runtime.Name,
+		cfg.Runtime.Root,
+		cfg.Runtime.Endpoint,
+		cfg.Runtime.DataRoot,
+		provider,
+		clarify,
+		cfg.Runtime.MaxTurns,
+		nil,
+		nil,
+		nil,
+	)
+	if err != nil {
+		return nil, err
 	}
+	if launcher != nil && launcher.Node() != nil && launcher.Node().RemoteWorker != nil && launcher.Node().RemoteWorker.Server() != nil {
+		launcher.Node().RemoteWorker.Server().Addr = cfg.Runtime.Addr
+	}
+	return launcher, nil
 }

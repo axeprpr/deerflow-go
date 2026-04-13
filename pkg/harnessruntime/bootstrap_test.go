@@ -172,6 +172,37 @@ func TestBuildDefaultWorkerRuntimeSystemLauncherWithMemoryUsesWorkerRole(t *test
 	}
 }
 
+func TestBuildDefaultRuntimeSystemLauncherForRoleWithMemoryUsesRequestedRole(t *testing.T) {
+	tests := []struct {
+		name      string
+		role      RuntimeNodeRole
+		endpoint  string
+		wantServe bool
+	}{
+		{name: "all-in-one", role: RuntimeNodeRoleAllInOne, wantServe: true},
+		{name: "gateway", role: RuntimeNodeRoleGateway, endpoint: "http://worker:8081/dispatch", wantServe: false},
+		{name: "worker", role: RuntimeNodeRoleWorker, wantServe: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bootstrap, launcher, err := BuildDefaultRuntimeSystemLauncherForRoleWithMemory(context.Background(), tc.role, "runtime-test", t.TempDir(), tc.endpoint, t.TempDir(), nil, clarification.NewManager(4), 100, nil, nil, nil)
+			if err != nil {
+				t.Fatalf("BuildDefaultRuntimeSystemLauncherForRoleWithMemory() error = %v", err)
+			}
+			if bootstrap.Node.Config.Role != tc.role {
+				t.Fatalf("role = %q, want %q", bootstrap.Node.Config.Role, tc.role)
+			}
+			if launcher.Spec().Role != tc.role {
+				t.Fatalf("launcher role = %q, want %q", launcher.Spec().Role, tc.role)
+			}
+			if got := launcher.Handler() != nil; got != tc.wantServe {
+				t.Fatalf("launcher serves remote worker = %v, want %v", got, tc.wantServe)
+			}
+		})
+	}
+}
+
 func TestRefreshHarnessRuntimePrefersCurrentOverrides(t *testing.T) {
 	config := DefaultRuntimeNodeConfig("runtime-test", t.TempDir())
 	bootstrap, err := BuildDefaultRuntimeBootstrapWithMemory(context.Background(), config, t.TempDir(), nil, clarification.NewManager(4))

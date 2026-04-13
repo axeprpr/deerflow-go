@@ -2,6 +2,7 @@ package harnessruntime
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
@@ -102,6 +103,19 @@ func BuildDefaultRuntimeSystemLauncherWithMemory(ctx context.Context, config Run
 		return nil, nil, err
 	}
 	return bootstrap, bootstrap.EnsureLauncher(source, specs), nil
+}
+
+func BuildDefaultRuntimeSystemLauncherForRoleWithMemory(ctx context.Context, role RuntimeNodeRole, name, root, endpoint, dataRoot string, provider llm.LLMProvider, clarify *clarification.Manager, maxTurns int, profileBuilder RuntimeProfileBuilderFactory, source func() *harness.Runtime, specs WorkerSpecRuntime) (*RuntimeBootstrap, *RuntimeNodeLauncher, error) {
+	switch role {
+	case RuntimeNodeRoleAllInOne:
+		return BuildDefaultAllInOneRuntimeSystemLauncherWithMemory(ctx, name, root, dataRoot, provider, clarify, maxTurns, profileBuilder, source, specs)
+	case RuntimeNodeRoleGateway:
+		return BuildDefaultGatewayRuntimeSystemLauncherWithMemory(ctx, name, root, endpoint, dataRoot, provider, clarify, maxTurns, profileBuilder, source, specs)
+	case RuntimeNodeRoleWorker:
+		return BuildDefaultWorkerRuntimeSystemLauncherWithMemory(ctx, name, root, dataRoot, provider, clarify, maxTurns, profileBuilder, source, specs)
+	default:
+		return nil, nil, fmt.Errorf("unsupported runtime node role %q", role)
+	}
 }
 
 func BuildDefaultAllInOneRuntimeSystemLauncherWithMemory(ctx context.Context, name, root, dataRoot string, provider llm.LLMProvider, clarify *clarification.Manager, maxTurns int, profileBuilder RuntimeProfileBuilderFactory, source func() *harness.Runtime, specs WorkerSpecRuntime) (*RuntimeBootstrap, *RuntimeNodeLauncher, error) {
