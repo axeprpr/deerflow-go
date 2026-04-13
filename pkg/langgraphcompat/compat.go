@@ -342,7 +342,7 @@ func (s *Server) bindRuntimeNodeDispatch() {
 		return
 	}
 	node.BindDispatchSource(s.runtimeView, s.runtimeWorkerSpecAdapter())
-	s.runDispatcher = node.Dispatcher
+	s.runDispatcher = node.RunDispatcher()
 }
 
 func (s *Server) ensureRuntimeSystem() *harnessruntime.RuntimeNode {
@@ -370,7 +370,7 @@ func (s *Server) ensureRuntimeSystem() *harnessruntime.RuntimeNode {
 	}
 	s.runtimeSystem = node
 	s.runtimeNode = node.Config
-	s.sandboxManager = node.Sandbox
+	s.sandboxManager = node.SandboxManager()
 	return node
 }
 
@@ -416,7 +416,7 @@ func (s *Server) defaultRunDispatcher() harnessruntime.RunDispatcher {
 	node := s.ensureRuntimeSystem()
 	if node != nil {
 		node.BindDispatchSource(s.runtimeView, s.runtimeWorkerSpecAdapter())
-		s.runDispatcher = node.Dispatcher
+		s.runDispatcher = node.RunDispatcher()
 		return s.runDispatcher
 	}
 	if s.runtimeNode.Transport.Backend == "" {

@@ -126,6 +126,20 @@ func (n *RuntimeNode) ThreadStateStore() ThreadStateStore {
 	return n.State.Threads
 }
 
+func (n *RuntimeNode) RunDispatcher() RunDispatcher {
+	if n == nil {
+		return nil
+	}
+	return n.Dispatcher
+}
+
+func (n *RuntimeNode) SandboxManager() *SandboxResourceManager {
+	if n == nil {
+		return nil
+	}
+	return n.Sandbox
+}
+
 func (n *RuntimeNode) SandboxRuntime(policy harness.SandboxPolicy) harness.SandboxRuntime {
 	if n == nil || n.Sandbox == nil {
 		return nil
