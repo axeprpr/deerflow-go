@@ -12,6 +12,9 @@ import (
 
 func TestDefaultRuntimeNodeConfigUsesQueuedLocalDefaults(t *testing.T) {
 	config := DefaultRuntimeNodeConfig("runtime-test", "/tmp/runtime-test")
+	if config.Role != RuntimeNodeRoleAllInOne {
+		t.Fatalf("role = %q, want %q", config.Role, RuntimeNodeRoleAllInOne)
+	}
 	if config.Sandbox.Backend != SandboxBackendLocalLinux {
 		t.Fatalf("sandbox backend = %q, want %q", config.Sandbox.Backend, SandboxBackendLocalLinux)
 	}
@@ -23,6 +26,32 @@ func TestDefaultRuntimeNodeConfigUsesQueuedLocalDefaults(t *testing.T) {
 	}
 	if config.State.SnapshotBackend != RuntimeStateStoreBackendInMemory || config.State.EventBackend != RuntimeStateStoreBackendInMemory || config.State.ThreadBackend != RuntimeStateStoreBackendInMemory {
 		t.Fatalf("state config = %+v", config.State)
+	}
+}
+
+func TestDefaultGatewayRuntimeNodeConfigUsesRemoteTransport(t *testing.T) {
+	config := DefaultGatewayRuntimeNodeConfig("runtime-test", "/tmp/runtime-test", "http://worker:8081/dispatch")
+	if config.Role != RuntimeNodeRoleGateway {
+		t.Fatalf("role = %q, want %q", config.Role, RuntimeNodeRoleGateway)
+	}
+	if config.Transport.Backend != WorkerTransportBackendRemote {
+		t.Fatalf("transport backend = %q, want %q", config.Transport.Backend, WorkerTransportBackendRemote)
+	}
+	if config.Transport.Endpoint != "http://worker:8081/dispatch" {
+		t.Fatalf("transport endpoint = %q", config.Transport.Endpoint)
+	}
+}
+
+func TestDefaultWorkerRuntimeNodeConfigUsesQueuedTransport(t *testing.T) {
+	config := DefaultWorkerRuntimeNodeConfig("runtime-test", "/tmp/runtime-test")
+	if config.Role != RuntimeNodeRoleWorker {
+		t.Fatalf("role = %q, want %q", config.Role, RuntimeNodeRoleWorker)
+	}
+	if config.Transport.Backend != WorkerTransportBackendQueue {
+		t.Fatalf("transport backend = %q, want %q", config.Transport.Backend, WorkerTransportBackendQueue)
+	}
+	if config.Transport.Endpoint != "" {
+		t.Fatalf("transport endpoint = %q, want empty", config.Transport.Endpoint)
 	}
 }
 

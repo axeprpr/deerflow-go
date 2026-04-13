@@ -14,11 +14,20 @@ import (
 // RuntimeNodeConfig describes the in-process runtime node shape. It keeps
 // deployment-facing execution choices outside compat protocol code.
 type RuntimeNodeConfig struct {
+	Role         RuntimeNodeRole
 	Sandbox      SandboxManagerConfig
 	Transport    WorkerTransportConfig
 	State        RuntimeStateStoreConfig
 	RemoteWorker RemoteWorkerServerConfig
 }
+
+type RuntimeNodeRole string
+
+const (
+	RuntimeNodeRoleAllInOne RuntimeNodeRole = "all-in-one"
+	RuntimeNodeRoleGateway  RuntimeNodeRole = "gateway"
+	RuntimeNodeRoleWorker   RuntimeNodeRole = "worker"
+)
 
 type RuntimeStateStoreBackend string
 
@@ -46,6 +55,7 @@ func DefaultRuntimeNodeConfig(name, root string) RuntimeNodeConfig {
 		workers = 1
 	}
 	return RuntimeNodeConfig{
+		Role: RuntimeNodeRoleAllInOne,
 		Sandbox: SandboxManagerConfig{
 			Backend: SandboxBackendLocalLinux,
 			Name:    name,
@@ -68,6 +78,22 @@ func DefaultRuntimeNodeConfig(name, root string) RuntimeNodeConfig {
 			ReadHeaderTimeout: 10 * time.Second,
 		},
 	}
+}
+
+func DefaultGatewayRuntimeNodeConfig(name, root, endpoint string) RuntimeNodeConfig {
+	config := DefaultRuntimeNodeConfig(name, root)
+	config.Role = RuntimeNodeRoleGateway
+	config.Transport.Backend = WorkerTransportBackendRemote
+	config.Transport.Endpoint = strings.TrimSpace(endpoint)
+	return config
+}
+
+func DefaultWorkerRuntimeNodeConfig(name, root string) RuntimeNodeConfig {
+	config := DefaultRuntimeNodeConfig(name, root)
+	config.Role = RuntimeNodeRoleWorker
+	config.Transport.Backend = WorkerTransportBackendQueue
+	config.Transport.Endpoint = ""
+	return config
 }
 
 func ResolveRuntimeNodeConfig(existing RuntimeNodeConfig, name, root string) RuntimeNodeConfig {
