@@ -16,7 +16,7 @@ func TestDefaultConfigUsesEnvironmentDefaults(t *testing.T) {
 	t.Setenv("RUNTIME_NODE_ENDPOINT", "http://worker:8081/dispatch")
 	t.Setenv("RUNTIME_NODE_MAX_TURNS", "77")
 
-	cfg := DefaultConfig(":8080")
+	cfg := DefaultConfig()
 	if cfg.AuthToken != "token" {
 		t.Fatalf("AuthToken = %q", cfg.AuthToken)
 	}
@@ -44,7 +44,7 @@ func TestDefaultConfigUsesEnvironmentDefaults(t *testing.T) {
 }
 
 func TestDefaultConfigFallsBackToBuiltins(t *testing.T) {
-	cfg := DefaultConfig(":8080")
+	cfg := DefaultConfig()
 	if cfg.Provider != "siliconflow" {
 		t.Fatalf("Provider = %q, want %q", cfg.Provider, "siliconflow")
 	}

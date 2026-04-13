@@ -9,7 +9,7 @@ import (
 
 func TestBindFlagsBuildsConfig(t *testing.T) {
 	fs := flag.NewFlagSet("langgraph", flag.ContinueOnError)
-	binding := BindFlags(fs, DefaultConfig(":8080"))
+	binding := BindFlags(fs, DefaultConfig())
 	if err := fs.Parse([]string{
 		"-addr=:9090",
 		"-db=postgres://db",

@@ -16,10 +16,10 @@ type Config struct {
 	Runtime     runtimecmd.NodeConfig
 }
 
-func DefaultConfig(defaultAddr string) Config {
+func DefaultConfig() Config {
 	return Config{
 		AuthToken:   strings.TrimSpace(firstNonEmptyEnv("DEERFLOW_AUTH_TOKEN")),
-		Addr:        normalizeAddr(firstNonEmptyEnv("ADDR", "PORT"), defaultAddr),
+		Addr:        defaultAddr(),
 		DatabaseURL: firstNonEmptyEnv("DATABASE_URL", "POSTGRES_URL"),
 		Provider:    firstNonEmptyEnvOrDefault("siliconflow", "DEFAULT_LLM_PROVIDER"),
 		Model:       firstNonEmptyEnvOrDefault("qwen/Qwen3.5-9B", "DEFAULT_LLM_MODEL"),
@@ -46,20 +46,6 @@ func (c Config) BuildServer() (*langgraphcompat.Server, error) {
 	return langgraphcompat.NewServer(c.Addr, c.DatabaseURL, c.Model, c.ServerOptions()...)
 }
 
-func normalizeAddr(value, fallback string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		value = strings.TrimSpace(fallback)
-	}
-	if value == "" {
-		value = ":8080"
-	}
-	if strings.HasPrefix(value, ":") {
-		return value
-	}
-	return ":" + value
-}
-
 func firstNonEmptyEnv(keys ...string) string {
 	for _, key := range keys {
 		if key == "" {
@@ -73,6 +59,13 @@ func firstNonEmptyEnv(keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func defaultAddr() string {
+	if addr := strings.TrimSpace(firstNonEmptyEnv("ADDR", "PORT")); addr != "" {
+		return addr
+	}
+	return ":8080"
 }
 
 func firstNonEmptyEnvOrDefault(fallback string, keys ...string) string {
