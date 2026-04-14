@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
+	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
@@ -692,6 +693,58 @@ func TestForwardTaskEventSyncsRunningOutcomeFromLiveTaskState(t *testing.T) {
 	}
 	if len(stored.Events) == 0 || len(stored.Events[len(stored.Events)-1].Outcome.TaskState.Items) != 1 || stored.Events[len(stored.Events)-1].Outcome.TaskState.Items[0].ID != "task-1" {
 		t.Fatalf("event outcome task_state=%+v", stored.Events)
+	}
+}
+
+func TestRunStreamEmitterClarificationSyncsRunningOutcomeFromLiveTaskState(t *testing.T) {
+	s := &Server{
+		sessions:    map[string]*Session{},
+		runs:        map[string]*Run{},
+		runRegistry: newRunRegistry(),
+	}
+	run := &Run{
+		RunID:       "run-clarify-live",
+		ThreadID:    "thread-clarify-live",
+		AssistantID: "lead_agent",
+		Status:      "running",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.saveRun(run)
+	taskState := harness.TaskState{
+		Items: []harness.TaskItem{
+			{ID: "task-1", Text: "inspect repo", Status: harness.TaskStatusInProgress},
+		},
+		ExpectedOutputs: []string{"/mnt/user-data/outputs/report.md"},
+	}
+	s.ensureThreadStateStore().SetThreadMetadata(run.ThreadID, harnessruntime.DefaultTaskStateMetadataKey, taskState.Value())
+	s.ensureThreadStateStore().SetThreadMetadata(run.ThreadID, harnessruntime.DefaultTaskLifecycleMetadataKey, harnessruntime.NewTaskLifecycleService().Describe(
+		harnessruntime.RunOutcome{RunStatus: "running"},
+		taskState,
+		false,
+	).Value())
+
+	emitter := s.newRunStreamEmitter(nil, nil, run, newStreamModeFilter([]any{"values"}))
+	emitter.Clarification(&clarification.Clarification{
+		ID:       "clarify-1",
+		ThreadID: run.ThreadID,
+		Type:     "text",
+		Question: "Need more detail?",
+		Required: true,
+	})
+
+	stored := s.getRun(run.RunID)
+	if stored == nil {
+		t.Fatal("stored run missing")
+	}
+	if len(stored.Events) == 0 || stored.Events[len(stored.Events)-1].Event != "clarification_request" {
+		t.Fatalf("events=%+v", stored.Events)
+	}
+	if len(stored.Events[len(stored.Events)-1].Outcome.TaskState.Items) != 1 || stored.Events[len(stored.Events)-1].Outcome.TaskState.Items[0].ID != "task-1" {
+		t.Fatalf("event outcome task_state=%+v", stored.Events[len(stored.Events)-1].Outcome.TaskState)
+	}
+	if len(stored.Outcome.TaskLifecycle.ExpectedArtifacts) != 1 || stored.Outcome.TaskLifecycle.ExpectedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("run outcome task_lifecycle=%+v", stored.Outcome.TaskLifecycle)
 	}
 }
 

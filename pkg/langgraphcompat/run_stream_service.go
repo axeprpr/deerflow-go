@@ -72,7 +72,9 @@ func (e runStreamEmitter) Clarification(item *clarification.Clarification) {
 	if item == nil {
 		return
 	}
+	e.server.refreshRunningRunFromThreadState(e.run)
 	e.server.recordAndSendEventFiltered(e.w, e.flusher, e.run, e.filter, "clarification_request", item)
+	e.server.syncRunningRunFromThreadState(e.run)
 }
 
 func (e runStreamEmitter) Task(evt subagent.TaskEvent) {
