@@ -4,8 +4,9 @@ import "testing"
 
 func TestDescribeSandboxProfileRemote(t *testing.T) {
 	profile := DescribeSandboxProfile(SandboxManagerConfig{
-		Backend:  SandboxBackendRemote,
-		Endpoint: "https://sandbox.internal",
+		Backend:         SandboxBackendRemote,
+		Endpoint:        "https://sandbox.internal",
+		MaxActiveLeases: 11,
 	})
 	if profile.Backend != SandboxBackendRemote {
 		t.Fatalf("backend = %q", profile.Backend)
@@ -18,6 +19,9 @@ func TestDescribeSandboxProfileRemote(t *testing.T) {
 	}
 	if profile.Limits.Endpoint != "https://sandbox.internal" {
 		t.Fatalf("endpoint = %q", profile.Limits.Endpoint)
+	}
+	if profile.Limits.MaxActiveLeases != 11 {
+		t.Fatalf("max active leases = %d", profile.Limits.MaxActiveLeases)
 	}
 }
 

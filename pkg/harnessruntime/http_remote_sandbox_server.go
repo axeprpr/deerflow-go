@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -115,6 +116,7 @@ func (s *HTTPRemoteSandboxServer) handleHealth(w http.ResponseWriter, r *http.Re
 		"heartbeat_interval_ms": s.config.HeartbeatInterval.Milliseconds(),
 		"idle_ttl_ms":           s.config.IdleTTL.Milliseconds(),
 		"sweep_interval_ms":     s.config.SweepInterval.Milliseconds(),
+		"max_active_leases":     s.config.MaxActiveLeases,
 		"paths": map[string]string{
 			"health": DefaultRemoteSandboxHealthPath,
 			"leases": DefaultRemoteSandboxLeasePath,
@@ -126,6 +128,15 @@ func (s *HTTPRemoteSandboxServer) handleLeases(w http.ResponseWriter, r *http.Re
 	if r.Method != http.MethodPost {
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 		return
+	}
+	if max := s.config.MaxActiveLeases; max > 0 {
+		s.mu.Lock()
+		active := len(s.sessions)
+		s.mu.Unlock()
+		if active >= max {
+			http.Error(w, fmt.Sprintf("max active leases reached (%d)", max), http.StatusTooManyRequests)
+			return
+		}
 	}
 	leaseID, session, err := s.createLease()
 	if err != nil {
@@ -250,6 +261,11 @@ func (s *HTTPRemoteSandboxServer) createLease() (string, sandbox.Session, error)
 	}
 	now := time.Now().UTC()
 	s.mu.Lock()
+	if max := s.config.MaxActiveLeases; max > 0 && len(s.sessions) >= max {
+		s.mu.Unlock()
+		_ = session.Close()
+		return "", nil, fmt.Errorf("max active leases reached (%d)", max)
+	}
 	s.sessions[leaseID] = &remoteSandboxServerLease{
 		session:     session,
 		createdAt:   now,

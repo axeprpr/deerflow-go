@@ -35,6 +35,9 @@ func (c NodeConfig) CLIArgs(prefix string) []string {
 	if c.SandboxImage != "" {
 		args = append(args, fmt.Sprintf("-%ssandbox-image=%s", prefix, c.SandboxImage))
 	}
+	if c.SandboxMaxActiveLeases > 0 {
+		args = append(args, fmt.Sprintf("-%ssandbox-max-active-leases=%d", prefix, c.SandboxMaxActiveLeases))
+	}
 	return compactArgs(args)
 }
 

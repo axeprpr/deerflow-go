@@ -19,6 +19,7 @@ func TestDefaultLangGraphNodeConfigUsesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("RUNTIME_NODE_TRANSPORT_BACKEND", "remote")
 	t.Setenv("RUNTIME_NODE_SANDBOX_BACKEND", "remote")
 	t.Setenv("RUNTIME_NODE_SANDBOX_ENDPOINT", "http://sandbox:8082")
+	t.Setenv("RUNTIME_NODE_SANDBOX_MAX_ACTIVE_LEASES", "7")
 	t.Setenv("RUNTIME_NODE_MEMORY_STORE", "sqlite:///tmp/memory.sqlite3")
 	t.Setenv("RUNTIME_NODE_STATE_STORE", "sqlite:///tmp/runtime.sqlite3")
 	t.Setenv("RUNTIME_NODE_SNAPSHOT_STORE", "sqlite:///tmp/snapshots.sqlite3")
@@ -60,6 +61,9 @@ func TestDefaultLangGraphNodeConfigUsesEnvironmentOverrides(t *testing.T) {
 	}
 	if cfg.SandboxEndpoint != "http://sandbox:8082" {
 		t.Fatalf("SandboxEndpoint = %q", cfg.SandboxEndpoint)
+	}
+	if cfg.SandboxMaxActiveLeases != 7 {
+		t.Fatalf("SandboxMaxActiveLeases = %d", cfg.SandboxMaxActiveLeases)
 	}
 	if cfg.MemoryStoreURL != "sqlite:///tmp/memory.sqlite3" {
 		t.Fatalf("MemoryStoreURL = %q", cfg.MemoryStoreURL)
@@ -223,6 +227,18 @@ func TestNormalizePresetSupportsKnownValues(t *testing.T) {
 	}
 	if got := NormalizePreset("fast-local", RuntimeNodePresetAuto); got != RuntimeNodePresetFastLocal {
 		t.Fatalf("NormalizePreset() = %q", got)
+	}
+}
+
+func TestNodeConfigRuntimeNodeConfigCarriesSandboxLeaseLimit(t *testing.T) {
+	cfg := NodeConfig{
+		Role:                   harnessruntime.RuntimeNodeRoleWorker,
+		SandboxBackend:         harnessruntime.SandboxBackendLocalLinux,
+		SandboxMaxActiveLeases: 5,
+	}.withRoleDefaults()
+	node := cfg.RuntimeNodeConfig()
+	if node.Sandbox.MaxActiveLeases != 5 {
+		t.Fatalf("node sandbox max active leases = %d", node.Sandbox.MaxActiveLeases)
 	}
 }
 

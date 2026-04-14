@@ -18,6 +18,7 @@ func TestBindFlagsBuildsNodeConfig(t *testing.T) {
 		"-transport-backend=direct",
 		"-sandbox-backend=container",
 		"-sandbox-image=debian:bookworm",
+		"-sandbox-max-active-leases=12",
 		"-memory-store=sqlite:///tmp/memory.sqlite3",
 		"-state-store=sqlite:///tmp/runtime.sqlite3",
 		"-snapshot-store=sqlite:///tmp/snapshots.sqlite3",
@@ -50,6 +51,9 @@ func TestBindFlagsBuildsNodeConfig(t *testing.T) {
 	}
 	if cfg.SandboxImage != "debian:bookworm" {
 		t.Fatalf("SandboxImage = %q", cfg.SandboxImage)
+	}
+	if cfg.SandboxMaxActiveLeases != 12 {
+		t.Fatalf("SandboxMaxActiveLeases = %d", cfg.SandboxMaxActiveLeases)
 	}
 	if cfg.MemoryStoreURL != "sqlite:///tmp/memory.sqlite3" {
 		t.Fatalf("MemoryStoreURL = %q", cfg.MemoryStoreURL)

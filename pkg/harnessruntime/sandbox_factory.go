@@ -19,6 +19,7 @@ type SandboxManagerConfig struct {
 	Root              string
 	Endpoint          string
 	Image             string
+	MaxActiveLeases   int
 	Policy            harness.SandboxPolicy
 	HeartbeatInterval time.Duration
 	IdleTTL           time.Duration
@@ -34,6 +35,9 @@ func (c SandboxManagerConfig) Normalized() SandboxManagerConfig {
 	c.Root = strings.TrimSpace(c.Root)
 	c.Endpoint = strings.TrimSpace(c.Endpoint)
 	c.Image = strings.TrimSpace(c.Image)
+	if c.MaxActiveLeases < 0 {
+		c.MaxActiveLeases = 0
+	}
 	return c
 }
 

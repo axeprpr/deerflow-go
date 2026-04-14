@@ -36,59 +36,61 @@ const (
 )
 
 type NodeConfig struct {
-	Preset           RuntimeNodePreset
-	StateProvider    harnessruntime.RuntimeStateProviderMode
-	Role             harnessruntime.RuntimeNodeRole
-	Addr             string
-	Name             string
-	Root             string
-	DataRoot         string
-	Provider         string
-	Endpoint         string
-	MaxTurns         int
-	TransportBackend harnessruntime.WorkerTransportBackend
-	SandboxBackend   harnessruntime.SandboxBackend
-	SandboxEndpoint  string
-	SandboxImage     string
-	MemoryStoreURL   string
-	StateRoot        string
-	StateBackend     harnessruntime.RuntimeStateStoreBackend
-	StateStoreURL    string
-	SnapshotBackend  harnessruntime.RuntimeStateStoreBackend
-	EventBackend     harnessruntime.RuntimeStateStoreBackend
-	ThreadBackend    harnessruntime.RuntimeStateStoreBackend
-	SnapshotStoreURL string
-	EventStoreURL    string
-	ThreadStoreURL   string
+	Preset                 RuntimeNodePreset
+	StateProvider          harnessruntime.RuntimeStateProviderMode
+	Role                   harnessruntime.RuntimeNodeRole
+	Addr                   string
+	Name                   string
+	Root                   string
+	DataRoot               string
+	Provider               string
+	Endpoint               string
+	MaxTurns               int
+	TransportBackend       harnessruntime.WorkerTransportBackend
+	SandboxBackend         harnessruntime.SandboxBackend
+	SandboxEndpoint        string
+	SandboxImage           string
+	SandboxMaxActiveLeases int
+	MemoryStoreURL         string
+	StateRoot              string
+	StateBackend           harnessruntime.RuntimeStateStoreBackend
+	StateStoreURL          string
+	SnapshotBackend        harnessruntime.RuntimeStateStoreBackend
+	EventBackend           harnessruntime.RuntimeStateStoreBackend
+	ThreadBackend          harnessruntime.RuntimeStateStoreBackend
+	SnapshotStoreURL       string
+	EventStoreURL          string
+	ThreadStoreURL         string
 }
 
 func DefaultNodeConfig(defaults NodeDefaults) NodeConfig {
 	role := NormalizeRole(os.Getenv("RUNTIME_NODE_ROLE"), defaults.Role)
 	config := NodeConfig{
-		Preset:           NormalizePreset(firstNonEmpty(os.Getenv("RUNTIME_NODE_PRESET"), string(defaults.Preset)), defaults.Preset),
-		StateProvider:    NormalizeStateProvider(os.Getenv("RUNTIME_NODE_STATE_PROVIDER"), ""),
-		Role:             role,
-		Addr:             NormalizeAddr(firstNonEmpty(os.Getenv("RUNTIME_NODE_ADDR"), defaults.Addr), defaults.Addr),
-		Name:             firstNonEmpty(os.Getenv("RUNTIME_NODE_NAME"), defaults.Name),
-		Root:             firstNonEmpty(os.Getenv("RUNTIME_NODE_ROOT"), defaults.Root),
-		DataRoot:         firstNonEmpty(os.Getenv("DEERFLOW_DATA_ROOT"), tools.DataRootFromEnv()),
-		Provider:         firstNonEmpty(os.Getenv("DEFAULT_LLM_PROVIDER"), "siliconflow"),
-		Endpoint:         strings.TrimSpace(firstNonEmpty(os.Getenv("RUNTIME_NODE_ENDPOINT"), defaults.Endpoint)),
-		MaxTurns:         intFromEnv("RUNTIME_NODE_MAX_TURNS", defaults.MaxTurns),
-		TransportBackend: NormalizeTransportBackend(firstNonEmpty(os.Getenv("RUNTIME_NODE_TRANSPORT_BACKEND"), string(defaults.TransportBackend)), defaults.TransportBackend),
-		SandboxBackend:   NormalizeSandboxBackend(firstNonEmpty(os.Getenv("RUNTIME_NODE_SANDBOX_BACKEND"), string(defaults.SandboxBackend)), defaults.SandboxBackend),
-		SandboxEndpoint:  strings.TrimSpace(os.Getenv("RUNTIME_NODE_SANDBOX_ENDPOINT")),
-		SandboxImage:     strings.TrimSpace(os.Getenv("RUNTIME_NODE_SANDBOX_IMAGE")),
-		MemoryStoreURL:   strings.TrimSpace(os.Getenv("RUNTIME_NODE_MEMORY_STORE")),
-		StateRoot:        strings.TrimSpace(os.Getenv("RUNTIME_NODE_STATE_ROOT")),
-		StateBackend:     NormalizeStateBackend(firstNonEmpty(os.Getenv("RUNTIME_NODE_STATE_BACKEND"), string(defaults.StateBackend)), defaults.StateBackend),
-		StateStoreURL:    strings.TrimSpace(os.Getenv("RUNTIME_NODE_STATE_STORE")),
-		SnapshotBackend:  NormalizeStateBackend(os.Getenv("RUNTIME_NODE_SNAPSHOT_BACKEND"), ""),
-		EventBackend:     NormalizeStateBackend(os.Getenv("RUNTIME_NODE_EVENT_BACKEND"), ""),
-		ThreadBackend:    NormalizeStateBackend(os.Getenv("RUNTIME_NODE_THREAD_BACKEND"), ""),
-		SnapshotStoreURL: strings.TrimSpace(os.Getenv("RUNTIME_NODE_SNAPSHOT_STORE")),
-		EventStoreURL:    strings.TrimSpace(os.Getenv("RUNTIME_NODE_EVENT_STORE")),
-		ThreadStoreURL:   strings.TrimSpace(os.Getenv("RUNTIME_NODE_THREAD_STORE")),
+		Preset:                 NormalizePreset(firstNonEmpty(os.Getenv("RUNTIME_NODE_PRESET"), string(defaults.Preset)), defaults.Preset),
+		StateProvider:          NormalizeStateProvider(os.Getenv("RUNTIME_NODE_STATE_PROVIDER"), ""),
+		Role:                   role,
+		Addr:                   NormalizeAddr(firstNonEmpty(os.Getenv("RUNTIME_NODE_ADDR"), defaults.Addr), defaults.Addr),
+		Name:                   firstNonEmpty(os.Getenv("RUNTIME_NODE_NAME"), defaults.Name),
+		Root:                   firstNonEmpty(os.Getenv("RUNTIME_NODE_ROOT"), defaults.Root),
+		DataRoot:               firstNonEmpty(os.Getenv("DEERFLOW_DATA_ROOT"), tools.DataRootFromEnv()),
+		Provider:               firstNonEmpty(os.Getenv("DEFAULT_LLM_PROVIDER"), "siliconflow"),
+		Endpoint:               strings.TrimSpace(firstNonEmpty(os.Getenv("RUNTIME_NODE_ENDPOINT"), defaults.Endpoint)),
+		MaxTurns:               intFromEnv("RUNTIME_NODE_MAX_TURNS", defaults.MaxTurns),
+		TransportBackend:       NormalizeTransportBackend(firstNonEmpty(os.Getenv("RUNTIME_NODE_TRANSPORT_BACKEND"), string(defaults.TransportBackend)), defaults.TransportBackend),
+		SandboxBackend:         NormalizeSandboxBackend(firstNonEmpty(os.Getenv("RUNTIME_NODE_SANDBOX_BACKEND"), string(defaults.SandboxBackend)), defaults.SandboxBackend),
+		SandboxEndpoint:        strings.TrimSpace(os.Getenv("RUNTIME_NODE_SANDBOX_ENDPOINT")),
+		SandboxImage:           strings.TrimSpace(os.Getenv("RUNTIME_NODE_SANDBOX_IMAGE")),
+		SandboxMaxActiveLeases: intFromEnv("RUNTIME_NODE_SANDBOX_MAX_ACTIVE_LEASES", 0),
+		MemoryStoreURL:         strings.TrimSpace(os.Getenv("RUNTIME_NODE_MEMORY_STORE")),
+		StateRoot:              strings.TrimSpace(os.Getenv("RUNTIME_NODE_STATE_ROOT")),
+		StateBackend:           NormalizeStateBackend(firstNonEmpty(os.Getenv("RUNTIME_NODE_STATE_BACKEND"), string(defaults.StateBackend)), defaults.StateBackend),
+		StateStoreURL:          strings.TrimSpace(os.Getenv("RUNTIME_NODE_STATE_STORE")),
+		SnapshotBackend:        NormalizeStateBackend(os.Getenv("RUNTIME_NODE_SNAPSHOT_BACKEND"), ""),
+		EventBackend:           NormalizeStateBackend(os.Getenv("RUNTIME_NODE_EVENT_BACKEND"), ""),
+		ThreadBackend:          NormalizeStateBackend(os.Getenv("RUNTIME_NODE_THREAD_BACKEND"), ""),
+		SnapshotStoreURL:       strings.TrimSpace(os.Getenv("RUNTIME_NODE_SNAPSHOT_STORE")),
+		EventStoreURL:          strings.TrimSpace(os.Getenv("RUNTIME_NODE_EVENT_STORE")),
+		ThreadStoreURL:         strings.TrimSpace(os.Getenv("RUNTIME_NODE_THREAD_STORE")),
 	}
 	return config.withRoleDefaults()
 }
@@ -128,6 +130,9 @@ func (c NodeConfig) RuntimeNodeConfig() harnessruntime.RuntimeNodeConfig {
 	}
 	if strings.TrimSpace(c.SandboxImage) != "" {
 		config.Sandbox.Image = strings.TrimSpace(c.SandboxImage)
+	}
+	if c.SandboxMaxActiveLeases > 0 {
+		config.Sandbox.MaxActiveLeases = c.SandboxMaxActiveLeases
 	}
 	if strings.TrimSpace(c.MemoryStoreURL) != "" {
 		config.Memory.StoreURL = strings.TrimSpace(c.MemoryStoreURL)

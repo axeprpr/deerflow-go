@@ -14,6 +14,7 @@ type SandboxProfileLimits struct {
 	HeartbeatIntervalMilli int64  `json:"heartbeat_interval_ms,omitempty"`
 	IdleTTLMilli           int64  `json:"idle_ttl_ms,omitempty"`
 	SweepIntervalMilli     int64  `json:"sweep_interval_ms,omitempty"`
+	MaxActiveLeases        int    `json:"max_active_leases,omitempty"`
 	Endpoint               string `json:"endpoint,omitempty"`
 	Image                  string `json:"image,omitempty"`
 }
@@ -37,6 +38,7 @@ func DescribeSandboxProfile(config SandboxManagerConfig) SandboxProfile {
 			HeartbeatIntervalMilli: normalized.HeartbeatInterval.Milliseconds(),
 			IdleTTLMilli:           normalized.IdleTTL.Milliseconds(),
 			SweepIntervalMilli:     normalized.SweepInterval.Milliseconds(),
+			MaxActiveLeases:        normalized.MaxActiveLeases,
 			Endpoint:               strings.TrimSpace(normalized.Endpoint),
 			Image:                  strings.TrimSpace(normalized.Image),
 		},

@@ -80,3 +80,43 @@ func TestRecoveryPlannerCarriesLiveTaskStateIntoResumedOutcome(t *testing.T) {
 		t.Fatalf("TaskLifecycle = %+v", record.Outcome.TaskLifecycle)
 	}
 }
+
+func TestRecoveryPlannerKeepsAttemptForIdempotentRecoveryContext(t *testing.T) {
+	planner := NewRecoveryPlanner()
+	record := planner.NextRecord(RunRecord{
+		RunID:           "run-1",
+		ThreadID:        "thread-1",
+		AssistantID:     "lead_agent",
+		Attempt:         4,
+		Status:          "running",
+		ResumeFromEvent: 9,
+		ResumeReason:    "resume-after-crash",
+	}, 9, "resume-after-crash")
+
+	if record.Attempt != 4 {
+		t.Fatalf("Attempt = %d, want 4 (idempotent)", record.Attempt)
+	}
+	if record.ResumeFromEvent != 9 || record.ResumeReason != "resume-after-crash" {
+		t.Fatalf("resume = %+v", record)
+	}
+}
+
+func TestRecoveryPlannerAdvancesAttemptWhenRecoveryContextChanges(t *testing.T) {
+	planner := NewRecoveryPlanner()
+	record := planner.NextRecord(RunRecord{
+		RunID:           "run-1",
+		ThreadID:        "thread-1",
+		AssistantID:     "lead_agent",
+		Attempt:         4,
+		Status:          "running",
+		ResumeFromEvent: 9,
+		ResumeReason:    "resume-after-crash",
+	}, 11, "replay")
+
+	if record.Attempt != 5 {
+		t.Fatalf("Attempt = %d, want 5", record.Attempt)
+	}
+	if record.ResumeFromEvent != 11 || record.ResumeReason != "replay" {
+		t.Fatalf("resume = %+v", record)
+	}
+}
