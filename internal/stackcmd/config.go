@@ -31,15 +31,7 @@ const (
 )
 
 func DefaultConfig() Config {
-	gateway, worker, state, sb := defaultSplitComponents()
-
-	return Config{
-		Preset:  StackPresetSharedSQLite,
-		Gateway: gateway,
-		Worker:  worker,
-		State:   state,
-		Sandbox: sb,
-	}
+	return BuildPresetConfig(StackPresetSharedSQLite)
 }
 
 func (c Config) Validate() error {
@@ -78,28 +70,7 @@ func (c Config) withDefaults() Config {
 }
 
 func (c Config) applyPresetDefaults() Config {
-	switch c.effectivePreset() {
-	case StackPresetSharedRemote:
-		c.Gateway.Runtime.Preset = runtimecmd.RuntimeNodePresetSharedRemote
-		c.Worker.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
-		c.State.Runtime.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
-		c.Sandbox.Runtime.Preset = runtimecmd.RuntimeNodePresetFastLocal
-	case StackPresetSharedSQLite:
-		c.Gateway.Runtime.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
-		c.Worker.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
-	default:
-		if c.Gateway.Runtime.Preset == "" {
-			c.Gateway.Runtime.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
-		}
-		if c.Worker.Preset == "" {
-			c.Worker.Preset = runtimecmd.RuntimeNodePresetSharedSQLite
-		}
-	}
-	c.Gateway.Runtime = runtimecmd.ApplyNodePresetDefaults(c.Gateway.Runtime)
-	c.Worker = runtimecmd.ApplyNodePresetDefaults(c.Worker)
-	c.State.Runtime = runtimecmd.ApplyNodePresetDefaults(c.State.Runtime)
-	c.Sandbox.Runtime = runtimecmd.ApplyNodePresetDefaults(c.Sandbox.Runtime)
-	return c
+	return c.PresetSpec().Apply(c)
 }
 
 func (c Config) effectivePreset() StackPreset {
