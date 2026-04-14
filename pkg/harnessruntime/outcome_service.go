@@ -106,6 +106,8 @@ func (s OutcomeService) DescribeLiveRunning(record RunRecord, store ThreadStateS
 	}
 	if lifecycle, ok := LoadLiveTaskLifecycle(store, record.ThreadID); ok {
 		outcome.TaskLifecycle = lifecycle
+		outcome.PendingTasks = append([]string(nil), lifecycle.PendingTasks...)
+		outcome.ExpectedArtifacts = append([]string(nil), lifecycle.ExpectedArtifacts...)
 	}
 	return outcome
 }

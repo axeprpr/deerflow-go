@@ -38,6 +38,36 @@ func TestOutcomeServiceDescribeLiveRunningUsesThreadState(t *testing.T) {
 	if len(outcome.TaskLifecycle.ExpectedArtifacts) != 1 || outcome.TaskLifecycle.ExpectedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
 		t.Fatalf("TaskLifecycle = %+v", outcome.TaskLifecycle)
 	}
+	if len(outcome.ExpectedArtifacts) != 1 || outcome.ExpectedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("ExpectedArtifacts = %#v", outcome.ExpectedArtifacts)
+	}
+}
+
+func TestOutcomeServiceDescribeLiveRunningUsesLifecycleFallback(t *testing.T) {
+	store := NewInMemoryThreadStateStore()
+	store.SetThreadMetadata("thread-2", DefaultTaskLifecycleMetadataKey, TaskLifecycleDescriptor{
+		Status:            "running",
+		PendingTasks:      []string{"draft summary"},
+		ExpectedArtifacts: []string{"/mnt/user-data/outputs/summary.md"},
+	}.Value())
+
+	outcome := NewOutcomeService().DescribeLiveRunning(RunRecord{
+		ThreadID: "thread-2",
+		Attempt:  1,
+	}, store)
+
+	if outcome.TaskState.IsZero() != true {
+		t.Fatalf("TaskState = %+v, want zero", outcome.TaskState)
+	}
+	if len(outcome.PendingTasks) != 1 || outcome.PendingTasks[0] != "draft summary" {
+		t.Fatalf("PendingTasks = %#v", outcome.PendingTasks)
+	}
+	if len(outcome.ExpectedArtifacts) != 1 || outcome.ExpectedArtifacts[0] != "/mnt/user-data/outputs/summary.md" {
+		t.Fatalf("ExpectedArtifacts = %#v", outcome.ExpectedArtifacts)
+	}
+	if outcome.TaskLifecycle.Status != "running" {
+		t.Fatalf("TaskLifecycle = %+v", outcome.TaskLifecycle)
+	}
 }
 
 func TestOutcomeServiceDescribeWithTaskStateBuildsLifecycle(t *testing.T) {
