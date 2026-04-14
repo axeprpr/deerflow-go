@@ -127,6 +127,12 @@ func (a runtimeConversationAdapter) LoadTaskState(threadID string) harness.TaskS
 		return harness.TaskState{}
 	}
 	session := a.server.ensureSession(threadID, nil)
+	base := harness.TaskState{}
+	if state, ok := harness.ParseTaskState(session.Metadata[harnessruntime.DefaultTaskStateMetadataKey]); ok {
+		base = state
+	} else if state, ok := taskStateFromTodosRaw(session.Metadata["todos"]); ok {
+		base = state
+	}
 	if len(session.Todos) > 0 {
 		items := make([]harness.TaskItem, 0, len(session.Todos))
 		for _, todo := range session.Todos {
@@ -137,16 +143,16 @@ func (a runtimeConversationAdapter) LoadTaskState(threadID string) harness.TaskS
 		}
 		state, err := harness.NormalizeTaskState(harness.TaskState{Items: items})
 		if err == nil {
+			if base.IsZero() {
+				return state
+			}
+			if merged, err := harness.MergeTaskStates(base, state); err == nil {
+				return merged
+			}
 			return state
 		}
 	}
-	if state, ok := harness.ParseTaskState(session.Metadata[harnessruntime.DefaultTaskStateMetadataKey]); ok {
-		return state
-	}
-	if state, ok := taskStateFromTodosRaw(session.Metadata["todos"]); ok {
-		return state
-	}
-	return harness.TaskState{}
+	return base
 }
 
 func (a runtimeConversationAdapter) DeriveTaskState(threadID string, result *agent.RunResult) harness.TaskState {

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
+	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/tools"
@@ -21,6 +22,33 @@ func TestRuntimeConversationAdapterSummaryAccessors(t *testing.T) {
 	adapter.PersistHistorySummary("thread-1", "summary-1")
 	if got := adapter.HistorySummary("thread-1"); got != "summary-1" {
 		t.Fatalf("HistorySummary() = %q, want %q", got, "summary-1")
+	}
+}
+
+func TestRuntimeConversationAdapterLoadTaskStatePreservesExpectedOutputs(t *testing.T) {
+	server := &Server{
+		sessions: map[string]*Session{},
+		runs:     map[string]*Run{},
+	}
+	session := server.ensureSession("thread-1", nil)
+	session.Todos = []Todo{
+		{Content: "draft report", Status: "completed"},
+		{Content: "present report", Status: "in_progress"},
+	}
+	session.Metadata[harnessruntime.DefaultTaskStateMetadataKey] = harness.TaskState{
+		Items: []harness.TaskItem{
+			{Text: "draft report", Status: harness.TaskStatusCompleted},
+			{Text: "present report", Status: harness.TaskStatusInProgress},
+		},
+		ExpectedOutputs: []string{"/mnt/user-data/outputs/report.md"},
+	}.Value()
+
+	state := server.runtimeConversationAdapter().LoadTaskState("thread-1")
+	if got := len(state.ExpectedOutputs); got != 1 {
+		t.Fatalf("ExpectedOutputs=%v want len=1", state.ExpectedOutputs)
+	}
+	if state.ExpectedOutputs[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("ExpectedOutputs=%v", state.ExpectedOutputs)
 	}
 }
 
