@@ -503,8 +503,10 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 }
 
 func (s *Server) registerLangGraphRoutes(mux *http.ServeMux, prefix string) {
+	mux.HandleFunc("POST "+prefix+"/runs", s.handleRunsCreate)
 	mux.HandleFunc("POST "+prefix+"/runs/stream", s.handleRunsStream)
 	mux.HandleFunc("GET "+prefix+"/runs/{run_id}", s.handleRunGet)
+	mux.HandleFunc("POST "+prefix+"/runs/{run_id}/cancel", s.handleRunCancel)
 	mux.HandleFunc("GET "+prefix+"/runs/{run_id}/stream", s.handleRunStream)
 
 	mux.HandleFunc("GET "+prefix+"/threads", s.handleThreadSearch)

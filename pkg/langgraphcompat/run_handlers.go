@@ -19,6 +19,10 @@ func (s *Server) handleRunsStream(w http.ResponseWriter, r *http.Request) {
 	s.handleStreamRequest(w, r, "")
 }
 
+func (s *Server) handleRunsCreate(w http.ResponseWriter, r *http.Request) {
+	s.handleRunsCreateWithRouteThread(w, r, "")
+}
+
 func (s *Server) handleThreadRunsStream(w http.ResponseWriter, r *http.Request) {
 	s.handleStreamRequest(w, r, r.PathValue("thread_id"))
 }
@@ -29,7 +33,10 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 		writeDetailError(w, http.StatusBadRequest, "thread ID required")
 		return
 	}
+	s.handleRunsCreateWithRouteThread(w, r, threadID)
+}
 
+func (s *Server) handleRunsCreateWithRouteThread(w http.ResponseWriter, r *http.Request, routeThreadID string) {
 	var req RunCreateRequest
 	if r.Body != nil {
 		defer r.Body.Close()
@@ -38,11 +45,11 @@ func (s *Server) handleThreadRunsCreate(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	if err := validateStrictLangGraphRunRequest(r, threadID, req); err != nil {
+	if err := validateStrictLangGraphRunRequest(r, routeThreadID, req); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": err.Error()})
 		return
 	}
-	prepared := s.prepareRunRequest(threadID, req)
+	prepared := s.prepareRunRequest(routeThreadID, req)
 	preparedExecution, err := s.buildRunExecution(r.Context(), prepared, req)
 	if err != nil {
 		s.markRunError(prepared.Run, prepared.ThreadID, err)
@@ -195,6 +202,19 @@ func (s *Server) handleRunGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, runResponse(run))
+}
+
+func (s *Server) handleRunCancel(w http.ResponseWriter, r *http.Request) {
+	resp, found, canceled := s.cancelThreadRun("", r.PathValue("run_id"))
+	if !found {
+		writeDetailError(w, http.StatusNotFound, "run not found")
+		return
+	}
+	if !canceled {
+		writeDetailError(w, http.StatusConflict, "run is not cancellable")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, resp)
 }
 
 func (s *Server) handleThreadScopedRunGet(w http.ResponseWriter, r *http.Request) {

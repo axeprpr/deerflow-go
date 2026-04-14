@@ -1021,3 +1021,20 @@ func TestCoordinationServiceWaitAndCancel(t *testing.T) {
 		t.Fatalf("cancel result = %#v found=%v canceled=%v runtime=%+v", resp, found, canceled, runtime)
 	}
 }
+
+func TestCoordinationServiceCancelUsesRecordThreadIDForGlobalRunRoute(t *testing.T) {
+	t.Parallel()
+
+	runtime := &fakeCoordinationRuntime{
+		record: RunRecord{RunID: "run-1", ThreadID: "thread-1", Status: "running"},
+		found:  true,
+	}
+	service := NewCoordinationService(runtime)
+	resp, found, canceled := service.Cancel("", "run-1")
+	if !found || !canceled {
+		t.Fatalf("cancel found=%v canceled=%v resp=%#v", found, canceled, resp)
+	}
+	if got := resp["thread_id"]; got != "thread-1" {
+		t.Fatalf("thread_id=%v want=thread-1", got)
+	}
+}

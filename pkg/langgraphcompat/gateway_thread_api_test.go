@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 )
 
 func TestGatewayThreadsListReturnsGatewayThreadEnvelopes(t *testing.T) {
@@ -514,6 +515,61 @@ func TestGatewayThreadRunCancelConflictUsesJSONDetail(t *testing.T) {
 	}
 	if payload["detail"] != "run is not cancellable" {
 		t.Fatalf("detail=%#v", payload["detail"])
+	}
+}
+
+func TestGatewayGlobalRunCreateRouteUsesLangGraphHandler(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	s.llmProvider = fakeLLMProvider{}
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/runs", strings.NewReader(`{
+		"thread_id":"thread-gateway-global-create",
+		"assistant_id":"lead_agent",
+		"input":{"messages":[{"role":"user","content":"hello"}]}
+	}`), map[string]string{"Content-Type": "application/json"})
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, resp.Body.String())
+	}
+	if got := asString(payload["thread_id"]); got != "thread-gateway-global-create" {
+		t.Fatalf("thread_id=%q want=thread-gateway-global-create body=%s", got, resp.Body.String())
+	}
+	if got := asString(payload["run_id"]); got == "" {
+		t.Fatalf("run_id missing body=%s", resp.Body.String())
+	}
+}
+
+func TestGatewayGlobalRunCancelReturnsThreadID(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	now := time.Now().UTC().Add(-2 * detachedRunCancelGracePeriod)
+	run := &Run{
+		RunID:     "run-gateway-global-cancel",
+		ThreadID:  "thread-gateway-global-cancel",
+		Status:    "running",
+		CreatedAt: now,
+		UpdatedAt: now,
+		Outcome:   harnessruntime.RunOutcomeDescriptor{RunStatus: "running"},
+	}
+	s.saveRun(run)
+
+	resp := performCompatRequest(t, handler, http.MethodPost, "/api/runs/"+run.RunID+"/cancel", nil, nil)
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, resp.Body.String())
+	}
+	if got := asString(payload["run_id"]); got != run.RunID {
+		t.Fatalf("run_id=%q want=%q payload=%#v", got, run.RunID, payload)
+	}
+	if got := asString(payload["thread_id"]); got != run.ThreadID {
+		t.Fatalf("thread_id=%q want=%q payload=%#v", got, run.ThreadID, payload)
 	}
 }
 

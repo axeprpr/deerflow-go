@@ -96,3 +96,49 @@ func TestStrictLangGraphRunsCreateRequiresAssistantID(t *testing.T) {
 		t.Fatalf("payload=%#v", payload)
 	}
 }
+
+func TestStrictLangGraphTopLevelRunsCreateRequiresThreadID(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	resp := performCompatRequest(
+		t,
+		handler,
+		http.MethodPost,
+		"/api/langgraph/runs",
+		strings.NewReader(`{"assistant_id":"lead_agent","input":{"messages":[{"role":"user","content":"hi"}]}}`),
+		map[string]string{"Content-Type": "application/json"},
+	)
+	if resp.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload["detail"] != "thread_id required" {
+		t.Fatalf("payload=%#v", payload)
+	}
+}
+
+func TestStrictLangGraphTopLevelRunsCreateRequiresUUIDThreadID(t *testing.T) {
+	_, handler := newCompatTestServer(t)
+
+	resp := performCompatRequest(
+		t,
+		handler,
+		http.MethodPost,
+		"/api/langgraph/runs",
+		strings.NewReader(`{"thread_id":"thread-not-uuid","assistant_id":"lead_agent","input":{"messages":[{"role":"user","content":"hi"}]}}`),
+		map[string]string{"Content-Type": "application/json"},
+	)
+	if resp.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload["detail"] != "invalid thread_id" {
+		t.Fatalf("payload=%#v", payload)
+	}
+}

@@ -70,8 +70,8 @@ func (s CoordinationService) Cancel(threadID, runID string) (map[string]any, boo
 		return nil, true, false
 	}
 	return map[string]any{
-		"run_id":    runID,
-		"thread_id": threadID,
+		"run_id":    record.RunID,
+		"thread_id": record.ThreadID,
 		"status":    "interrupted",
 	}, true, true
 }

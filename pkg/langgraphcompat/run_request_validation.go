@@ -13,7 +13,7 @@ func isStrictLangGraphRunPath(path string) bool {
 	if path == "" {
 		return false
 	}
-	if strings.HasPrefix(path, "/api/langgraph/runs/") || path == "/api/langgraph/runs/stream" {
+	if path == "/api/langgraph/runs" || strings.HasPrefix(path, "/api/langgraph/runs/") || path == "/api/langgraph/runs/stream" {
 		return true
 	}
 	return strings.HasPrefix(path, "/api/langgraph/threads/") && strings.Contains(path, "/runs")
