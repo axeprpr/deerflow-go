@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/internal/langgraphcmd"
 )
@@ -235,6 +236,36 @@ func TestPrepareCommandValidateBundle(t *testing.T) {
 	}
 	if strings.TrimSpace(stdout.String()) != dir {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), dir)
+	}
+}
+
+func TestLoadBundleHostPlan(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Preset = StackPresetSharedRemote
+	cfg.Worker.Addr = ":19081"
+	dir := t.TempDir()
+	if err := WriteBundleWithOptions(dir, cfg.Manifest(), BundleOptions{
+		RestartPolicy:     ProcessRestartAlways,
+		MaxRestarts:       6,
+		RestartDelay:      1500 * time.Millisecond,
+		DependencyTimeout: 30 * time.Second,
+		FailureIsolation:  true,
+	}); err != nil {
+		t.Fatalf("WriteBundleWithOptions() error = %v", err)
+	}
+
+	hostPlan, err := LoadBundleHostPlan(dir)
+	if err != nil {
+		t.Fatalf("LoadBundleHostPlan() error = %v", err)
+	}
+	if hostPlan.RuntimePolicy.RestartPolicy != string(ProcessRestartAlways) {
+		t.Fatalf("runtime policy restart = %q", hostPlan.RuntimePolicy.RestartPolicy)
+	}
+	if hostPlan.RuntimePolicy.MaxRestarts != 6 {
+		t.Fatalf("runtime policy max restarts = %d", hostPlan.RuntimePolicy.MaxRestarts)
+	}
+	if !hostPlan.RuntimePolicy.FailureIsolation {
+		t.Fatal("runtime policy failure isolation = false")
 	}
 }
 

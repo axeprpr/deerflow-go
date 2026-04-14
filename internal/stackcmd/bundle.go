@@ -194,6 +194,25 @@ func LoadBundleManifest(dir string) (StackManifest, error) {
 	return manifest, nil
 }
 
+func LoadBundleHostPlan(dir string) (HostPlan, error) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return HostPlan{}, fmt.Errorf("bundle dir required")
+	}
+	manifest, err := LoadBundleManifest(dir)
+	if err != nil {
+		return HostPlan{}, err
+	}
+	var hostPlan HostPlan
+	if err := readJSONFile(filepath.Join(dir, "host-plan.json"), &hostPlan); err != nil {
+		return HostPlan{}, fmt.Errorf("read host-plan.json: %w", err)
+	}
+	if err := validateHostPlan(manifest, hostPlan); err != nil {
+		return HostPlan{}, fmt.Errorf("invalid host plan: %w", err)
+	}
+	return hostPlan, nil
+}
+
 func buildHostPlan(manifest StackManifest, options BundleOptions) (HostPlan, error) {
 	order, err := resolveProcessOrder(manifest.Processes)
 	if err != nil {

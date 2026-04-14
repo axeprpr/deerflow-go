@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/internal/langgraphcmd"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
@@ -324,6 +325,60 @@ func TestPrepareCommandSpawnBundleRejectsInvalidBundle(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "stack-manifest.json") {
 		t.Fatalf("PrepareCommand() error = %v, want missing stack-manifest", err)
+	}
+}
+
+func TestPrepareCommandSpawnBundleUsesHostPlanPolicy(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Preset = StackPresetSharedRemote
+	cfg.Worker.Addr = ":19081"
+	dir := t.TempDir()
+	if err := WriteBundleWithOptions(dir, cfg.Manifest(), BundleOptions{
+		RestartPolicy:     ProcessRestartAlways,
+		MaxRestarts:       9,
+		RestartDelay:      2 * time.Second,
+		DependencyTimeout: 45 * time.Second,
+		FailureIsolation:  true,
+	}); err != nil {
+		t.Fatalf("WriteBundleWithOptions() error = %v", err)
+	}
+	binDir := installTestProcessBinaries(t, "langgraph", "runtime-node", "runtime-state", "runtime-sandbox")
+
+	prepared, err := PrepareCommand(flag.NewFlagSet("runtime-stack-spawn-bundle-host-plan", flag.ContinueOnError), langgraphcmd.BuildInfo{}, CommandOptions{
+		Stderr: new(strings.Builder),
+		Args: []string{
+			"-spawn-bundle=" + dir,
+			"-spawn-bundle-use-host-plan",
+			"-process-binary-dir=" + binDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareCommand() error = %v", err)
+	}
+	launcher, ok := prepared.Lifecycle.(*ProcessLauncher)
+	if !ok {
+		t.Fatalf("Lifecycle type = %T, want *ProcessLauncher", prepared.Lifecycle)
+	}
+	if len(launcher.lifecycles) == 0 {
+		t.Fatal("spawn bundle lifecycles = 0")
+	}
+	if launcher.lifecycles[0].restartPolicy != ProcessRestartAlways {
+		t.Fatalf("restart policy = %q", launcher.lifecycles[0].restartPolicy)
+	}
+	if launcher.lifecycles[0].maxRestarts != 9 {
+		t.Fatalf("max restarts = %d", launcher.lifecycles[0].maxRestarts)
+	}
+	if launcher.lifecycles[0].restartDelay != 2*time.Second {
+		t.Fatalf("restart delay = %s", launcher.lifecycles[0].restartDelay)
+	}
+	if launcher.lifecycles[0].dependencyTimeout != 45*time.Second {
+		t.Fatalf("dependency timeout = %s", launcher.lifecycles[0].dependencyTimeout)
+	}
+	if !launcher.failureIsolation {
+		t.Fatal("failure isolation = false, want true")
+	}
+	if !strings.Contains(strings.Join(prepared.StartupLines, "\n"), "policy_source=host-plan") {
+		t.Fatalf("StartupLines = %#v", prepared.StartupLines)
 	}
 }
 
