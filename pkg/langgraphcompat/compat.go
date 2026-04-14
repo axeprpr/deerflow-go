@@ -387,7 +387,11 @@ func (s *Server) runtimeView() *harness.Runtime {
 	if s == nil {
 		return nil
 	}
-	s.runtime = harnessruntime.RefreshHarnessRuntime(s.ensureRuntimeSystem(), s.llmProvider, s.maxTurns, s.runtime, s.runtimeProfileBuilder)
+	if node := s.ensureRuntimeSystem(); node != nil {
+		s.runtime = node.RefreshRuntimeView(s.llmProvider, s.maxTurns, s.runtime, s.runtimeProfileBuilder)
+		return s.runtime
+	}
+	s.runtime = harnessruntime.RefreshHarnessRuntime(nil, s.llmProvider, s.maxTurns, s.runtime, s.runtimeProfileBuilder)
 	return s.runtime
 }
 
