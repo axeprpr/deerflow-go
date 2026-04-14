@@ -70,3 +70,42 @@ func (s OutcomeService) DescribeRunning(record RunRecord) RunOutcomeDescriptor {
 		),
 	})
 }
+
+func LoadLiveTaskState(store ThreadStateStore, threadID string) harness.TaskState {
+	if store == nil {
+		return harness.TaskState{}
+	}
+	state, ok := store.LoadThreadRuntimeState(threadID)
+	if !ok {
+		return harness.TaskState{}
+	}
+	taskState, ok := harness.ParseTaskState(state.Metadata[DefaultTaskStateMetadataKey])
+	if !ok {
+		return harness.TaskState{}
+	}
+	return taskState
+}
+
+func LoadLiveTaskLifecycle(store ThreadStateStore, threadID string) (TaskLifecycleDescriptor, bool) {
+	if store == nil {
+		return TaskLifecycleDescriptor{}, false
+	}
+	state, ok := store.LoadThreadRuntimeState(threadID)
+	if !ok {
+		return TaskLifecycleDescriptor{}, false
+	}
+	return ParseTaskLifecycle(state.Metadata[DefaultTaskLifecycleMetadataKey])
+}
+
+func (s OutcomeService) DescribeLiveRunning(record RunRecord, store ThreadStateStore) RunOutcomeDescriptor {
+	outcome := s.DescribeRunning(record)
+	taskState := LoadLiveTaskState(store, record.ThreadID)
+	if lifecycle, ok := LoadLiveTaskLifecycle(store, record.ThreadID); ok {
+		outcome.TaskLifecycle = lifecycle
+	}
+	if !taskState.IsZero() {
+		outcome.TaskState = taskState
+		outcome.TaskLifecycle = NewTaskLifecycleService().Describe(RunOutcome{RunStatus: "running"}, taskState, false)
+	}
+	return outcome
+}

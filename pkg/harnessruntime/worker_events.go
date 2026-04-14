@@ -6,7 +6,6 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
-	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
 )
 
@@ -168,7 +167,12 @@ func workerRunEventContext(plan WorkerExecutionPlan, threads ThreadStateStore) R
 		Attempt:         plan.Attempt,
 		ResumeFromEvent: plan.ResumeFromEvent,
 		ResumeReason:    plan.ResumeReason,
-		Outcome:         runningOutcomeDescriptor(plan, threads),
+		Outcome: NewOutcomeService().DescribeLiveRunning(RunRecord{
+			ThreadID:        plan.ThreadID,
+			Attempt:         plan.Attempt,
+			ResumeFromEvent: plan.ResumeFromEvent,
+			ResumeReason:    plan.ResumeReason,
+		}, threads),
 	}
 }
 
@@ -180,26 +184,12 @@ func workerToolMessageID(toolCallID string) string {
 }
 
 func runningOutcomeDescriptor(plan WorkerExecutionPlan, threads ThreadStateStore) RunOutcomeDescriptor {
-	outcome := NewOutcomeService().DescribeRunning(RunRecord{
+	return NewOutcomeService().DescribeLiveRunning(RunRecord{
+		ThreadID:        plan.ThreadID,
 		Attempt:         plan.Attempt,
 		ResumeFromEvent: plan.ResumeFromEvent,
 		ResumeReason:    plan.ResumeReason,
-	})
-	if threads == nil {
-		return outcome
-	}
-	state, ok := threads.LoadThreadRuntimeState(plan.ThreadID)
-	if !ok {
-		return outcome
-	}
-	if lifecycle, ok := ParseTaskLifecycle(state.Metadata[DefaultTaskLifecycleMetadataKey]); ok {
-		outcome.TaskLifecycle = lifecycle
-	}
-	if taskState, ok := harness.ParseTaskState(state.Metadata[DefaultTaskStateMetadataKey]); ok {
-		outcome.TaskState = taskState
-		outcome.TaskLifecycle = NewTaskLifecycleService().Describe(RunOutcome{RunStatus: "running"}, taskState, false)
-	}
-	return outcome
+	}, threads)
 }
 
 func (r WorkerRunEventRecorder) syncRunningRecord(plan WorkerExecutionPlan) {

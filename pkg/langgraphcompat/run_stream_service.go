@@ -8,7 +8,6 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
-	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
@@ -195,31 +194,10 @@ func (s *Server) refreshRunningRunFromThreadState(run *Run) bool {
 	if s == nil || run == nil || strings.TrimSpace(run.Status) != "running" {
 		return false
 	}
-	taskState := s.runtimeCompletionAdapter().LoadThreadTaskState(run.ThreadID)
-	lifecycle := run.Outcome.TaskLifecycle
-	if store := s.ensureThreadStateStore(); store != nil {
-		if state, ok := store.LoadThreadRuntimeState(run.ThreadID); ok {
-			if live, ok := harnessruntime.ParseTaskLifecycle(state.Metadata[harnessruntime.DefaultTaskLifecycleMetadataKey]); ok {
-				lifecycle = live
-			}
-		}
-	}
-	if lifecycle.IsZero() {
-		lifecycle = harnessruntime.NewTaskLifecycleService().Describe(harnessruntime.RunOutcome{RunStatus: "running"}, taskState, false)
-	}
-	if taskState.IsZero() && lifecycle.IsZero() {
+	outcome := harnessruntime.NewOutcomeService().DescribeLiveRunning(runRecordFromRun(run), s.ensureThreadStateStore())
+	if outcome.TaskState.IsZero() && outcome.TaskLifecycle.IsZero() {
 		return false
 	}
-	outcome := run.Outcome
-	outcome.RunStatus = "running"
-	outcome.Interrupted = false
-	outcome.Error = ""
-	outcome.TaskState = harness.TaskState{}
-	if normalized, err := harness.NormalizeTaskState(taskState); err == nil {
-		outcome.TaskState = normalized
-	}
-	outcome.TaskLifecycle = lifecycle
-	outcome = harnessruntime.NewOutcomeService().BindRecord(runRecordFromRun(run), outcome)
 	record := runRecordFromRun(run)
 	record.Status = "running"
 	record.Error = ""
