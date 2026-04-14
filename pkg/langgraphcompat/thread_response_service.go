@@ -6,15 +6,15 @@ import (
 )
 
 type threadSearchRequest struct {
-	Query      string
-	Status     string
-	Limit      int
-	Offset     int
-	SortBy     string
-	SortOrder  string
-	Select     []string
-	Metadata   map[string]any
-	Values     map[string]any
+	Query     string
+	Status    string
+	Limit     int
+	Offset    int
+	SortBy    string
+	SortOrder string
+	Select    []string
+	Metadata  map[string]any
+	Values    map[string]any
 }
 
 func (s *Server) findThreadResponse(threadID string) (map[string]any, bool) {
@@ -88,6 +88,7 @@ func (s *Server) threadResponse(session *Session) map[string]any {
 		"thinking_enabled":            configurable["thinking_enabled"],
 		"is_plan_mode":                configurable["is_plan_mode"],
 		"subagent_enabled":            configurable["subagent_enabled"],
+		"max_concurrent_subagents":    configurable["max_concurrent_subagents"],
 		"temperature":                 configurable["temperature"],
 		"max_tokens":                  configurable["max_tokens"],
 		"checkpoint_id":               firstNonEmpty(stringValue(session.Metadata["checkpoint_id"]), session.CheckpointID),

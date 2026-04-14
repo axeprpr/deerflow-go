@@ -324,3 +324,25 @@ func TestResolveRunConfigIncludesSubagentPromptWhenEnabled(t *testing.T) {
 		t.Fatalf("system prompt missing subagent concurrency limit: %q", cfg.SystemPrompt)
 	}
 }
+
+func TestResolveRunConfigCarriesSubagentSettingsIntoAgentSpec(t *testing.T) {
+	s := &Server{
+		tools: newRuntimeToolRegistry(t),
+	}
+
+	maxConcurrent := 4
+	enabled := true
+	cfg, err := s.resolveRunConfig(runConfig{
+		SubagentEnabled:        &enabled,
+		MaxConcurrentSubagents: &maxConcurrent,
+	}, nil)
+	if err != nil {
+		t.Fatalf("resolveRunConfig error: %v", err)
+	}
+	if cfg.MaxConcurrentSubagents != 4 {
+		t.Fatalf("MaxConcurrentSubagents=%d want=4", cfg.MaxConcurrentSubagents)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "<subagent_system>") {
+		t.Fatalf("system prompt missing subagent guidance: %q", cfg.SystemPrompt)
+	}
+}

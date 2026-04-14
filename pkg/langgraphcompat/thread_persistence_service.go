@@ -104,7 +104,7 @@ func (s *Server) loadPersistedThreads() {
 			if persisted.Metadata == nil {
 				persisted.Metadata = map[string]any{}
 			}
-			for _, key := range []string{"thread_id", "agent_type", "agent_name", "model_name", "mode", "reasoning_effort", "thinking_enabled", "is_plan_mode", "subagent_enabled", "temperature", "max_tokens"} {
+			for _, key := range []string{"thread_id", "agent_type", "agent_name", "model_name", "mode", "reasoning_effort", "thinking_enabled", "is_plan_mode", "subagent_enabled", "max_concurrent_subagents", "temperature", "max_tokens"} {
 				if value, ok := configurable[key]; ok {
 					persisted.Metadata[key] = value
 				}
@@ -185,6 +185,7 @@ func (s *Server) loadPersistedThreads() {
 			"thinking_enabled",
 			"is_plan_mode",
 			"subagent_enabled",
+			"max_concurrent_subagents",
 			"temperature",
 			"max_tokens",
 		} {
@@ -300,6 +301,11 @@ func normalizePersistedThreadMetadata(metadata map[string]any) map[string]any {
 	if _, ok := metadata["subagent_enabled"]; !ok {
 		if value, ok := metadata["subagentEnabled"]; ok {
 			metadata["subagent_enabled"] = value
+		}
+	}
+	if _, ok := metadata["max_concurrent_subagents"]; !ok {
+		if value, ok := metadata["maxConcurrentSubagents"]; ok {
+			metadata["max_concurrent_subagents"] = value
 		}
 	}
 	if _, ok := metadata["temperature"]; !ok {
@@ -586,16 +592,17 @@ func normalizeThreadConfig(raw map[string]any) map[string]any {
 		normalized[key] = value
 	}
 	for canonicalKey, aliases := range map[string][]string{
-		"thread_id":        {"thread_id", "threadId"},
-		"agent_type":       {"agent_type", "agentType"},
-		"agent_name":       {"agent_name", "agentName"},
-		"model_name":       {"model_name", "modelName", "model"},
-		"reasoning_effort": {"reasoning_effort", "reasoningEffort"},
-		"thinking_enabled": {"thinking_enabled", "thinkingEnabled"},
-		"is_plan_mode":     {"is_plan_mode", "isPlanMode"},
-		"subagent_enabled": {"subagent_enabled", "subagentEnabled"},
-		"temperature":      {"temperature", "Temperature"},
-		"max_tokens":       {"max_tokens", "maxTokens"},
+		"thread_id":                {"thread_id", "threadId"},
+		"agent_type":               {"agent_type", "agentType"},
+		"agent_name":               {"agent_name", "agentName"},
+		"model_name":               {"model_name", "modelName", "model"},
+		"reasoning_effort":         {"reasoning_effort", "reasoningEffort"},
+		"thinking_enabled":         {"thinking_enabled", "thinkingEnabled"},
+		"is_plan_mode":             {"is_plan_mode", "isPlanMode"},
+		"subagent_enabled":         {"subagent_enabled", "subagentEnabled"},
+		"max_concurrent_subagents": {"max_concurrent_subagents", "maxConcurrentSubagents"},
+		"temperature":              {"temperature", "Temperature"},
+		"max_tokens":               {"max_tokens", "maxTokens"},
 	} {
 		for _, alias := range aliases {
 			if value, ok := configurable[alias]; ok {

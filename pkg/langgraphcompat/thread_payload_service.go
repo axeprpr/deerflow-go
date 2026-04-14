@@ -44,6 +44,7 @@ func applyThreadConfigurable(session *Session, raw map[string]any) {
 		"thinking_enabled",
 		"is_plan_mode",
 		"subagent_enabled",
+		"max_concurrent_subagents",
 		"temperature",
 		"max_tokens",
 		"memory_user_id",

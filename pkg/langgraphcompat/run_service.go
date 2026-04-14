@@ -105,7 +105,7 @@ func (s *Server) buildRunExecution(ctx context.Context, prepared *preparedRunReq
 		Model:            agentSpec.Model,
 		AgentName:        runCfg.AgentName,
 		Spec:             agentSpec,
-		Features:         harness.FeatureSet{Sandbox: true},
+		Features:         harness.FeatureSet{Sandbox: true, Subagent: subagentEnabledFromRunConfig(runCfg)},
 		ExistingMessages: prepared.ExistingMessages,
 		Messages:         prepared.Messages,
 	})

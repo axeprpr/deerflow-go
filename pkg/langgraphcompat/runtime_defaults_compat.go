@@ -1,6 +1,6 @@
 package langgraphcompat
 
-const defaultGatewaySubagentMaxConcurrent = 4
+const defaultGatewaySubagentMaxConcurrent = 3
 
 func boolFromAny(value any) bool {
 	return boolValue(value)

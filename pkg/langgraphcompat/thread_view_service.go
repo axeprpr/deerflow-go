@@ -89,6 +89,11 @@ func (s *Server) threadConfigurable(session *Session) map[string]any {
 			configurable[key] = value
 		}
 	}
+	if subagentEnabled {
+		if _, exists := configurable["max_concurrent_subagents"]; !exists {
+			configurable["max_concurrent_subagents"] = int64(defaultGatewaySubagentMaxConcurrent)
+		}
+	}
 	if value, ok := float64FromAny(session.Metadata["temperature"]); ok {
 		if _, exists := configurable["temperature"]; !exists {
 			configurable["temperature"] = value
@@ -118,6 +123,13 @@ func (s *Server) threadConfigurable(session *Session) map[string]any {
 			configurable["subagent_enabled"] = value
 		} else if _, exists := session.Configurable["subagent_enabled"]; !exists {
 			configurable["subagent_enabled"] = value
+		}
+	}
+	if value := toInt64(session.Metadata["max_concurrent_subagents"]); value > 0 {
+		if session.Configurable == nil {
+			configurable["max_concurrent_subagents"] = value
+		} else if _, exists := session.Configurable["max_concurrent_subagents"]; !exists {
+			configurable["max_concurrent_subagents"] = value
 		}
 	}
 	return configurable

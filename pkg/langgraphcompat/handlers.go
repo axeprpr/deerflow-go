@@ -22,21 +22,22 @@ import (
 )
 
 type runConfig struct {
-	ModelName       string
-	Mode            string
-	ExecutionMode   string
-	ReasoningEffort string
-	AgentType       agent.AgentType
-	AgentName       string
-	MemoryUserID    string
-	MemoryGroupID   string
-	MemoryNamespace string
-	MaxTurns        *int
-	ThinkingEnabled *bool
-	IsPlanMode      *bool
-	SubagentEnabled *bool
-	Temperature     *float64
-	MaxTokens       *int
+	ModelName              string
+	Mode                   string
+	ExecutionMode          string
+	ReasoningEffort        string
+	AgentType              agent.AgentType
+	AgentName              string
+	MemoryUserID           string
+	MemoryGroupID          string
+	MemoryNamespace        string
+	MaxTurns               *int
+	MaxConcurrentSubagents *int
+	ThinkingEnabled        *bool
+	IsPlanMode             *bool
+	SubagentEnabled        *bool
+	Temperature            *float64
+	MaxTokens              *int
 }
 
 type streamModeFilter struct {
@@ -875,6 +876,12 @@ func parseRunConfig(raw map[string]any) runConfig {
 			configurable["recursion_limit"],
 			configurable["recursionLimit"],
 		)),
+		MaxConcurrentSubagents: intPointerFromAny(firstNonNil(
+			raw["max_concurrent_subagents"],
+			raw["maxConcurrentSubagents"],
+			configurable["max_concurrent_subagents"],
+			configurable["maxConcurrentSubagents"],
+		)),
 		ThinkingEnabled: boolPointerFromAny(firstNonNil(
 			raw["thinking_enabled"],
 			raw["thinkingEnabled"],
@@ -971,6 +978,9 @@ func (s *Server) applyRunConfigMetadata(threadID string, cfg runConfig) {
 	}
 	if cfg.MaxTurns != nil {
 		s.setThreadMetadata(threadID, "recursion_limit", *cfg.MaxTurns)
+	}
+	if cfg.MaxConcurrentSubagents != nil {
+		s.setThreadMetadata(threadID, "max_concurrent_subagents", *cfg.MaxConcurrentSubagents)
 	}
 }
 

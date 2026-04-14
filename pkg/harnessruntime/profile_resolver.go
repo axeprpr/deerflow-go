@@ -14,11 +14,8 @@ func NewModeProfileResolver() ModeProfileResolver {
 
 func (ModeProfileResolver) ResolveProfile(base harness.RuntimeProfile, req harness.AgentRequest) harness.RuntimeProfile {
 	mode := parseExecutionMode(req.Spec.ExecutionMode)
-	if mode == ExecutionModeDefault || mode == ExecutionModeInteractive {
-		return base
-	}
 	profile := base
-	profile.ToolRuntime = modeToolRuntime(mode, base.ToolRuntime)
+	profile.ToolRuntime = featureToolRuntime(req, modeToolRuntime(mode, base.ToolRuntime))
 	profile.SandboxRuntime = modeSandboxRuntime(mode, base.SandboxRuntime)
 	return profile
 }
@@ -34,4 +31,28 @@ func parseExecutionMode(raw string) ExecutionMode {
 	default:
 		return ExecutionModeDefault
 	}
+}
+
+func featureToolRuntime(req harness.AgentRequest, base harness.ToolRuntime) harness.ToolRuntime {
+	if base == nil {
+		return nil
+	}
+	if req.Features.Subagent {
+		return base
+	}
+
+	registry := base.Registry()
+	if registry == nil || registry.Get("task") == nil {
+		return base
+	}
+
+	allowed := make([]string, 0, len(registry.List()))
+	for _, tool := range registry.List() {
+		name := strings.TrimSpace(tool.Name)
+		if name == "" || name == "task" {
+			continue
+		}
+		allowed = append(allowed, name)
+	}
+	return harness.NewStaticToolRuntime(registry.Restrict(allowed), base.DeferredTools(), nil)
 }

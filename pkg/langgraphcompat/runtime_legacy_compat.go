@@ -96,18 +96,17 @@ func configuredGatewayModelsFromConfig() []gatewayModel {
 }
 
 func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) (harness.AgentSpec, error) {
-	if runtimeContext == nil {
-		runtimeContext = map[string]any{}
-	}
+	runtimeContext = runtimeContextWithRunConfig(cfg, runtimeContext)
 	resolvedModel, catalogModel := s.resolveConfiguredModel(cfg.ModelName)
 	agentSpec := harness.AgentSpec{
-		AgentType:       cfg.AgentType,
-		ExecutionMode:   cfg.ExecutionMode,
-		MaxTurns:        s.maxTurns,
-		Model:           resolvedModel,
-		ReasoningEffort: cfg.ReasoningEffort,
-		Temperature:     cfg.Temperature,
-		MaxTokens:       cfg.MaxTokens,
+		AgentType:              cfg.AgentType,
+		ExecutionMode:          cfg.ExecutionMode,
+		MaxTurns:               s.maxTurns,
+		MaxConcurrentSubagents: subagentLimitFromRunConfig(cfg),
+		Model:                  resolvedModel,
+		ReasoningEffort:        cfg.ReasoningEffort,
+		Temperature:            cfg.Temperature,
+		MaxTokens:              cfg.MaxTokens,
 	}
 	if cfg.MaxTurns != nil && *cfg.MaxTurns > 0 {
 		agentSpec.MaxTurns = *cfg.MaxTurns
@@ -128,6 +127,37 @@ func (s *Server) resolveRunConfig(cfg runConfig, runtimeContext map[string]any) 
 	}
 	agentSpec.SystemPrompt = strings.TrimSpace(basePrompt + "\n\n" + s.environmentPrompt(runtimeContext))
 	return agentSpec, nil
+}
+
+func runtimeContextWithRunConfig(cfg runConfig, runtimeContext map[string]any) map[string]any {
+	merged := make(map[string]any, len(runtimeContext)+2)
+	for key, value := range runtimeContext {
+		merged[key] = value
+	}
+	if cfg.SubagentEnabled != nil {
+		merged["subagent_enabled"] = *cfg.SubagentEnabled
+	}
+	if limit := subagentLimitFromRunConfig(cfg); limit > 0 {
+		merged["max_concurrent_subagents"] = limit
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
+}
+
+func subagentEnabledFromRunConfig(cfg runConfig) bool {
+	return cfg.SubagentEnabled != nil && *cfg.SubagentEnabled
+}
+
+func subagentLimitFromRunConfig(cfg runConfig) int {
+	if cfg.MaxConcurrentSubagents != nil && *cfg.MaxConcurrentSubagents > 0 {
+		return *cfg.MaxConcurrentSubagents
+	}
+	if subagentEnabledFromRunConfig(cfg) {
+		return defaultGatewaySubagentMaxConcurrent
+	}
+	return 0
 }
 
 func (s *Server) resolveConfiguredModel(name string) (string, *gatewayModel) {
