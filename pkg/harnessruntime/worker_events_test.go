@@ -132,6 +132,12 @@ func TestWorkerRunEventRecorderCarriesLiveTaskLifecycleIntoTaskEvents(t *testing
 	if len(events[0].Outcome.TaskLifecycle.ExpectedArtifacts) != 1 || events[0].Outcome.TaskLifecycle.ExpectedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
 		t.Fatalf("expected artifacts = %#v", events[0].Outcome.TaskLifecycle.ExpectedArtifacts)
 	}
+	if len(events[0].Outcome.TaskState.Items) != 1 || events[0].Outcome.TaskState.Items[0].Text != "delegate research" {
+		t.Fatalf("task state = %+v", events[0].Outcome.TaskState)
+	}
+	if len(events[0].Outcome.TaskState.ExpectedOutputs) != 1 || events[0].Outcome.TaskState.ExpectedOutputs[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("task state expected outputs = %#v", events[0].Outcome.TaskState.ExpectedOutputs)
+	}
 }
 
 type workerContextRuntimeStub struct {

@@ -103,6 +103,7 @@ func (s CompletionService) Apply(threadID string, state *harness.RunState, resul
 		descriptor := outcomes.Describe(RunRecord{
 			ThreadID: threadID,
 		}, decision.Outcome, "")
+		descriptor.TaskState = taskState
 		descriptor.TaskLifecycle = lifecycle
 		return CompletionOutcome{
 			RunOutcome: decision.Outcome,
@@ -121,6 +122,7 @@ func (s CompletionService) Apply(threadID string, state *harness.RunState, resul
 		descriptor := outcomes.Describe(RunRecord{
 			ThreadID: threadID,
 		}, decision.Outcome, decision.Reason)
+		descriptor.TaskState = taskState
 		descriptor.PendingTasks = append([]string(nil), decision.PendingTasks...)
 		descriptor.ExpectedArtifacts = append([]string(nil), decision.ExpectedArtifacts...)
 		descriptor.TaskLifecycle = lifecycle
@@ -139,6 +141,7 @@ func (s CompletionService) Apply(threadID string, state *harness.RunState, resul
 	descriptor := outcomes.Describe(RunRecord{
 		ThreadID: threadID,
 	}, decision.Outcome, "")
+	descriptor.TaskState = taskState
 	descriptor.TaskLifecycle = lifecycle
 	return CompletionOutcome{
 		RunOutcome: decision.Outcome,

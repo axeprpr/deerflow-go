@@ -515,6 +515,9 @@ func TestCompletionServiceMarksRunIncompleteFromTaskState(t *testing.T) {
 	if got := len(outcome.Descriptor.PendingTasks); got != 2 {
 		t.Fatalf("Descriptor.PendingTasks=%v want len=2", outcome.Descriptor.PendingTasks)
 	}
+	if got := len(outcome.Descriptor.TaskState.Items); got != 2 {
+		t.Fatalf("Descriptor.TaskState=%+v", outcome.Descriptor.TaskState)
+	}
 	if got := len(runtime.taskState.Items); got != 2 {
 		t.Fatalf("taskState.Items=%d want=2", got)
 	}
@@ -542,6 +545,9 @@ func TestCompletionServiceMergesLiveTrackedTaskState(t *testing.T) {
 	}
 	if len(outcome.Descriptor.PendingTasks) != 1 || outcome.Descriptor.PendingTasks[0] != "delegate research" {
 		t.Fatalf("Descriptor.PendingTasks=%v", outcome.Descriptor.PendingTasks)
+	}
+	if len(outcome.Descriptor.TaskState.Items) != 1 || outcome.Descriptor.TaskState.Items[0].Text != "delegate research" {
+		t.Fatalf("Descriptor.TaskState=%+v", outcome.Descriptor.TaskState)
 	}
 	if runtime.taskLife.Status != "incomplete" {
 		t.Fatalf("taskLife=%+v", runtime.taskLife)
@@ -610,6 +616,9 @@ func TestCompletionServiceAllowsVerifiedExpectedOutputs(t *testing.T) {
 	}
 	if len(outcome.Descriptor.PendingTasks) != 0 || len(outcome.Descriptor.ExpectedArtifacts) != 0 {
 		t.Fatalf("Descriptor=%+v want no pending task details", outcome.Descriptor)
+	}
+	if len(outcome.Descriptor.TaskState.VerifiedOutputs) != 1 || outcome.Descriptor.TaskState.VerifiedOutputs[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("Descriptor.TaskState=%+v", outcome.Descriptor.TaskState)
 	}
 	if got := len(runtime.taskState.VerifiedOutputs); got != 1 {
 		t.Fatalf("VerifiedOutputs=%v want len=1", runtime.taskState.VerifiedOutputs)

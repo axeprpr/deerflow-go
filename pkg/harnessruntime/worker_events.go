@@ -182,9 +182,9 @@ func runningOutcomeDescriptor(plan WorkerExecutionPlan, threads ThreadStateStore
 	}
 	if lifecycle, ok := ParseTaskLifecycle(state.Metadata[DefaultTaskLifecycleMetadataKey]); ok {
 		outcome.TaskLifecycle = lifecycle
-		return outcome
 	}
 	if taskState, ok := harness.ParseTaskState(state.Metadata[DefaultTaskStateMetadataKey]); ok {
+		outcome.TaskState = taskState
 		outcome.TaskLifecycle = NewTaskLifecycleService().Describe(RunOutcome{RunStatus: "running"}, taskState, false)
 	}
 	return outcome

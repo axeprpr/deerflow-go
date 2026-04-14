@@ -13,6 +13,7 @@ type RunOutcomeDescriptor struct {
 	Error             string
 	PendingTasks      []string
 	ExpectedArtifacts []string
+	TaskState         harness.TaskState
 	TaskLifecycle     TaskLifecycleDescriptor
 	Attempt           int
 	ResumeFromEvent   int
@@ -43,6 +44,7 @@ func (s OutcomeService) Describe(record RunRecord, outcome RunOutcome, errText s
 		RunStatus:       outcome.RunStatus,
 		Interrupted:     outcome.Interrupted,
 		Error:           errText,
+		TaskState:       harness.TaskState{},
 		TaskLifecycle:   NewTaskLifecycleService().Describe(outcome, harness.TaskState{}, false),
 		Attempt:         record.Attempt,
 		ResumeFromEvent: record.ResumeFromEvent,
@@ -60,6 +62,7 @@ func (s OutcomeService) BindRecord(record RunRecord, descriptor RunOutcomeDescri
 func (s OutcomeService) DescribeRunning(record RunRecord) RunOutcomeDescriptor {
 	return s.BindRecord(record, RunOutcomeDescriptor{
 		RunStatus: "running",
+		TaskState: harness.TaskState{},
 		TaskLifecycle: NewTaskLifecycleService().Describe(
 			RunOutcome{RunStatus: "running"},
 			harness.TaskState{},
