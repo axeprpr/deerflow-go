@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 )
 
 func TestThreadJoinStreamRejectsInvalidThreadID(t *testing.T) {
@@ -135,5 +137,129 @@ func TestThreadJoinStreamFollowsLatestActiveRunOnly(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for active join stream response")
+	}
+}
+
+func TestThreadJoinStreamPrefersOwnedActiveRun(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-join-owned-active"
+	s.ensureSession(threadID, nil)
+	now := time.Now().UTC()
+	s.saveRun(&Run{
+		RunID:     "run-owned-running",
+		ThreadID:  threadID,
+		Status:    "running",
+		CreatedAt: now.Add(-time.Minute),
+		UpdatedAt: now.Add(-time.Minute),
+	})
+	s.saveRun(&Run{
+		RunID:     "run-newer-running",
+		ThreadID:  threadID,
+		Status:    "running",
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+	s.ensureThreadStateStore().SetThreadMetadata(threadID, harnessruntime.DefaultActiveRunMetadataKey, "run-owned-running")
+
+	bodyCh := make(chan string, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodGet, "/threads/"+threadID+"/stream", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		bodyCh <- rec.Body.String()
+	}()
+
+	waitForRunSubscriber(t, s, "run-owned-running")
+	if got := s.runSubscriberCount("run-newer-running"); got != 0 {
+		t.Fatalf("expected newer run to have no subscribers, got %d", got)
+	}
+
+	s.appendRunEvent("run-owned-running", StreamEvent{
+		ID:       "run-owned-running:1",
+		Event:    "messages-tuple",
+		Data:     Message{Type: "ai", ID: "msg-owned", Role: "assistant", Content: "owned-run"},
+		RunID:    "run-owned-running",
+		ThreadID: threadID,
+	})
+	s.appendRunEvent("run-owned-running", StreamEvent{
+		ID:       "run-owned-running:2",
+		Event:    "end",
+		Data:     map[string]any{"run_id": "run-owned-running"},
+		RunID:    "run-owned-running",
+		ThreadID: threadID,
+	})
+
+	select {
+	case body := <-bodyCh:
+		if !strings.Contains(body, `"content":"owned-run"`) {
+			t.Fatalf("expected owned active run payload in %q", body)
+		}
+		if strings.Contains(body, "run-newer-running") {
+			t.Fatalf("expected newer run payload to be skipped in %q", body)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for owned active join stream response")
+	}
+}
+
+func TestThreadJoinStreamFallsBackWhenOwnedActiveRunIsMissing(t *testing.T) {
+	s, handler := newCompatTestServer(t)
+	threadID := "thread-join-owned-missing"
+	s.ensureSession(threadID, nil)
+	now := time.Now().UTC()
+	s.saveRun(&Run{
+		RunID:     "run-older-running",
+		ThreadID:  threadID,
+		Status:    "running",
+		CreatedAt: now.Add(-time.Minute),
+		UpdatedAt: now.Add(-time.Minute),
+	})
+	s.saveRun(&Run{
+		RunID:     "run-latest-running",
+		ThreadID:  threadID,
+		Status:    "running",
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+	s.ensureThreadStateStore().SetThreadMetadata(threadID, harnessruntime.DefaultActiveRunMetadataKey, "run-missing")
+
+	bodyCh := make(chan string, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodGet, "/threads/"+threadID+"/stream", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		bodyCh <- rec.Body.String()
+	}()
+
+	waitForRunSubscriber(t, s, "run-latest-running")
+	if got := s.runSubscriberCount("run-older-running"); got != 0 {
+		t.Fatalf("expected older run to have no subscribers, got %d", got)
+	}
+
+	s.appendRunEvent("run-latest-running", StreamEvent{
+		ID:       "run-latest-running:1",
+		Event:    "messages-tuple",
+		Data:     Message{Type: "ai", ID: "msg-latest", Role: "assistant", Content: "latest-run"},
+		RunID:    "run-latest-running",
+		ThreadID: threadID,
+	})
+	s.appendRunEvent("run-latest-running", StreamEvent{
+		ID:       "run-latest-running:2",
+		Event:    "end",
+		Data:     map[string]any{"run_id": "run-latest-running"},
+		RunID:    "run-latest-running",
+		ThreadID: threadID,
+	})
+
+	select {
+	case body := <-bodyCh:
+		if !strings.Contains(body, `"content":"latest-run"`) {
+			t.Fatalf("expected fallback latest run payload in %q", body)
+		}
+		if strings.Contains(body, "run-older-running") {
+			t.Fatalf("expected older run payload to be skipped in %q", body)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for fallback join stream response")
 	}
 }
