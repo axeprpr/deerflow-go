@@ -60,10 +60,12 @@ func (fakeTitleRuntime) ComputeThreadTitle(_ context.Context, threadID string, m
 }
 
 type fakeCompletionRuntime struct {
-	title      string
-	interrupts []any
-	status     string
-	cleared    bool
+	title       string
+	taskState   harness.TaskState
+	taskCleared bool
+	interrupts  []any
+	status      string
+	cleared     bool
 }
 
 type fakePreflightRuntime struct {
@@ -93,6 +95,16 @@ type fakeContextBinder struct {
 
 func (r *fakeCompletionRuntime) SetThreadTitle(_ string, title string) {
 	r.title = title
+}
+
+func (r *fakeCompletionRuntime) SetThreadTaskState(_ string, taskState harness.TaskState) {
+	r.taskState = taskState
+	r.taskCleared = false
+}
+
+func (r *fakeCompletionRuntime) ClearThreadTaskState(_ string) {
+	r.taskState = harness.TaskState{}
+	r.taskCleared = true
 }
 
 func (r *fakeCompletionRuntime) SetThreadInterrupts(_ string, interrupts []any) {
@@ -468,6 +480,9 @@ func TestCompletionServiceMarksRunIncompleteFromTaskState(t *testing.T) {
 	}
 	if outcome.Descriptor.Error != "pending-tasks" {
 		t.Fatalf("Descriptor.Error = %q, want %q", outcome.Descriptor.Error, "pending-tasks")
+	}
+	if got := len(runtime.taskState.Items); got != 2 {
+		t.Fatalf("taskState.Items=%d want=2", got)
 	}
 }
 

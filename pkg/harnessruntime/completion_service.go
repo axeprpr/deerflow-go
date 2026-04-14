@@ -9,6 +9,8 @@ import (
 
 type CompletionRuntime interface {
 	SetThreadTitle(threadID string, title string)
+	SetThreadTaskState(threadID string, taskState harness.TaskState)
+	ClearThreadTaskState(threadID string)
 	SetThreadInterrupts(threadID string, interrupts []any)
 	ClearThreadInterrupts(threadID string)
 	MarkThreadStatus(threadID string, status string)
@@ -50,6 +52,13 @@ func (s CompletionService) Apply(threadID string, state *harness.RunState, resul
 
 	if title := strings.TrimSpace(metadataString(state, s.titleMetadataKey)); title != "" && s.runtime != nil {
 		s.runtime.SetThreadTitle(threadID, title)
+	}
+	if s.runtime != nil {
+		if state != nil && !state.TaskState.IsZero() {
+			s.runtime.SetThreadTaskState(threadID, state.TaskState)
+		} else {
+			s.runtime.ClearThreadTaskState(threadID)
+		}
 	}
 
 	decision := s.gate.Evaluate(CompletionGateInput{

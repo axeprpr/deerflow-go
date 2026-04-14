@@ -186,6 +186,18 @@ func (a runtimeCompletionAdapter) SetThreadTitle(threadID string, title string) 
 	}
 }
 
+func (a runtimeCompletionAdapter) SetThreadTaskState(threadID string, taskState harness.TaskState) {
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		store.SetThreadMetadata(threadID, harnessruntime.DefaultTaskStateMetadataKey, taskState.Value())
+	}
+}
+
+func (a runtimeCompletionAdapter) ClearThreadTaskState(threadID string) {
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		store.ClearThreadMetadata(threadID, harnessruntime.DefaultTaskStateMetadataKey)
+	}
+}
+
 func (a runtimeCompletionAdapter) SetThreadInterrupts(threadID string, interrupts []any) {
 	if store := a.server.ensureThreadStateStore(); store != nil {
 		store.SetThreadMetadata(threadID, "interrupts", interrupts)
