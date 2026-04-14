@@ -1,6 +1,7 @@
 package stackcmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -141,6 +142,42 @@ func WriteBundleWithOptions(dir string, manifest StackManifest, options BundleOp
 	}
 	if err := writeHostAssets(dir, hostPlan); err != nil {
 		return err
+	}
+	return nil
+}
+
+func ValidateBundle(dir string) error {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return fmt.Errorf("bundle dir required")
+	}
+	var manifest StackManifest
+	if err := readJSONFile(filepath.Join(dir, "stack-manifest.json"), &manifest); err != nil {
+		return fmt.Errorf("read stack-manifest.json: %w", err)
+	}
+	if err := manifest.ValidateProcessGraph(); err != nil {
+		return fmt.Errorf("invalid process graph: %w", err)
+	}
+
+	var hostPlan HostPlan
+	if err := readJSONFile(filepath.Join(dir, "host-plan.json"), &hostPlan); err != nil {
+		return fmt.Errorf("read host-plan.json: %w", err)
+	}
+	if err := validateHostPlan(manifest, hostPlan); err != nil {
+		return fmt.Errorf("invalid host plan: %w", err)
+	}
+
+	var electronBundle ElectronHostBundle
+	if err := readJSONFile(filepath.Join(dir, "host", "electron", "runtime-processes.json"), &electronBundle); err != nil {
+		return fmt.Errorf("read host/electron/runtime-processes.json: %w", err)
+	}
+	if err := validateElectronBundle(hostPlan, electronBundle); err != nil {
+		return fmt.Errorf("invalid electron host bundle: %w", err)
+	}
+	for _, service := range hostPlan.Systemd.Services {
+		if _, err := os.Stat(filepath.Join(dir, "host", "systemd", service.Name)); err != nil {
+			return fmt.Errorf("missing host/systemd/%s: %w", service.Name, err)
+		}
 	}
 	return nil
 }
@@ -348,4 +385,99 @@ func formatSystemdDurationMS(ms int64) string {
 		return "0"
 	}
 	return strconv.FormatInt(ms, 10) + "ms"
+}
+
+func readJSONFile(path string, target any) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, target)
+}
+
+func validateHostPlan(manifest StackManifest, hostPlan HostPlan) error {
+	manifestByName := make(map[string]ProcessManifest, len(manifest.Processes))
+	for _, process := range manifest.Processes {
+		manifestByName[strings.TrimSpace(process.Name)] = process
+	}
+	if len(hostPlan.Processes) != len(manifestByName) {
+		return fmt.Errorf("process count mismatch: host=%d manifest=%d", len(hostPlan.Processes), len(manifestByName))
+	}
+	if _, err := parseProcessRestartPolicy(hostPlan.RuntimePolicy.RestartPolicy); err != nil {
+		return err
+	}
+
+	hostByName := make(map[string]HostProcessPlan, len(hostPlan.Processes))
+	for _, process := range hostPlan.Processes {
+		name := strings.TrimSpace(process.Name)
+		if name == "" {
+			return fmt.Errorf("host process name is required")
+		}
+		if _, ok := manifestByName[name]; !ok {
+			return fmt.Errorf("host process %q missing from manifest", name)
+		}
+		if _, exists := hostByName[name]; exists {
+			return fmt.Errorf("duplicate host process %q", name)
+		}
+		if _, err := parseProcessRestartPolicy(process.RestartPolicy); err != nil {
+			return err
+		}
+		hostByName[name] = process
+	}
+	for name := range manifestByName {
+		if _, ok := hostByName[name]; !ok {
+			return fmt.Errorf("host plan missing process %q", name)
+		}
+	}
+	if err := validateOrderSet("start_order", hostPlan.Electron.StartOrder, manifestByName); err != nil {
+		return err
+	}
+	if err := validateOrderSet("shutdown_order", hostPlan.Electron.ShutdownOrder, manifestByName); err != nil {
+		return err
+	}
+	if len(hostPlan.Systemd.Services) != len(manifestByName) {
+		return fmt.Errorf("systemd service count mismatch: services=%d manifest=%d", len(hostPlan.Systemd.Services), len(manifestByName))
+	}
+	return nil
+}
+
+func validateElectronBundle(hostPlan HostPlan, bundle ElectronHostBundle) error {
+	if len(bundle.Processes) != len(hostPlan.Electron.StartOrder) {
+		return fmt.Errorf("process count mismatch: electron=%d host=%d", len(bundle.Processes), len(hostPlan.Electron.StartOrder))
+	}
+	if len(bundle.StartOrder) != len(hostPlan.Electron.StartOrder) || len(bundle.ShutdownOrder) != len(hostPlan.Electron.ShutdownOrder) {
+		return fmt.Errorf("electron order size mismatch")
+	}
+	for i := range bundle.StartOrder {
+		if bundle.StartOrder[i] != hostPlan.Electron.StartOrder[i] {
+			return fmt.Errorf("electron start order mismatch at index %d", i)
+		}
+	}
+	for i := range bundle.ShutdownOrder {
+		if bundle.ShutdownOrder[i] != hostPlan.Electron.ShutdownOrder[i] {
+			return fmt.Errorf("electron shutdown order mismatch at index %d", i)
+		}
+	}
+	return nil
+}
+
+func validateOrderSet(label string, order []string, processes map[string]ProcessManifest) error {
+	if len(order) != len(processes) {
+		return fmt.Errorf("%s count mismatch: order=%d processes=%d", label, len(order), len(processes))
+	}
+	seen := make(map[string]struct{}, len(order))
+	for _, name := range order {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			return fmt.Errorf("%s contains empty process name", label)
+		}
+		if _, ok := processes[trimmed]; !ok {
+			return fmt.Errorf("%s contains unknown process %q", label, trimmed)
+		}
+		if _, exists := seen[trimmed]; exists {
+			return fmt.Errorf("%s contains duplicate process %q", label, trimmed)
+		}
+		seen[trimmed] = struct{}{}
+	}
+	return nil
 }

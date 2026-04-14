@@ -78,6 +78,7 @@ flowchart TD
 `cmd/runtime-stack` resolves deployment topology into a portable manifest instead of shell scripts:
 
 - `-print-manifest`: print full `stack-manifest.json` to stdout
+- `-validate-bundle=<dir>`: validate an existing bundle directory (`manifest + host-plan + host assets`)
 - `-write-bundle=<dir>`: write
   - `stack-manifest.json`
   - `host-plan.json` (systemd/Electron host orchestration plan)

@@ -210,6 +210,52 @@ func TestWriteBundleWithOptionsRejectsInvalidRestartPolicy(t *testing.T) {
 	}
 }
 
+func TestPrepareCommandValidateBundle(t *testing.T) {
+	var stdout strings.Builder
+	cfg := DefaultConfig()
+	cfg.Preset = StackPresetSharedRemote
+	cfg.Worker.Addr = ":19081"
+	dir := t.TempDir()
+	if err := WriteBundle(dir, cfg.Manifest()); err != nil {
+		t.Fatalf("WriteBundle() error = %v", err)
+	}
+
+	prepared, err := PrepareCommand(flagSet("runtime-stack-validate-bundle"), langgraphcmd.BuildInfo{}, CommandOptions{
+		Stdout: &stdout,
+		Args:   []string{"-validate-bundle=" + dir},
+	})
+	if err != nil {
+		t.Fatalf("PrepareCommand() error = %v", err)
+	}
+	if prepared == nil || prepared.RunFunc == nil {
+		t.Fatal("PrepareCommand() did not build validate run func")
+	}
+	if err := prepared.Run(); err != nil {
+		t.Fatalf("prepared.Run() error = %v", err)
+	}
+	if strings.TrimSpace(stdout.String()) != dir {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), dir)
+	}
+}
+
+func TestValidateBundleRejectsMissingHostAsset(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Preset = StackPresetSharedRemote
+	cfg.Worker.Addr = ":19081"
+	dir := t.TempDir()
+	if err := WriteBundle(dir, cfg.Manifest()); err != nil {
+		t.Fatalf("WriteBundle() error = %v", err)
+	}
+	if err := os.Remove(filepath.Join(dir, "host", "electron", "runtime-processes.json")); err != nil {
+		t.Fatalf("remove electron bundle error = %v", err)
+	}
+
+	err := ValidateBundle(dir)
+	if err == nil || !strings.Contains(err.Error(), "host/electron/runtime-processes.json") {
+		t.Fatalf("ValidateBundle() error = %v", err)
+	}
+}
+
 func TestWriteBundleRejectsInvalidProcessGraph(t *testing.T) {
 	dir := t.TempDir()
 	manifest := StackManifest{

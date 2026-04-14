@@ -35,6 +35,7 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 	logger := log.New(commandrun.OutputWriter(options.Stderr), "[runtime-stack] ", log.LstdFlags)
 	printManifest := fs.Bool("print-manifest", false, "print resolved runtime stack manifest and exit")
 	writeBundle := fs.String("write-bundle", "", "write stack manifest and per-process specs to a directory, then exit")
+	validateBundle := fs.String("validate-bundle", "", "validate an existing runtime bundle directory and exit")
 	bundleRestartPolicy := fs.String("bundle-restart-policy", string(bundleDefaultRestartPolicy), "host-plan restart policy for write-bundle: never|on-failure|always")
 	bundleMaxRestarts := fs.Int("bundle-max-restarts", bundleDefaultMaxRestarts, "host-plan max restart attempts per process for write-bundle (<=0 means unlimited)")
 	bundleRestartDelay := fs.Duration("bundle-restart-delay", bundleDefaultRestartDelay, "host-plan restart delay for write-bundle")
@@ -62,6 +63,17 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 		return &commandrun.PreparedCommand{
 			RunFunc: func() error {
 				return commandrun.PrintJSON(options.Stdout, builder.Manifest())
+			},
+		}, nil
+	}
+	if strings.TrimSpace(*validateBundle) != "" {
+		return &commandrun.PreparedCommand{
+			RunFunc: func() error {
+				if err := ValidateBundle(*validateBundle); err != nil {
+					return err
+				}
+				_, err := io.WriteString(commandrun.StdoutWriter(options.Stdout), *validateBundle+"\n")
+				return err
 			},
 		}, nil
 	}
