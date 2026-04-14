@@ -30,9 +30,7 @@ func NewRunStateService(runtime RunStateRuntime) RunStateService {
 
 func (s RunStateService) MarkError(record RunRecord, err error) RunRecord {
 	taskState := s.loadTaskState(record.ThreadID)
-	outcome := NewOutcomeService().Describe(record, RunOutcome{RunStatus: "error"}, err.Error())
-	outcome.TaskState = taskState
-	outcome.TaskLifecycle = NewTaskLifecycleService().Describe(RunOutcome{RunStatus: "error"}, taskState, false)
+	outcome := NewOutcomeService().DescribeWithTaskState(record, RunOutcome{RunStatus: "error"}, err.Error(), taskState, false)
 	record.Status = outcome.RunStatus
 	record.Error = outcome.Error
 	record.Outcome = outcome
@@ -50,11 +48,7 @@ func (s RunStateService) Begin(record RunRecord) RunRecord {
 	if record.Status == "" {
 		record.Status = "running"
 	}
-	if record.Outcome.RunStatus == "" {
-		record.Outcome = NewOutcomeService().Describe(record, RunOutcome{RunStatus: "running"}, "")
-	}
-	record.Outcome.TaskState = taskState
-	record.Outcome.TaskLifecycle = NewTaskLifecycleService().Describe(RunOutcome{RunStatus: "running"}, taskState, false)
+	record.Outcome = NewOutcomeService().DescribeWithTaskState(record, RunOutcome{RunStatus: "running"}, "", taskState, false)
 	record.UpdatedAt = s.now()
 	if s.runtime != nil {
 		s.runtime.SaveRunRecord(record)
@@ -66,9 +60,7 @@ func (s RunStateService) Begin(record RunRecord) RunRecord {
 
 func (s RunStateService) MarkCanceled(record RunRecord) RunRecord {
 	taskState := s.loadTaskState(record.ThreadID)
-	outcome := NewOutcomeService().Describe(record, RunOutcome{RunStatus: "interrupted", Interrupted: true}, "")
-	outcome.TaskState = taskState
-	outcome.TaskLifecycle = NewTaskLifecycleService().Describe(RunOutcome{RunStatus: "interrupted", Interrupted: true}, taskState, false)
+	outcome := NewOutcomeService().DescribeWithTaskState(record, RunOutcome{RunStatus: "interrupted", Interrupted: true}, "", taskState, false)
 	record.Status = outcome.RunStatus
 	record.Error = outcome.Error
 	record.Outcome = outcome

@@ -39,3 +39,27 @@ func TestOutcomeServiceDescribeLiveRunningUsesThreadState(t *testing.T) {
 		t.Fatalf("TaskLifecycle = %+v", outcome.TaskLifecycle)
 	}
 }
+
+func TestOutcomeServiceDescribeWithTaskStateBuildsLifecycle(t *testing.T) {
+	taskState := harness.TaskState{
+		Items: []harness.TaskItem{
+			{ID: "task-1", Text: "inspect repo", Status: harness.TaskStatusInProgress},
+		},
+		ExpectedOutputs: []string{"/mnt/user-data/outputs/report.md"},
+	}
+
+	outcome := NewOutcomeService().DescribeWithTaskState(RunRecord{Attempt: 3}, RunOutcome{RunStatus: "interrupted", Interrupted: true}, "", taskState, true)
+
+	if outcome.RunStatus != "interrupted" || !outcome.Interrupted {
+		t.Fatalf("Outcome = %+v", outcome)
+	}
+	if outcome.Attempt != 3 {
+		t.Fatalf("Attempt = %d, want 3", outcome.Attempt)
+	}
+	if outcome.TaskLifecycle.Status != "paused" {
+		t.Fatalf("TaskLifecycle = %+v, want paused", outcome.TaskLifecycle)
+	}
+	if len(outcome.TaskState.Items) != 1 || outcome.TaskState.Items[0].ID != "task-1" {
+		t.Fatalf("TaskState = %+v", outcome.TaskState)
+	}
+}

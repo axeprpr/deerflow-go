@@ -52,6 +52,13 @@ func (s OutcomeService) Describe(record RunRecord, outcome RunOutcome, errText s
 	}
 }
 
+func (s OutcomeService) DescribeWithTaskState(record RunRecord, outcome RunOutcome, errText string, taskState harness.TaskState, paused bool) RunOutcomeDescriptor {
+	descriptor := s.Describe(record, outcome, errText)
+	descriptor.TaskState = taskState
+	descriptor.TaskLifecycle = NewTaskLifecycleService().Describe(outcome, taskState, paused)
+	return descriptor
+}
+
 func (s OutcomeService) BindRecord(record RunRecord, descriptor RunOutcomeDescriptor) RunOutcomeDescriptor {
 	descriptor.Attempt = record.Attempt
 	descriptor.ResumeFromEvent = record.ResumeFromEvent
@@ -60,15 +67,7 @@ func (s OutcomeService) BindRecord(record RunRecord, descriptor RunOutcomeDescri
 }
 
 func (s OutcomeService) DescribeRunning(record RunRecord) RunOutcomeDescriptor {
-	return s.BindRecord(record, RunOutcomeDescriptor{
-		RunStatus: "running",
-		TaskState: harness.TaskState{},
-		TaskLifecycle: NewTaskLifecycleService().Describe(
-			RunOutcome{RunStatus: "running"},
-			harness.TaskState{},
-			false,
-		),
-	})
+	return s.DescribeWithTaskState(record, RunOutcome{RunStatus: "running"}, "", harness.TaskState{}, false)
 }
 
 func LoadLiveTaskState(store ThreadStateStore, threadID string) harness.TaskState {
@@ -98,14 +97,13 @@ func LoadLiveTaskLifecycle(store ThreadStateStore, threadID string) (TaskLifecyc
 }
 
 func (s OutcomeService) DescribeLiveRunning(record RunRecord, store ThreadStateStore) RunOutcomeDescriptor {
-	outcome := s.DescribeRunning(record)
 	taskState := LoadLiveTaskState(store, record.ThreadID)
+	outcome := s.DescribeWithTaskState(record, RunOutcome{RunStatus: "running"}, "", taskState, false)
+	if !taskState.IsZero() {
+		return outcome
+	}
 	if lifecycle, ok := LoadLiveTaskLifecycle(store, record.ThreadID); ok {
 		outcome.TaskLifecycle = lifecycle
-	}
-	if !taskState.IsZero() {
-		outcome.TaskState = taskState
-		outcome.TaskLifecycle = NewTaskLifecycleService().Describe(RunOutcome{RunStatus: "running"}, taskState, false)
 	}
 	return outcome
 }
