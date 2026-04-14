@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axeprpr/deerflow-go/pkg/harness"
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	toolctx "github.com/axeprpr/deerflow-go/pkg/tools"
 )
@@ -38,6 +40,11 @@ func (s *Server) todoTool() models.Tool {
 						"required": []any{"content", "status"},
 					},
 				},
+				"expected_outputs": map[string]any{
+					"type":        "array",
+					"description": "Optional absolute output paths that must be delivered before the task is complete. Only declare final deliverables under /mnt/user-data/outputs.",
+					"items":       map[string]any{"type": "string"},
+				},
 			},
 			"required": []any{"todos"},
 		},
@@ -62,11 +69,21 @@ func (s *Server) todoTool() models.Tool {
 					Error:    err.Error(),
 				}, err
 			}
+			taskState, err := taskStateFromTodoArguments(call.Arguments, todos)
+			if err != nil {
+				return models.ToolResult{
+					CallID:   call.ID,
+					ToolName: call.Name,
+					Status:   models.CallStatusFailed,
+					Error:    err.Error(),
+				}, err
+			}
 
-			s.setThreadTodos(threadID, todos)
+			s.setThreadTaskState(threadID, taskState)
 			data := map[string]any{
-				"thread_id": threadID,
-				"todos":     todosToAny(todos),
+				"thread_id":  threadID,
+				"todos":      todosToAny(todos),
+				"task_state": taskState.Value(),
 			}
 			content := fmt.Sprintf("Updated todo list with %d item(s)", len(todos))
 			if len(todos) == 0 {
@@ -82,6 +99,26 @@ func (s *Server) todoTool() models.Tool {
 			}, nil
 		},
 	}
+}
+
+func taskStateFromTodoArguments(args map[string]any, todos []Todo) (harness.TaskState, error) {
+	items := make([]harness.TaskItem, 0, len(todos))
+	for _, todo := range todos {
+		items = append(items, harness.TaskItem{
+			Text:   strings.TrimSpace(todo.Content),
+			Status: strings.TrimSpace(todo.Status),
+		})
+	}
+	expectedOutputs, err := harness.NormalizeTaskState(harness.TaskState{
+		ExpectedOutputs: anyStringSlice(args["expected_outputs"]),
+	})
+	if err != nil {
+		return harness.TaskState{}, err
+	}
+	return harness.NormalizeTaskState(harness.TaskState{
+		Items:           items,
+		ExpectedOutputs: expectedOutputs.ExpectedOutputs,
+	})
 }
 
 func decodeTodos(raw any) ([]Todo, error) {
@@ -145,7 +182,14 @@ func decodeTodoObject(obj map[string]any) (Todo, error) {
 	return Todo{Content: content, Status: status}, nil
 }
 
-func (s *Server) setThreadTodos(threadID string, todos []Todo) {
+func (s *Server) setThreadTaskState(threadID string, taskState harness.TaskState) {
+	todos := make([]Todo, 0, len(taskState.Items))
+	for _, item := range taskState.Items {
+		todos = append(todos, Todo{
+			Content: item.Text,
+			Status:  item.Status,
+		})
+	}
 	s.sessionsMu.Lock()
 	var snapshot *Session
 	session, exists := s.sessions[threadID]
@@ -163,6 +207,14 @@ func (s *Server) setThreadTodos(threadID string, todos []Todo) {
 		s.sessions[threadID] = session
 	}
 	session.Todos = append([]Todo(nil), todos...)
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
+	}
+	if taskState.IsZero() {
+		delete(session.Metadata, harnessruntime.DefaultTaskStateMetadataKey)
+	} else {
+		session.Metadata[harnessruntime.DefaultTaskStateMetadataKey] = taskState.Value()
+	}
 	session.UpdatedAt = time.Now().UTC()
 	snapshot = cloneSession(session)
 	s.sessionsMu.Unlock()
