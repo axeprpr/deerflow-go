@@ -183,6 +183,11 @@ func decodeTodoObject(obj map[string]any) (Todo, error) {
 }
 
 func (s *Server) setThreadTaskState(threadID string, taskState harness.TaskState) {
+	lifecycle := harnessruntime.NewTaskLifecycleService().Describe(
+		harnessruntime.RunOutcome{RunStatus: "running"},
+		taskState,
+		false,
+	)
 	todos := make([]Todo, 0, len(taskState.Items))
 	for _, item := range taskState.Items {
 		todos = append(todos, Todo{
@@ -212,8 +217,10 @@ func (s *Server) setThreadTaskState(threadID string, taskState harness.TaskState
 	}
 	if taskState.IsZero() {
 		delete(session.Metadata, harnessruntime.DefaultTaskStateMetadataKey)
+		delete(session.Metadata, harnessruntime.DefaultTaskLifecycleMetadataKey)
 	} else {
 		session.Metadata[harnessruntime.DefaultTaskStateMetadataKey] = taskState.Value()
+		session.Metadata[harnessruntime.DefaultTaskLifecycleMetadataKey] = lifecycle.Value()
 	}
 	session.UpdatedAt = time.Now().UTC()
 	snapshot = cloneSession(session)
@@ -221,8 +228,10 @@ func (s *Server) setThreadTaskState(threadID string, taskState harness.TaskState
 	if store := s.ensureThreadStateStore(); store != nil {
 		if taskState.IsZero() {
 			store.ClearThreadMetadata(threadID, harnessruntime.DefaultTaskStateMetadataKey)
+			store.ClearThreadMetadata(threadID, harnessruntime.DefaultTaskLifecycleMetadataKey)
 		} else {
 			store.SetThreadMetadata(threadID, harnessruntime.DefaultTaskStateMetadataKey, taskState.Value())
+			store.SetThreadMetadata(threadID, harnessruntime.DefaultTaskLifecycleMetadataKey, lifecycle.Value())
 		}
 	}
 	_ = s.persistSessionSnapshot(snapshot)

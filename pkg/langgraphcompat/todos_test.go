@@ -146,4 +146,56 @@ func TestTodoToolPersistsStructuredTaskState(t *testing.T) {
 	if got, _ := persisted["expected_outputs"].([]string); len(got) != 1 || got[0] != "/mnt/user-data/outputs/report.md" {
 		t.Fatalf("thread store expected_outputs=%#v", persisted["expected_outputs"])
 	}
+	lifecycle, ok := storeState.Metadata[harnessruntime.DefaultTaskLifecycleMetadataKey].(map[string]any)
+	if !ok {
+		t.Fatalf("thread store task_lifecycle=%#v", storeState.Metadata[harnessruntime.DefaultTaskLifecycleMetadataKey])
+	}
+	if got, _ := lifecycle["status"].(string); got != "running" {
+		t.Fatalf("task_lifecycle status=%q", got)
+	}
+	if got, _ := lifecycle["pending_tasks"].([]string); len(got) != 1 || got[0] != "present report" {
+		t.Fatalf("task_lifecycle pending_tasks=%#v", lifecycle["pending_tasks"])
+	}
+	if got, _ := lifecycle["expected_artifacts"].([]string); len(got) != 1 || got[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("task_lifecycle expected_artifacts=%#v", lifecycle["expected_artifacts"])
+	}
+}
+
+func TestTodoToolClearsTaskLifecycleWhenTodosClear(t *testing.T) {
+	s, _ := newCompatTestServer(t)
+	threadID := "thread-task-clear"
+
+	_, err := s.todoTool().Handler(toolctx.WithThreadID(context.Background(), threadID), models.ToolCall{
+		ID:   "call-1",
+		Name: "write_todos",
+		Arguments: map[string]any{
+			"todos": []any{
+				map[string]any{"content": "draft report", "status": "in_progress"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed Handler() error = %v", err)
+	}
+
+	_, err = s.todoTool().Handler(toolctx.WithThreadID(context.Background(), threadID), models.ToolCall{
+		ID:        "call-2",
+		Name:      "write_todos",
+		Arguments: map[string]any{"todos": []any{}},
+	})
+	if err != nil {
+		t.Fatalf("clear Handler() error = %v", err)
+	}
+
+	session := s.ensureSession(threadID, nil)
+	if _, ok := session.Metadata[harnessruntime.DefaultTaskLifecycleMetadataKey]; ok {
+		t.Fatalf("session task_lifecycle still present: %#v", session.Metadata[harnessruntime.DefaultTaskLifecycleMetadataKey])
+	}
+	storeState, ok := s.ensureThreadStateStore().LoadThreadRuntimeState(threadID)
+	if !ok {
+		t.Fatal("LoadThreadRuntimeState() ok = false, want true")
+	}
+	if _, ok := storeState.Metadata[harnessruntime.DefaultTaskLifecycleMetadataKey]; ok {
+		t.Fatalf("thread store task_lifecycle still present: %#v", storeState.Metadata[harnessruntime.DefaultTaskLifecycleMetadataKey])
+	}
 }
