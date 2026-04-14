@@ -140,6 +140,45 @@ func TestWorkerRunEventRecorderCarriesLiveTaskLifecycleIntoTaskEvents(t *testing
 	}
 }
 
+func TestWorkerRunEventRecorderSyncsRunningRecordFromLiveTaskState(t *testing.T) {
+	store := NewInMemoryRunEventStore()
+	threads := NewInMemoryThreadStateStore()
+	snapshots := NewInMemoryRunStore()
+	threads.SetThreadMetadata("thread-worker-live", DefaultTaskStateMetadataKey, harness.TaskState{
+		Items: []harness.TaskItem{
+			{ID: "task-1", Text: "delegate research", Status: harness.TaskStatusInProgress},
+		},
+		ExpectedOutputs: []string{"/mnt/user-data/outputs/report.md"},
+	}.Value())
+
+	recorder := NewWorkerRunEventRecorderWithRuntime(store, threads, snapshots)
+	plan := WorkerExecutionPlan{
+		RunID:    "run-worker-live",
+		ThreadID: "thread-worker-live",
+		Attempt:  1,
+	}
+
+	recorder.RecordTaskEvent(plan, subagent.TaskEvent{
+		Type:        "task_running",
+		TaskID:      "task-1",
+		Description: "delegate research",
+	})
+
+	record, ok := NewSnapshotStoreService(snapshots).LoadRecord(plan.RunID)
+	if !ok {
+		t.Fatal("LoadRecord() ok = false, want true")
+	}
+	if record.Status != "running" || record.Outcome.RunStatus != "running" {
+		t.Fatalf("record = %+v", record)
+	}
+	if len(record.Outcome.TaskState.Items) != 1 || record.Outcome.TaskState.Items[0].ID != "task-1" {
+		t.Fatalf("record outcome task state = %+v", record.Outcome.TaskState)
+	}
+	if len(record.Outcome.TaskLifecycle.ExpectedArtifacts) != 1 || record.Outcome.TaskLifecycle.ExpectedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("record outcome lifecycle = %+v", record.Outcome.TaskLifecycle)
+	}
+}
+
 type workerContextRuntimeStub struct {
 	spec harness.ContextSpec
 }

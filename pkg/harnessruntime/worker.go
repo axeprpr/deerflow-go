@@ -53,7 +53,7 @@ func (w RuntimeWorker) execute(ctx context.Context, req DispatchRequest) (*Dispa
 	}
 	handle := NewStaticExecutionHandle(prepared.Execution, prepared.Lifecycle.ThreadID)
 	if w.complete {
-		recorder := NewWorkerRunEventRecorder(w.events, w.threads)
+		recorder := NewWorkerRunEventRecorderWithRuntime(w.events, w.threads, w.snapshots)
 		ctx = bindWorkerExecutionContextWithTracker(ctx, runtime, w.specs, req.Plan, recorder, NewThreadTaskLifecycleTracker(w.threads, req.Plan.ThreadID))
 		runState := NewRunStateService(workerRunStateRuntime{
 			snapshots: w.snapshots,

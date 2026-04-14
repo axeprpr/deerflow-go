@@ -2,6 +2,7 @@ package harnessruntime
 
 import (
 	"strings"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
@@ -10,8 +11,9 @@ import (
 )
 
 type WorkerRunEventRecorder struct {
-	store   RunEventRecorder
-	threads ThreadStateStore
+	store     RunEventRecorder
+	threads   ThreadStateStore
+	snapshots RunSnapshotStore
 }
 
 func NewWorkerRunEventRecorder(store RunEventRecorder, threads ...ThreadStateStore) WorkerRunEventRecorder {
@@ -20,6 +22,14 @@ func NewWorkerRunEventRecorder(store RunEventRecorder, threads ...ThreadStateSto
 		recorder.threads = threads[0]
 	}
 	return recorder
+}
+
+func NewWorkerRunEventRecorderWithRuntime(store RunEventRecorder, threads ThreadStateStore, snapshots RunSnapshotStore) WorkerRunEventRecorder {
+	return WorkerRunEventRecorder{
+		store:     store,
+		threads:   threads,
+		snapshots: snapshots,
+	}
 }
 
 func (r WorkerRunEventRecorder) RecordAgentEvent(plan WorkerExecutionPlan, evt agent.AgentEvent) {
@@ -90,6 +100,7 @@ func (r WorkerRunEventRecorder) RecordAgentEvent(plan WorkerExecutionPlan, evt a
 				"error":          evt.ToolEvent.Error,
 			},
 		})
+		r.syncRunningRecord(plan)
 	case agent.AgentEventError:
 		errData := map[string]any{
 			"error":   "RunError",
@@ -120,6 +131,7 @@ func (r WorkerRunEventRecorder) RecordTaskEvent(plan WorkerExecutionPlan, evt su
 		"result":         evt.Result,
 		"error":          evt.Error,
 	})
+	r.syncRunningRecord(plan)
 }
 
 func (r WorkerRunEventRecorder) RecordClarification(plan WorkerExecutionPlan, item *clarification.Clarification) {
@@ -188,4 +200,16 @@ func runningOutcomeDescriptor(plan WorkerExecutionPlan, threads ThreadStateStore
 		outcome.TaskLifecycle = NewTaskLifecycleService().Describe(RunOutcome{RunStatus: "running"}, taskState, false)
 	}
 	return outcome
+}
+
+func (r WorkerRunEventRecorder) syncRunningRecord(plan WorkerExecutionPlan) {
+	if r.snapshots == nil {
+		return
+	}
+	record := loadWorkerRunRecord(plan, r.snapshots)
+	record.Status = "running"
+	record.Error = ""
+	record.Outcome = runningOutcomeDescriptor(plan, r.threads)
+	record.UpdatedAt = time.Now().UTC()
+	NewSnapshotStoreService(r.snapshots).SaveRecord(record)
 }
