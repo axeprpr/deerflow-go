@@ -40,3 +40,36 @@ func TestParseTaskStateNormalizesStructuredValues(t *testing.T) {
 		t.Fatalf("MissingExpectedOutputs()=%v want=[]", missing)
 	}
 }
+
+func TestMergeTaskStatesPreservesExpectedOutputsAndAddsVerifiedOutputs(t *testing.T) {
+	t.Parallel()
+
+	merged, err := MergeTaskStates(
+		TaskState{
+			Items: []TaskItem{
+				{Text: "draft report", Status: TaskStatusCompleted},
+				{Text: "present report", Status: TaskStatusPending},
+			},
+			ExpectedOutputs: []string{"/mnt/user-data/outputs/report.md"},
+		},
+		TaskState{
+			Items: []TaskItem{
+				{Text: "draft report", Status: TaskStatusCompleted},
+				{Text: "present report", Status: TaskStatusCompleted},
+			},
+			VerifiedOutputs: []string{"/mnt/user-data/outputs/report.md"},
+		},
+	)
+	if err != nil {
+		t.Fatalf("MergeTaskStates() error = %v", err)
+	}
+	if missing := merged.MissingExpectedOutputs(); len(missing) != 0 {
+		t.Fatalf("MissingExpectedOutputs()=%v want=[]", missing)
+	}
+	if got := len(merged.VerifiedOutputs); got != 1 {
+		t.Fatalf("VerifiedOutputs=%v want len=1", merged.VerifiedOutputs)
+	}
+	if got := merged.Items[1].Status; got != TaskStatusCompleted {
+		t.Fatalf("merged status=%q want=%q", got, TaskStatusCompleted)
+	}
+}

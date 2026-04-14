@@ -53,6 +53,9 @@ func (s CompletionService) Apply(threadID string, state *harness.RunState, resul
 	if title := strings.TrimSpace(metadataString(state, s.titleMetadataKey)); title != "" && s.runtime != nil {
 		s.runtime.SetThreadTitle(threadID, title)
 	}
+	if resolved, ok := resolveTaskStateFromRunState(state, result, DefaultTaskStateMetadataKey); ok && state != nil {
+		state.TaskState = resolved
+	}
 	if s.runtime != nil {
 		if state != nil && !state.TaskState.IsZero() {
 			s.runtime.SetThreadTaskState(threadID, state.TaskState)

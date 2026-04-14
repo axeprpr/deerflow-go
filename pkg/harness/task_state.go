@@ -66,6 +66,30 @@ func NormalizeTaskState(state TaskState) (TaskState, error) {
 	return normalized, nil
 }
 
+func MergeTaskStates(base TaskState, overlay TaskState) (TaskState, error) {
+	if base.IsZero() {
+		return NormalizeTaskState(overlay)
+	}
+	if overlay.IsZero() {
+		return NormalizeTaskState(base)
+	}
+	merged := TaskState{
+		Items:           append([]TaskItem(nil), base.Items...),
+		ExpectedOutputs: append([]string(nil), base.ExpectedOutputs...),
+		VerifiedOutputs: append([]string(nil), base.VerifiedOutputs...),
+	}
+	if len(overlay.Items) > 0 {
+		merged.Items = append([]TaskItem(nil), overlay.Items...)
+	}
+	if len(overlay.ExpectedOutputs) > 0 {
+		merged.ExpectedOutputs = append([]string(nil), overlay.ExpectedOutputs...)
+	}
+	if len(overlay.VerifiedOutputs) > 0 {
+		merged.VerifiedOutputs = append(merged.VerifiedOutputs, overlay.VerifiedOutputs...)
+	}
+	return NormalizeTaskState(merged)
+}
+
 func ParseTaskState(raw any) (TaskState, bool) {
 	switch value := raw.(type) {
 	case nil:

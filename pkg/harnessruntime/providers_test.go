@@ -516,6 +516,44 @@ func TestCompletionServiceDerivesTaskStateFromWriteTodosResult(t *testing.T) {
 	}
 }
 
+func TestCompletionServiceAllowsVerifiedExpectedOutputs(t *testing.T) {
+	t.Parallel()
+
+	runtime := &fakeCompletionRuntime{}
+	service := NewCompletionService(runtime, "generated_title", "clarification_interrupt")
+	outcome := service.Apply("thread-1", &harness.RunState{
+		ThreadID: "thread-1",
+		TaskState: harness.TaskState{
+			Items: []harness.TaskItem{
+				{Text: "draft report", Status: harness.TaskStatusCompleted},
+				{Text: "present report", Status: harness.TaskStatusCompleted},
+			},
+			ExpectedOutputs: []string{"/mnt/user-data/outputs/report.md"},
+		},
+	}, &agent.RunResult{
+		Messages: []models.Message{{
+			Role: models.RoleTool,
+			ToolResult: &models.ToolResult{
+				CallID:   "call-present",
+				ToolName: "present_files",
+				Status:   models.CallStatusCompleted,
+				Data: map[string]any{
+					"filepaths": []any{"/mnt/user-data/outputs/report.md"},
+				},
+			},
+		}},
+	})
+	if outcome.RunStatus != "success" {
+		t.Fatalf("RunStatus = %q, want %q", outcome.RunStatus, "success")
+	}
+	if got := len(runtime.taskState.VerifiedOutputs); got != 1 {
+		t.Fatalf("VerifiedOutputs=%v want len=1", runtime.taskState.VerifiedOutputs)
+	}
+	if runtime.taskState.VerifiedOutputs[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("VerifiedOutputs=%v", runtime.taskState.VerifiedOutputs)
+	}
+}
+
 func TestOutcomeServiceMapsInterruptedState(t *testing.T) {
 	t.Parallel()
 

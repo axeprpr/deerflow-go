@@ -150,10 +150,17 @@ func (a runtimeConversationAdapter) LoadTaskState(threadID string) harness.TaskS
 }
 
 func (a runtimeConversationAdapter) DeriveTaskState(threadID string, result *agent.RunResult) harness.TaskState {
+	loaded := a.LoadTaskState(threadID)
 	if state, ok := deriveRuntimeTaskState(result); ok {
+		if loaded.IsZero() {
+			return state
+		}
+		if merged, err := harness.MergeTaskStates(loaded, state); err == nil {
+			return merged
+		}
 		return state
 	}
-	return a.LoadTaskState(threadID)
+	return loaded
 }
 
 func (a runtimeMemoryAdapter) ResolveMemorySessionID(threadID string, agentName string) string {
