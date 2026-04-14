@@ -162,23 +162,55 @@ func (s runReplayStreamer) Join(run *Run) {
 	if run == nil {
 		return
 	}
-	sub, unsubscribe := harnessruntime.NewEventFeedService(s.server.runtimeEventAdapter()).Subscribe(run.RunID, 16)
+	feed := harnessruntime.NewEventFeedService(s.server.runtimeEventAdapter())
+	sub, unsubscribe := feed.Subscribe(run.RunID, 16)
 	defer unsubscribe()
 	record := runRecordFromRun(run)
+	last := run.ResumeFromEvent
+	if baseline, _ := feed.ReplayFrom(run.RunID, run.ResumeFromEvent); len(baseline) > 0 {
+		for _, event := range baseline {
+			event = normalizeRuntimeEventForRun(event, record)
+			if idx := harnessruntimeEventIndex(event); idx > last {
+				last = idx
+			}
+		}
+	}
+	seen := map[string]struct{}{}
+	handle := func(event harnessruntime.RunEvent) bool {
+		event = normalizeRuntimeEventForRun(event, record)
+		if idx := harnessruntimeEventIndex(event); idx > last {
+			last = idx
+		}
+		if event.ID != "" {
+			if _, ok := seen[event.ID]; ok {
+				return false
+			}
+			seen[event.ID] = struct{}{}
+		}
+		if s.filter.allows(event.Event) {
+			s.server.sendSSEEvent(s.w, s.flusher, streamEventFromRuntimeEvent(event))
+		}
+		return event.Event == "end"
+	}
 	for {
 		select {
 		case event, ok := <-sub:
 			if !ok {
 				return
 			}
-			event = normalizeRuntimeEventForRun(event, record)
-			if s.filter.allows(event.Event) {
-				s.server.sendSSEEvent(s.w, s.flusher, streamEventFromRuntimeEvent(event))
-			}
-			if event.Event == "end" {
+			if handle(event) {
 				return
 			}
-		case <-time.After(defaultSSEHeartbeatInterval):
+		case <-time.After(sseHeartbeatInterval):
+			events, replayedEnd := feed.ReplayFrom(run.RunID, last)
+			for _, event := range events {
+				if handle(event) {
+					return
+				}
+			}
+			if replayedEnd {
+				return
+			}
 			sendSSEHeartbeat(s.w, s.flusher)
 		}
 	}

@@ -48,6 +48,8 @@ type streamModeFilter struct {
 const maxUploadedImageParts = 4
 const defaultSSEHeartbeatInterval = 15 * time.Second
 
+var sseHeartbeatInterval = defaultSSEHeartbeatInterval
+
 type synchronizedSSEWriter struct {
 	http.ResponseWriter
 	flusher http.Flusher
@@ -642,7 +644,7 @@ func sendSSEHeartbeat(w http.ResponseWriter, flusher http.Flusher) {
 }
 
 func streamSSEHeartbeats(ctx context.Context, done <-chan struct{}, w http.ResponseWriter, flusher http.Flusher) {
-	ticker := time.NewTicker(defaultSSEHeartbeatInterval)
+	ticker := time.NewTicker(sseHeartbeatInterval)
 	defer ticker.Stop()
 	for {
 		select {
