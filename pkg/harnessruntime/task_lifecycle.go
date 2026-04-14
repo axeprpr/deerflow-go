@@ -92,43 +92,25 @@ func (t ThreadTaskLifecycleTracker) Observe(evt subagent.TaskEvent) {
 	if t.store == nil || t.threadID == "" {
 		return
 	}
-	lifecycle := t.load()
 	taskState := t.loadTaskState()
-	lifecycle.Status = "running"
 	description := strings.Join(strings.Fields(strings.TrimSpace(evt.Description)), " ")
 	switch strings.TrimSpace(evt.Type) {
 	case "task_started", "task_running":
-		lifecycle.PendingTasks = upsertLifecycleText(lifecycle.PendingTasks, description)
 		taskState = upsertTaskStateItem(taskState, description, harness.TaskStatusInProgress)
 	case "task_completed":
-		lifecycle.PendingTasks = removeLifecycleText(lifecycle.PendingTasks, description)
 		taskState = upsertTaskStateItem(taskState, description, harness.TaskStatusCompleted)
 	case "task_failed", "task_timed_out":
-		lifecycle.PendingTasks = upsertLifecycleText(lifecycle.PendingTasks, description)
 		taskState = upsertTaskStateItem(taskState, description, harness.TaskStatusPending)
 	default:
 		return
 	}
+	lifecycle := NewTaskLifecycleService().Describe(RunOutcome{RunStatus: "running"}, taskState, false)
 	t.store.SetThreadMetadata(t.threadID, DefaultTaskLifecycleMetadataKey, lifecycle.Value())
 	if taskState.IsZero() {
 		t.store.ClearThreadMetadata(t.threadID, DefaultTaskStateMetadataKey)
 	} else {
 		t.store.SetThreadMetadata(t.threadID, DefaultTaskStateMetadataKey, taskState.Value())
 	}
-}
-
-func (t ThreadTaskLifecycleTracker) load() TaskLifecycleDescriptor {
-	if t.store == nil || t.threadID == "" {
-		return TaskLifecycleDescriptor{}
-	}
-	state, ok := t.store.LoadThreadRuntimeState(t.threadID)
-	if !ok {
-		return TaskLifecycleDescriptor{}
-	}
-	if lifecycle, ok := ParseTaskLifecycle(state.Metadata[DefaultTaskLifecycleMetadataKey]); ok {
-		return lifecycle
-	}
-	return TaskLifecycleDescriptor{}
 }
 
 func (t ThreadTaskLifecycleTracker) loadTaskState() harness.TaskState {
@@ -165,36 +147,6 @@ func normalizeLifecycleStrings(raw any) []string {
 	default:
 		return nil
 	}
-}
-
-func upsertLifecycleText(items []string, text string) []string {
-	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
-	if text == "" {
-		return items
-	}
-	for _, item := range items {
-		if item == text {
-			return items
-		}
-	}
-	return append(append([]string(nil), items...), text)
-}
-
-func removeLifecycleText(items []string, text string) []string {
-	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
-	if text == "" || len(items) == 0 {
-		return items
-	}
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		if item != text {
-			out = append(out, item)
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 func upsertTaskStateItem(state harness.TaskState, text string, status string) harness.TaskState {

@@ -77,3 +77,40 @@ func TestThreadTaskLifecycleTrackerKeepsFailedDelegatedTasksPending(t *testing.T
 		t.Fatalf("task state after task_failed=%+v", taskState)
 	}
 }
+
+func TestThreadTaskLifecycleTrackerRecomputesLifecycleFromTaskState(t *testing.T) {
+	t.Parallel()
+
+	store := NewInMemoryThreadStateStore()
+	store.SetThreadMetadata("thread-1", DefaultTaskStateMetadataKey, harness.TaskState{
+		Items: []harness.TaskItem{
+			{Text: "draft report", Status: harness.TaskStatusCompleted},
+		},
+		ExpectedOutputs: []string{"/mnt/user-data/outputs/report.md"},
+		VerifiedOutputs: []string{"/mnt/user-data/outputs/draft.md"},
+	}.Value())
+
+	tracker := NewThreadTaskLifecycleTracker(store, "thread-1")
+	tracker.Observe(subagent.TaskEvent{Type: "task_running", Description: "delegate review"})
+
+	state, ok := store.LoadThreadRuntimeState("thread-1")
+	if !ok {
+		t.Fatal("thread state missing after task_running")
+	}
+	lifecycle, ok := ParseTaskLifecycle(state.Metadata[DefaultTaskLifecycleMetadataKey])
+	if !ok {
+		t.Fatalf("task lifecycle=%#v", state.Metadata[DefaultTaskLifecycleMetadataKey])
+	}
+	if lifecycle.Status != "running" {
+		t.Fatalf("lifecycle status=%q", lifecycle.Status)
+	}
+	if len(lifecycle.PendingTasks) != 1 || lifecycle.PendingTasks[0] != "delegate review" {
+		t.Fatalf("pending tasks=%#v", lifecycle.PendingTasks)
+	}
+	if len(lifecycle.ExpectedArtifacts) != 1 || lifecycle.ExpectedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("expected artifacts=%#v", lifecycle.ExpectedArtifacts)
+	}
+	if len(lifecycle.VerifiedArtifacts) != 1 || lifecycle.VerifiedArtifacts[0] != "/mnt/user-data/outputs/draft.md" {
+		t.Fatalf("verified artifacts=%#v", lifecycle.VerifiedArtifacts)
+	}
+}
