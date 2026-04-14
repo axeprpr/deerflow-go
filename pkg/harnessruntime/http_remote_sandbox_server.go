@@ -19,16 +19,42 @@ type HTTPRemoteSandboxServer struct {
 	config   SandboxManagerConfig
 	protocol RemoteSandboxProtocol
 
-	mu       sync.Mutex
-	sessions map[string]sandbox.Session
+	mu            sync.Mutex
+	sessions      map[string]*remoteSandboxServerLease
+	evictedLeases int64
+	stopCh        chan struct{}
+	wg            sync.WaitGroup
+	closed        bool
+}
+
+type remoteSandboxServerLease struct {
+	session     sandbox.Session
+	createdAt   time.Time
+	lastTouched time.Time
 }
 
 func NewHTTPRemoteSandboxServer(config SandboxManagerConfig, protocol RemoteSandboxProtocol) *HTTPRemoteSandboxServer {
-	return &HTTPRemoteSandboxServer{
-		config:   config.Normalized(),
+	normalized := config.Normalized()
+	leaseConfig := normalizeSandboxLeaseConfig(SandboxLeaseConfig{
+		HeartbeatInterval: normalized.HeartbeatInterval,
+		IdleTTL:           normalized.IdleTTL,
+		SweepInterval:     normalized.SweepInterval,
+	})
+	normalized.HeartbeatInterval = leaseConfig.HeartbeatInterval
+	normalized.IdleTTL = leaseConfig.IdleTTL
+	normalized.SweepInterval = leaseConfig.SweepInterval
+
+	server := &HTTPRemoteSandboxServer{
+		config:   normalized,
 		protocol: defaultRemoteSandboxProtocol(protocol),
-		sessions: map[string]sandbox.Session{},
+		sessions: map[string]*remoteSandboxServerLease{},
+		stopCh:   make(chan struct{}),
 	}
+	if normalized.IdleTTL > 0 && normalized.SweepInterval > 0 {
+		server.wg.Add(1)
+		go server.runJanitor()
+	}
+	return server
 }
 
 func (s *HTTPRemoteSandboxServer) Handler() http.Handler {
@@ -46,12 +72,14 @@ func (s *HTTPRemoteSandboxServer) handleHealth(w http.ResponseWriter, r *http.Re
 	}
 	s.mu.Lock()
 	activeLeases := len(s.sessions)
+	evictedLeases := s.evictedLeases
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":                "ok",
 		"backend":               s.config.Backend,
 		"active_leases":         activeLeases,
+		"evicted_leases":        evictedLeases,
 		"heartbeat_interval_ms": s.config.HeartbeatInterval.Milliseconds(),
 		"idle_ttl_ms":           s.config.IdleTTL.Milliseconds(),
 		"sweep_interval_ms":     s.config.SweepInterval.Milliseconds(),
@@ -91,7 +119,7 @@ func (s *HTTPRemoteSandboxServer) handleLease(w http.ResponseWriter, r *http.Req
 		s.releaseLease(leaseID)
 		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodPost && suffix == DefaultRemoteSandboxHeartbeatPath:
-		if _, ok := s.loadLease(leaseID); !ok {
+		if _, ok := s.loadLease(leaseID, true); !ok {
 			http.NotFound(w, r)
 			return
 		}
@@ -108,7 +136,7 @@ func (s *HTTPRemoteSandboxServer) handleLease(w http.ResponseWriter, r *http.Req
 }
 
 func (s *HTTPRemoteSandboxServer) handleLeaseExec(w http.ResponseWriter, r *http.Request, leaseID string) {
-	session, ok := s.loadLease(leaseID)
+	session, ok := s.loadLease(leaseID, true)
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -140,7 +168,7 @@ func (s *HTTPRemoteSandboxServer) handleLeaseExec(w http.ResponseWriter, r *http
 }
 
 func (s *HTTPRemoteSandboxServer) handleLeaseWriteFile(w http.ResponseWriter, r *http.Request, leaseID string) {
-	session, ok := s.loadLease(leaseID)
+	session, ok := s.loadLease(leaseID, true)
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -164,7 +192,7 @@ func (s *HTTPRemoteSandboxServer) handleLeaseWriteFile(w http.ResponseWriter, r 
 }
 
 func (s *HTTPRemoteSandboxServer) handleLeaseReadFile(w http.ResponseWriter, r *http.Request, leaseID string) {
-	session, ok := s.loadLease(leaseID)
+	session, ok := s.loadLease(leaseID, true)
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -188,28 +216,39 @@ func (s *HTTPRemoteSandboxServer) createLease() (string, sandbox.Session, error)
 	if err != nil {
 		return "", nil, err
 	}
+	now := time.Now().UTC()
 	s.mu.Lock()
-	s.sessions[leaseID] = session
+	s.sessions[leaseID] = &remoteSandboxServerLease{
+		session:     session,
+		createdAt:   now,
+		lastTouched: now,
+	}
 	s.mu.Unlock()
 	return leaseID, session, nil
 }
 
-func (s *HTTPRemoteSandboxServer) loadLease(leaseID string) (sandbox.Session, bool) {
+func (s *HTTPRemoteSandboxServer) loadLease(leaseID string, touch bool) (sandbox.Session, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	session, ok := s.sessions[leaseID]
-	return session, ok
+	lease, ok := s.sessions[leaseID]
+	if !ok || lease == nil || lease.session == nil {
+		return nil, false
+	}
+	if touch {
+		lease.lastTouched = time.Now().UTC()
+	}
+	return lease.session, true
 }
 
 func (s *HTTPRemoteSandboxServer) releaseLease(leaseID string) {
 	s.mu.Lock()
-	session, ok := s.sessions[leaseID]
+	lease, ok := s.sessions[leaseID]
 	if ok {
 		delete(s.sessions, leaseID)
 	}
 	s.mu.Unlock()
-	if ok && session != nil {
-		_ = session.Close()
+	if ok && lease != nil && lease.session != nil {
+		_ = lease.session.Close()
 	}
 }
 
@@ -236,17 +275,70 @@ func remoteSandboxLeasePathParts(path string) (leaseID string, suffix string) {
 
 func (s *HTTPRemoteSandboxServer) Close(ctx context.Context) error {
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil
+	}
+	s.closed = true
+	close(s.stopCh)
 	sessions := s.sessions
-	s.sessions = map[string]sandbox.Session{}
+	s.sessions = map[string]*remoteSandboxServerLease{}
 	s.mu.Unlock()
+	s.wg.Wait()
+
 	var closeErr error
-	for _, session := range sessions {
-		if session == nil {
+	for _, lease := range sessions {
+		if lease == nil || lease.session == nil {
 			continue
 		}
-		if err := session.Close(); err != nil && !errors.Is(err, context.Canceled) && closeErr == nil {
+		if err := lease.session.Close(); err != nil && !errors.Is(err, context.Canceled) && closeErr == nil {
 			closeErr = err
 		}
 	}
 	return closeErr
+}
+
+func (s *HTTPRemoteSandboxServer) runJanitor() {
+	defer s.wg.Done()
+	ticker := time.NewTicker(s.config.SweepInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.evictIdleLeases()
+		case <-s.stopCh:
+			return
+		}
+	}
+}
+
+func (s *HTTPRemoteSandboxServer) evictIdleLeases() {
+	if s == nil || s.config.IdleTTL <= 0 {
+		return
+	}
+	now := time.Now().UTC()
+	expired := make([]sandbox.Session, 0)
+
+	s.mu.Lock()
+	for leaseID, lease := range s.sessions {
+		if lease == nil || lease.session == nil {
+			delete(s.sessions, leaseID)
+			continue
+		}
+		lastTouched := lease.lastTouched
+		if lastTouched.IsZero() {
+			lastTouched = lease.createdAt
+		}
+		if lastTouched.IsZero() || now.Sub(lastTouched) < s.config.IdleTTL {
+			continue
+		}
+		delete(s.sessions, leaseID)
+		s.evictedLeases++
+		expired = append(expired, lease.session)
+	}
+	s.mu.Unlock()
+
+	for _, session := range expired {
+		_ = session.Close()
+	}
 }

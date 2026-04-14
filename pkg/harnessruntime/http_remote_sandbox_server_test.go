@@ -87,3 +87,56 @@ func TestRemoteSandboxLeaseServiceRoundTrip(t *testing.T) {
 		t.Fatalf("Close() error = %v", err)
 	}
 }
+
+func TestHTTPRemoteSandboxServerEvictsIdleLeases(t *testing.T) {
+	httpServer := NewHTTPRemoteSandboxServer(SandboxManagerConfig{
+		Name:              "sandbox-evict",
+		Root:              t.TempDir(),
+		HeartbeatInterval: 10 * time.Millisecond,
+		IdleTTL:           40 * time.Millisecond,
+		SweepInterval:     10 * time.Millisecond,
+	}, nil)
+	server := httptest.NewServer(httpServer.Handler())
+	defer server.Close()
+	defer func() {
+		_ = httpServer.Close(context.Background())
+	}()
+
+	service := NewRemoteSandboxLeaseService(server.URL, nil)
+	lease, err := service.AcquireLease(harness.AgentRequest{Features: harness.FeatureSet{Sandbox: true}})
+	if err != nil {
+		t.Fatalf("AcquireLease() error = %v", err)
+	}
+	if lease.Sandbox == nil {
+		t.Fatal("AcquireLease().Sandbox = nil")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	evicted := false
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(server.URL + DefaultRemoteSandboxHealthPath)
+		if err != nil {
+			t.Fatalf("health get error = %v", err)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			resp.Body.Close()
+			t.Fatalf("decode health body error = %v", err)
+		}
+		resp.Body.Close()
+		activeLeases, _ := body["active_leases"].(float64)
+		evictedLeases, _ := body["evicted_leases"].(float64)
+		if activeLeases == 0 && evictedLeases >= 1 {
+			evicted = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !evicted {
+		t.Fatal("timed out waiting for idle lease eviction")
+	}
+
+	if err := lease.Heartbeat(); err == nil {
+		t.Fatal("Heartbeat() error = nil after idle eviction, want not found")
+	}
+}
