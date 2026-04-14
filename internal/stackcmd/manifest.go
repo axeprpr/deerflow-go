@@ -26,6 +26,13 @@ type StackManifest struct {
 	WorkerThread   string              `json:"worker_thread"`
 	WorkerDispatch string              `json:"worker_dispatch"`
 	Components     []ComponentManifest `json:"components"`
+	Processes      []ProcessManifest   `json:"processes"`
+}
+
+type ProcessManifest struct {
+	Name   string   `json:"name"`
+	Binary string   `json:"binary"`
+	Args   []string `json:"args"`
 }
 
 func (c Config) Manifest() StackManifest {
@@ -75,6 +82,12 @@ func (c Config) Manifest() StackManifest {
 				Dedicated: true,
 			},
 		)
+		manifest.Processes = []ProcessManifest{
+			{Name: "gateway", Binary: "langgraph", Args: cfg.Gateway.CLIArgs()},
+			{Name: "worker", Binary: "runtime-node", Args: cfg.Worker.CLIArgs("")},
+			{Name: "state", Binary: "runtime-state", Args: cfg.State.CLIArgs()},
+			{Name: "sandbox", Binary: "runtime-sandbox", Args: cfg.Sandbox.CLIArgs()},
+		}
 		return manifest
 	}
 	manifest.Components = append(manifest.Components,
@@ -93,6 +106,10 @@ func (c Config) Manifest() StackManifest {
 			Dedicated: false,
 		},
 	)
+	manifest.Processes = []ProcessManifest{
+		{Name: "gateway", Binary: "langgraph", Args: cfg.Gateway.CLIArgs()},
+		{Name: "worker", Binary: "runtime-node", Args: cfg.Worker.CLIArgs("")},
+	}
 	return manifest
 }
 

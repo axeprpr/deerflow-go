@@ -28,6 +28,15 @@ func TestManifestIncludesDedicatedRemoteComponents(t *testing.T) {
 	if !manifest.Components[3].Dedicated || manifest.Components[3].Kind != ComponentSandbox {
 		t.Fatalf("sandbox component = %+v", manifest.Components[3])
 	}
+	if len(manifest.Processes) != 4 {
+		t.Fatalf("processes = %d", len(manifest.Processes))
+	}
+	if manifest.Processes[0].Binary != "langgraph" {
+		t.Fatalf("gateway process = %+v", manifest.Processes[0])
+	}
+	if manifest.Processes[1].Binary != "runtime-node" {
+		t.Fatalf("worker process = %+v", manifest.Processes[1])
+	}
 }
 
 func TestManifestReadyLinesUseDedicatedLabels(t *testing.T) {
