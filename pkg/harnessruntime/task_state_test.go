@@ -76,3 +76,78 @@ func TestResolveTaskStateFromRunStateMergesDerivedOutputs(t *testing.T) {
 		t.Fatalf("MissingExpectedOutputs()=%v want=[]", missing)
 	}
 }
+
+func TestDeriveTaskStateFromResultTracksCompletedSubagentTasks(t *testing.T) {
+	t.Parallel()
+
+	state, ok := DeriveTaskStateFromResult(&agent.RunResult{
+		Messages: []models.Message{
+			{
+				Role: models.RoleAI,
+				ToolCalls: []models.ToolCall{{
+					ID:   "call-task",
+					Name: "task",
+					Arguments: map[string]any{
+						"description": "delegate research",
+					},
+				}},
+			},
+			{
+				Role: models.RoleTool,
+				ToolResult: &models.ToolResult{
+					CallID:   "call-task",
+					ToolName: "task",
+					Status:   models.CallStatusCompleted,
+					Data: map[string]any{
+						"description": "delegate research",
+						"status":      "completed",
+					},
+				},
+			},
+		},
+	})
+	if !ok {
+		t.Fatal("DeriveTaskStateFromResult() ok = false, want true")
+	}
+	if len(state.Items) != 1 || state.Items[0].Text != "delegate research" || state.Items[0].Status != harness.TaskStatusCompleted {
+		t.Fatalf("Items=%+v", state.Items)
+	}
+}
+
+func TestDeriveTaskStateFromResultTracksFailedSubagentTasksAsPending(t *testing.T) {
+	t.Parallel()
+
+	state, ok := DeriveTaskStateFromResult(&agent.RunResult{
+		Messages: []models.Message{
+			{
+				Role: models.RoleAI,
+				ToolCalls: []models.ToolCall{{
+					ID:   "call-task",
+					Name: "task",
+					Arguments: map[string]any{
+						"description": "delegate research",
+					},
+				}},
+			},
+			{
+				Role: models.RoleTool,
+				ToolResult: &models.ToolResult{
+					CallID:   "call-task",
+					ToolName: "task",
+					Status:   models.CallStatusFailed,
+					Error:    "boom",
+					Data: map[string]any{
+						"description": "delegate research",
+						"status":      "failed",
+					},
+				},
+			},
+		},
+	})
+	if !ok {
+		t.Fatal("DeriveTaskStateFromResult() ok = false, want true")
+	}
+	if len(state.Items) != 1 || state.Items[0].Status != harness.TaskStatusPending {
+		t.Fatalf("Items=%+v", state.Items)
+	}
+}

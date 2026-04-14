@@ -53,6 +53,9 @@ func TestTaskToolCompleted(t *testing.T) {
 	if result.Content != "ok" {
 		t.Fatalf("content = %q, want ok", result.Content)
 	}
+	if result.Data["description"] != "run shell" || result.Data["status"] != string(subagent.TaskStatusCompleted) {
+		t.Fatalf("data = %#v", result.Data)
+	}
 }
 
 func TestTaskToolFailed(t *testing.T) {
@@ -75,6 +78,9 @@ func TestTaskToolFailed(t *testing.T) {
 	}
 	if result.Error != "boom" {
 		t.Fatalf("error = %q, want boom", result.Error)
+	}
+	if result.Data["description"] != "bad" || result.Data["status"] != string(subagent.TaskStatusFailed) {
+		t.Fatalf("data = %#v", result.Data)
 	}
 }
 

@@ -108,6 +108,11 @@ func DeriveTaskStateFromResult(result *agent.RunResult) (harness.TaskState, bool
 		return harness.TaskState{}, false
 	}
 	state := taskStateFromLatestTodoResult(result.Messages)
+	if taskState, ok := taskStateFromLatestSubagentResult(result.Messages); ok {
+		if merged, err := mergeTaskProgressState(state, taskState); err == nil {
+			state = merged
+		}
+	}
 	verified := deriveVerifiedOutputsFromMessages(result.Messages)
 	if len(verified) > 0 {
 		if merged, err := harness.MergeTaskStates(state, harness.TaskState{VerifiedOutputs: verified}); err == nil {
@@ -141,6 +146,101 @@ func taskStateFromLatestTodoResult(messages []models.Message) harness.TaskState 
 		}
 	}
 	return harness.TaskState{}
+}
+
+func taskStateFromLatestSubagentResult(messages []models.Message) (harness.TaskState, bool) {
+	if len(messages) == 0 {
+		return harness.TaskState{}, false
+	}
+	calls := make(map[string]models.ToolCall, len(messages))
+	for _, msg := range messages {
+		for _, call := range msg.ToolCalls {
+			if strings.TrimSpace(call.ID) == "" {
+				continue
+			}
+			calls[strings.TrimSpace(call.ID)] = call
+		}
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.ToolResult == nil {
+			continue
+		}
+		if strings.TrimSpace(msg.ToolResult.ToolName) != "task" {
+			continue
+		}
+		state, ok := taskStateFromSubagentToolResult(msg.ToolResult, calls[strings.TrimSpace(msg.ToolResult.CallID)])
+		if ok {
+			return state, true
+		}
+	}
+	return harness.TaskState{}, false
+}
+
+func taskStateFromSubagentToolResult(result *models.ToolResult, call models.ToolCall) (harness.TaskState, bool) {
+	if result == nil {
+		return harness.TaskState{}, false
+	}
+	description := strings.TrimSpace(anyString(result.Data["description"]))
+	if description == "" {
+		description = strings.TrimSpace(anyString(call.Arguments["description"]))
+	}
+	if description == "" {
+		return harness.TaskState{}, false
+	}
+	status := harness.TaskStatusCompleted
+	switch strings.TrimSpace(anyString(result.Data["status"])) {
+	case "completed", "task_completed":
+		status = harness.TaskStatusCompleted
+	default:
+		if result.Status == models.CallStatusFailed {
+			status = harness.TaskStatusPending
+		}
+	}
+	state, err := harness.NormalizeTaskState(harness.TaskState{
+		Items: []harness.TaskItem{{
+			Text:   description,
+			Status: status,
+		}},
+	})
+	if err != nil {
+		return harness.TaskState{}, false
+	}
+	return state, true
+}
+
+func mergeTaskProgressState(base harness.TaskState, update harness.TaskState) (harness.TaskState, error) {
+	if base.IsZero() {
+		return harness.NormalizeTaskState(update)
+	}
+	if update.IsZero() {
+		return harness.NormalizeTaskState(base)
+	}
+	merged := harness.TaskState{
+		Items:           append([]harness.TaskItem(nil), base.Items...),
+		ExpectedOutputs: append([]string(nil), base.ExpectedOutputs...),
+		VerifiedOutputs: append([]string(nil), base.VerifiedOutputs...),
+	}
+	for _, item := range update.Items {
+		replaced := false
+		for i := range merged.Items {
+			if merged.Items[i].Text == item.Text {
+				merged.Items[i].Status = item.Status
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			merged.Items = append(merged.Items, item)
+		}
+	}
+	if len(update.ExpectedOutputs) > 0 {
+		merged.ExpectedOutputs = append([]string(nil), update.ExpectedOutputs...)
+	}
+	if len(update.VerifiedOutputs) > 0 {
+		merged.VerifiedOutputs = append(merged.VerifiedOutputs, update.VerifiedOutputs...)
+	}
+	return harness.NormalizeTaskState(merged)
 }
 
 func parseTaskStatePayload(data map[string]any) (harness.TaskState, bool) {

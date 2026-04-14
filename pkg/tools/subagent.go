@@ -75,6 +75,12 @@ func TaskTool(pool taskPool) models.Tool {
 				CallID:   call.ID,
 				ToolName: call.Name,
 				Content:  completed.Result,
+				Data: map[string]any{
+					"task_id":       completed.ID,
+					"description":   strings.TrimSpace(description),
+					"status":        string(completed.Status),
+					"subagent_type": string(subagentType),
+				},
 			}
 			switch completed.Status {
 			case subagent.TaskStatusCompleted:
@@ -82,12 +88,15 @@ func TaskTool(pool taskPool) models.Tool {
 			case subagent.TaskStatusTimedOut:
 				result.Status = models.CallStatusFailed
 				result.Error = completed.Error
+				result.Data["error"] = completed.Error
 				return result, fmt.Errorf("subagent task timed out: %s", completed.Error)
 			default:
 				result.Status = models.CallStatusFailed
 				result.Error = completed.Error
+				result.Data["error"] = completed.Error
 				if result.Error == "" {
 					result.Error = fmt.Sprintf("subagent task ended with status %s", completed.Status)
+					result.Data["error"] = result.Error
 				}
 				return result, fmt.Errorf("%s", result.Error)
 			}
