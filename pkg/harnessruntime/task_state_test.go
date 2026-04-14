@@ -151,3 +151,55 @@ func TestDeriveTaskStateFromResultTracksFailedSubagentTasksAsPending(t *testing.
 		t.Fatalf("Items=%+v", state.Items)
 	}
 }
+
+func TestDeriveTaskStateFromResultTracksMultipleSubagentTasks(t *testing.T) {
+	t.Parallel()
+
+	state, ok := DeriveTaskStateFromResult(&agent.RunResult{
+		Messages: []models.Message{
+			{
+				Role: models.RoleAI,
+				ToolCalls: []models.ToolCall{
+					{ID: "call-task-1", Name: "task", Arguments: map[string]any{"description": "research api"}},
+					{ID: "call-task-2", Name: "task", Arguments: map[string]any{"description": "draft page"}},
+				},
+			},
+			{
+				Role: models.RoleTool,
+				ToolResult: &models.ToolResult{
+					CallID:   "call-task-1",
+					ToolName: "task",
+					Status:   models.CallStatusCompleted,
+					Data: map[string]any{
+						"description": "research api",
+						"status":      "completed",
+					},
+				},
+			},
+			{
+				Role: models.RoleTool,
+				ToolResult: &models.ToolResult{
+					CallID:   "call-task-2",
+					ToolName: "task",
+					Status:   models.CallStatusFailed,
+					Data: map[string]any{
+						"description": "draft page",
+						"status":      "failed",
+					},
+				},
+			},
+		},
+	})
+	if !ok {
+		t.Fatal("DeriveTaskStateFromResult() ok = false, want true")
+	}
+	if len(state.Items) != 2 {
+		t.Fatalf("Items=%+v want len=2", state.Items)
+	}
+	if state.Items[0].Text != "research api" || state.Items[0].Status != harness.TaskStatusCompleted {
+		t.Fatalf("Items[0]=%+v", state.Items[0])
+	}
+	if state.Items[1].Text != "draft page" || state.Items[1].Status != harness.TaskStatusPending {
+		t.Fatalf("Items[1]=%+v", state.Items[1])
+	}
+}

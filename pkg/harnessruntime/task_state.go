@@ -108,7 +108,7 @@ func DeriveTaskStateFromResult(result *agent.RunResult) (harness.TaskState, bool
 		return harness.TaskState{}, false
 	}
 	state := taskStateFromLatestTodoResult(result.Messages)
-	if taskState, ok := taskStateFromLatestSubagentResult(result.Messages); ok {
+	if taskState, ok := taskStateFromSubagentResults(result.Messages); ok {
 		if merged, err := mergeTaskProgressState(state, taskState); err == nil {
 			state = merged
 		}
@@ -148,7 +148,7 @@ func taskStateFromLatestTodoResult(messages []models.Message) harness.TaskState 
 	return harness.TaskState{}
 }
 
-func taskStateFromLatestSubagentResult(messages []models.Message) (harness.TaskState, bool) {
+func taskStateFromSubagentResults(messages []models.Message) (harness.TaskState, bool) {
 	if len(messages) == 0 {
 		return harness.TaskState{}, false
 	}
@@ -161,20 +161,26 @@ func taskStateFromLatestSubagentResult(messages []models.Message) (harness.TaskS
 			calls[strings.TrimSpace(call.ID)] = call
 		}
 	}
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
+	var state harness.TaskState
+	found := false
+	for _, msg := range messages {
 		if msg.ToolResult == nil {
 			continue
 		}
 		if strings.TrimSpace(msg.ToolResult.ToolName) != "task" {
 			continue
 		}
-		state, ok := taskStateFromSubagentToolResult(msg.ToolResult, calls[strings.TrimSpace(msg.ToolResult.CallID)])
+		derived, ok := taskStateFromSubagentToolResult(msg.ToolResult, calls[strings.TrimSpace(msg.ToolResult.CallID)])
 		if ok {
-			return state, true
+			merged, err := mergeTaskProgressState(state, derived)
+			if err != nil {
+				continue
+			}
+			state = merged
+			found = true
 		}
 	}
-	return harness.TaskState{}, false
+	return state, found
 }
 
 func taskStateFromSubagentToolResult(result *models.ToolResult, call models.ToolCall) (harness.TaskState, bool) {
