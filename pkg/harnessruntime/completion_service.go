@@ -18,6 +18,7 @@ type CompletionService struct {
 	runtime              CompletionRuntime
 	titleMetadataKey     string
 	interruptMetadataKey string
+	gate                 CompletionGate
 }
 
 type CompletionOutcome struct {
@@ -36,6 +37,7 @@ func NewCompletionService(runtime CompletionRuntime, titleMetadataKey string, in
 		runtime:              runtime,
 		titleMetadataKey:     titleMetadataKey,
 		interruptMetadataKey: interruptMetadataKey,
+		gate:                 NewCompletionGate(),
 	}
 }
 
@@ -50,21 +52,40 @@ func (s CompletionService) Apply(threadID string, state *harness.RunState, resul
 		s.runtime.SetThreadTitle(threadID, title)
 	}
 
-	interrupt := metadataMap(state, s.interruptMetadataKey)
-	if len(interrupt) == 0 && result != nil {
-		interrupt = harness.ClarificationInterruptFromMessages(result.Messages)
-	}
-	if len(interrupt) > 0 {
+	decision := s.gate.Evaluate(CompletionGateInput{
+		ThreadID:             threadID,
+		State:                state,
+		Result:               result,
+		InterruptMetadataKey: s.interruptMetadataKey,
+		PendingTasksKey:      DefaultCompletionPendingTasksKey,
+		ExpectedArtifactsKey: DefaultCompletionExpectedArtifactsKey,
+	})
+	if decision.InterruptRequested {
+		interrupt := metadataMap(state, s.interruptMetadataKey)
+		if len(interrupt) == 0 && result != nil {
+			interrupt = harness.ClarificationInterruptFromMessages(result.Messages)
+		}
 		if s.runtime != nil {
 			s.runtime.SetThreadInterrupts(threadID, []any{interrupt})
 			s.runtime.MarkThreadStatus(threadID, "interrupted")
 		}
-		outcome := outcomes.Resolve(true)
 		return CompletionOutcome{
-			RunOutcome: outcome,
+			RunOutcome: decision.Outcome,
 			Descriptor: outcomes.Describe(RunRecord{
 				ThreadID: threadID,
-			}, outcome, ""),
+			}, decision.Outcome, ""),
+		}
+	}
+	if !decision.Allowed {
+		if s.runtime != nil {
+			s.runtime.ClearThreadInterrupts(threadID)
+			s.runtime.MarkThreadStatus(threadID, "idle")
+		}
+		return CompletionOutcome{
+			RunOutcome: decision.Outcome,
+			Descriptor: outcomes.Describe(RunRecord{
+				ThreadID: threadID,
+			}, decision.Outcome, decision.Reason),
 		}
 	}
 
@@ -72,12 +93,11 @@ func (s CompletionService) Apply(threadID string, state *harness.RunState, resul
 		s.runtime.ClearThreadInterrupts(threadID)
 		s.runtime.MarkThreadStatus(threadID, "idle")
 	}
-	outcome := outcomes.Resolve(false)
 	return CompletionOutcome{
-		RunOutcome: outcome,
+		RunOutcome: decision.Outcome,
 		Descriptor: outcomes.Describe(RunRecord{
 			ThreadID: threadID,
-		}, outcome, ""),
+		}, decision.Outcome, ""),
 	}
 }
 

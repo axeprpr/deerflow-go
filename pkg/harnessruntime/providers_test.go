@@ -424,6 +424,31 @@ func TestCompletionServiceFallsBackToIdleWithoutInterrupt(t *testing.T) {
 	}
 }
 
+func TestCompletionServiceMarksRunIncompleteWhenPendingTasksRemain(t *testing.T) {
+	t.Parallel()
+
+	runtime := &fakeCompletionRuntime{}
+	service := NewCompletionService(runtime, "generated_title", "clarification_interrupt")
+	outcome := service.Apply("thread-1", &harness.RunState{
+		ThreadID: "thread-1",
+		Metadata: map[string]any{
+			DefaultCompletionPendingTasksKey: []string{"write summary", "verify artifact"},
+		},
+	}, &agent.RunResult{})
+	if outcome.Interrupted {
+		t.Fatalf("Interrupted = true, want false")
+	}
+	if outcome.RunStatus != "incomplete" {
+		t.Fatalf("RunStatus = %q, want %q", outcome.RunStatus, "incomplete")
+	}
+	if outcome.Descriptor.Error != "pending-tasks" {
+		t.Fatalf("Descriptor.Error = %q, want %q", outcome.Descriptor.Error, "pending-tasks")
+	}
+	if runtime.status != "idle" || !runtime.cleared {
+		t.Fatalf("unexpected runtime state: status=%q cleared=%v", runtime.status, runtime.cleared)
+	}
+}
+
 func TestOutcomeServiceMapsInterruptedState(t *testing.T) {
 	t.Parallel()
 
