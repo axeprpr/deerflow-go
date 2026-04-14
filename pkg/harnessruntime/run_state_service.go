@@ -40,10 +40,13 @@ func (s RunStateService) MarkError(record RunRecord, err error) RunRecord {
 	record.Error = outcome.Error
 	record.Outcome = outcome
 	record.UpdatedAt = s.now()
+	applyThreadMutation := s.shouldMutateThreadState(record)
 	if s.runtime != nil {
 		s.runtime.SaveRunRecord(record)
-		s.runtime.SetThreadTaskLifecycle(record.ThreadID, outcome.TaskLifecycle)
-		s.runtime.MarkThreadStatus(record.ThreadID, "error")
+		if applyThreadMutation {
+			s.runtime.SetThreadTaskLifecycle(record.ThreadID, outcome.TaskLifecycle)
+			s.runtime.MarkThreadStatus(record.ThreadID, "error")
+		}
 	}
 	s.clearActiveRunOwnership(record)
 	return record
@@ -72,10 +75,13 @@ func (s RunStateService) MarkCanceled(record RunRecord) RunRecord {
 	record.Error = outcome.Error
 	record.Outcome = outcome
 	record.UpdatedAt = s.now()
+	applyThreadMutation := s.shouldMutateThreadState(record)
 	if s.runtime != nil {
 		s.runtime.SaveRunRecord(record)
-		s.runtime.SetThreadTaskLifecycle(record.ThreadID, outcome.TaskLifecycle)
-		s.runtime.MarkThreadStatus(record.ThreadID, "interrupted")
+		if applyThreadMutation {
+			s.runtime.SetThreadTaskLifecycle(record.ThreadID, outcome.TaskLifecycle)
+			s.runtime.MarkThreadStatus(record.ThreadID, "interrupted")
+		}
 	}
 	s.clearActiveRunOwnership(record)
 	return record
@@ -98,12 +104,15 @@ func (s RunStateService) Finalize(record RunRecord, outcome CompletionOutcome) R
 	record.Error = descriptor.Error
 	record.Outcome = descriptor
 	record.UpdatedAt = s.now()
+	applyThreadMutation := s.shouldMutateThreadState(record)
 	if s.runtime != nil {
 		s.runtime.SaveRunRecord(record)
-		if !record.Outcome.TaskLifecycle.IsZero() {
-			s.runtime.SetThreadTaskLifecycle(record.ThreadID, record.Outcome.TaskLifecycle)
-		} else {
-			s.runtime.ClearThreadTaskLifecycle(record.ThreadID)
+		if applyThreadMutation {
+			if !record.Outcome.TaskLifecycle.IsZero() {
+				s.runtime.SetThreadTaskLifecycle(record.ThreadID, record.Outcome.TaskLifecycle)
+			} else {
+				s.runtime.ClearThreadTaskLifecycle(record.ThreadID)
+			}
 		}
 	}
 	s.clearActiveRunOwnership(record)
@@ -130,6 +139,24 @@ func (s RunStateService) setActiveRunOwnership(record RunRecord) {
 	}
 	store.SetThreadMetadata(threadID, DefaultRunIDMetadataKey, runID)
 	store.SetThreadMetadata(threadID, DefaultActiveRunMetadataKey, runID)
+}
+
+func (s RunStateService) shouldMutateThreadState(record RunRecord) bool {
+	store := s.threadStateStore()
+	if store == nil {
+		return true
+	}
+	threadID := strings.TrimSpace(record.ThreadID)
+	runID := strings.TrimSpace(record.RunID)
+	if threadID == "" || runID == "" {
+		return true
+	}
+	state, ok := store.LoadThreadRuntimeState(threadID)
+	if !ok {
+		return true
+	}
+	activeRunID := metadataRunID(state.Metadata[DefaultActiveRunMetadataKey])
+	return activeRunID == "" || activeRunID == runID
 }
 
 func (s RunStateService) clearActiveRunOwnership(record RunRecord) {

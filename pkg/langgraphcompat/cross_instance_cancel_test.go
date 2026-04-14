@@ -148,12 +148,23 @@ func TestCrossInstanceCancelKeepsOwnedActiveRunForJoinSelection(t *testing.T) {
 	}
 	serverA.saveRun(staleRun)
 	serverA.saveRun(activeRun)
+	serverA.ensureThreadStateStore().MarkThreadStatus(threadID, "busy")
 	serverA.ensureThreadStateStore().SetThreadMetadata(threadID, harnessruntime.DefaultRunIDMetadataKey, activeRun.RunID)
 	serverA.ensureThreadStateStore().SetThreadMetadata(threadID, harnessruntime.DefaultActiveRunMetadataKey, activeRun.RunID)
 
 	cancelResp := performCompatRequest(t, serverB.httpServer.Handler, http.MethodPost, "/threads/"+threadID+"/runs/"+staleRun.RunID+"/cancel", nil, nil)
 	if cancelResp.Code != http.StatusAccepted {
 		t.Fatalf("cancel status=%d body=%s", cancelResp.Code, cancelResp.Body.String())
+	}
+	threadState, ok := serverB.ensureThreadStateStore().LoadThreadRuntimeState(threadID)
+	if !ok {
+		t.Fatal("thread state missing after stale cancel")
+	}
+	if got := threadState.Status; got != "busy" {
+		t.Fatalf("thread status after stale cancel = %q, want busy", got)
+	}
+	if got := threadState.Metadata[harnessruntime.DefaultActiveRunMetadataKey]; got != activeRun.RunID {
+		t.Fatalf("active run metadata after stale cancel = %v, want %q", got, activeRun.RunID)
 	}
 
 	staleGet := performCompatRequest(t, serverB.httpServer.Handler, http.MethodGet, "/threads/"+threadID+"/runs/"+staleRun.RunID, nil, nil)

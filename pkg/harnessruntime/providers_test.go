@@ -921,6 +921,29 @@ func TestRunStateServiceMaintainsActiveRunOwnership(t *testing.T) {
 	if got := metadataRunID(state.Metadata[DefaultActiveRunMetadataKey]); got != "run-b" {
 		t.Fatalf("active run id = %q, want %q", got, "run-b")
 	}
+	if state.Status != "busy" {
+		t.Fatalf("thread status after begin = %q, want busy", state.Status)
+	}
+	lifecycle, ok := ParseTaskLifecycle(state.Metadata[DefaultTaskLifecycleMetadataKey])
+	if !ok || lifecycle.Status != "running" {
+		t.Fatalf("thread lifecycle after begin = %#v", state.Metadata[DefaultTaskLifecycleMetadataKey])
+	}
+
+	service.MarkCanceled(runA)
+	state, ok = threads.LoadThreadRuntimeState("thread-1")
+	if !ok {
+		t.Fatal("LoadThreadRuntimeState() = false after stale cancel")
+	}
+	if got := metadataRunID(state.Metadata[DefaultActiveRunMetadataKey]); got != "run-b" {
+		t.Fatalf("active run id after stale cancel = %q, want %q", got, "run-b")
+	}
+	if state.Status != "busy" {
+		t.Fatalf("thread status after stale cancel = %q, want busy", state.Status)
+	}
+	lifecycle, ok = ParseTaskLifecycle(state.Metadata[DefaultTaskLifecycleMetadataKey])
+	if !ok || lifecycle.Status != "running" {
+		t.Fatalf("thread lifecycle after stale cancel = %#v", state.Metadata[DefaultTaskLifecycleMetadataKey])
+	}
 
 	service.Finalize(runA, CompletionOutcome{
 		RunOutcome: RunOutcome{RunStatus: "success"},
@@ -933,6 +956,13 @@ func TestRunStateServiceMaintainsActiveRunOwnership(t *testing.T) {
 	if got := metadataRunID(state.Metadata[DefaultActiveRunMetadataKey]); got != "run-b" {
 		t.Fatalf("active run id after stale finalize = %q, want %q", got, "run-b")
 	}
+	if state.Status != "busy" {
+		t.Fatalf("thread status after stale finalize = %q, want busy", state.Status)
+	}
+	lifecycle, ok = ParseTaskLifecycle(state.Metadata[DefaultTaskLifecycleMetadataKey])
+	if !ok || lifecycle.Status != "running" {
+		t.Fatalf("thread lifecycle after stale finalize = %#v", state.Metadata[DefaultTaskLifecycleMetadataKey])
+	}
 
 	service.MarkCanceled(runB)
 	state, ok = threads.LoadThreadRuntimeState("thread-1")
@@ -941,6 +971,13 @@ func TestRunStateServiceMaintainsActiveRunOwnership(t *testing.T) {
 	}
 	if got := metadataRunID(state.Metadata[DefaultActiveRunMetadataKey]); got != "" {
 		t.Fatalf("active run id after owner cancel = %q, want empty", got)
+	}
+	if state.Status != "interrupted" {
+		t.Fatalf("thread status after owner cancel = %q, want interrupted", state.Status)
+	}
+	lifecycle, ok = ParseTaskLifecycle(state.Metadata[DefaultTaskLifecycleMetadataKey])
+	if !ok || lifecycle.Status != "interrupted" {
+		t.Fatalf("thread lifecycle after owner cancel = %#v", state.Metadata[DefaultTaskLifecycleMetadataKey])
 	}
 }
 
