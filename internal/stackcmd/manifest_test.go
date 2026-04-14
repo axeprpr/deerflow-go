@@ -78,12 +78,29 @@ func TestManifestIncludesSandboxMaxActiveLeases(t *testing.T) {
 
 	manifest := cfg.Manifest()
 	processes := processManifestByName(manifest.Processes)
-	if !strings.Contains(strings.Join(processes["sandbox"].Args, " "), "-sandbox-max-active-leases=6") {
+	if !strings.Contains(strings.Join(processes["sandbox"].Args, " "), "-max-active-leases=6") {
 		t.Fatalf("sandbox args = %#v", processes["sandbox"].Args)
 	}
 	joined := strings.Join(manifest.StartupLines(langgraphcmd.BuildInfo{}, false, ""), "\n")
 	if !strings.Contains(joined, "max_active_leases=6") {
 		t.Fatalf("StartupLines = %q", joined)
+	}
+}
+
+func TestManifestStateAndSandboxArgsMatchCommandFlags(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Preset = StackPresetSharedRemote
+	cfg.Worker.Addr = ":19081"
+
+	manifest := cfg.Manifest()
+	processes := processManifestByName(manifest.Processes)
+	stateArgs := strings.Join(processes["state"].Args, " ")
+	sandboxArgs := strings.Join(processes["sandbox"].Args, " ")
+	if strings.Contains(stateArgs, "-role=") || strings.Contains(stateArgs, "-transport-backend=") {
+		t.Fatalf("state args include unsupported runtime-node flags: %q", stateArgs)
+	}
+	if strings.Contains(sandboxArgs, "-role=") || strings.Contains(sandboxArgs, "-state-provider=") {
+		t.Fatalf("sandbox args include unsupported runtime-node flags: %q", sandboxArgs)
 	}
 }
 

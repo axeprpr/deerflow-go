@@ -466,6 +466,31 @@ func (c NodeConfig) deriveStateBackendsFromStoreURLs() NodeConfig {
 	return c
 }
 
+func (c NodeConfig) normalizeStateStoreURLsForBackends() NodeConfig {
+	c.StateStoreURL = normalizeStoreURLForBackend(c.StateStoreURL, effectiveStateBackend(c.StateBackend, ""))
+	c.SnapshotStoreURL = normalizeStoreURLForBackend(c.SnapshotStoreURL, effectiveStateBackend(c.SnapshotBackend, c.StateBackend))
+	c.EventStoreURL = normalizeStoreURLForBackend(c.EventStoreURL, effectiveStateBackend(c.EventBackend, c.StateBackend))
+	c.ThreadStoreURL = normalizeStoreURLForBackend(c.ThreadStoreURL, effectiveStateBackend(c.ThreadBackend, c.StateBackend))
+	return c
+}
+
+func normalizeStoreURLForBackend(raw string, backend harnessruntime.RuntimeStateStoreBackend) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	isRemote := strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://")
+	switch backend {
+	case harnessruntime.RuntimeStateStoreBackendRemote:
+		if isRemote {
+			return trimmed
+		}
+		return ""
+	default:
+		return trimmed
+	}
+}
+
 func effectiveStateBackend(override harnessruntime.RuntimeStateStoreBackend, fallback harnessruntime.RuntimeStateStoreBackend) harnessruntime.RuntimeStateStoreBackend {
 	if override != "" {
 		return override

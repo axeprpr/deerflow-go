@@ -146,3 +146,39 @@ func TestBindFlagsBuildsSharedRemoteGatewayConfig(t *testing.T) {
 		t.Fatalf("StateStoreURL = %q", cfg.StateStoreURL)
 	}
 }
+
+func TestBindFlagsKeepsRemoteBackendsForSharedSQLitePresetOverride(t *testing.T) {
+	fs := flag.NewFlagSet("runtime", flag.ContinueOnError)
+	defaults := DefaultRuntimeWorkerNodeConfig()
+	binding := BindFlags(fs, defaults, "", "")
+	if err := fs.Parse([]string{
+		"-preset=shared-sqlite",
+		"-state-backend=remote",
+		"-snapshot-backend=remote",
+		"-event-backend=remote",
+		"-thread-backend=remote",
+		"-state-store=http://127.0.0.1:29082/state",
+	}); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	cfg := binding.Config()
+	if cfg.StateBackend != harnessruntime.RuntimeStateStoreBackendRemote {
+		t.Fatalf("StateBackend = %q", cfg.StateBackend)
+	}
+	if cfg.SnapshotBackend != harnessruntime.RuntimeStateStoreBackendRemote {
+		t.Fatalf("SnapshotBackend = %q", cfg.SnapshotBackend)
+	}
+	if cfg.EventBackend != harnessruntime.RuntimeStateStoreBackendRemote {
+		t.Fatalf("EventBackend = %q", cfg.EventBackend)
+	}
+	if cfg.ThreadBackend != harnessruntime.RuntimeStateStoreBackendRemote {
+		t.Fatalf("ThreadBackend = %q", cfg.ThreadBackend)
+	}
+	if cfg.SnapshotStoreURL != "" || cfg.EventStoreURL != "" || cfg.ThreadStoreURL != "" {
+		t.Fatalf("unexpected per-store URLs: snapshot=%q event=%q thread=%q", cfg.SnapshotStoreURL, cfg.EventStoreURL, cfg.ThreadStoreURL)
+	}
+	if err := cfg.ValidateForRuntimeNode(); err != nil {
+		t.Fatalf("ValidateForRuntimeNode() error = %v", err)
+	}
+}

@@ -48,6 +48,7 @@ func DefaultSplitWorkerNodeConfig() NodeConfig {
 
 func ApplyNodePresetDefaults(config NodeConfig) NodeConfig {
 	config = applyNodePreset(config)
+	config = config.normalizeStateStoreURLsForBackends()
 	return config.deriveStateBackendsFromStoreURLs()
 }
 

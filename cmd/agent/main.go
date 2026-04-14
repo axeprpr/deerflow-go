@@ -198,7 +198,7 @@ func newApp(ctx context.Context, cfg config) (*app, func(), error) {
 		}
 	}
 
-	subagentPool := agent.NewSubagentPool(provider, registry, sb, cfg.SubagentMaxConcurrent, cfg.SubagentTimeout)
+	subagentPool := agent.NewSubagentPool(provider, registry, sb, nil, cfg.SubagentMaxConcurrent, cfg.SubagentTimeout)
 	mustRegister(registry, tools.TaskTool(subagentPool))
 
 	store := sessionStore(newMemoryStore())
