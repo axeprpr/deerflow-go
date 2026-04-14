@@ -187,3 +187,15 @@ func TestPrepareCommandSpawnProcessesRejectsInvalidRestartPolicy(t *testing.T) {
 		t.Fatalf("PrepareCommand() error = %v, want invalid restart policy", err)
 	}
 }
+
+func TestPrepareCommandWriteBundleRejectsInvalidRestartPolicy(t *testing.T) {
+	_, err := PrepareCommand(flag.NewFlagSet("runtime-stack-bundle-invalid-policy", flag.ContinueOnError), langgraphcmd.BuildInfo{}, CommandOptions{
+		Args: []string{
+			"-write-bundle=" + t.TempDir(),
+			"-bundle-restart-policy=sometimes",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid restart policy") {
+		t.Fatalf("PrepareCommand() error = %v, want invalid restart policy", err)
+	}
+}

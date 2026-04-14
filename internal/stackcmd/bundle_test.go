@@ -40,6 +40,15 @@ func TestWriteBundleWritesManifestAndProcesses(t *testing.T) {
 	if hostPlan.Electron.StartOrder[0] != "state" || hostPlan.Electron.StartOrder[1] != "sandbox" {
 		t.Fatalf("electron start order = %#v", hostPlan.Electron.StartOrder)
 	}
+	if hostPlan.RuntimePolicy.RestartPolicy != string(bundleDefaultRestartPolicy) {
+		t.Fatalf("runtime policy restart = %q", hostPlan.RuntimePolicy.RestartPolicy)
+	}
+	if hostPlan.RuntimePolicy.DependencyTimeoutMilli != bundleDefaultDependencyTimeout.Milliseconds() {
+		t.Fatalf("runtime policy dependency timeout = %d", hostPlan.RuntimePolicy.DependencyTimeoutMilli)
+	}
+	if hostPlan.RuntimePolicy.FailureIsolation {
+		t.Fatalf("runtime policy failure isolation = true, want false")
+	}
 	for _, name := range []string{"gateway.json", "worker.json", "state.json", "sandbox.json"} {
 		data, err := os.ReadFile(filepath.Join(dir, "processes", name))
 		if err != nil {
@@ -82,6 +91,75 @@ func TestPrepareCommandWriteBundle(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "host-plan.json")); err != nil {
 		t.Fatalf("host plan stat error = %v", err)
+	}
+}
+
+func TestPrepareCommandWriteBundleUsesBundlePolicyFlags(t *testing.T) {
+	var stdout strings.Builder
+	dir := t.TempDir()
+	prepared, err := PrepareCommand(flagSet("runtime-stack-bundle-policy"), langgraphcmd.BuildInfo{}, CommandOptions{
+		Stdout: &stdout,
+		Args: []string{
+			"-write-bundle=" + dir,
+			"-preset=shared-remote",
+			"-worker-addr=:19081",
+			"-bundle-restart-policy=always",
+			"-bundle-max-restarts=7",
+			"-bundle-restart-delay=2s",
+			"-bundle-dependency-timeout=90s",
+			"-bundle-failure-isolation",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareCommand() error = %v", err)
+	}
+	if err := prepared.Run(); err != nil {
+		t.Fatalf("prepared.Run() error = %v", err)
+	}
+	hostPlanData, err := os.ReadFile(filepath.Join(dir, "host-plan.json"))
+	if err != nil {
+		t.Fatalf("host plan read error = %v", err)
+	}
+	var hostPlan HostPlan
+	if err := json.Unmarshal(hostPlanData, &hostPlan); err != nil {
+		t.Fatalf("host plan decode error = %v", err)
+	}
+	if hostPlan.RuntimePolicy.RestartPolicy != string(ProcessRestartAlways) {
+		t.Fatalf("runtime policy restart=%q", hostPlan.RuntimePolicy.RestartPolicy)
+	}
+	if hostPlan.RuntimePolicy.MaxRestarts != 7 {
+		t.Fatalf("runtime policy max restarts=%d", hostPlan.RuntimePolicy.MaxRestarts)
+	}
+	if hostPlan.RuntimePolicy.RestartDelayMilli != 2000 {
+		t.Fatalf("runtime policy restart delay=%d", hostPlan.RuntimePolicy.RestartDelayMilli)
+	}
+	if hostPlan.RuntimePolicy.DependencyTimeoutMilli != 90000 {
+		t.Fatalf("runtime policy dependency timeout=%d", hostPlan.RuntimePolicy.DependencyTimeoutMilli)
+	}
+	if !hostPlan.RuntimePolicy.FailureIsolation {
+		t.Fatalf("runtime policy failure isolation = false")
+	}
+	if len(hostPlan.Processes) == 0 {
+		t.Fatal("host plan processes = 0")
+	}
+	if hostPlan.Processes[0].RestartPolicy != string(ProcessRestartAlways) {
+		t.Fatalf("process restart policy=%q", hostPlan.Processes[0].RestartPolicy)
+	}
+	if hostPlan.Processes[0].DependencyTimeoutMilli != 90000 {
+		t.Fatalf("process dependency timeout=%d", hostPlan.Processes[0].DependencyTimeoutMilli)
+	}
+	if !hostPlan.Processes[0].FailureIsolation {
+		t.Fatalf("process failure isolation=false")
+	}
+}
+
+func TestWriteBundleWithOptionsRejectsInvalidRestartPolicy(t *testing.T) {
+	cfg := DefaultConfig()
+	err := WriteBundleWithOptions(t.TempDir(), cfg.Manifest(), BundleOptions{
+		RestartPolicy: ProcessRestartPolicy("sometimes"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid restart policy") {
+		t.Fatalf("WriteBundleWithOptions() error = %v", err)
 	}
 }
 

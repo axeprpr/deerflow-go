@@ -35,6 +35,11 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 	logger := log.New(commandrun.OutputWriter(options.Stderr), "[runtime-stack] ", log.LstdFlags)
 	printManifest := fs.Bool("print-manifest", false, "print resolved runtime stack manifest and exit")
 	writeBundle := fs.String("write-bundle", "", "write stack manifest and per-process specs to a directory, then exit")
+	bundleRestartPolicy := fs.String("bundle-restart-policy", string(bundleDefaultRestartPolicy), "host-plan restart policy for write-bundle: never|on-failure|always")
+	bundleMaxRestarts := fs.Int("bundle-max-restarts", bundleDefaultMaxRestarts, "host-plan max restart attempts per process for write-bundle (<=0 means unlimited)")
+	bundleRestartDelay := fs.Duration("bundle-restart-delay", bundleDefaultRestartDelay, "host-plan restart delay for write-bundle")
+	bundleDependencyTimeout := fs.Duration("bundle-dependency-timeout", bundleDefaultDependencyTimeout, "host-plan dependency readiness timeout for write-bundle")
+	bundleFailureIsolation := fs.Bool("bundle-failure-isolation", bundleDefaultFailureIsolation, "host-plan failure isolation hint for write-bundle orchestration")
 	spawnProcesses := fs.Bool("spawn-processes", false, "launch stack using external processes from manifest binaries")
 	processBinaryDir := fs.String("process-binary-dir", "", "directory used to resolve process binaries when spawning external processes")
 	spawnRestartPolicy := fs.String("spawn-restart-policy", string(ProcessRestartOnFailure), "external process restart policy: never|on-failure|always")
@@ -60,9 +65,19 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 		}, nil
 	}
 	if strings.TrimSpace(*writeBundle) != "" {
+		restartPolicy, err := parseProcessRestartPolicy(*bundleRestartPolicy)
+		if err != nil {
+			return nil, err
+		}
 		return &commandrun.PreparedCommand{
 			RunFunc: func() error {
-				if err := WriteBundle(*writeBundle, builder.Manifest()); err != nil {
+				if err := WriteBundleWithOptions(*writeBundle, builder.Manifest(), BundleOptions{
+					RestartPolicy:     restartPolicy,
+					MaxRestarts:       *bundleMaxRestarts,
+					RestartDelay:      *bundleRestartDelay,
+					DependencyTimeout: *bundleDependencyTimeout,
+					FailureIsolation:  *bundleFailureIsolation,
+				}); err != nil {
 					return err
 				}
 				_, err := io.WriteString(commandrun.StdoutWriter(options.Stdout), *writeBundle+"\n")

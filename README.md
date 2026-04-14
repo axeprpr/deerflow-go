@@ -85,6 +85,11 @@ flowchart TD
   - `processes/worker.json`
   - `processes/state.json`
   - `processes/sandbox.json`
+- `-bundle-restart-policy=never|on-failure|always`: set `host-plan.json` restart policy
+- `-bundle-max-restarts=<n>`: set `host-plan.json` max restart count (`<=0` means unlimited)
+- `-bundle-restart-delay=<duration>`: set `host-plan.json` restart delay
+- `-bundle-dependency-timeout=<duration>`: set `host-plan.json` dependency readiness timeout
+- `-bundle-failure-isolation`: set `host-plan.json` failure-isolation hint for host orchestrators
 - `-spawn-processes`: launch the manifest as real OS processes (no `.sh`), using per-process `binary + args`
 - `-process-binary-dir=<dir>`: resolve process binaries from a specific directory in external-process mode
 - `-spawn-restart-policy=never|on-failure|always`: restart strategy for external-process mode
