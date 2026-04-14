@@ -449,6 +449,58 @@ func TestCompletionServiceMarksRunIncompleteWhenPendingTasksRemain(t *testing.T)
 	}
 }
 
+func TestCompletionServiceMarksRunIncompleteFromTaskState(t *testing.T) {
+	t.Parallel()
+
+	runtime := &fakeCompletionRuntime{}
+	service := NewCompletionService(runtime, "generated_title", "clarification_interrupt")
+	outcome := service.Apply("thread-1", &harness.RunState{
+		ThreadID: "thread-1",
+		TaskState: harness.TaskState{
+			Items: []harness.TaskItem{
+				{Text: "write summary", Status: harness.TaskStatusInProgress},
+				{Text: "verify artifact", Status: harness.TaskStatusPending},
+			},
+		},
+	}, &agent.RunResult{})
+	if outcome.RunStatus != "incomplete" {
+		t.Fatalf("RunStatus = %q, want %q", outcome.RunStatus, "incomplete")
+	}
+	if outcome.Descriptor.Error != "pending-tasks" {
+		t.Fatalf("Descriptor.Error = %q, want %q", outcome.Descriptor.Error, "pending-tasks")
+	}
+}
+
+func TestCompletionServiceDerivesTaskStateFromWriteTodosResult(t *testing.T) {
+	t.Parallel()
+
+	runtime := &fakeCompletionRuntime{}
+	service := NewCompletionService(runtime, "generated_title", "clarification_interrupt")
+	outcome := service.Apply("thread-1", &harness.RunState{
+		ThreadID: "thread-1",
+	}, &agent.RunResult{
+		Messages: []models.Message{{
+			Role: models.RoleTool,
+			ToolResult: &models.ToolResult{
+				ToolName: "write_todos",
+				Status:   models.CallStatusCompleted,
+				Data: map[string]any{
+					"todos": []any{
+						map[string]any{"content": "draft summary", "status": "completed"},
+						map[string]any{"content": "verify artifact", "status": "pending"},
+					},
+				},
+			},
+		}},
+	})
+	if outcome.RunStatus != "incomplete" {
+		t.Fatalf("RunStatus = %q, want %q", outcome.RunStatus, "incomplete")
+	}
+	if outcome.Descriptor.Error != "pending-tasks" {
+		t.Fatalf("Descriptor.Error = %q, want %q", outcome.Descriptor.Error, "pending-tasks")
+	}
+}
+
 func TestOutcomeServiceMapsInterruptedState(t *testing.T) {
 	t.Parallel()
 
@@ -504,10 +556,12 @@ func TestLifecycleConfigBuildHooks(t *testing.T) {
 		MemorySessionKey:     "memory_session_id",
 		InterruptMetadataKey: "clarification_interrupt",
 		TitleMetadataKey:     "generated_title",
+		TaskStateMetadataKey: DefaultTaskStateMetadataKey,
 	}.BuildHooks(features, LifecycleProviders{
 		MemoryRuntime:  &harness.MemoryRuntime{},
 		Summarizer:     Summarizer{},
 		MemoryPlanner:  MemoryScopePlanner{},
+		TaskState:      TaskStateProvider{},
 		TitleGenerator: TitleGenerator{},
 	})
 	if hooks == nil {

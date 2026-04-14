@@ -2,8 +2,10 @@ package langgraphcompat
 
 import (
 	"context"
+	"strings"
 	"sync"
 
+	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
@@ -118,6 +120,40 @@ func (a runtimeConversationAdapter) CompactConversation(ctx context.Context, thr
 
 func (a runtimeConversationAdapter) ComputeThreadTitle(ctx context.Context, threadID string, modelName string, messages []models.Message) string {
 	return a.server.computeThreadTitle(ctx, threadID, modelName, messages)
+}
+
+func (a runtimeConversationAdapter) LoadTaskState(threadID string) harness.TaskState {
+	if a.server == nil {
+		return harness.TaskState{}
+	}
+	session := a.server.ensureSession(threadID, nil)
+	if len(session.Todos) > 0 {
+		items := make([]harness.TaskItem, 0, len(session.Todos))
+		for _, todo := range session.Todos {
+			items = append(items, harness.TaskItem{
+				Text:   strings.TrimSpace(todo.Content),
+				Status: strings.TrimSpace(todo.Status),
+			})
+		}
+		state, err := harness.NormalizeTaskState(harness.TaskState{Items: items})
+		if err == nil {
+			return state
+		}
+	}
+	if state, ok := harness.ParseTaskState(session.Metadata[harnessruntime.DefaultTaskStateMetadataKey]); ok {
+		return state
+	}
+	if state, ok := taskStateFromTodosRaw(session.Metadata["todos"]); ok {
+		return state
+	}
+	return harness.TaskState{}
+}
+
+func (a runtimeConversationAdapter) DeriveTaskState(threadID string, result *agent.RunResult) harness.TaskState {
+	if state, ok := deriveRuntimeTaskState(result); ok {
+		return state
+	}
+	return a.LoadTaskState(threadID)
 }
 
 func (a runtimeMemoryAdapter) ResolveMemorySessionID(threadID string, agentName string) string {

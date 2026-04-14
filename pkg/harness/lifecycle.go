@@ -13,6 +13,7 @@ type RunState struct {
 	Model            string
 	AgentName        string
 	Spec             AgentSpec
+	TaskState        TaskState
 	ExistingMessages []models.Message
 	Messages         []models.Message
 	Metadata         map[string]any

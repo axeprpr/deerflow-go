@@ -17,6 +17,7 @@ type CompletionGateInput struct {
 	State                *harness.RunState
 	Result               *agent.RunResult
 	InterruptMetadataKey string
+	TaskStateMetadataKey string
 	PendingTasksKey      string
 	ExpectedArtifactsKey string
 }
@@ -40,10 +41,36 @@ func NewCompletionGate(checks ...CompletionCheck) CompletionGate {
 	if len(checks) == 0 {
 		checks = []CompletionCheck{
 			interruptCompletionCheck,
+			taskStateCompletionCheck,
 			pendingTasksCompletionCheck,
 		}
 	}
 	return CompletionGate{checks: append([]CompletionCheck(nil), checks...)}
+}
+
+func taskStateCompletionCheck(input CompletionGateInput) (CompletionGateDecision, bool) {
+	taskState, ok := resolveTaskStateFromRunState(input.State, input.Result, input.TaskStateMetadataKey)
+	if !ok {
+		return CompletionGateDecision{}, false
+	}
+	pending := taskState.PendingTexts()
+	missing := taskState.MissingExpectedOutputs()
+	if len(pending) == 0 && len(missing) == 0 {
+		return CompletionGateDecision{}, false
+	}
+	reason := "pending-tasks"
+	if len(pending) == 0 && len(missing) > 0 {
+		reason = "missing-expected-outputs"
+	}
+	return CompletionGateDecision{
+		Outcome: RunOutcome{
+			RunStatus: "incomplete",
+		},
+		Allowed:           false,
+		Reason:            reason,
+		PendingTasks:      pending,
+		ExpectedArtifacts: missing,
+	}, true
 }
 
 func (g CompletionGate) Evaluate(input CompletionGateInput) CompletionGateDecision {

@@ -57,6 +57,7 @@ func (s CompletionService) Apply(threadID string, state *harness.RunState, resul
 		State:                state,
 		Result:               result,
 		InterruptMetadataKey: s.interruptMetadataKey,
+		TaskStateMetadataKey: DefaultTaskStateMetadataKey,
 		PendingTasksKey:      DefaultCompletionPendingTasksKey,
 		ExpectedArtifactsKey: DefaultCompletionExpectedArtifactsKey,
 	})

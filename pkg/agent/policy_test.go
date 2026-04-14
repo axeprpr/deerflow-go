@@ -98,6 +98,34 @@ func TestDefaultToolTurnRecoveryPolicyUsesChatFallback(t *testing.T) {
 	}
 }
 
+func TestDefaultTaskProgressPolicyInjectsReminderAfterToolRounds(t *testing.T) {
+	policy := resolveRunPolicy(nil)
+	state := newTaskProgressState()
+	for i := 0; i < defaultTodoReminderThreshold; i++ {
+		policy.Task.ObserveToolCalls(state, []models.ToolCall{{Name: "read_file"}})
+	}
+	reminder := policy.Task.Reminder(state, []models.Message{
+		{Role: models.RoleAI, ToolCalls: []models.ToolCall{{Name: "read_file"}}},
+		{Role: models.RoleTool, Content: "ok"},
+		{Role: models.RoleAI, ToolCalls: []models.ToolCall{{Name: "write_file"}}},
+		{Role: models.RoleTool, Content: "ok"},
+		{Role: models.RoleAI, ToolCalls: []models.ToolCall{{Name: "ls"}}},
+	})
+	if reminder == "" {
+		t.Fatal("Reminder() = empty, want reminder")
+	}
+}
+
+func TestDefaultTaskProgressPolicyResetsAfterWriteTodos(t *testing.T) {
+	policy := resolveRunPolicy(nil)
+	state := newTaskProgressState()
+	policy.Task.ObserveToolCalls(state, []models.ToolCall{{Name: "read_file"}})
+	policy.Task.ObserveToolCalls(state, []models.ToolCall{{Name: "write_todos"}})
+	if state.RoundsSinceUpdate != 0 {
+		t.Fatalf("RoundsSinceUpdate = %d, want 0", state.RoundsSinceUpdate)
+	}
+}
+
 type toolRecoveryLLMProvider struct {
 	response llm.ChatResponse
 }

@@ -1,12 +1,17 @@
 package harnessruntime
 
-import "github.com/axeprpr/deerflow-go/pkg/harness"
+import (
+	"strings"
+
+	"github.com/axeprpr/deerflow-go/pkg/harness"
+)
 
 type LifecycleConfig struct {
 	SummaryMetadataKey   string
 	MemorySessionKey     string
 	InterruptMetadataKey string
 	TitleMetadataKey     string
+	TaskStateMetadataKey string
 }
 
 type LifecycleProviders struct {
@@ -14,6 +19,7 @@ type LifecycleProviders struct {
 	Summarizer     harness.Summarizer
 	MemoryResolver harness.MemoryScopeResolver
 	MemoryPlanner  harness.MemoryScopePlanner
+	TaskState      TaskStateProvider
 	TitleGenerator harness.TitleGenerator
 }
 
@@ -36,9 +42,19 @@ func (c LifecycleConfig) BuildHooks(features harness.FeatureAssembly, providers 
 		memoryHooks = harness.MemoryLifecycleHooksWithScopeResolver(providers.MemoryRuntime, providers.MemoryResolver, c.MemorySessionKey)
 	}
 
+	taskStateMetadataKey := c.TaskStateMetadataKey
+	if strings.TrimSpace(taskStateMetadataKey) == "" {
+		taskStateMetadataKey = DefaultTaskStateMetadataKey
+	}
+
 	return harness.MergeLifecycleHooks(
 		harness.SummarizationLifecycleHooksWithSummarizer(providers.Summarizer, c.SummaryMetadataKey),
 		memoryHooks,
+		harness.TaskLifecycleHooks(harness.TaskLifecycleConfig{
+			TaskStateMetadataKey: taskStateMetadataKey,
+			Load:                 providers.TaskState.LoadTaskState,
+			Derive:               providers.TaskState.DeriveTaskState,
+		}),
 		harness.ClarificationLifecycleHooks(harness.ClarificationLifecycleConfig{
 			InterruptMetadataKey: c.InterruptMetadataKey,
 		}),

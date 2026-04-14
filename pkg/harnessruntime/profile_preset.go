@@ -21,6 +21,7 @@ func DefaultLifecycleConfig() LifecycleConfig {
 		MemorySessionKey:     "memory_session_id",
 		InterruptMetadataKey: "clarification_interrupt",
 		TitleMetadataKey:     "generated_title",
+		TaskStateMetadataKey: DefaultTaskStateMetadataKey,
 	}
 }
 

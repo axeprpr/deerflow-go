@@ -178,12 +178,25 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 	runMessages = patchDanglingToolCalls(runMessages)
 	usage := &Usage{}
 	loopState := newToolLoopState()
+	taskState := newTaskProgressState()
 
 	for turn := 0; turn < a.maxTurns; turn++ {
+		visibleTools := a.visibleTools(deferredState)
+		if hasTodoTool(visibleTools) {
+			if reminder := a.runPolicy.Task.Reminder(taskState, runMessages); reminder != "" {
+				runMessages = append(runMessages, models.Message{
+					ID:        newMessageID("system"),
+					SessionID: sessionID,
+					Role:      models.RoleSystem,
+					Content:   reminder,
+					CreatedAt: time.Now().UTC(),
+				})
+			}
+		}
 		req := llm.ChatRequest{
 			Model:           a.model,
 			Messages:        runMessages,
-			Tools:           a.visibleTools(deferredState),
+			Tools:           visibleTools,
 			ReasoningEffort: a.reasoningEffort,
 			Temperature:     a.temperature,
 			MaxTokens:       a.maxTokens,
@@ -391,6 +404,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 		if execErr != nil {
 			return nil, execErr
 		}
+		a.runPolicy.Task.ObserveToolCalls(taskState, toolCalls)
 		if len(viewedImages) > 0 {
 			runMessages = append(runMessages, viewedImagesMessage(sessionID, viewedImages, modelLikelySupportsVision(a.model)))
 		}
@@ -406,6 +420,15 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 	err := fmt.Errorf("agent exceeded max turns (%d)", a.maxTurns)
 	emit(AgentEvent{Type: AgentEventError, Err: err.Error(), Error: newAgentError(err)})
 	return nil, err
+}
+
+func hasTodoTool(tools []models.Tool) bool {
+	for _, tool := range tools {
+		if strings.EqualFold(strings.TrimSpace(tool.Name), "write_todos") {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Agent) recoverToolTurn(

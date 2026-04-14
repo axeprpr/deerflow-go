@@ -34,6 +34,7 @@ func (b serverRuntimeProfileBuilder) BuildProfile() harness.RuntimeProfile {
 			MemoryRuntime:  b.memoryRuntime,
 			Summarizer:     harnessruntime.NewSummarizer(b.server.runtimeConversationAdapter()),
 			MemoryPlanner:  harnessruntime.NewMemoryScopePlanner(b.server.runtimeMemoryAdapter()),
+			TaskState:      harnessruntime.NewTaskStateProvider(b.server.runtimeConversationAdapter()),
 			TitleGenerator: harnessruntime.NewTitleGenerator(b.server.runtimeConversationAdapter()),
 		},
 	})

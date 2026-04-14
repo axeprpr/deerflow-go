@@ -37,6 +37,12 @@ type TitleLifecycleConfig struct {
 	Generate         func(context.Context, *RunState, *agent.RunResult) string
 }
 
+type TaskLifecycleConfig struct {
+	TaskStateMetadataKey string
+	Load                 func(*RunState) TaskState
+	Derive               func(*RunState, *agent.RunResult) TaskState
+}
+
 type MemorySessionResolver interface {
 	ResolveMemorySession(*RunState) string
 }
@@ -246,6 +252,66 @@ func injectMemoryScopes(ctx context.Context, runtime *MemoryRuntime, scopes []pk
 		sections = append(sections, injected)
 	}
 	return strings.TrimSpace(strings.Join(sections, "\n\n"))
+}
+
+func TaskLifecycleHooks(cfg TaskLifecycleConfig) *LifecycleHooks {
+	key := strings.TrimSpace(cfg.TaskStateMetadataKey)
+	if key == "" {
+		key = "task_state"
+	}
+	if cfg.Load == nil && cfg.Derive == nil {
+		return nil
+	}
+	return &LifecycleHooks{
+		BeforeRun: []BeforeRunHook{
+			func(_ context.Context, state *RunState) error {
+				if state == nil || cfg.Load == nil {
+					return nil
+				}
+				if !state.TaskState.IsZero() {
+					applyTaskStateMetadata(state, key)
+					return nil
+				}
+				taskState, err := NormalizeTaskState(cfg.Load(state))
+				if err != nil {
+					return err
+				}
+				state.TaskState = taskState
+				applyTaskStateMetadata(state, key)
+				return nil
+			},
+		},
+		AfterRun: []AfterRunHook{
+			func(_ context.Context, state *RunState, result *agent.RunResult) error {
+				if state == nil || cfg.Derive == nil {
+					return nil
+				}
+				taskState, err := NormalizeTaskState(cfg.Derive(state, result))
+				if err != nil {
+					return err
+				}
+				if !taskState.IsZero() {
+					state.TaskState = taskState
+				}
+				applyTaskStateMetadata(state, key)
+				return nil
+			},
+		},
+	}
+}
+
+func applyTaskStateMetadata(state *RunState, key string) {
+	if state == nil || strings.TrimSpace(key) == "" {
+		return
+	}
+	if state.Metadata == nil {
+		state.Metadata = map[string]any{}
+	}
+	if state.TaskState.IsZero() {
+		delete(state.Metadata, key)
+		return
+	}
+	state.Metadata[key] = state.TaskState.Value()
 }
 
 func ClarificationInterruptFromMessages(messages []models.Message) map[string]any {

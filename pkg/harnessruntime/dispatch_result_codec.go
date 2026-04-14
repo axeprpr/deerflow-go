@@ -15,13 +15,14 @@ type DispatchResultMarshaler interface {
 }
 
 type portableRunLifecycle struct {
-	ThreadID         string           `json:"thread_id"`
-	AssistantID      string           `json:"assistant_id"`
-	Model            string           `json:"model,omitempty"`
-	AgentName        string           `json:"agent_name,omitempty"`
-	ExistingMessages []models.Message `json:"existing_messages,omitempty"`
-	Messages         []models.Message `json:"messages,omitempty"`
-	Metadata         map[string]any   `json:"metadata,omitempty"`
+	ThreadID         string            `json:"thread_id"`
+	AssistantID      string            `json:"assistant_id"`
+	Model            string            `json:"model,omitempty"`
+	AgentName        string            `json:"agent_name,omitempty"`
+	TaskState        harness.TaskState `json:"task_state,omitempty"`
+	ExistingMessages []models.Message  `json:"existing_messages,omitempty"`
+	Messages         []models.Message  `json:"messages,omitempty"`
+	Metadata         map[string]any    `json:"metadata,omitempty"`
 }
 
 type portableDispatchResult struct {
@@ -54,6 +55,7 @@ func (c DispatchResultCodec) Encode(result *DispatchResult) ([]byte, error) {
 			AssistantID:      result.Lifecycle.AssistantID,
 			Model:            result.Lifecycle.Model,
 			AgentName:        result.Lifecycle.AgentName,
+			TaskState:        result.Lifecycle.TaskState,
 			ExistingMessages: append([]models.Message(nil), result.Lifecycle.ExistingMessages...),
 			Messages:         append([]models.Message(nil), result.Lifecycle.Messages...),
 			Metadata:         copyStringAnyMap(result.Lifecycle.Metadata),
@@ -82,6 +84,7 @@ func (c DispatchResultCodec) Decode(data []byte) (*DispatchResult, error) {
 			AssistantID:      payload.Lifecycle.AssistantID,
 			Model:            payload.Lifecycle.Model,
 			AgentName:        payload.Lifecycle.AgentName,
+			TaskState:        payload.Lifecycle.TaskState,
 			ExistingMessages: append([]models.Message(nil), payload.Lifecycle.ExistingMessages...),
 			Messages:         append([]models.Message(nil), payload.Lifecycle.Messages...),
 			Metadata:         copyStringAnyMap(payload.Lifecycle.Metadata),

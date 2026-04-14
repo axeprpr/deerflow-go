@@ -15,9 +15,12 @@ import (
 const defaultLoopWarnThreshold = 3
 const defaultLoopHardLimit = 5
 const defaultLoopWindowSize = 20
+const defaultTodoReminderThreshold = 3
 
 const loopWarningMessage = "[LOOP DETECTED] You are repeating the same tool calls. Stop calling tools and produce your final answer now. If you cannot complete the task, summarize what you accomplished so far."
 const loopHardStopMessage = "[FORCED STOP] Repeated tool calls exceeded the safety limit. Producing final answer with results collected so far."
+const todoReminderPrefix = "[todo reminder]"
+const todoReminderMessage = todoReminderPrefix + "\nYou have been doing multi-step work for several rounds without updating the plan. Call write_todos to reflect progress (completed/in_progress/pending) before continuing."
 
 type RunPolicy struct {
 	ToolTurns ToolTurnPolicy
@@ -25,6 +28,7 @@ type RunPolicy struct {
 	Recovery  ToolTurnRecoveryPolicy
 	Loop      LoopPolicy
 	Retry     RetryPolicy
+	Task      TaskProgressPolicy
 }
 
 type ToolTurnPolicy interface {
@@ -47,6 +51,11 @@ type RetryPolicy interface {
 	RecoverableToolRetryPrompt([]models.Message) string
 }
 
+type TaskProgressPolicy interface {
+	Reminder(*TaskProgressState, []models.Message) string
+	ObserveToolCalls(*TaskProgressState, []models.ToolCall)
+}
+
 type LoopDecision struct {
 	Warning  string
 	HardStop bool
@@ -55,6 +64,10 @@ type LoopDecision struct {
 type ToolLoopState struct {
 	History []string
 	Warned  map[string]struct{}
+}
+
+type TaskProgressState struct {
+	RoundsSinceUpdate int
 }
 
 type DefaultToolTurnPolicy struct{}
@@ -69,6 +82,10 @@ type DefaultLoopPolicy struct {
 }
 
 type DefaultRetryPolicy struct{}
+type DefaultTaskProgressPolicy struct {
+	ReminderThreshold int
+	ReminderText      string
+}
 
 type ToolTurnRecoveryState struct {
 	MessageID           string
@@ -95,6 +112,10 @@ func DefaultRunPolicy() *RunPolicy {
 			WarningText:   loopWarningMessage,
 		},
 		Retry: DefaultRetryPolicy{},
+		Task: DefaultTaskProgressPolicy{
+			ReminderThreshold: defaultTodoReminderThreshold,
+			ReminderText:      todoReminderMessage,
+		},
 	}
 }
 
@@ -103,6 +124,10 @@ func newToolLoopState() *ToolLoopState {
 		History: make([]string, 0, defaultLoopWindowSize),
 		Warned:  make(map[string]struct{}),
 	}
+}
+
+func newTaskProgressState() *TaskProgressState {
+	return &TaskProgressState{}
 }
 
 func (p DefaultToolTurnPolicy) UseStructuredToolCalls(provider llm.LLMProvider, _ llm.ChatRequest) bool {
@@ -216,6 +241,39 @@ func (DefaultRetryPolicy) RecoverableToolRetryPrompt(messages []models.Message) 
 	return recoverableToolRetryPrompt(messages)
 }
 
+func (p DefaultTaskProgressPolicy) Reminder(state *TaskProgressState, messages []models.Message) string {
+	if state == nil {
+		state = newTaskProgressState()
+	}
+	threshold := p.ReminderThreshold
+	if threshold <= 0 {
+		threshold = defaultTodoReminderThreshold
+	}
+	if state.RoundsSinceUpdate < threshold {
+		return ""
+	}
+	if !hasRecentToolActivity(messages, threshold) {
+		return ""
+	}
+	if hasRecentTaskReminder(messages) {
+		return ""
+	}
+	return firstNonEmpty(p.ReminderText, todoReminderMessage)
+}
+
+func (DefaultTaskProgressPolicy) ObserveToolCalls(state *TaskProgressState, calls []models.ToolCall) {
+	if state == nil || len(calls) == 0 {
+		return
+	}
+	for _, call := range calls {
+		if strings.EqualFold(strings.TrimSpace(call.Name), "write_todos") {
+			state.RoundsSinceUpdate = 0
+			return
+		}
+	}
+	state.RoundsSinceUpdate++
+}
+
 func resolveRunPolicy(policy *RunPolicy) *RunPolicy {
 	if policy == nil {
 		return DefaultRunPolicy()
@@ -240,7 +298,43 @@ func resolveRunPolicy(policy *RunPolicy) *RunPolicy {
 	if policy.Retry == nil {
 		policy.Retry = DefaultRetryPolicy{}
 	}
+	if policy.Task == nil {
+		policy.Task = DefaultTaskProgressPolicy{
+			ReminderThreshold: defaultTodoReminderThreshold,
+			ReminderText:      todoReminderMessage,
+		}
+	}
 	return policy
+}
+
+func hasRecentToolActivity(messages []models.Message, rounds int) bool {
+	if rounds <= 0 {
+		return false
+	}
+	seen := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role == models.RoleAI && len(msg.ToolCalls) > 0 {
+			seen++
+			if seen >= rounds {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasRecentTaskReminder(messages []models.Message) bool {
+	for i := len(messages) - 1; i >= 0 && i >= len(messages)-4; i-- {
+		msg := messages[i]
+		if msg.Role != models.RoleSystem {
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(msg.Content), todoReminderPrefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func hashToolCalls(calls []models.ToolCall) string {
