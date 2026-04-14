@@ -764,6 +764,10 @@ func TestPreflightServicePreparesRunState(t *testing.T) {
 	if runtime.metadata["assistant_id"] != "lead_agent" || runtime.metadata["run_id"] != "generated-id" {
 		t.Fatalf("metadata = %#v", runtime.metadata)
 	}
+	lifecycle, ok := runtime.metadata[DefaultTaskLifecycleMetadataKey].(map[string]any)
+	if !ok || lifecycle["status"] != "running" {
+		t.Fatalf("task lifecycle metadata = %#v", runtime.metadata[DefaultTaskLifecycleMetadataKey])
+	}
 }
 
 func TestRunStateServiceTransitionsRecords(t *testing.T) {

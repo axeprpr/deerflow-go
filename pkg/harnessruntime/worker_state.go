@@ -102,14 +102,9 @@ func loadWorkerRunRecord(plan WorkerExecutionPlan, snapshots RunSnapshotStore) R
 		ResumeFromEvent: plan.ResumeFromEvent,
 		ResumeReason:    plan.ResumeReason,
 		Status:          "running",
-		Outcome: RunOutcomeDescriptor{
-			RunStatus:       "running",
-			Attempt:         plan.Attempt,
-			ResumeFromEvent: plan.ResumeFromEvent,
-			ResumeReason:    plan.ResumeReason,
-		},
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
+	record.Outcome = NewOutcomeService().DescribeRunning(record)
 	return record
 }

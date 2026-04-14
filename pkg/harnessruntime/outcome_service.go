@@ -56,3 +56,14 @@ func (s OutcomeService) BindRecord(record RunRecord, descriptor RunOutcomeDescri
 	descriptor.ResumeReason = record.ResumeReason
 	return descriptor
 }
+
+func (s OutcomeService) DescribeRunning(record RunRecord) RunOutcomeDescriptor {
+	return s.BindRecord(record, RunOutcomeDescriptor{
+		RunStatus: "running",
+		TaskLifecycle: NewTaskLifecycleService().Describe(
+			RunOutcome{RunStatus: "running"},
+			harness.TaskState{},
+			false,
+		),
+	})
+}

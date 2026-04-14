@@ -25,12 +25,7 @@ func (r WorkerRunEventRecorder) RecordAgentEvent(plan WorkerExecutionPlan, evt a
 		Attempt:         plan.Attempt,
 		ResumeFromEvent: plan.ResumeFromEvent,
 		ResumeReason:    plan.ResumeReason,
-		Outcome: RunOutcomeDescriptor{
-			RunStatus:       "running",
-			Attempt:         plan.Attempt,
-			ResumeFromEvent: plan.ResumeFromEvent,
-			ResumeReason:    plan.ResumeReason,
-		},
+		Outcome:         runningOutcomeDescriptor(plan),
 	}
 	recordEvent := func(eventType string, data any) {
 		record.RecordWithContext(ctx, plan.RunID, plan.ThreadID, eventType, data)
@@ -160,12 +155,7 @@ func workerRunEventContext(plan WorkerExecutionPlan) RunEventContext {
 		Attempt:         plan.Attempt,
 		ResumeFromEvent: plan.ResumeFromEvent,
 		ResumeReason:    plan.ResumeReason,
-		Outcome: RunOutcomeDescriptor{
-			RunStatus:       "running",
-			Attempt:         plan.Attempt,
-			ResumeFromEvent: plan.ResumeFromEvent,
-			ResumeReason:    plan.ResumeReason,
-		},
+		Outcome:         runningOutcomeDescriptor(plan),
 	}
 }
 
@@ -174,4 +164,12 @@ func workerToolMessageID(toolCallID string) string {
 		return ""
 	}
 	return "tool:" + strings.TrimSpace(toolCallID)
+}
+
+func runningOutcomeDescriptor(plan WorkerExecutionPlan) RunOutcomeDescriptor {
+	return NewOutcomeService().DescribeRunning(RunRecord{
+		Attempt:         plan.Attempt,
+		ResumeFromEvent: plan.ResumeFromEvent,
+		ResumeReason:    plan.ResumeReason,
+	})
 }

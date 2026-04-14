@@ -15,12 +15,7 @@ func (RecoveryPlanner) NextRecord(record RunRecord, afterEvent int, reason strin
 	record.ResumeReason = reason
 	record.Status = "running"
 	record.Error = ""
-	record.Outcome = RunOutcomeDescriptor{
-		RunStatus:       "running",
-		Attempt:         record.Attempt,
-		ResumeFromEvent: record.ResumeFromEvent,
-		ResumeReason:    record.ResumeReason,
-	}
+	record.Outcome = NewOutcomeService().DescribeRunning(record)
 	return record
 }
 

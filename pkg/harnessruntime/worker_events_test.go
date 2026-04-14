@@ -44,6 +44,9 @@ func TestWorkerRunEventRecorderRecordsChunkAndToolEvents(t *testing.T) {
 	if events[0].Attempt != 2 || events[0].Outcome.RunStatus != "running" {
 		t.Fatalf("chunk event context = %#v", events[0])
 	}
+	if events[0].Outcome.TaskLifecycle.Status != "running" {
+		t.Fatalf("chunk task lifecycle = %+v", events[0].Outcome.TaskLifecycle)
+	}
 	if events[1].Event != "tool_call_end" {
 		t.Fatalf("second event = %q", events[1].Event)
 	}
