@@ -85,9 +85,10 @@ func (s RunStateService) loadTaskState(threadID string) harness.TaskState {
 }
 
 func (s RunStateService) Finalize(record RunRecord, outcome CompletionOutcome) RunRecord {
-	record.Status = outcome.Descriptor.RunStatus
-	record.Error = outcome.Descriptor.Error
-	record.Outcome = outcome.Descriptor
+	descriptor := NewOutcomeService().BindRecord(record, outcome.Descriptor)
+	record.Status = descriptor.RunStatus
+	record.Error = descriptor.Error
+	record.Outcome = descriptor
 	record.UpdatedAt = s.now()
 	if s.runtime != nil {
 		s.runtime.SaveRunRecord(record)

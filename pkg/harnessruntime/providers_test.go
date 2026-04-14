@@ -888,6 +888,9 @@ func TestRunStateServiceTransitionsRecords(t *testing.T) {
 	if record.Status != "success" || record.Outcome.RunStatus != "success" || runtime.saved.Status != "success" {
 		t.Fatalf("finalized record = %+v runtime=%+v", record, runtime)
 	}
+	if record.Outcome.Attempt != record.Attempt || record.Outcome.ResumeFromEvent != record.ResumeFromEvent || record.Outcome.ResumeReason != record.ResumeReason {
+		t.Fatalf("finalized outcome recovery fields = %+v record=%+v", record.Outcome, record)
+	}
 	if runtime.taskLife.Status != "success" {
 		t.Fatalf("finalized task lifecycle = %+v", runtime.taskLife)
 	}
