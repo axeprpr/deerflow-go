@@ -34,6 +34,7 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 	}
 	logger := log.New(commandrun.OutputWriter(options.Stderr), "[runtime-stack] ", log.LstdFlags)
 	printManifest := fs.Bool("print-manifest", false, "print resolved runtime stack manifest and exit")
+	writeBundle := fs.String("write-bundle", "", "write stack manifest and launch scripts to a directory, then exit")
 
 	yolo := fs.Bool("yolo", false, "YOLO mode: no auth, defaults for all settings")
 	cfg := DefaultConfig()
@@ -49,6 +50,17 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 		return &commandrun.PreparedCommand{
 			RunFunc: func() error {
 				return commandrun.PrintJSON(options.Stdout, builder.Manifest())
+			},
+		}, nil
+	}
+	if strings.TrimSpace(*writeBundle) != "" {
+		return &commandrun.PreparedCommand{
+			RunFunc: func() error {
+				if err := WriteBundle(*writeBundle, builder.Manifest()); err != nil {
+					return err
+				}
+				_, err := io.WriteString(commandrun.StdoutWriter(options.Stdout), *writeBundle+"\n")
+				return err
 			},
 		}, nil
 	}
