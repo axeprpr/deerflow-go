@@ -8,24 +8,24 @@ import (
 )
 
 type ComponentManifest struct {
-	Kind      ComponentKind
-	Addr      string
-	Node      runtimecmd.NodeManifest
-	ReadyURL  string
-	Dedicated bool
+	Kind      ComponentKind           `json:"kind"`
+	Addr      string                  `json:"addr"`
+	Node      runtimecmd.NodeManifest `json:"node"`
+	ReadyURL  string                  `json:"ready_url"`
+	Dedicated bool                    `json:"dedicated"`
 }
 
 type StackManifest struct {
-	Preset         StackPreset
-	Profile        StackProfile
-	GatewayAddr    string
-	WorkerRoot     string
-	WorkerStore    string
-	WorkerSnapshot string
-	WorkerEvent    string
-	WorkerThread   string
-	WorkerDispatch string
-	Components     []ComponentManifest
+	Preset         StackPreset         `json:"preset"`
+	Profile        StackProfile        `json:"profile"`
+	GatewayAddr    string              `json:"gateway_addr"`
+	WorkerRoot     string              `json:"worker_root"`
+	WorkerStore    string              `json:"worker_store"`
+	WorkerSnapshot string              `json:"worker_snapshot"`
+	WorkerEvent    string              `json:"worker_event"`
+	WorkerThread   string              `json:"worker_thread"`
+	WorkerDispatch string              `json:"worker_dispatch"`
+	Components     []ComponentManifest `json:"components"`
 }
 
 func (c Config) Manifest() StackManifest {

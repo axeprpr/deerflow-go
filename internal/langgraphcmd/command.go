@@ -21,6 +21,7 @@ type BuildInfo struct {
 
 type CommandOptions struct {
 	Stderr io.Writer
+	Stdout io.Writer
 	Args   []string
 }
 
@@ -37,6 +38,7 @@ func PrepareCommand(fs *flag.FlagSet, build BuildInfo, options CommandOptions) (
 		fs = flag.CommandLine
 	}
 	logger := log.New(commandrun.OutputWriter(options.Stderr), "[deerflow] ", log.LstdFlags)
+	printManifest := fs.Bool("print-manifest", false, "print resolved langgraph server manifest and exit")
 
 	yolo := fs.Bool("yolo", false, "YOLO mode: no auth, defaults for all settings")
 	cfg := DefaultConfig()
@@ -50,6 +52,13 @@ func PrepareCommand(fs *flag.FlagSet, build BuildInfo, options CommandOptions) (
 	cfg.ApplyProcessEnvironment()
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid runtime configuration: %w", err)
+	}
+	if *printManifest {
+		return &commandrun.PreparedCommand{
+			RunFunc: func() error {
+				return commandrun.PrintJSON(options.Stdout, cfg.Manifest())
+			},
+		}, nil
 	}
 
 	launcher, err := cfg.BuildLauncher()

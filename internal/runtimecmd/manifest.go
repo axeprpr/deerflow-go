@@ -7,26 +7,26 @@ import (
 )
 
 type NodeManifest struct {
-	Role             harnessruntime.RuntimeNodeRole
-	Preset           RuntimeNodePreset
-	RuntimeProfile   string
-	StateProfile     string
-	ExecutionProfile string
-	Addr             string
-	Endpoint         string
-	Transport        harnessruntime.WorkerTransportBackend
-	Sandbox          harnessruntime.SandboxBackend
-	MemoryStore      string
-	StateProvider    harnessruntime.RuntimeStateProviderMode
-	StateBackend     harnessruntime.RuntimeStateStoreBackend
-	SnapshotBackend  harnessruntime.RuntimeStateStoreBackend
-	EventBackend     harnessruntime.RuntimeStateStoreBackend
-	ThreadBackend    harnessruntime.RuntimeStateStoreBackend
-	StateRoot        string
-	StateStore       string
-	SnapshotStore    string
-	EventStore       string
-	ThreadStore      string
+	Role             harnessruntime.RuntimeNodeRole          `json:"role"`
+	Preset           RuntimeNodePreset                       `json:"preset"`
+	RuntimeProfile   string                                  `json:"runtime_profile"`
+	StateProfile     string                                  `json:"state_profile"`
+	ExecutionProfile string                                  `json:"execution_profile"`
+	Addr             string                                  `json:"addr"`
+	Endpoint         string                                  `json:"endpoint"`
+	Transport        harnessruntime.WorkerTransportBackend   `json:"transport"`
+	Sandbox          harnessruntime.SandboxBackend           `json:"sandbox"`
+	MemoryStore      string                                  `json:"memory_store"`
+	StateProvider    harnessruntime.RuntimeStateProviderMode `json:"state_provider"`
+	StateBackend     harnessruntime.RuntimeStateStoreBackend `json:"state_backend"`
+	SnapshotBackend  harnessruntime.RuntimeStateStoreBackend `json:"snapshot_backend"`
+	EventBackend     harnessruntime.RuntimeStateStoreBackend `json:"event_backend"`
+	ThreadBackend    harnessruntime.RuntimeStateStoreBackend `json:"thread_backend"`
+	StateRoot        string                                  `json:"state_root"`
+	StateStore       string                                  `json:"state_store"`
+	SnapshotStore    string                                  `json:"snapshot_store"`
+	EventStore       string                                  `json:"event_store"`
+	ThreadStore      string                                  `json:"thread_store"`
 }
 
 func (c NodeConfig) Manifest() NodeManifest {

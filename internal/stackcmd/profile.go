@@ -3,11 +3,11 @@ package stackcmd
 import "github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 
 type StackProfile struct {
-	Name                 string
-	Preset               PresetSpec
-	GatewayStateProvider harnessruntime.RuntimeStateProviderMode
-	WorkerStateProvider  harnessruntime.RuntimeStateProviderMode
-	WorkerTransport      harnessruntime.WorkerTransportBackend
+	Name                 string                                  `json:"name"`
+	Preset               PresetSpec                              `json:"preset"`
+	GatewayStateProvider harnessruntime.RuntimeStateProviderMode `json:"gateway_state_provider"`
+	WorkerStateProvider  harnessruntime.RuntimeStateProviderMode `json:"worker_state_provider"`
+	WorkerTransport      harnessruntime.WorkerTransportBackend   `json:"worker_transport"`
 }
 
 func DefaultStackProfile(preset StackPreset) StackProfile {

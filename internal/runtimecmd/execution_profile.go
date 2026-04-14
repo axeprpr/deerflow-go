@@ -3,9 +3,9 @@ package runtimecmd
 import "github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 
 type ExecutionProfile struct {
-	Name      string
-	Transport harnessruntime.WorkerTransportBackend
-	Sandbox   harnessruntime.SandboxBackend
+	Name      string                                `json:"name"`
+	Transport harnessruntime.WorkerTransportBackend `json:"transport"`
+	Sandbox   harnessruntime.SandboxBackend         `json:"sandbox"`
 }
 
 func DefaultExecutionProfile(preset RuntimeNodePreset, role harnessruntime.RuntimeNodeRole) ExecutionProfile {

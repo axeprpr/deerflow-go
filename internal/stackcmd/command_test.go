@@ -112,3 +112,26 @@ func TestPrepareCommandAcceptsSharedRemotePreset(t *testing.T) {
 		t.Fatalf("ReadyLines = %#v", prepared.ReadyLines)
 	}
 }
+
+func TestPrepareCommandPrintManifest(t *testing.T) {
+	var stdout strings.Builder
+	prepared, err := PrepareCommand(flag.NewFlagSet("runtime-stack-manifest", flag.ContinueOnError), langgraphcmd.BuildInfo{}, CommandOptions{
+		Stdout: &stdout,
+		Args:   []string{"-print-manifest", "-preset=shared-remote", "-worker-addr=:19081"},
+	})
+	if err != nil {
+		t.Fatalf("PrepareCommand() error = %v", err)
+	}
+	if prepared == nil || prepared.RunFunc == nil {
+		t.Fatal("PrepareCommand() did not build manifest run func")
+	}
+	if err := prepared.Run(); err != nil {
+		t.Fatalf("prepared.Run() error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "\"preset\": \"shared-remote\"") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "\"worker_dispatch\"") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}

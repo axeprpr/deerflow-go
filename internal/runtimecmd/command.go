@@ -15,6 +15,7 @@ import (
 type CommandOptions struct {
 	LogPrefix string
 	Stderr    io.Writer
+	Stdout    io.Writer
 	Args      []string
 }
 
@@ -34,6 +35,7 @@ func PrepareCommand(fs *flag.FlagSet, options CommandOptions) (*commandrun.Prepa
 		options.LogPrefix = "[runtime-node] "
 	}
 	logger := log.New(commandrun.OutputWriter(options.Stderr), options.LogPrefix, log.LstdFlags)
+	printManifest := fs.Bool("print-manifest", false, "print resolved runtime node manifest and exit")
 
 	defaults := DefaultRuntimeWorkerNodeConfig()
 	binding := BindFlags(fs, defaults, "", "")
@@ -41,6 +43,13 @@ func PrepareCommand(fs *flag.FlagSet, options CommandOptions) (*commandrun.Prepa
 		return nil, err
 	}
 	cfg := binding.Config()
+	if *printManifest {
+		return &commandrun.PreparedCommand{
+			RunFunc: func() error {
+				return commandrun.PrintJSON(options.Stdout, cfg.Manifest())
+			},
+		}, nil
+	}
 	launcher, err := cfg.BuildLauncher(context.Background())
 	if err != nil {
 		return nil, err

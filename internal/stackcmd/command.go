@@ -16,6 +16,7 @@ import (
 
 type CommandOptions struct {
 	Stderr io.Writer
+	Stdout io.Writer
 	Args   []string
 }
 
@@ -32,6 +33,7 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 		fs = flag.CommandLine
 	}
 	logger := log.New(commandrun.OutputWriter(options.Stderr), "[runtime-stack] ", log.LstdFlags)
+	printManifest := fs.Bool("print-manifest", false, "print resolved runtime stack manifest and exit")
 
 	yolo := fs.Bool("yolo", false, "YOLO mode: no auth, defaults for all settings")
 	cfg := DefaultConfig()
@@ -43,6 +45,13 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 	cfg.Gateway.ApplyYoloEnvironment(*yolo)
 	cfg.Gateway.ApplyProcessEnvironment()
 	builder := NewBuilder(cfg)
+	if *printManifest {
+		return &commandrun.PreparedCommand{
+			RunFunc: func() error {
+				return commandrun.PrintJSON(options.Stdout, builder.Manifest())
+			},
+		}, nil
+	}
 
 	launcher, err := builder.BuildLauncher(context.Background())
 	if err != nil {

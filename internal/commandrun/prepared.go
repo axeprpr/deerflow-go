@@ -15,9 +15,13 @@ type PreparedCommand struct {
 	ReadyTimeout    time.Duration
 	ShutdownTimeout time.Duration
 	IgnoredErrors   []error
+	RunFunc         func() error
 }
 
 func (p PreparedCommand) Run() error {
+	if p.RunFunc != nil {
+		return p.RunFunc()
+	}
 	for _, line := range p.StartupLines {
 		if p.Logger != nil && line != "" {
 			p.Logger.Print(line)

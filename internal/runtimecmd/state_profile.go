@@ -3,8 +3,8 @@ package runtimecmd
 import "github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 
 type StateProfile struct {
-	Name     string
-	Provider harnessruntime.RuntimeStateProviderMode
+	Name     string                                  `json:"name"`
+	Provider harnessruntime.RuntimeStateProviderMode `json:"provider"`
 }
 
 func DefaultStateProfile(preset RuntimeNodePreset, role harnessruntime.RuntimeNodeRole) StateProfile {

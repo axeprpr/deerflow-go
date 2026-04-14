@@ -3,13 +3,13 @@ package stackcmd
 import "github.com/axeprpr/deerflow-go/internal/runtimecmd"
 
 type PresetSpec struct {
-	Preset                  StackPreset
-	GatewayRuntimePreset    runtimecmd.RuntimeNodePreset
-	WorkerRuntimePreset     runtimecmd.RuntimeNodePreset
-	StateRuntimePreset      runtimecmd.RuntimeNodePreset
-	SandboxRuntimePreset    runtimecmd.RuntimeNodePreset
-	DedicatedStateService   bool
-	DedicatedSandboxService bool
+	Preset                  StackPreset                  `json:"preset"`
+	GatewayRuntimePreset    runtimecmd.RuntimeNodePreset `json:"gateway_runtime_preset"`
+	WorkerRuntimePreset     runtimecmd.RuntimeNodePreset `json:"worker_runtime_preset"`
+	StateRuntimePreset      runtimecmd.RuntimeNodePreset `json:"state_runtime_preset"`
+	SandboxRuntimePreset    runtimecmd.RuntimeNodePreset `json:"sandbox_runtime_preset"`
+	DedicatedStateService   bool                         `json:"dedicated_state_service"`
+	DedicatedSandboxService bool                         `json:"dedicated_sandbox_service"`
 }
 
 func DefaultPresetSpec(preset StackPreset) PresetSpec {

@@ -38,6 +38,29 @@ func TestPrepareCommandBuildsReadyLines(t *testing.T) {
 	}
 }
 
+func TestPrepareCommandPrintManifest(t *testing.T) {
+	var stdout strings.Builder
+	prepared, err := PrepareCommand(flag.NewFlagSet("langgraph-manifest", flag.ContinueOnError), BuildInfo{}, CommandOptions{
+		Stdout: &stdout,
+		Args:   []string{"-print-manifest", "-addr=:19080"},
+	})
+	if err != nil {
+		t.Fatalf("PrepareCommand() error = %v", err)
+	}
+	if prepared == nil || prepared.RunFunc == nil {
+		t.Fatal("PrepareCommand() did not build manifest run func")
+	}
+	if err := prepared.Run(); err != nil {
+		t.Fatalf("prepared.Run() error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "\"addr\": \":19080\"") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "\"runtime\"") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
 func TestFirstNonEmpty(t *testing.T) {
 	if got := firstNonEmpty("", "  ", "value", "later"); got != "value" {
 		t.Fatalf("firstNonEmpty() = %q", got)
