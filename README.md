@@ -73,6 +73,20 @@ flowchart TD
     SandboxMgr --> Sandbox
 ```
 
+## Runtime Stack Manifest
+
+`cmd/runtime-stack` resolves deployment topology into a portable manifest instead of shell scripts:
+
+- `-print-manifest`: print full `stack-manifest.json` to stdout
+- `-write-bundle=<dir>`: write
+  - `stack-manifest.json`
+  - `processes/gateway.json`
+  - `processes/worker.json`
+  - `processes/state.json`
+  - `processes/sandbox.json`
+
+Each process spec includes binary, args, env, and readiness metadata, so orchestration can stay cross-platform (Linux/macOS/Windows/Electron-managed runtime).
+
 ## Layers
 
 The repository is organized around six main layers:
