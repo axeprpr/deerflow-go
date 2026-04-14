@@ -43,6 +43,17 @@ func (r workerCompletionRuntime) SetThreadTitle(threadID string, title string) {
 	}
 }
 
+func (r workerCompletionRuntime) LoadThreadTaskState(threadID string) harness.TaskState {
+	if r.threads != nil {
+		if state, ok := r.threads.LoadThreadRuntimeState(threadID); ok {
+			if taskState, ok := harness.ParseTaskState(state.Metadata[DefaultTaskStateMetadataKey]); ok {
+				return taskState
+			}
+		}
+	}
+	return harness.TaskState{}
+}
+
 func (r workerCompletionRuntime) SetThreadTaskState(threadID string, taskState harness.TaskState) {
 	if r.threads != nil {
 		r.threads.SetThreadMetadata(threadID, DefaultTaskStateMetadataKey, taskState.Value())

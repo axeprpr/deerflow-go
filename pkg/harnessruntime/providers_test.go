@@ -101,6 +101,10 @@ func (r *fakeCompletionRuntime) SetThreadTitle(_ string, title string) {
 	r.title = title
 }
 
+func (r *fakeCompletionRuntime) LoadThreadTaskState(_ string) harness.TaskState {
+	return r.taskState
+}
+
 func (r *fakeCompletionRuntime) SetThreadTaskState(_ string, taskState harness.TaskState) {
 	r.taskState = taskState
 	r.taskCleared = false
@@ -515,6 +519,31 @@ func TestCompletionServiceMarksRunIncompleteFromTaskState(t *testing.T) {
 		t.Fatalf("taskState.Items=%d want=2", got)
 	}
 	if runtime.taskLife.Status != "incomplete" || len(runtime.taskLife.PendingTasks) != 2 {
+		t.Fatalf("taskLife=%+v", runtime.taskLife)
+	}
+}
+
+func TestCompletionServiceMergesLiveTrackedTaskState(t *testing.T) {
+	t.Parallel()
+
+	runtime := &fakeCompletionRuntime{
+		taskState: harness.TaskState{
+			Items: []harness.TaskItem{
+				{Text: "delegate research", Status: harness.TaskStatusInProgress},
+			},
+		},
+	}
+	service := NewCompletionService(runtime, "generated_title", "clarification_interrupt")
+	outcome := service.Apply("thread-1", &harness.RunState{
+		ThreadID: "thread-1",
+	}, &agent.RunResult{})
+	if outcome.RunStatus != "incomplete" {
+		t.Fatalf("RunStatus = %q, want incomplete", outcome.RunStatus)
+	}
+	if len(outcome.Descriptor.PendingTasks) != 1 || outcome.Descriptor.PendingTasks[0] != "delegate research" {
+		t.Fatalf("Descriptor.PendingTasks=%v", outcome.Descriptor.PendingTasks)
+	}
+	if runtime.taskLife.Status != "incomplete" {
 		t.Fatalf("taskLife=%+v", runtime.taskLife)
 	}
 }

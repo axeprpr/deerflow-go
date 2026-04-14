@@ -199,6 +199,17 @@ func (a runtimeCompletionAdapter) SetThreadTitle(threadID string, title string) 
 	}
 }
 
+func (a runtimeCompletionAdapter) LoadThreadTaskState(threadID string) harness.TaskState {
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		if state, ok := store.LoadThreadRuntimeState(threadID); ok {
+			if taskState, ok := harness.ParseTaskState(state.Metadata[harnessruntime.DefaultTaskStateMetadataKey]); ok {
+				return taskState
+			}
+		}
+	}
+	return harness.TaskState{}
+}
+
 func (a runtimeCompletionAdapter) SetThreadTaskState(threadID string, taskState harness.TaskState) {
 	if store := a.server.ensureThreadStateStore(); store != nil {
 		store.SetThreadMetadata(threadID, harnessruntime.DefaultTaskStateMetadataKey, taskState.Value())

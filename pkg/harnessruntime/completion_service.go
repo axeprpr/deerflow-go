@@ -9,6 +9,7 @@ import (
 
 type CompletionRuntime interface {
 	SetThreadTitle(threadID string, title string)
+	LoadThreadTaskState(threadID string) harness.TaskState
 	SetThreadTaskState(threadID string, taskState harness.TaskState)
 	ClearThreadTaskState(threadID string)
 	SetThreadTaskLifecycle(threadID string, lifecycle TaskLifecycleDescriptor)
@@ -56,11 +57,20 @@ func (s CompletionService) Apply(threadID string, state *harness.RunState, resul
 	if title := strings.TrimSpace(metadataString(state, s.titleMetadataKey)); title != "" && s.runtime != nil {
 		s.runtime.SetThreadTitle(threadID, title)
 	}
-	if resolved, ok := resolveTaskStateFromRunState(state, result, DefaultTaskStateMetadataKey); ok && state != nil {
-		state.TaskState = resolved
-		taskState = resolved
-	} else if state != nil {
+	if s.runtime != nil {
+		taskState = s.runtime.LoadThreadTaskState(threadID)
+	}
+	if resolved, ok := resolveTaskStateFromRunState(state, result, DefaultTaskStateMetadataKey); ok {
+		if merged, err := mergeTaskProgressState(taskState, resolved); err == nil {
+			taskState = merged
+		} else {
+			taskState = resolved
+		}
+	} else if taskState.IsZero() && state != nil {
 		taskState = state.TaskState
+	}
+	if state != nil {
+		state.TaskState = taskState
 	}
 	if s.runtime != nil {
 		if !taskState.IsZero() {
