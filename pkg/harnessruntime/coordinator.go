@@ -2,6 +2,7 @@ package harnessruntime
 
 import (
 	"context"
+	"strings"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
@@ -124,7 +125,11 @@ func (c Coordinator) Submit(ctx context.Context, plan RunPlan) (*DispatchResult,
 }
 
 func (c Coordinator) Resume(ctx context.Context, plan RunPlan, record RunRecord, afterEvent int, reason string) (RunRecord, *DispatchResult, error) {
-	record = c.runState.Begin(c.recovery.NextRecord(record, afterEvent, reason))
+	next := c.recovery.NextRecord(record, afterEvent, reason)
+	if isIdempotentResume(record, next, afterEvent, reason) {
+		return c.runState.Begin(next), nil, nil
+	}
+	record = c.runState.Begin(next)
 	plan.RunID = record.RunID
 	plan.ThreadID = record.ThreadID
 	plan.AssistantID = record.AssistantID
@@ -207,4 +212,23 @@ func threadStoreFromRunStateRuntime(runtime RunStateRuntime) ThreadStateStore {
 		return provider.ThreadStateStore()
 	}
 	return nil
+}
+
+func isIdempotentResume(previous RunRecord, next RunRecord, afterEvent int, reason string) bool {
+	if strings.TrimSpace(previous.RunID) == "" || strings.TrimSpace(next.RunID) == "" {
+		return false
+	}
+	if strings.TrimSpace(previous.RunID) != strings.TrimSpace(next.RunID) {
+		return false
+	}
+	if previous.Attempt <= 0 || next.Attempt != previous.Attempt {
+		return false
+	}
+	if next.ResumeFromEvent != afterEvent {
+		return false
+	}
+	if strings.TrimSpace(next.ResumeReason) != strings.TrimSpace(reason) {
+		return false
+	}
+	return isLiveRecoveryStatus(previous.Status)
 }

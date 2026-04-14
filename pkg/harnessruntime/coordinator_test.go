@@ -197,6 +197,55 @@ func TestCoordinatorResumeSubmitsRecoveredPlan(t *testing.T) {
 	}
 }
 
+func TestCoordinatorResumeSkipsDispatchForIdempotentRecoveryContext(t *testing.T) {
+	dispatcher := &fakeDispatcher{}
+	runState := &fakeRunStateRuntime{}
+	coordinator := NewCoordinator(CoordinatorDeps{
+		Dispatcher: dispatcher,
+		RunState:   runState,
+	})
+	coordinator.runState.now = func() time.Time { return time.Unix(25, 0).UTC() }
+
+	record, result, err := coordinator.Resume(context.Background(), RunPlan{
+		Model:     "model-1",
+		AgentName: "lead_agent",
+		Spec:      harness.AgentSpec{},
+		Features:  harness.FeatureSet{Sandbox: true},
+		Messages: []models.Message{{
+			Role:      models.RoleHuman,
+			Content:   "resume",
+			SessionID: "thread-1",
+		}},
+	}, RunRecord{
+		RunID:           "run-1",
+		ThreadID:        "thread-1",
+		AssistantID:     "lead_agent",
+		Attempt:         2,
+		Status:          "running",
+		ResumeFromEvent: 7,
+		ResumeReason:    "worker-retry",
+		Outcome:         RunOutcomeDescriptor{RunStatus: "running", Attempt: 2},
+	}, 7, "worker-retry")
+	if err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+	if result != nil {
+		t.Fatalf("result = %#v, want nil for idempotent recovery", result)
+	}
+	if dispatcher.called {
+		t.Fatal("dispatcher was called for idempotent recovery")
+	}
+	if record.Attempt != 2 || record.ResumeFromEvent != 7 || record.ResumeReason != "worker-retry" {
+		t.Fatalf("record = %+v", record)
+	}
+	if runState.saved.Attempt != 2 || runState.saved.Status != "running" {
+		t.Fatalf("runState saved = %+v", runState.saved)
+	}
+	if runState.threadStatus != "thread-1:busy" {
+		t.Fatalf("runState threadStatus = %q", runState.threadStatus)
+	}
+}
+
 func TestCoordinatorFinalizePreservesTaskLifecycleDescriptor(t *testing.T) {
 	t.Parallel()
 
