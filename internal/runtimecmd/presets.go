@@ -58,31 +58,7 @@ func applyNodePreset(config NodeConfig) NodeConfig {
 	if config.Preset == "" {
 		config.Preset = RuntimeNodePresetAuto
 	}
-	switch config.effectivePreset() {
-	case RuntimeNodePresetSharedSQLite:
-		config = config.applySharedSQLiteDefaults()
-	case RuntimeNodePresetSharedRemote:
-		config = config.applySharedRemoteDefaults()
-	case RuntimeNodePresetFastLocal:
-		config = config.applyFastLocalDefaults()
-	default:
-		if config.Role == harnessruntime.RuntimeNodeRoleGateway || config.Role == harnessruntime.RuntimeNodeRoleWorker {
-			config = config.applySharedSQLiteDefaults()
-		}
-	}
-	if config.StateProvider == "" || config.StateProvider == harnessruntime.RuntimeStateProviderModeAuto {
-		switch config.effectivePreset() {
-		case RuntimeNodePresetSharedSQLite:
-			config.StateProvider = harnessruntime.RuntimeStateProviderModeSharedSQLite
-		case RuntimeNodePresetSharedRemote:
-			config.StateProvider = harnessruntime.RuntimeStateProviderModeAuto
-		case RuntimeNodePresetFastLocal:
-			config.StateProvider = harnessruntime.RuntimeStateProviderModeIsolated
-		default:
-			config.StateProvider = harnessruntime.RuntimeStateProviderModeAuto
-		}
-	}
-	return config
+	return DefaultStateProfile(config.effectivePreset(), config.Role).Apply(config)
 }
 
 func (c NodeConfig) applyFastLocalDefaults() NodeConfig {
