@@ -145,6 +145,7 @@ func TestPrepareCommandSpawnProcessesUsesProcessLauncher(t *testing.T) {
 			"-process-binary-dir=" + binDir,
 			"-spawn-restart-policy=always",
 			"-spawn-max-restarts=5",
+			"-spawn-failure-isolation",
 			"-preset=shared-remote",
 			"-worker-addr=:19081",
 		},
@@ -168,7 +169,13 @@ func TestPrepareCommandSpawnProcessesUsesProcessLauncher(t *testing.T) {
 	if launcher.lifecycles[0].maxRestarts != 5 {
 		t.Fatalf("max restarts = %d", launcher.lifecycles[0].maxRestarts)
 	}
+	if !launcher.failureIsolation {
+		t.Fatal("failure isolation = false, want true")
+	}
 	if !strings.Contains(strings.Join(prepared.StartupLines, "\n"), "launch_mode=external-processes") {
+		t.Fatalf("StartupLines = %#v", prepared.StartupLines)
+	}
+	if !strings.Contains(strings.Join(prepared.StartupLines, "\n"), "failure_isolation=enabled") {
 		t.Fatalf("StartupLines = %#v", prepared.StartupLines)
 	}
 }

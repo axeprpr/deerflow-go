@@ -22,6 +22,7 @@ type ProcessLaunchOptions struct {
 	MaxRestarts       int
 	RestartDelay      time.Duration
 	DependencyTimeout time.Duration
+	FailureIsolation  bool
 }
 
 type ProcessRestartPolicy string
@@ -33,9 +34,10 @@ const (
 )
 
 type ProcessLauncher struct {
-	processes  []ProcessManifest
-	lifecycles []*processLifecycle
-	order      []string
+	processes        []ProcessManifest
+	lifecycles       []*processLifecycle
+	order            []string
+	failureIsolation bool
 }
 
 type processLifecycle struct {
@@ -93,9 +95,10 @@ func NewProcessLauncher(processes []ProcessManifest, options ProcessLaunchOption
 		lifecycles = append(lifecycles, lifecycle)
 	}
 	return &ProcessLauncher{
-		processes:  append([]ProcessManifest(nil), processes...),
-		lifecycles: lifecycles,
-		order:      append([]string(nil), order...),
+		processes:        append([]ProcessManifest(nil), processes...),
+		lifecycles:       lifecycles,
+		order:            append([]string(nil), order...),
+		failureIsolation: options.FailureIsolation,
 	}, nil
 }
 
@@ -140,20 +143,11 @@ func (l *ProcessLauncher) Start() error {
 	if l == nil || len(l.lifecycles) == 0 {
 		return nil
 	}
-	errCh := make(chan error, len(l.lifecycles))
+	runners := make([]processRunner, 0, len(l.lifecycles))
 	for _, lifecycle := range l.lifecycles {
-		item := lifecycle
-		go func() {
-			errCh <- item.Start()
-		}()
+		runners = append(runners, lifecycle)
 	}
-	for range l.lifecycles {
-		if err := <-errCh; err != nil {
-			_ = l.Close(context.Background())
-			return err
-		}
-	}
-	return nil
+	return runProcessRunners(runners, l.failureIsolation)
 }
 
 func (l *ProcessLauncher) Close(ctx context.Context) error {
@@ -163,6 +157,50 @@ func (l *ProcessLauncher) Close(ctx context.Context) error {
 	var closeErr error
 	for i := len(l.lifecycles) - 1; i >= 0; i-- {
 		if err := l.lifecycles[i].Close(ctx); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	return closeErr
+}
+
+type processRunner interface {
+	Start() error
+	Close(context.Context) error
+}
+
+func runProcessRunners(runners []processRunner, failureIsolation bool) error {
+	if len(runners) == 0 {
+		return nil
+	}
+	errCh := make(chan error, len(runners))
+	for _, runner := range runners {
+		item := runner
+		go func() {
+			errCh <- item.Start()
+		}()
+	}
+
+	var firstErr error
+	for range runners {
+		err := <-errCh
+		if err == nil {
+			continue
+		}
+		if !failureIsolation {
+			_ = closeProcessRunners(runners, context.Background())
+			return err
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func closeProcessRunners(runners []processRunner, ctx context.Context) error {
+	var closeErr error
+	for i := len(runners) - 1; i >= 0; i-- {
+		if err := runners[i].Close(ctx); err != nil && closeErr == nil {
 			closeErr = err
 		}
 	}

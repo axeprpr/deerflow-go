@@ -46,6 +46,11 @@ func NewCompletionService(runtime CompletionRuntime, titleMetadataKey string, in
 	}
 }
 
+func (s CompletionService) WithRuntime(runtime CompletionRuntime) CompletionService {
+	s.runtime = runtime
+	return s
+}
+
 func (s CompletionService) Apply(threadID string, state *harness.RunState, result *agent.RunResult) CompletionOutcome {
 	threadID = strings.TrimSpace(threadID)
 	if threadID == "" {

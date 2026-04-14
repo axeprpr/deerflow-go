@@ -36,6 +36,12 @@ func TestHTTPRemoteSandboxServerHealthEndpoint(t *testing.T) {
 	if got, _ := body["active_leases"].(float64); got != 0 {
 		t.Fatalf("active_leases = %v, want 0", got)
 	}
+	if got, _ := body["oldest_lease_age_ms"].(float64); got != 0 {
+		t.Fatalf("oldest_lease_age_ms = %v, want 0", got)
+	}
+	if got, _ := body["oldest_idle_age_ms"].(float64); got != 0 {
+		t.Fatalf("oldest_idle_age_ms = %v, want 0", got)
+	}
 }
 
 func TestRemoteSandboxLeaseServiceRoundTrip(t *testing.T) {
@@ -85,6 +91,22 @@ func TestRemoteSandboxLeaseServiceRoundTrip(t *testing.T) {
 	}
 	if err := lease.Sandbox.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
+	}
+
+	resp, err := http.Get(server.URL + DefaultRemoteSandboxHealthPath)
+	if err != nil {
+		t.Fatalf("health get error = %v", err)
+	}
+	defer resp.Body.Close()
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode health body error = %v", err)
+	}
+	if got, _ := body["oldest_lease_age_ms"].(float64); got < 0 {
+		t.Fatalf("oldest_lease_age_ms = %v, want >= 0", got)
+	}
+	if got, _ := body["oldest_idle_age_ms"].(float64); got < 0 {
+		t.Fatalf("oldest_idle_age_ms = %v, want >= 0", got)
 	}
 }
 

@@ -162,7 +162,11 @@ func (c Coordinator) Finalize(ctx context.Context, threadID string, state *harne
 		state.Messages = append([]models.Message(nil), result.Messages...)
 		_ = c.runtime.AfterRun(ctx, state, result)
 	}
-	outcome := c.completion.Apply(threadID, state, result)
+	completion := c.completion
+	if !c.runState.CanMutateThreadState(record) {
+		completion = completion.WithRuntime(nil)
+	}
+	outcome := completion.Apply(threadID, state, result)
 	outcome.Descriptor = NewOutcomeService().BindRecord(record, outcome.Descriptor)
 	return CompletionResult{
 		Run:         c.runState.Finalize(record, outcome),

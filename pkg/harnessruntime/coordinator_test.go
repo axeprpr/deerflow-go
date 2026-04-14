@@ -214,13 +214,13 @@ func TestCoordinatorFinalizePreservesTaskLifecycleDescriptor(t *testing.T) {
 			Items: []harness.TaskItem{{Text: "verify artifact", Status: harness.TaskStatusPending}},
 		},
 	}, &agent.RunResult{}, RunRecord{
-		RunID:       "run-1",
-		ThreadID:    "thread-1",
-		Attempt:     2,
-		Status:      "running",
-		Outcome:     RunOutcomeDescriptor{RunStatus: "running", Attempt: 2},
-		CreatedAt:   time.Unix(1, 0).UTC(),
-		UpdatedAt:   time.Unix(1, 0).UTC(),
+		RunID:     "run-1",
+		ThreadID:  "thread-1",
+		Attempt:   2,
+		Status:    "running",
+		Outcome:   RunOutcomeDescriptor{RunStatus: "running", Attempt: 2},
+		CreatedAt: time.Unix(1, 0).UTC(),
+		UpdatedAt: time.Unix(1, 0).UTC(),
 	})
 
 	if result.Outcome.RunStatus != "incomplete" {
@@ -237,5 +237,62 @@ func TestCoordinatorFinalizePreservesTaskLifecycleDescriptor(t *testing.T) {
 	}
 	if runState.saved.Outcome.TaskLifecycle.Status != "incomplete" {
 		t.Fatalf("saved outcome=%+v", runState.saved.Outcome)
+	}
+}
+
+func TestCoordinatorFinalizeSkipsThreadMutationsForStaleRun(t *testing.T) {
+	t.Parallel()
+
+	threads := NewInMemoryThreadStateStore()
+	threads.MarkThreadStatus("thread-1", "busy")
+	threads.SetThreadMetadata("thread-1", DefaultRunIDMetadataKey, "run-b")
+	threads.SetThreadMetadata("thread-1", DefaultActiveRunMetadataKey, "run-b")
+	threads.SetThreadMetadata("thread-1", DefaultTaskLifecycleMetadataKey, TaskLifecycleDescriptor{
+		Status: "running",
+	}.Value())
+
+	snapshots := NewInMemoryRunStore()
+	coordinator := NewCoordinator(CoordinatorDeps{
+		RunState: workerRunStateRuntime{
+			snapshots: snapshots,
+			threads:   threads,
+		},
+		Completion: workerCompletionRuntime{
+			threads: threads,
+		},
+	})
+	coordinator.runState.now = func() time.Time { return time.Unix(40, 0).UTC() }
+
+	result := coordinator.Finalize(context.Background(), "thread-1", &harness.RunState{
+		ThreadID: "thread-1",
+	}, &agent.RunResult{}, RunRecord{
+		RunID:     "run-a",
+		ThreadID:  "thread-1",
+		Status:    "running",
+		Attempt:   1,
+		CreatedAt: time.Unix(1, 0).UTC(),
+		UpdatedAt: time.Unix(1, 0).UTC(),
+		Outcome:   RunOutcomeDescriptor{RunStatus: "running", Attempt: 1},
+	})
+
+	if result.Run.RunID != "run-a" {
+		t.Fatalf("result run = %+v", result.Run)
+	}
+	threadState, ok := threads.LoadThreadRuntimeState("thread-1")
+	if !ok {
+		t.Fatal("thread state missing after stale finalize")
+	}
+	if got := threadState.Status; got != "busy" {
+		t.Fatalf("thread status after stale finalize = %q, want busy", got)
+	}
+	if got := metadataRunID(threadState.Metadata[DefaultActiveRunMetadataKey]); got != "run-b" {
+		t.Fatalf("active run after stale finalize = %q, want run-b", got)
+	}
+	lifecycle, ok := ParseTaskLifecycle(threadState.Metadata[DefaultTaskLifecycleMetadataKey])
+	if !ok || lifecycle.Status != "running" {
+		t.Fatalf("task lifecycle after stale finalize = %#v", threadState.Metadata[DefaultTaskLifecycleMetadataKey])
+	}
+	if _, saved := NewSnapshotStoreService(snapshots).LoadRecord("run-a"); !saved {
+		t.Fatal("stale run record was not persisted")
 	}
 }

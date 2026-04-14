@@ -46,6 +46,7 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 	spawnMaxRestarts := fs.Int("spawn-max-restarts", 3, "max restart attempts per external process (<=0 means unlimited)")
 	spawnRestartDelay := fs.Duration("spawn-restart-delay", 500*time.Millisecond, "delay before restarting an external process")
 	spawnDependencyTimeout := fs.Duration("spawn-dependency-timeout", 60*time.Second, "timeout waiting for each dependency readiness target")
+	spawnFailureIsolation := fs.Bool("spawn-failure-isolation", false, "allow other external processes to keep running when one process exits with terminal error")
 
 	yolo := fs.Bool("yolo", false, "YOLO mode: no auth, defaults for all settings")
 	cfg := DefaultConfig()
@@ -98,12 +99,18 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 			MaxRestarts:       *spawnMaxRestarts,
 			RestartDelay:      *spawnRestartDelay,
 			DependencyTimeout: *spawnDependencyTimeout,
+			FailureIsolation:  *spawnFailureIsolation,
 		})
 		if err != nil {
 			return nil, err
 		}
 		startup := append([]string{}, builder.StartupLines(build, *yolo, strings.TrimSpace(os.Getenv("LOG_LEVEL")))...)
 		startup = append(startup, "  launch_mode=external-processes")
+		if *spawnFailureIsolation {
+			startup = append(startup, "  failure_isolation=enabled")
+		} else {
+			startup = append(startup, "  failure_isolation=disabled")
+		}
 		return &commandrun.PreparedCommand{
 			Logger:          logger,
 			Lifecycle:       processLauncher,

@@ -61,6 +61,9 @@ func TestNewProcessLauncherBuildsDependenciesAndPolicyDefaults(t *testing.T) {
 	if launcher.lifecycles[2].restartPolicy != ProcessRestartOnFailure {
 		t.Fatalf("restart policy=%q", launcher.lifecycles[2].restartPolicy)
 	}
+	if launcher.failureIsolation {
+		t.Fatal("failure isolation = true, want false")
+	}
 }
 
 func TestParseProcessRestartPolicy(t *testing.T) {

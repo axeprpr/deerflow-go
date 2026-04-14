@@ -73,6 +73,36 @@ func (s *HTTPRemoteSandboxServer) handleHealth(w http.ResponseWriter, r *http.Re
 	s.mu.Lock()
 	activeLeases := len(s.sessions)
 	evictedLeases := s.evictedLeases
+	now := time.Now().UTC()
+	var oldestLeaseAgeMilli int64
+	var oldestIdleAgeMilli int64
+	for _, lease := range s.sessions {
+		if lease == nil {
+			continue
+		}
+		if !lease.createdAt.IsZero() {
+			age := now.Sub(lease.createdAt).Milliseconds()
+			if age < 0 {
+				age = 0
+			}
+			if age > oldestLeaseAgeMilli {
+				oldestLeaseAgeMilli = age
+			}
+		}
+		idleAt := lease.lastTouched
+		if idleAt.IsZero() {
+			idleAt = lease.createdAt
+		}
+		if !idleAt.IsZero() {
+			idle := now.Sub(idleAt).Milliseconds()
+			if idle < 0 {
+				idle = 0
+			}
+			if idle > oldestIdleAgeMilli {
+				oldestIdleAgeMilli = idle
+			}
+		}
+	}
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -80,6 +110,8 @@ func (s *HTTPRemoteSandboxServer) handleHealth(w http.ResponseWriter, r *http.Re
 		"backend":               s.config.Backend,
 		"active_leases":         activeLeases,
 		"evicted_leases":        evictedLeases,
+		"oldest_lease_age_ms":   oldestLeaseAgeMilli,
+		"oldest_idle_age_ms":    oldestIdleAgeMilli,
 		"heartbeat_interval_ms": s.config.HeartbeatInterval.Milliseconds(),
 		"idle_ttl_ms":           s.config.IdleTTL.Milliseconds(),
 		"sweep_interval_ms":     s.config.SweepInterval.Milliseconds(),

@@ -96,6 +96,7 @@ flowchart TD
 - `-spawn-max-restarts=<n>`: per-process restart limit (`<=0` means unlimited)
 - `-spawn-restart-delay=<duration>`: delay before restarting a failed process
 - `-spawn-dependency-timeout=<duration>`: max wait time for each dependency readiness endpoint
+- `-spawn-failure-isolation`: keep other processes running when one process exits with terminal error
 
 Each process spec includes component identity, bind address, readiness target, startup dependencies, binary, and args so orchestration can stay cross-platform (Linux/macOS/Windows/Electron-managed runtime).
 

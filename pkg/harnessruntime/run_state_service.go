@@ -159,6 +159,10 @@ func (s RunStateService) shouldMutateThreadState(record RunRecord) bool {
 	return activeRunID == "" || activeRunID == runID
 }
 
+func (s RunStateService) CanMutateThreadState(record RunRecord) bool {
+	return s.shouldMutateThreadState(record)
+}
+
 func (s RunStateService) clearActiveRunOwnership(record RunRecord) {
 	store := s.threadStateStore()
 	if store == nil {
