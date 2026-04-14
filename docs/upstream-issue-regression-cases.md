@@ -230,6 +230,7 @@
 当前自动化依据：
 
 - `pkg/langgraphcompat/issue_regression_test.go`
+- `pkg/agent/issue_regression_test.go`
 - `pkg/tools/builtin/web_test.go`
 - `pkg/harnessruntime/tool_runtime_test.go`
 
@@ -238,10 +239,11 @@
 - 默认 runtime 必须暴露 `web_search/web_fetch/image_search`
 - 搜索失败必须保留底层可诊断错误
 - live smoke 必须真实联网返回结果
+- agent 主路径出现“口头宣称 web_search 但未发 tool_call”时，会自动追加重试提示并强制下一轮发起真实 `web_search`
 
 当前缺口：
 
-- agent 主路径在当前 MiniMax 组合下仍可能输出伪 tool-call 文本，而不是真正执行 `web_search`
+- 当前兜底策略针对 `web_search` 特化；其他工具仍以模型结构化 tool-call 能力为主
 
 ### Case P1-2: 模型映射和 provider 错误可诊断
 
