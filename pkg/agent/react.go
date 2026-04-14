@@ -317,6 +317,16 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 		}
 
 		if len(toolCalls) == 0 {
+			if retryPrompt := missingWebSearchToolCallRetryPrompt(runMessages, assistantMessage, req.Tools); retryPrompt != "" && turn+1 < a.maxTurns {
+				runMessages = append(runMessages, models.Message{
+					ID:        newMessageID("human"),
+					SessionID: sessionID,
+					Role:      models.RoleHuman,
+					Content:   retryPrompt,
+					CreatedAt: time.Now().UTC(),
+				})
+				continue
+			}
 			if strings.TrimSpace(assistantMessage.Content) == "" {
 				if retryPrompt := a.runPolicy.Retry.RecoverableToolRetryPrompt(runMessages); retryPrompt != "" && turn+1 < a.maxTurns {
 					runMessages = append(runMessages, models.Message{
@@ -1242,6 +1252,61 @@ func recoverableToolRetryPrompt(messages []models.Message) string {
 	default:
 		return ""
 	}
+}
+
+func missingWebSearchToolCallRetryPrompt(messages []models.Message, assistant models.Message, visibleTools []models.Tool) string {
+	if len(visibleTools) == 0 {
+		return ""
+	}
+	hasWebSearch := false
+	for _, tool := range visibleTools {
+		if strings.EqualFold(strings.TrimSpace(tool.Name), "web_search") {
+			hasWebSearch = true
+			break
+		}
+	}
+	if !hasWebSearch || len(assistant.ToolCalls) > 0 {
+		return ""
+	}
+
+	assistantLower := strings.ToLower(strings.TrimSpace(assistant.Content))
+	if assistantLower == "" {
+		return ""
+	}
+	mentionsWebSearch := strings.Contains(assistantLower, "web_search") ||
+		strings.Contains(assistantLower, "web search") ||
+		strings.Contains(assistantLower, "联网搜索")
+	if !mentionsWebSearch {
+		return ""
+	}
+	for _, msg := range messages {
+		if msg.Role != models.RoleTool || msg.ToolResult == nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(msg.ToolResult.ToolName), "web_search") {
+			return ""
+		}
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != models.RoleHuman {
+			continue
+		}
+		humanLower := strings.ToLower(strings.TrimSpace(msg.Content))
+		if humanLower == "" {
+			return ""
+		}
+		needsSearch := strings.Contains(humanLower, "联网") ||
+			strings.Contains(humanLower, "搜索") ||
+			strings.Contains(humanLower, "web search") ||
+			strings.Contains(humanLower, "openai api 价格") ||
+			strings.Contains(humanLower, "openai api price")
+		if !needsSearch {
+			return ""
+		}
+		return "Do not simulate search results in plain text. Call `web_search` now with a concrete query, then continue with the tool output."
+	}
+	return ""
 }
 
 func normalizeToolCalls(calls []models.ToolCall) []models.ToolCall {

@@ -126,6 +126,62 @@ func TestIssue2124ProviderErrorsRemainDiagnosable(t *testing.T) {
 	}
 }
 
+func TestIssue2139WebSearchTextSimulationTriggersRetryAndRealToolCall(t *testing.T) {
+	registry := tools.NewRegistry()
+	webSearchCalls := 0
+	if err := registry.Register(models.Tool{
+		Name:        "web_search",
+		Description: "search the web",
+		Handler: func(_ context.Context, call models.ToolCall) (models.ToolResult, error) {
+			webSearchCalls++
+			query := strings.TrimSpace(stringFromAny(call.Arguments["query"]))
+			if query == "" {
+				return models.ToolResult{}, errors.New("missing required argument \"query\"")
+			}
+			return models.ToolResult{
+				CallID:   call.ID,
+				ToolName: call.Name,
+				Status:   models.CallStatusCompleted,
+				Content:  "found pricing page for " + query,
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register web_search: %v", err)
+	}
+
+	provider := &issue2139WebSearchSimulationProvider{t: t}
+	runAgent := New(AgentConfig{
+		LLMProvider: provider,
+		Tools:       registry,
+		MaxTurns:    4,
+	})
+
+	result, err := runAgent.Run(context.Background(), "issue-2139", []models.Message{{
+		ID:        "m1",
+		SessionID: "issue-2139",
+		Role:      models.RoleHuman,
+		Content:   "联网搜索今天的 OpenAI API 价格页",
+	}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "done" {
+		t.Fatalf("FinalOutput=%q want done", result.FinalOutput)
+	}
+	if webSearchCalls != 1 {
+		t.Fatalf("web_search calls=%d want 1", webSearchCalls)
+	}
+	if provider.calls != 3 {
+		t.Fatalf("provider calls=%d want 3", provider.calls)
+	}
+	if !messagesContainToolResult(result.Messages, "web_search") {
+		t.Fatalf("messages=%#v want web_search tool result", result.Messages)
+	}
+	if !messagesContainHumanText(result.Messages, "Do not simulate search results in plain text.") {
+		t.Fatalf("messages=%#v want retry prompt", result.Messages)
+	}
+}
+
 func assertLastToolRoundTrip(t *testing.T, messages []models.Message, callID, toolName string) {
 	t.Helper()
 	if len(messages) < 2 {
@@ -160,4 +216,110 @@ func (p issue2124FailingProvider) Stream(context.Context, llm.ChatRequest) (<-ch
 	ch <- llm.StreamChunk{Err: p.err, Done: true}
 	close(ch)
 	return ch, nil
+}
+
+type issue2139WebSearchSimulationProvider struct {
+	t     *testing.T
+	calls int
+}
+
+func (p *issue2139WebSearchSimulationProvider) PrefersStructuredToolCalls() bool { return true }
+
+func (p *issue2139WebSearchSimulationProvider) Chat(_ context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	p.calls++
+	switch p.calls {
+	case 1:
+		if !toolListContains(req.Tools, "web_search") {
+			p.t.Fatalf("tools=%v want web_search", toolNames(req.Tools))
+		}
+		return llm.ChatResponse{
+			Model: "test-model",
+			Message: models.Message{
+				Role:    models.RoleAI,
+				Content: "我会调用 web_search 来联网搜索 OpenAI API 价格页。",
+			},
+			Stop: "stop",
+		}, nil
+	case 2:
+		if len(req.Messages) == 0 || req.Messages[len(req.Messages)-1].Role != models.RoleHuman {
+			p.t.Fatalf("last message=%#v want human retry prompt", req.Messages)
+		}
+		if !strings.Contains(req.Messages[len(req.Messages)-1].Content, "Do not simulate search results in plain text.") {
+			p.t.Fatalf("retry prompt=%q", req.Messages[len(req.Messages)-1].Content)
+		}
+		return llm.ChatResponse{
+			Model: "test-model",
+			Message: models.Message{
+				Role: models.RoleAI,
+				ToolCalls: []models.ToolCall{{
+					ID:   "web-1",
+					Name: "web_search",
+					Arguments: map[string]any{
+						"query": "OpenAI API pricing",
+					},
+				}},
+			},
+			Stop: "tool_calls",
+		}, nil
+	case 3:
+		if !messagesContainToolResult(req.Messages, "web_search") {
+			p.t.Fatalf("messages=%#v want web_search result in history", req.Messages)
+		}
+		return llm.ChatResponse{
+			Model: "test-model",
+			Message: models.Message{
+				Role:    models.RoleAI,
+				Content: "done",
+			},
+			Stop: "stop",
+		}, nil
+	default:
+		p.t.Fatalf("unexpected Chat call %d", p.calls)
+		return llm.ChatResponse{}, nil
+	}
+}
+
+func (p *issue2139WebSearchSimulationProvider) Stream(context.Context, llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	if p.t != nil {
+		p.t.Fatal("Stream() should not be used for structured tool turns")
+	}
+	ch := make(chan llm.StreamChunk)
+	close(ch)
+	return ch, nil
+}
+
+func toolListContains(items []models.Tool, name string) bool {
+	name = strings.TrimSpace(name)
+	for _, item := range items {
+		if strings.TrimSpace(item.Name) == name {
+			return true
+		}
+	}
+	return false
+}
+
+func messagesContainToolResult(messages []models.Message, toolName string) bool {
+	toolName = strings.TrimSpace(toolName)
+	for _, msg := range messages {
+		if msg.Role != models.RoleTool || msg.ToolResult == nil {
+			continue
+		}
+		if strings.TrimSpace(msg.ToolResult.ToolName) == toolName {
+			return true
+		}
+	}
+	return false
+}
+
+func messagesContainHumanText(messages []models.Message, needle string) bool {
+	needle = strings.TrimSpace(needle)
+	for _, msg := range messages {
+		if msg.Role != models.RoleHuman {
+			continue
+		}
+		if strings.Contains(msg.Content, needle) {
+			return true
+		}
+	}
+	return false
 }
