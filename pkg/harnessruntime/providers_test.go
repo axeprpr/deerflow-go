@@ -80,6 +80,7 @@ type fakePreflightRuntime struct {
 
 type fakeRunStateRuntime struct {
 	saved        RunRecord
+	taskState    harness.TaskState
 	threadStatus string
 	taskLife     TaskLifecycleDescriptor
 	lifeCleared  bool
@@ -163,6 +164,10 @@ func (r *fakePreflightRuntime) SaveRunRecord(record RunRecord) {
 
 func (r *fakeRunStateRuntime) SaveRunRecord(record RunRecord) {
 	r.saved = record
+}
+
+func (r *fakeRunStateRuntime) LoadThreadTaskState(_ string) harness.TaskState {
+	return r.taskState
 }
 
 func (r *fakeRunStateRuntime) MarkThreadStatus(threadID string, status string) {
@@ -812,7 +817,12 @@ func TestRunStateServiceTransitionsRecords(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 4, 11, 11, 0, 0, 0, time.UTC)
-	runtime := &fakeRunStateRuntime{}
+	runtime := &fakeRunStateRuntime{
+		taskState: harness.TaskState{
+			Items: []harness.TaskItem{{Text: "verify artifact", Status: harness.TaskStatusPending}},
+			ExpectedOutputs: []string{"/mnt/user-data/outputs/report.md"},
+		},
+	}
 	service := NewRunStateService(runtime)
 	service.now = func() time.Time { return now }
 
@@ -824,6 +834,9 @@ func TestRunStateServiceTransitionsRecords(t *testing.T) {
 	if runtime.taskLife.Status != "running" {
 		t.Fatalf("begin task lifecycle = %+v", runtime.taskLife)
 	}
+	if len(record.Outcome.TaskState.Items) != 1 || record.Outcome.TaskState.Items[0].Text != "verify artifact" {
+		t.Fatalf("begin task state = %+v", record.Outcome.TaskState)
+	}
 
 	record = service.MarkError(record, context.DeadlineExceeded)
 	if record.Status != "error" || record.Outcome.RunStatus != "error" || runtime.threadStatus != "thread-1:error" {
@@ -832,6 +845,9 @@ func TestRunStateServiceTransitionsRecords(t *testing.T) {
 	if runtime.taskLife.Status != "error" {
 		t.Fatalf("error task lifecycle = %+v", runtime.taskLife)
 	}
+	if len(record.Outcome.TaskState.Items) != 1 || record.Outcome.TaskState.Items[0].Text != "verify artifact" {
+		t.Fatalf("error task state = %+v", record.Outcome.TaskState)
+	}
 
 	record = service.MarkCanceled(record)
 	if record.Status != "interrupted" || !record.Outcome.Interrupted || runtime.threadStatus != "thread-1:interrupted" {
@@ -839,6 +855,9 @@ func TestRunStateServiceTransitionsRecords(t *testing.T) {
 	}
 	if runtime.taskLife.Status != "interrupted" {
 		t.Fatalf("canceled task lifecycle = %+v", runtime.taskLife)
+	}
+	if len(record.Outcome.TaskState.Items) != 1 || record.Outcome.TaskState.Items[0].Text != "verify artifact" {
+		t.Fatalf("canceled task state = %+v", record.Outcome.TaskState)
 	}
 
 	record = service.Finalize(record, CompletionOutcome{

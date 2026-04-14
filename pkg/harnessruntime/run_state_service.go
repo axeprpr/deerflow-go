@@ -8,6 +8,7 @@ import (
 
 type RunStateRuntime interface {
 	SaveRunRecord(record RunRecord)
+	LoadThreadTaskState(threadID string) harness.TaskState
 	MarkThreadStatus(threadID string, status string)
 	SetThreadTaskLifecycle(threadID string, lifecycle TaskLifecycleDescriptor)
 	ClearThreadTaskLifecycle(threadID string)
@@ -28,8 +29,10 @@ func NewRunStateService(runtime RunStateRuntime) RunStateService {
 }
 
 func (s RunStateService) MarkError(record RunRecord, err error) RunRecord {
+	taskState := s.loadTaskState(record.ThreadID)
 	outcome := NewOutcomeService().Describe(record, RunOutcome{RunStatus: "error"}, err.Error())
-	outcome.TaskLifecycle = NewTaskLifecycleService().Describe(RunOutcome{RunStatus: "error"}, harness.TaskState{}, false)
+	outcome.TaskState = taskState
+	outcome.TaskLifecycle = NewTaskLifecycleService().Describe(RunOutcome{RunStatus: "error"}, taskState, false)
 	record.Status = outcome.RunStatus
 	record.Error = outcome.Error
 	record.Outcome = outcome
@@ -43,13 +46,15 @@ func (s RunStateService) MarkError(record RunRecord, err error) RunRecord {
 }
 
 func (s RunStateService) Begin(record RunRecord) RunRecord {
+	taskState := s.loadTaskState(record.ThreadID)
 	if record.Status == "" {
 		record.Status = "running"
 	}
 	if record.Outcome.RunStatus == "" {
 		record.Outcome = NewOutcomeService().Describe(record, RunOutcome{RunStatus: "running"}, "")
 	}
-	record.Outcome.TaskLifecycle = NewTaskLifecycleService().Describe(RunOutcome{RunStatus: "running"}, harness.TaskState{}, false)
+	record.Outcome.TaskState = taskState
+	record.Outcome.TaskLifecycle = NewTaskLifecycleService().Describe(RunOutcome{RunStatus: "running"}, taskState, false)
 	record.UpdatedAt = s.now()
 	if s.runtime != nil {
 		s.runtime.SaveRunRecord(record)
@@ -60,8 +65,10 @@ func (s RunStateService) Begin(record RunRecord) RunRecord {
 }
 
 func (s RunStateService) MarkCanceled(record RunRecord) RunRecord {
+	taskState := s.loadTaskState(record.ThreadID)
 	outcome := NewOutcomeService().Describe(record, RunOutcome{RunStatus: "interrupted", Interrupted: true}, "")
-	outcome.TaskLifecycle = NewTaskLifecycleService().Describe(RunOutcome{RunStatus: "interrupted", Interrupted: true}, harness.TaskState{}, false)
+	outcome.TaskState = taskState
+	outcome.TaskLifecycle = NewTaskLifecycleService().Describe(RunOutcome{RunStatus: "interrupted", Interrupted: true}, taskState, false)
 	record.Status = outcome.RunStatus
 	record.Error = outcome.Error
 	record.Outcome = outcome
@@ -72,6 +79,17 @@ func (s RunStateService) MarkCanceled(record RunRecord) RunRecord {
 		s.runtime.MarkThreadStatus(record.ThreadID, "interrupted")
 	}
 	return record
+}
+
+func (s RunStateService) loadTaskState(threadID string) harness.TaskState {
+	if s.runtime == nil {
+		return harness.TaskState{}
+	}
+	taskState, err := harness.NormalizeTaskState(s.runtime.LoadThreadTaskState(threadID))
+	if err != nil {
+		return harness.TaskState{}
+	}
+	return taskState
 }
 
 func (s RunStateService) Finalize(record RunRecord, outcome CompletionOutcome) RunRecord {

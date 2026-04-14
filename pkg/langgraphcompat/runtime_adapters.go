@@ -307,6 +307,17 @@ func (a runtimeRunStateAdapter) SaveRunRecord(record harnessruntime.RunRecord) {
 	harnessruntime.NewSnapshotStoreService(a.server.ensureSnapshotStore()).SaveRecord(record)
 }
 
+func (a runtimeRunStateAdapter) LoadThreadTaskState(threadID string) harness.TaskState {
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		if state, ok := store.LoadThreadRuntimeState(threadID); ok {
+			if taskState, ok := harness.ParseTaskState(state.Metadata[harnessruntime.DefaultTaskStateMetadataKey]); ok {
+				return taskState
+			}
+		}
+	}
+	return harness.TaskState{}
+}
+
 func (a runtimeRunStateAdapter) MarkThreadStatus(threadID string, status string) {
 	if store := a.server.ensureThreadStateStore(); store != nil {
 		store.MarkThreadStatus(threadID, status)

@@ -19,6 +19,17 @@ func (r workerRunStateRuntime) SaveRunRecord(record RunRecord) {
 	NewSnapshotStoreService(r.snapshots).SaveRecord(record)
 }
 
+func (r workerRunStateRuntime) LoadThreadTaskState(threadID string) harness.TaskState {
+	if r.threads != nil {
+		if state, ok := r.threads.LoadThreadRuntimeState(threadID); ok {
+			if taskState, ok := harness.ParseTaskState(state.Metadata[DefaultTaskStateMetadataKey]); ok {
+				return taskState
+			}
+		}
+	}
+	return harness.TaskState{}
+}
+
 func (r workerRunStateRuntime) MarkThreadStatus(threadID string, status string) {
 	if r.threads != nil {
 		r.threads.MarkThreadStatus(threadID, status)
