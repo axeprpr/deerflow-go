@@ -65,6 +65,35 @@ func TestWriteBundleWritesManifestAndProcesses(t *testing.T) {
 	if !strings.Contains(string(gatewayData), "\"depends_on\"") || !strings.Contains(string(gatewayData), "\"component\"") {
 		t.Fatalf("gateway process = %q", string(gatewayData))
 	}
+	for _, unit := range []string{
+		"deerflow-runtime-gateway.service",
+		"deerflow-runtime-worker.service",
+		"deerflow-runtime-state.service",
+		"deerflow-runtime-sandbox.service",
+	} {
+		data, err := os.ReadFile(filepath.Join(dir, "host", "systemd", unit))
+		if err != nil {
+			t.Fatalf("systemd unit %s read error = %v", unit, err)
+		}
+		text := string(data)
+		if !strings.Contains(text, "[Unit]") || !strings.Contains(text, "ExecStart=") || !strings.Contains(text, "[Service]") {
+			t.Fatalf("systemd unit %s = %q", unit, text)
+		}
+	}
+	electronData, err := os.ReadFile(filepath.Join(dir, "host", "electron", "runtime-processes.json"))
+	if err != nil {
+		t.Fatalf("electron runtime processes read error = %v", err)
+	}
+	var electronBundle ElectronHostBundle
+	if err := json.Unmarshal(electronData, &electronBundle); err != nil {
+		t.Fatalf("electron runtime processes decode error = %v", err)
+	}
+	if len(electronBundle.Processes) != 4 {
+		t.Fatalf("electron processes len = %d, want 4", len(electronBundle.Processes))
+	}
+	if electronBundle.Processes[0].Name != "state" {
+		t.Fatalf("first electron process = %#v", electronBundle.Processes[0])
+	}
 }
 
 func TestPrepareCommandWriteBundle(t *testing.T) {
@@ -150,6 +179,24 @@ func TestPrepareCommandWriteBundleUsesBundlePolicyFlags(t *testing.T) {
 	}
 	if !hostPlan.Processes[0].FailureIsolation {
 		t.Fatalf("process failure isolation=false")
+	}
+	gatewayUnit, err := os.ReadFile(filepath.Join(dir, "host", "systemd", "deerflow-runtime-gateway.service"))
+	if err != nil {
+		t.Fatalf("gateway systemd unit read error = %v", err)
+	}
+	if !strings.Contains(string(gatewayUnit), "Restart=always") || !strings.Contains(string(gatewayUnit), "RestartSec=2000ms") {
+		t.Fatalf("gateway systemd unit = %q", string(gatewayUnit))
+	}
+	electronData, err := os.ReadFile(filepath.Join(dir, "host", "electron", "runtime-processes.json"))
+	if err != nil {
+		t.Fatalf("electron runtime processes read error = %v", err)
+	}
+	var electronBundle ElectronHostBundle
+	if err := json.Unmarshal(electronData, &electronBundle); err != nil {
+		t.Fatalf("electron runtime processes decode error = %v", err)
+	}
+	if len(electronBundle.Processes) == 0 || electronBundle.Processes[0].RestartPolicy != string(ProcessRestartAlways) {
+		t.Fatalf("electron processes = %#v", electronBundle.Processes)
 	}
 }
 

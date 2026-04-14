@@ -85,6 +85,8 @@ flowchart TD
   - `processes/worker.json`
   - `processes/state.json`
   - `processes/sandbox.json`
+  - `host/systemd/*.service` (rendered units for Linux host orchestration)
+  - `host/electron/runtime-processes.json` (Electron host process plan)
 - `-bundle-restart-policy=never|on-failure|always`: set `host-plan.json` restart policy
 - `-bundle-max-restarts=<n>`: set `host-plan.json` max restart count (`<=0` means unlimited)
 - `-bundle-restart-delay=<duration>`: set `host-plan.json` restart delay

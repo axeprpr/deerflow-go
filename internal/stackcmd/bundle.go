@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -138,6 +139,9 @@ func WriteBundleWithOptions(dir string, manifest StackManifest, options BundleOp
 	if err := commandrun.WriteJSONFile(filepath.Join(dir, "host-plan.json"), hostPlan); err != nil {
 		return err
 	}
+	if err := writeHostAssets(dir, hostPlan); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -227,4 +231,121 @@ func systemdRestartMode(policy ProcessRestartPolicy) string {
 	default:
 		return "on-failure"
 	}
+}
+
+type ElectronHostBundle struct {
+	Version       string                `json:"version"`
+	StartOrder    []string              `json:"start_order"`
+	ShutdownOrder []string              `json:"shutdown_order"`
+	Processes     []ElectronHostProcess `json:"processes"`
+}
+
+type ElectronHostProcess struct {
+	Name                   string   `json:"name"`
+	Command                []string `json:"command"`
+	DependsOn              []string `json:"depends_on,omitempty"`
+	ReadyURL               string   `json:"ready_url"`
+	RestartPolicy          string   `json:"restart_policy"`
+	MaxRestarts            int      `json:"max_restarts"`
+	RestartDelayMilli      int64    `json:"restart_delay_ms"`
+	DependencyTimeoutMilli int64    `json:"dependency_timeout_ms"`
+	FailureIsolation       bool     `json:"failure_isolation"`
+}
+
+func writeHostAssets(dir string, hostPlan HostPlan) error {
+	hostDir := filepath.Join(dir, "host")
+	systemdDir := filepath.Join(hostDir, "systemd")
+	electronDir := filepath.Join(hostDir, "electron")
+	if err := os.MkdirAll(systemdDir, 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(electronDir, 0o755); err != nil {
+		return err
+	}
+
+	for _, service := range hostPlan.Systemd.Services {
+		if err := os.WriteFile(filepath.Join(systemdDir, service.Name), []byte(renderSystemdUnit(service)), 0o644); err != nil {
+			return err
+		}
+	}
+
+	byProcess := make(map[string]HostProcessPlan, len(hostPlan.Processes))
+	for _, process := range hostPlan.Processes {
+		byProcess[strings.TrimSpace(process.Name)] = process
+	}
+	electronProcesses := make([]ElectronHostProcess, 0, len(hostPlan.Electron.StartOrder))
+	for _, name := range hostPlan.Electron.StartOrder {
+		process, ok := byProcess[strings.TrimSpace(name)]
+		if !ok {
+			continue
+		}
+		electronProcesses = append(electronProcesses, ElectronHostProcess{
+			Name:                   process.Name,
+			Command:                append([]string{process.Binary}, process.Args...),
+			DependsOn:              append([]string(nil), process.DependsOn...),
+			ReadyURL:               process.ReadyURL,
+			RestartPolicy:          process.RestartPolicy,
+			MaxRestarts:            process.MaxRestarts,
+			RestartDelayMilli:      process.RestartDelayMilli,
+			DependencyTimeoutMilli: process.DependencyTimeoutMilli,
+			FailureIsolation:       process.FailureIsolation,
+		})
+	}
+	electronBundle := ElectronHostBundle{
+		Version:       hostPlan.Version,
+		StartOrder:    append([]string(nil), hostPlan.Electron.StartOrder...),
+		ShutdownOrder: append([]string(nil), hostPlan.Electron.ShutdownOrder...),
+		Processes:     electronProcesses,
+	}
+	if err := commandrun.WriteJSONFile(filepath.Join(electronDir, "runtime-processes.json"), electronBundle); err != nil {
+		return err
+	}
+	return nil
+}
+
+func renderSystemdUnit(service HostSystemdService) string {
+	lines := []string{
+		"[Unit]",
+		"Description=DeerFlow Runtime Process " + strings.TrimSpace(service.Name),
+		"After=network-online.target",
+		"Wants=network-online.target",
+	}
+	if len(service.After) > 0 {
+		lines = append(lines, "After=network-online.target "+strings.Join(service.After, " "))
+	}
+	if len(service.Wants) > 0 {
+		lines = append(lines, "Wants=network-online.target "+strings.Join(service.Wants, " "))
+	}
+	lines = append(lines,
+		"",
+		"[Service]",
+		"Type=simple",
+		"ExecStart="+renderSystemdExecStart(service.ExecStart),
+		"Restart="+firstNonEmpty(strings.TrimSpace(service.Restart), "on-failure"),
+		"RestartSec="+formatSystemdDurationMS(service.RestartDelayMilli),
+		"KillSignal=SIGINT",
+		"",
+		"[Install]",
+		"WantedBy=multi-user.target",
+	)
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func renderSystemdExecStart(parts []string) string {
+	quoted := make([]string, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value == "" {
+			continue
+		}
+		quoted = append(quoted, strconv.Quote(value))
+	}
+	return strings.Join(quoted, " ")
+}
+
+func formatSystemdDurationMS(ms int64) string {
+	if ms <= 0 {
+		return "0"
+	}
+	return strconv.FormatInt(ms, 10) + "ms"
 }
