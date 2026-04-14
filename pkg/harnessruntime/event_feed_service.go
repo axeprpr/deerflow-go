@@ -3,6 +3,7 @@ package harnessruntime
 import (
 	"strconv"
 	"strings"
+	"sync"
 )
 
 type EventFeedService struct {
@@ -32,6 +33,9 @@ func (s EventFeedService) ReplayFrom(runID string, afterEventIndex int) ([]RunEv
 		}
 		events = filtered
 	}
+	for i := range events {
+		events[i] = normalizeRunEventForFeed(events[i])
+	}
 	replayedEnd := false
 	for _, event := range events {
 		if event.Event == "end" {
@@ -47,7 +51,35 @@ func (s EventFeedService) Subscribe(runID string, buffer int) (<-chan RunEvent, 
 		close(ch)
 		return ch, func() {}
 	}
-	return s.stream.SubscribeRunEvents(runID, buffer)
+	source, unsubscribeSource := s.stream.SubscribeRunEvents(runID, buffer)
+	out := make(chan RunEvent, buffer)
+	done := make(chan struct{})
+	var once sync.Once
+	go func() {
+		defer close(out)
+		for {
+			select {
+			case <-done:
+				return
+			case event, ok := <-source:
+				if !ok {
+					return
+				}
+				event = normalizeRunEventForFeed(event)
+				select {
+				case out <- event:
+				case <-done:
+					return
+				}
+			}
+		}
+	}()
+	return out, func() {
+		once.Do(func() {
+			close(done)
+			unsubscribeSource()
+		})
+	}
 }
 
 func runEventIndex(event RunEvent) int {
@@ -62,4 +94,34 @@ func runEventIndex(event RunEvent) int {
 		}
 	}
 	return 0
+}
+
+func normalizeRunEventForFeed(event RunEvent) RunEvent {
+	descriptor := event.Outcome
+	if len(descriptor.PendingTasks) == 0 && len(descriptor.TaskLifecycle.PendingTasks) > 0 {
+		descriptor.PendingTasks = append([]string(nil), descriptor.TaskLifecycle.PendingTasks...)
+	}
+	if len(descriptor.ExpectedArtifacts) == 0 && len(descriptor.TaskLifecycle.ExpectedArtifacts) > 0 {
+		descriptor.ExpectedArtifacts = append([]string(nil), descriptor.TaskLifecycle.ExpectedArtifacts...)
+	}
+	if descriptor.Attempt <= 0 && event.Attempt > 0 {
+		descriptor.Attempt = event.Attempt
+	}
+	if descriptor.ResumeFromEvent <= 0 && event.ResumeFromEvent > 0 {
+		descriptor.ResumeFromEvent = event.ResumeFromEvent
+	}
+	if strings.TrimSpace(descriptor.ResumeReason) == "" && strings.TrimSpace(event.ResumeReason) != "" {
+		descriptor.ResumeReason = strings.TrimSpace(event.ResumeReason)
+	}
+	if event.Attempt <= 0 && descriptor.Attempt > 0 {
+		event.Attempt = descriptor.Attempt
+	}
+	if event.ResumeFromEvent <= 0 && descriptor.ResumeFromEvent > 0 {
+		event.ResumeFromEvent = descriptor.ResumeFromEvent
+	}
+	if strings.TrimSpace(event.ResumeReason) == "" && strings.TrimSpace(descriptor.ResumeReason) != "" {
+		event.ResumeReason = descriptor.ResumeReason
+	}
+	event.Outcome = descriptor
+	return event
 }

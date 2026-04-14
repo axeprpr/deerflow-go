@@ -143,7 +143,9 @@ func (s runReplayStreamer) Poll(run *Run, done <-chan struct{}) bool {
 func (s runReplayStreamer) replayFrom(run *Run, afterEventIndex int) (int, bool) {
 	events, replayedEnd := harnessruntime.NewEventFeedService(s.server.runtimeEventAdapter()).ReplayFrom(run.RunID, afterEventIndex)
 	last := afterEventIndex
+	record := runRecordFromRun(run)
 	for _, event := range events {
+		event = normalizeRuntimeEventForRun(event, record)
 		if idx := harnessruntimeEventIndex(event); idx > last {
 			last = idx
 		}
@@ -162,12 +164,14 @@ func (s runReplayStreamer) Join(run *Run) {
 	}
 	sub, unsubscribe := harnessruntime.NewEventFeedService(s.server.runtimeEventAdapter()).Subscribe(run.RunID, 16)
 	defer unsubscribe()
+	record := runRecordFromRun(run)
 	for {
 		select {
 		case event, ok := <-sub:
 			if !ok {
 				return
 			}
+			event = normalizeRuntimeEventForRun(event, record)
 			if s.filter.allows(event.Event) {
 				s.server.sendSSEEvent(s.w, s.flusher, streamEventFromRuntimeEvent(event))
 			}

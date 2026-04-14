@@ -36,7 +36,7 @@ func (s QueryService) Run(threadID, runID string) (RunRecord, bool) {
 	if threadID != "" && record.ThreadID != strings.TrimSpace(threadID) {
 		return RunRecord{}, false
 	}
-	return record, true
+	return normalizeQueryRunRecord(record), true
 }
 
 func (s QueryService) ListThreadRuns(threadID string) []RunRecord {
@@ -44,6 +44,9 @@ func (s QueryService) ListThreadRuns(threadID string) []RunRecord {
 		return nil
 	}
 	records := append([]RunRecord(nil), s.runtime.ListRunRecords(strings.TrimSpace(threadID))...)
+	for i := range records {
+		records[i] = normalizeQueryRunRecord(records[i])
+	}
 	sort.Slice(records, func(i, j int) bool {
 		return records[i].CreatedAt.After(records[j].CreatedAt)
 	})
@@ -94,4 +97,9 @@ func (s QueryService) SelectJoinRun(threadID string) JoinSelection {
 	}
 
 	return JoinSelection{ThreadFound: true}
+}
+
+func normalizeQueryRunRecord(record RunRecord) RunRecord {
+	record.Outcome = NewOutcomeService().BindRecord(record, record.Outcome)
+	return record
 }
