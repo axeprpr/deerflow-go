@@ -633,6 +633,9 @@ func TestForwardTaskEventIncludesStructuredMessageMetadata(t *testing.T) {
 		if toolCalls[0]["name"] != "bash" {
 			t.Fatalf("tool name=%v want bash", toolCalls[0]["name"])
 		}
+		if evt.Outcome.RunStatus != "running" {
+			t.Fatalf("event outcome status=%q want running", evt.Outcome.RunStatus)
+		}
 		found = true
 	}
 	if !found {
@@ -686,6 +689,9 @@ func TestForwardTaskEventSyncsRunningOutcomeFromLiveTaskState(t *testing.T) {
 	}
 	if len(stored.Outcome.TaskLifecycle.ExpectedArtifacts) != 1 || stored.Outcome.TaskLifecycle.ExpectedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
 		t.Fatalf("task_lifecycle=%+v", stored.Outcome.TaskLifecycle)
+	}
+	if len(stored.Events) == 0 || len(stored.Events[len(stored.Events)-1].Outcome.TaskState.Items) != 1 || stored.Events[len(stored.Events)-1].Outcome.TaskState.Items[0].ID != "task-1" {
+		t.Fatalf("event outcome task_state=%+v", stored.Events)
 	}
 }
 
@@ -835,6 +841,9 @@ func TestForwardAgentEventToolCallEndSyncsRunningOutcomeFromLiveTaskState(t *tes
 	}
 	if len(stored.Outcome.TaskLifecycle.VerifiedArtifacts) != 1 || stored.Outcome.TaskLifecycle.VerifiedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
 		t.Fatalf("task_lifecycle=%+v", stored.Outcome.TaskLifecycle)
+	}
+	if len(stored.Events) == 0 || len(stored.Events[len(stored.Events)-1].Outcome.TaskLifecycle.VerifiedArtifacts) != 1 || stored.Events[len(stored.Events)-1].Outcome.TaskLifecycle.VerifiedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("event outcome task_lifecycle=%+v", stored.Events)
 	}
 }
 

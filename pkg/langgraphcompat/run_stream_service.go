@@ -191,9 +191,9 @@ func (s *Server) recordAndSendEventFiltered(w http.ResponseWriter, flusher http.
 	}
 }
 
-func (s *Server) syncRunningRunFromThreadState(run *Run) {
+func (s *Server) refreshRunningRunFromThreadState(run *Run) bool {
 	if s == nil || run == nil || strings.TrimSpace(run.Status) != "running" {
-		return
+		return false
 	}
 	taskState := s.runtimeCompletionAdapter().LoadThreadTaskState(run.ThreadID)
 	lifecycle := run.Outcome.TaskLifecycle
@@ -208,7 +208,7 @@ func (s *Server) syncRunningRunFromThreadState(run *Run) {
 		lifecycle = harnessruntime.NewTaskLifecycleService().Describe(harnessruntime.RunOutcome{RunStatus: "running"}, taskState, false)
 	}
 	if taskState.IsZero() && lifecycle.IsZero() {
-		return
+		return false
 	}
 	outcome := run.Outcome
 	outcome.RunStatus = "running"
@@ -226,6 +226,14 @@ func (s *Server) syncRunningRunFromThreadState(run *Run) {
 	record.Outcome = outcome
 	record.UpdatedAt = time.Now().UTC()
 	applyRunRecord(run, record)
+	return true
+}
+
+func (s *Server) syncRunningRunFromThreadState(run *Run) {
+	if !s.refreshRunningRunFromThreadState(run) {
+		return
+	}
+	record := runRecordFromRun(run)
 	harnessruntime.NewSnapshotStoreService(s.ensureSnapshotStore()).SaveRecord(record)
 }
 
@@ -293,6 +301,7 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 		if evt.ToolEvent == nil {
 			return
 		}
+		s.refreshRunningRunFromThreadState(run)
 		s.recordAndSendEventFiltered(w, flusher, run, filter, "tool_call_end", evt.ToolEvent)
 		s.recordAndSendEventFiltered(w, flusher, run, filter, "events", compactToolAliasPayload(run, "on_tool_end", evt.ToolEvent, true))
 		s.recordAndSendEventFiltered(w, flusher, run, filter, "on_tool_end", compactToolAliasPayload(nil, "on_tool_end", evt.ToolEvent, false))
@@ -372,6 +381,7 @@ func (s *Server) emitFinalMessagesTuple(w http.ResponseWriter, flusher http.Flus
 }
 
 func (s *Server) forwardTaskEvent(w http.ResponseWriter, flusher http.Flusher, run *Run, filter streamModeFilter, evt subagent.TaskEvent) {
+	s.refreshRunningRunFromThreadState(run)
 	data := map[string]any{
 		"type":           evt.Type,
 		"task_id":        evt.TaskID,
