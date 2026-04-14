@@ -2,6 +2,7 @@ package harnessruntime
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -24,6 +25,16 @@ func TestHTTPRemoteSandboxServerHealthEndpoint(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body error = %v", err)
+	}
+	if body["status"] != "ok" {
+		t.Fatalf("status body = %#v", body)
+	}
+	if got, _ := body["active_leases"].(float64); got != 0 {
+		t.Fatalf("active_leases = %v, want 0", got)
 	}
 }
 

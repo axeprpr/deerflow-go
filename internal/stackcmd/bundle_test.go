@@ -1,6 +1,7 @@
 package stackcmd
 
 import (
+	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
@@ -21,6 +22,23 @@ func TestWriteBundleWritesManifestAndProcesses(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "stack-manifest.json")); err != nil {
 		t.Fatalf("manifest stat error = %v", err)
+	}
+	hostPlanData, err := os.ReadFile(filepath.Join(dir, "host-plan.json"))
+	if err != nil {
+		t.Fatalf("host plan read error = %v", err)
+	}
+	if !strings.Contains(string(hostPlanData), "\"systemd\"") || !strings.Contains(string(hostPlanData), "\"electron\"") {
+		t.Fatalf("host plan = %q", string(hostPlanData))
+	}
+	var hostPlan HostPlan
+	if err := json.Unmarshal(hostPlanData, &hostPlan); err != nil {
+		t.Fatalf("host plan decode error = %v", err)
+	}
+	if len(hostPlan.Electron.StartOrder) != 4 {
+		t.Fatalf("electron start order len = %d, want 4", len(hostPlan.Electron.StartOrder))
+	}
+	if hostPlan.Electron.StartOrder[0] != "state" || hostPlan.Electron.StartOrder[1] != "sandbox" {
+		t.Fatalf("electron start order = %#v", hostPlan.Electron.StartOrder)
 	}
 	for _, name := range []string{"gateway.json", "worker.json", "state.json", "sandbox.json"} {
 		data, err := os.ReadFile(filepath.Join(dir, "processes", name))
@@ -61,6 +79,9 @@ func TestPrepareCommandWriteBundle(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "stack-manifest.json")); err != nil {
 		t.Fatalf("manifest stat error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "host-plan.json")); err != nil {
+		t.Fatalf("host plan stat error = %v", err)
 	}
 }
 

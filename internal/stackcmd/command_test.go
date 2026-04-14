@@ -143,6 +143,8 @@ func TestPrepareCommandSpawnProcessesUsesProcessLauncher(t *testing.T) {
 		Args: []string{
 			"-spawn-processes",
 			"-process-binary-dir=" + binDir,
+			"-spawn-restart-policy=always",
+			"-spawn-max-restarts=5",
 			"-preset=shared-remote",
 			"-worker-addr=:19081",
 		},
@@ -156,7 +158,32 @@ func TestPrepareCommandSpawnProcessesUsesProcessLauncher(t *testing.T) {
 	if _, ok := prepared.Lifecycle.(*ProcessLauncher); !ok {
 		t.Fatalf("Lifecycle type = %T, want *ProcessLauncher", prepared.Lifecycle)
 	}
+	launcher := prepared.Lifecycle.(*ProcessLauncher)
+	if len(launcher.lifecycles) == 0 {
+		t.Fatal("spawn launcher lifecycles = 0")
+	}
+	if launcher.lifecycles[0].restartPolicy != ProcessRestartAlways {
+		t.Fatalf("restart policy = %q", launcher.lifecycles[0].restartPolicy)
+	}
+	if launcher.lifecycles[0].maxRestarts != 5 {
+		t.Fatalf("max restarts = %d", launcher.lifecycles[0].maxRestarts)
+	}
 	if !strings.Contains(strings.Join(prepared.StartupLines, "\n"), "launch_mode=external-processes") {
 		t.Fatalf("StartupLines = %#v", prepared.StartupLines)
+	}
+}
+
+func TestPrepareCommandSpawnProcessesRejectsInvalidRestartPolicy(t *testing.T) {
+	binDir := installTestProcessBinaries(t, "langgraph", "runtime-node")
+	_, err := PrepareCommand(flag.NewFlagSet("runtime-stack-spawn-invalid-policy", flag.ContinueOnError), langgraphcmd.BuildInfo{}, CommandOptions{
+		Stderr: new(strings.Builder),
+		Args: []string{
+			"-spawn-processes",
+			"-process-binary-dir=" + binDir,
+			"-spawn-restart-policy=sometimes",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid restart policy") {
+		t.Fatalf("PrepareCommand() error = %v, want invalid restart policy", err)
 	}
 }

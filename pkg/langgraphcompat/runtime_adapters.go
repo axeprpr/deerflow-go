@@ -411,6 +411,13 @@ func (a runtimeQueryAdapter) HasThread(threadID string) bool {
 	return false
 }
 
+func (a runtimeQueryAdapter) LoadThreadRuntimeState(threadID string) (harnessruntime.ThreadRuntimeState, bool) {
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		return store.LoadThreadRuntimeState(threadID)
+	}
+	return harnessruntime.ThreadRuntimeState{}, false
+}
+
 func (a runtimeEventAdapter) NextRunEventIndex(runID string) int {
 	store := a.server.ensureEventStore()
 	if store == nil {

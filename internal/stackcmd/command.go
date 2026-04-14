@@ -37,6 +37,10 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 	writeBundle := fs.String("write-bundle", "", "write stack manifest and per-process specs to a directory, then exit")
 	spawnProcesses := fs.Bool("spawn-processes", false, "launch stack using external processes from manifest binaries")
 	processBinaryDir := fs.String("process-binary-dir", "", "directory used to resolve process binaries when spawning external processes")
+	spawnRestartPolicy := fs.String("spawn-restart-policy", string(ProcessRestartOnFailure), "external process restart policy: never|on-failure|always")
+	spawnMaxRestarts := fs.Int("spawn-max-restarts", 3, "max restart attempts per external process (<=0 means unlimited)")
+	spawnRestartDelay := fs.Duration("spawn-restart-delay", 500*time.Millisecond, "delay before restarting an external process")
+	spawnDependencyTimeout := fs.Duration("spawn-dependency-timeout", 60*time.Second, "timeout waiting for each dependency readiness target")
 
 	yolo := fs.Bool("yolo", false, "YOLO mode: no auth, defaults for all settings")
 	cfg := DefaultConfig()
@@ -67,10 +71,18 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 		}, nil
 	}
 	if *spawnProcesses {
+		restartPolicy, err := parseProcessRestartPolicy(*spawnRestartPolicy)
+		if err != nil {
+			return nil, err
+		}
 		processLauncher, err := NewProcessLauncher(builder.Manifest().Processes, ProcessLaunchOptions{
-			Stdout:    commandrun.StdoutWriter(options.Stdout),
-			Stderr:    commandrun.OutputWriter(options.Stderr),
-			BinaryDir: strings.TrimSpace(*processBinaryDir),
+			Stdout:            commandrun.StdoutWriter(options.Stdout),
+			Stderr:            commandrun.OutputWriter(options.Stderr),
+			BinaryDir:         strings.TrimSpace(*processBinaryDir),
+			RestartPolicy:     restartPolicy,
+			MaxRestarts:       *spawnMaxRestarts,
+			RestartDelay:      *spawnRestartDelay,
+			DependencyTimeout: *spawnDependencyTimeout,
 		})
 		if err != nil {
 			return nil, err

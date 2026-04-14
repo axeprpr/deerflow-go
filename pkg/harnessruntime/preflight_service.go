@@ -107,15 +107,16 @@ func (s PreflightService) Prepare(input PreflightInput) PreflightResult {
 		AssistantID: assistantID,
 		Attempt:     1,
 		Status:      "running",
-		CreatedAt: now,
-		UpdatedAt: now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 	record.Outcome = NewOutcomeService().DescribeRunning(record)
 	if s.runtime != nil {
 		s.runtime.SaveRunRecord(record)
 		s.runtime.SetThreadMetadata(threadID, "assistant_id", assistantID)
 		s.runtime.SetThreadMetadata(threadID, "graph_id", firstNonEmpty(assistantID, "lead_agent"))
-		s.runtime.SetThreadMetadata(threadID, "run_id", runID)
+		s.runtime.SetThreadMetadata(threadID, DefaultRunIDMetadataKey, runID)
+		s.runtime.SetThreadMetadata(threadID, DefaultActiveRunMetadataKey, runID)
 		s.runtime.SetThreadMetadata(threadID, DefaultTaskLifecycleMetadataKey, record.Outcome.TaskLifecycle.Value())
 		s.runtime.ClearThreadMetadata(threadID, "interrupts")
 	}

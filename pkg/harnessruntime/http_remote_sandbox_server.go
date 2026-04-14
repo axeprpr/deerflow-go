@@ -19,7 +19,7 @@ type HTTPRemoteSandboxServer struct {
 	config   SandboxManagerConfig
 	protocol RemoteSandboxProtocol
 
-	mu      sync.Mutex
+	mu       sync.Mutex
 	sessions map[string]sandbox.Session
 }
 
@@ -44,8 +44,22 @@ func (s *HTTPRemoteSandboxServer) handleHealth(w http.ResponseWriter, r *http.Re
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 		return
 	}
+	s.mu.Lock()
+	activeLeases := len(s.sessions)
+	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":                "ok",
+		"backend":               s.config.Backend,
+		"active_leases":         activeLeases,
+		"heartbeat_interval_ms": s.config.HeartbeatInterval.Milliseconds(),
+		"idle_ttl_ms":           s.config.IdleTTL.Milliseconds(),
+		"sweep_interval_ms":     s.config.SweepInterval.Milliseconds(),
+		"paths": map[string]string{
+			"health": DefaultRemoteSandboxHealthPath,
+			"leases": DefaultRemoteSandboxLeasePath,
+		},
+	})
 }
 
 func (s *HTTPRemoteSandboxServer) handleLeases(w http.ResponseWriter, r *http.Request) {

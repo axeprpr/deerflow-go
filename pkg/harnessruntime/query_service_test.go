@@ -6,10 +6,12 @@ import (
 )
 
 type fakeQueryRuntime struct {
-	record    RunRecord
-	recordOK  bool
-	records   []RunRecord
-	hasThread bool
+	record        RunRecord
+	recordOK      bool
+	records       []RunRecord
+	hasThread     bool
+	threadState   ThreadRuntimeState
+	threadStateOK bool
 }
 
 func (r fakeQueryRuntime) LoadRunRecord(_ string) (RunRecord, bool) {
@@ -22,6 +24,10 @@ func (r fakeQueryRuntime) ListRunRecords(_ string) []RunRecord {
 
 func (r fakeQueryRuntime) HasThread(_ string) bool {
 	return r.hasThread
+}
+
+func (r fakeQueryRuntime) LoadThreadRuntimeState(_ string) (ThreadRuntimeState, bool) {
+	return r.threadState, r.threadStateOK
 }
 
 func TestQueryServiceRunNormalizesOutcomeDescriptor(t *testing.T) {
@@ -111,5 +117,73 @@ func TestQueryServiceListThreadRunsNormalizesAndSorts(t *testing.T) {
 	}
 	if len(records[1].Outcome.PendingTasks) != 1 || records[1].Outcome.PendingTasks[0] != "first task" {
 		t.Fatalf("older pending tasks = %#v", records[1].Outcome.PendingTasks)
+	}
+}
+
+func TestQueryServiceSelectJoinRunPrefersThreadActiveRunID(t *testing.T) {
+	now := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
+	service := NewQueryService(fakeQueryRuntime{
+		recordOK: true,
+		record: RunRecord{
+			RunID:     "run-active",
+			ThreadID:  "thread-1",
+			Status:    "running",
+			CreatedAt: now.Add(-time.Minute),
+		},
+		records: []RunRecord{
+			{
+				RunID:     "run-latest",
+				ThreadID:  "thread-1",
+				Status:    "running",
+				CreatedAt: now,
+			},
+		},
+		hasThread: true,
+		threadState: ThreadRuntimeState{
+			ThreadID: "thread-1",
+			Metadata: map[string]any{
+				DefaultActiveRunMetadataKey: "run-active",
+			},
+		},
+		threadStateOK: true,
+	})
+
+	selection := service.SelectJoinRun("thread-1")
+	if !selection.ThreadFound || !selection.HasRun {
+		t.Fatalf("selection=%+v", selection)
+	}
+	if selection.Run.RunID != "run-active" {
+		t.Fatalf("run id = %q, want %q", selection.Run.RunID, "run-active")
+	}
+}
+
+func TestQueryServiceSelectJoinRunFallsBackWhenActiveRunOwnershipStale(t *testing.T) {
+	now := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
+	service := NewQueryService(fakeQueryRuntime{
+		recordOK: false,
+		records: []RunRecord{
+			{
+				RunID:     "run-fallback",
+				ThreadID:  "thread-1",
+				Status:    "running",
+				CreatedAt: now,
+			},
+		},
+		hasThread: true,
+		threadState: ThreadRuntimeState{
+			ThreadID: "thread-1",
+			Metadata: map[string]any{
+				DefaultActiveRunMetadataKey: "run-missing",
+			},
+		},
+		threadStateOK: true,
+	})
+
+	selection := service.SelectJoinRun("thread-1")
+	if !selection.ThreadFound || !selection.HasRun {
+		t.Fatalf("selection=%+v", selection)
+	}
+	if selection.Run.RunID != "run-fallback" {
+		t.Fatalf("run id = %q, want %q", selection.Run.RunID, "run-fallback")
 	}
 }

@@ -19,6 +19,9 @@ func TestNodeConfigManifestIncludesProfiles(t *testing.T) {
 	if manifest.ExecutionProfile == "" {
 		t.Fatal("ExecutionProfile = empty")
 	}
+	if manifest.SandboxProfile.Isolation == "" {
+		t.Fatal("SandboxProfile.Isolation = empty")
+	}
 }
 
 func TestNodeManifestStartupLinesIncludeProfiles(t *testing.T) {
@@ -28,6 +31,9 @@ func TestNodeManifestStartupLinesIncludeProfiles(t *testing.T) {
 		t.Fatalf("StartupLines = %q", joined)
 	}
 	if !strings.Contains(joined, "state_profile=") {
+		t.Fatalf("StartupLines = %q", joined)
+	}
+	if !strings.Contains(joined, "sandbox_profile=") {
 		t.Fatalf("StartupLines = %q", joined)
 	}
 }

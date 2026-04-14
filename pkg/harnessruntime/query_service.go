@@ -9,6 +9,7 @@ type QueryRuntime interface {
 	LoadRunRecord(runID string) (RunRecord, bool)
 	ListRunRecords(threadID string) []RunRecord
 	HasThread(threadID string) bool
+	LoadThreadRuntimeState(threadID string) (ThreadRuntimeState, bool)
 }
 
 type JoinSelection struct {
@@ -74,6 +75,25 @@ func (s QueryService) SelectJoinRun(threadID string) JoinSelection {
 	threadID = strings.TrimSpace(threadID)
 	if s.runtime == nil {
 		return JoinSelection{}
+	}
+	if threadState, ok := s.runtime.LoadThreadRuntimeState(threadID); ok {
+		if activeRunID := metadataRunID(threadState.Metadata[DefaultActiveRunMetadataKey]); activeRunID != "" {
+			if record, recordOK := s.Run(threadID, activeRunID); recordOK && isRunningStatus(record.Status) {
+				return JoinSelection{
+					Run:         record,
+					HasRun:      true,
+					ThreadFound: true,
+				}
+			}
+		}
+		if active, ok := s.LatestActiveRun(threadID); ok {
+			return JoinSelection{
+				Run:         active,
+				HasRun:      true,
+				ThreadFound: true,
+			}
+		}
+		return JoinSelection{ThreadFound: true}
 	}
 
 	if active, ok := s.LatestActiveRun(threadID); ok {

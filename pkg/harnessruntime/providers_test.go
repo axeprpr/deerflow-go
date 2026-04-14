@@ -804,8 +804,11 @@ func TestPreflightServicePreparesRunState(t *testing.T) {
 	if runtime.threadStatus != "busy" || runtime.clearedKey != "interrupts" {
 		t.Fatalf("runtime state = %+v", runtime)
 	}
-	if runtime.metadata["assistant_id"] != "lead_agent" || runtime.metadata["run_id"] != "generated-id" {
+	if runtime.metadata["assistant_id"] != "lead_agent" || runtime.metadata[DefaultRunIDMetadataKey] != "generated-id" {
 		t.Fatalf("metadata = %#v", runtime.metadata)
+	}
+	if runtime.metadata[DefaultActiveRunMetadataKey] != "generated-id" {
+		t.Fatalf("active run metadata = %#v", runtime.metadata[DefaultActiveRunMetadataKey])
 	}
 	lifecycle, ok := runtime.metadata[DefaultTaskLifecycleMetadataKey].(map[string]any)
 	if !ok || lifecycle["status"] != "running" {
@@ -893,6 +896,51 @@ func TestRunStateServiceTransitionsRecords(t *testing.T) {
 	}
 	if runtime.taskLife.Status != "success" {
 		t.Fatalf("finalized task lifecycle = %+v", runtime.taskLife)
+	}
+}
+
+func TestRunStateServiceMaintainsActiveRunOwnership(t *testing.T) {
+	t.Parallel()
+
+	threads := NewInMemoryThreadStateStore()
+	runtime := workerRunStateRuntime{
+		snapshots: NewInMemoryRunStore(),
+		threads:   threads,
+	}
+	service := NewRunStateService(runtime)
+
+	runA := RunRecord{RunID: "run-a", ThreadID: "thread-1", Status: "running"}
+	runB := RunRecord{RunID: "run-b", ThreadID: "thread-1", Status: "running"}
+	service.Begin(runA)
+	service.Begin(runB)
+
+	state, ok := threads.LoadThreadRuntimeState("thread-1")
+	if !ok {
+		t.Fatal("LoadThreadRuntimeState() = false, want true")
+	}
+	if got := metadataRunID(state.Metadata[DefaultActiveRunMetadataKey]); got != "run-b" {
+		t.Fatalf("active run id = %q, want %q", got, "run-b")
+	}
+
+	service.Finalize(runA, CompletionOutcome{
+		RunOutcome: RunOutcome{RunStatus: "success"},
+		Descriptor: RunOutcomeDescriptor{RunStatus: "success"},
+	})
+	state, ok = threads.LoadThreadRuntimeState("thread-1")
+	if !ok {
+		t.Fatal("LoadThreadRuntimeState() = false after finalize")
+	}
+	if got := metadataRunID(state.Metadata[DefaultActiveRunMetadataKey]); got != "run-b" {
+		t.Fatalf("active run id after stale finalize = %q, want %q", got, "run-b")
+	}
+
+	service.MarkCanceled(runB)
+	state, ok = threads.LoadThreadRuntimeState("thread-1")
+	if !ok {
+		t.Fatal("LoadThreadRuntimeState() = false after cancel")
+	}
+	if got := metadataRunID(state.Metadata[DefaultActiveRunMetadataKey]); got != "" {
+		t.Fatalf("active run id after owner cancel = %q, want empty", got)
 	}
 }
 

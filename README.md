@@ -80,12 +80,17 @@ flowchart TD
 - `-print-manifest`: print full `stack-manifest.json` to stdout
 - `-write-bundle=<dir>`: write
   - `stack-manifest.json`
+  - `host-plan.json` (systemd/Electron host orchestration plan)
   - `processes/gateway.json`
   - `processes/worker.json`
   - `processes/state.json`
   - `processes/sandbox.json`
 - `-spawn-processes`: launch the manifest as real OS processes (no `.sh`), using per-process `binary + args`
 - `-process-binary-dir=<dir>`: resolve process binaries from a specific directory in external-process mode
+- `-spawn-restart-policy=never|on-failure|always`: restart strategy for external-process mode
+- `-spawn-max-restarts=<n>`: per-process restart limit (`<=0` means unlimited)
+- `-spawn-restart-delay=<duration>`: delay before restarting a failed process
+- `-spawn-dependency-timeout=<duration>`: max wait time for each dependency readiness endpoint
 
 Each process spec includes component identity, bind address, readiness target, startup dependencies, binary, and args so orchestration can stay cross-platform (Linux/macOS/Windows/Electron-managed runtime).
 

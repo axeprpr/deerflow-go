@@ -2,6 +2,7 @@ package runtimecmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 )
@@ -16,6 +17,7 @@ type NodeManifest struct {
 	Endpoint         string                                  `json:"endpoint"`
 	Transport        harnessruntime.WorkerTransportBackend   `json:"transport"`
 	Sandbox          harnessruntime.SandboxBackend           `json:"sandbox"`
+	SandboxProfile   harnessruntime.SandboxProfile           `json:"sandbox_profile"`
 	MemoryStore      string                                  `json:"memory_store"`
 	StateProvider    harnessruntime.RuntimeStateProviderMode `json:"state_provider"`
 	StateBackend     harnessruntime.RuntimeStateStoreBackend `json:"state_backend"`
@@ -31,6 +33,7 @@ type NodeManifest struct {
 
 func (c NodeConfig) Manifest() NodeManifest {
 	runtimeProfile := DefaultRuntimeProfile(c.effectivePreset(), c.Role)
+	sandboxProfile := harnessruntime.DescribeSandboxProfile(c.RuntimeNodeConfig().Sandbox)
 	return NodeManifest{
 		Role:             c.Role,
 		Preset:           c.effectivePreset(),
@@ -41,6 +44,7 @@ func (c NodeConfig) Manifest() NodeManifest {
 		Endpoint:         c.Endpoint,
 		Transport:        c.TransportBackend,
 		Sandbox:          c.SandboxBackend,
+		SandboxProfile:   sandboxProfile,
 		MemoryStore:      c.MemoryStoreURL,
 		StateProvider:    c.StateProvider,
 		StateBackend:     c.StateBackend,
@@ -61,6 +65,7 @@ func (m NodeManifest) StartupLines() []string {
 		fmt.Sprintf("  transport=%s endpoint=%s execution_profile=%s", m.Transport, firstNonEmpty(m.Endpoint, "(local)"), firstNonEmpty(m.ExecutionProfile, "(default)")),
 		fmt.Sprintf("  worker_addr=%s", m.Addr),
 		fmt.Sprintf("  sandbox=%s", m.Sandbox),
+		fmt.Sprintf("  sandbox_profile=isolation=%s capabilities=%s heartbeat_ms=%d idle_ttl_ms=%d", firstNonEmpty(m.SandboxProfile.Isolation, "(unknown)"), strings.Join(m.SandboxProfile.Capabilities, ","), m.SandboxProfile.Limits.HeartbeatIntervalMilli, m.SandboxProfile.Limits.IdleTTLMilli),
 		fmt.Sprintf("  memory_store=%s", firstNonEmpty(m.MemoryStore, "(file-store)")),
 		fmt.Sprintf("  state_profile=%s state_provider=%s state=%s snapshot=%s event=%s thread=%s root=%s store=%s", firstNonEmpty(m.StateProfile, "(default)"), firstNonEmpty(string(m.StateProvider), "(auto)"), firstNonEmpty(string(m.StateBackend), "(default)"), firstNonEmpty(string(m.SnapshotBackend), "(default)"), firstNonEmpty(string(m.EventBackend), "(default)"), firstNonEmpty(string(m.ThreadBackend), "(default)"), firstNonEmpty(m.StateRoot, "(memory)"), firstNonEmpty(m.StateStore, "(derived)")),
 		fmt.Sprintf("  snapshot_store=%s event_store=%s thread_store=%s", firstNonEmpty(m.SnapshotStore, "(derived)"), firstNonEmpty(m.EventStore, "(derived)"), firstNonEmpty(m.ThreadStore, "(derived)")),
