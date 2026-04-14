@@ -2,14 +2,17 @@ package langgraphcompat
 
 import (
 	"net/http"
+	"strings"
 	"time"
 )
 
 func (s *Server) getThreadState(threadID string) *ThreadState {
-	s.sessionsMu.RLock()
-	session, exists := s.sessions[threadID]
-	s.sessionsMu.RUnlock()
-	if !exists {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return nil
+	}
+	session := s.loadThreadStateSession(threadID)
+	if session == nil {
 		return nil
 	}
 
@@ -40,9 +43,11 @@ func (s *Server) getThreadState(threadID string) *ThreadState {
 }
 
 func (s *Server) updateThreadState(threadID string, req map[string]any) (*ThreadState, int, string) {
+	threadID = strings.TrimSpace(threadID)
 	if threadID == "" {
 		return nil, http.StatusBadRequest, "thread ID required"
 	}
+	_ = s.hydrateThreadSessionFromStore(threadID)
 
 	s.sessionsMu.Lock()
 	session, exists := s.sessions[threadID]
@@ -60,8 +65,12 @@ func (s *Server) updateThreadState(threadID string, req map[string]any) (*Thread
 		clearSessionCheckpoint(session)
 	}
 	session.UpdatedAt = time.Now().UTC()
+	runtimeState := newCompatThreadRuntimeState(session)
 	s.sessionsMu.Unlock()
 
+	if store := s.ensureThreadStateStore(); store != nil {
+		store.SaveThreadRuntimeState(runtimeState)
+	}
 	if err := s.persistSessionSnapshot(session); err != nil {
 		return nil, http.StatusInternalServerError, "failed to persist thread state"
 	}
@@ -89,4 +98,36 @@ func (s *Server) threadHistorySlice(threadID string, limit int, limitProvided bo
 		limit = len(history)
 	}
 	return history[:limit], 0, ""
+}
+
+func (s *Server) loadThreadStateSession(threadID string) *Session {
+	s.sessionsMu.RLock()
+	session, exists := s.sessions[threadID]
+	s.sessionsMu.RUnlock()
+	if exists {
+		return session
+	}
+	if !s.hydrateThreadSessionFromStore(threadID) {
+		return nil
+	}
+	s.sessionsMu.RLock()
+	session, ok := s.sessions[threadID]
+	s.sessionsMu.RUnlock()
+	if !ok {
+		return nil
+	}
+	return session
+}
+
+func (s *Server) hydrateThreadSessionFromStore(threadID string) bool {
+	store := s.ensureThreadStateStore()
+	if store == nil {
+		return false
+	}
+	state, ok := store.LoadThreadRuntimeState(threadID)
+	if !ok {
+		return false
+	}
+	store.SaveThreadRuntimeState(state)
+	return true
 }
