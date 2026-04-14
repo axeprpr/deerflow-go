@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 )
@@ -193,5 +194,48 @@ func TestCoordinatorResumeSubmitsRecoveredPlan(t *testing.T) {
 	}
 	if runState.saved.Attempt != 2 || runState.saved.Status != "running" {
 		t.Fatalf("runState saved = %+v", runState.saved)
+	}
+}
+
+func TestCoordinatorFinalizePreservesTaskLifecycleDescriptor(t *testing.T) {
+	t.Parallel()
+
+	runState := &fakeRunStateRuntime{}
+	completion := &fakeCompletionRuntime{}
+	coordinator := NewCoordinator(CoordinatorDeps{
+		RunState:   runState,
+		Completion: completion,
+	})
+	coordinator.runState.now = func() time.Time { return time.Unix(30, 0).UTC() }
+
+	result := coordinator.Finalize(context.Background(), "thread-1", &harness.RunState{
+		ThreadID: "thread-1",
+		TaskState: harness.TaskState{
+			Items: []harness.TaskItem{{Text: "verify artifact", Status: harness.TaskStatusPending}},
+		},
+	}, &agent.RunResult{}, RunRecord{
+		RunID:       "run-1",
+		ThreadID:    "thread-1",
+		Attempt:     2,
+		Status:      "running",
+		Outcome:     RunOutcomeDescriptor{RunStatus: "running", Attempt: 2},
+		CreatedAt:   time.Unix(1, 0).UTC(),
+		UpdatedAt:   time.Unix(1, 0).UTC(),
+	})
+
+	if result.Outcome.RunStatus != "incomplete" {
+		t.Fatalf("Outcome.RunStatus=%q want incomplete", result.Outcome.RunStatus)
+	}
+	if result.Outcome.TaskLifecycle.Status != "incomplete" {
+		t.Fatalf("TaskLifecycle=%+v", result.Outcome.TaskLifecycle)
+	}
+	if len(result.Outcome.TaskLifecycle.PendingTasks) != 1 {
+		t.Fatalf("TaskLifecycle=%+v", result.Outcome.TaskLifecycle)
+	}
+	if result.Outcome.Attempt != 2 {
+		t.Fatalf("Outcome recovery fields=%+v", result.Outcome)
+	}
+	if runState.saved.Outcome.TaskLifecycle.Status != "incomplete" {
+		t.Fatalf("saved outcome=%+v", runState.saved.Outcome)
 	}
 }

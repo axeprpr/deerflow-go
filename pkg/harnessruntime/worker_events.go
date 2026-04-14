@@ -133,7 +133,7 @@ func (r WorkerRunEventRecorder) RecordClarification(plan WorkerExecutionPlan, it
 	EventLogService{store: r.store}.RecordWithContext(workerRunEventContext(plan), plan.RunID, plan.ThreadID, "clarification_request", item)
 }
 
-func (r WorkerRunEventRecorder) RecordCompletion(plan WorkerExecutionPlan, result *agent.RunResult) {
+func (r WorkerRunEventRecorder) RecordCompletion(plan WorkerExecutionPlan, result *agent.RunResult, outcome RunOutcomeDescriptor) {
 	if r.store == nil {
 		return
 	}
@@ -142,12 +142,16 @@ func (r WorkerRunEventRecorder) RecordCompletion(plan WorkerExecutionPlan, resul
 		payload["usage"] = result.Usage
 	}
 	ctx := workerRunEventContext(plan)
-	ctx.Outcome = RunOutcomeDescriptor{
-		RunStatus:       "success",
+	if outcome.RunStatus == "" {
+		outcome = RunOutcomeDescriptor{
+			RunStatus: "success",
+		}
+	}
+	ctx.Outcome = NewOutcomeService().BindRecord(RunRecord{
 		Attempt:         plan.Attempt,
 		ResumeFromEvent: plan.ResumeFromEvent,
 		ResumeReason:    plan.ResumeReason,
-	}
+	}, outcome)
 	EventLogService{store: r.store}.RecordWithContext(ctx, plan.RunID, plan.ThreadID, "end", payload)
 }
 

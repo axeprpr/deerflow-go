@@ -70,7 +70,10 @@ func TestWorkerRunEventRecorderRecordsTaskClarificationAndCompletion(t *testing.
 		ThreadID: plan.ThreadID,
 		Question: "Need more detail?",
 	})
-	recorder.RecordCompletion(plan, &agent.RunResult{Usage: &agent.Usage{TotalTokens: 7}})
+	recorder.RecordCompletion(plan, &agent.RunResult{Usage: &agent.Usage{TotalTokens: 7}}, RunOutcomeDescriptor{
+		RunStatus:     "incomplete",
+		TaskLifecycle: TaskLifecycleDescriptor{Status: "incomplete", PendingTasks: []string{"verify artifact"}},
+	})
 
 	events := store.LoadRunEvents(plan.RunID)
 	if len(events) != 3 {
@@ -84,6 +87,9 @@ func TestWorkerRunEventRecorderRecordsTaskClarificationAndCompletion(t *testing.
 	}
 	if events[2].Event != "end" {
 		t.Fatalf("third event = %q", events[2].Event)
+	}
+	if events[2].Outcome.RunStatus != "incomplete" || events[2].Outcome.TaskLifecycle.Status != "incomplete" {
+		t.Fatalf("completion event outcome = %+v", events[2].Outcome)
 	}
 }
 

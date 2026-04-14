@@ -49,3 +49,10 @@ func (s OutcomeService) Describe(record RunRecord, outcome RunOutcome, errText s
 		ResumeReason:    record.ResumeReason,
 	}
 }
+
+func (s OutcomeService) BindRecord(record RunRecord, descriptor RunOutcomeDescriptor) RunOutcomeDescriptor {
+	descriptor.Attempt = record.Attempt
+	descriptor.ResumeFromEvent = record.ResumeFromEvent
+	descriptor.ResumeReason = record.ResumeReason
+	return descriptor
+}

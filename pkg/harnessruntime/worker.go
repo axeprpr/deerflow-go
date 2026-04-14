@@ -6,6 +6,7 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/harness"
+	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
 )
 
@@ -58,6 +59,7 @@ func (w RuntimeWorker) execute(ctx context.Context, req DispatchRequest) (*Dispa
 			snapshots: w.snapshots,
 			threads:   w.threads,
 		})
+		completion := NewCompletionService(workerCompletionRuntime{threads: w.threads}, "generated_title", "clarification_interrupt")
 		record := runState.Begin(loadWorkerRunRecord(req.Plan, w.snapshots))
 		eventsDone := make(chan struct{})
 		go func() {
@@ -72,14 +74,13 @@ func (w RuntimeWorker) execute(ctx context.Context, req DispatchRequest) (*Dispa
 			runState.MarkError(record, err)
 			return nil, err
 		}
-		recorder.RecordCompletion(req.Plan, result)
-		record = runState.Finalize(record, CompletionOutcome{
-			RunOutcome: NewOutcomeService().Resolve(false),
-			Descriptor: NewOutcomeService().Describe(record, NewOutcomeService().Resolve(false), ""),
-		})
-		if w.threads != nil {
-			w.threads.MarkThreadStatus(record.ThreadID, "idle")
+		if runtime != nil && prepared.Lifecycle != nil {
+			prepared.Lifecycle.Messages = append([]models.Message(nil), result.Messages...)
+			_ = runtime.AfterRun(ctx, prepared.Lifecycle, result)
 		}
+		outcome := completion.Apply(req.Plan.ThreadID, prepared.Lifecycle, result)
+		recorder.RecordCompletion(req.Plan, result, outcome.Descriptor)
+		record = runState.Finalize(record, outcome)
 		return &DispatchResult{
 			Lifecycle: prepared.Lifecycle,
 			Execution: ExecutionDescriptor{
