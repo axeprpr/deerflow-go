@@ -35,6 +35,8 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 	logger := log.New(commandrun.OutputWriter(options.Stderr), "[runtime-stack] ", log.LstdFlags)
 	printManifest := fs.Bool("print-manifest", false, "print resolved runtime stack manifest and exit")
 	writeBundle := fs.String("write-bundle", "", "write stack manifest and per-process specs to a directory, then exit")
+	spawnProcesses := fs.Bool("spawn-processes", false, "launch stack using external processes from manifest binaries")
+	processBinaryDir := fs.String("process-binary-dir", "", "directory used to resolve process binaries when spawning external processes")
 
 	yolo := fs.Bool("yolo", false, "YOLO mode: no auth, defaults for all settings")
 	cfg := DefaultConfig()
@@ -62,6 +64,28 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 				_, err := io.WriteString(commandrun.StdoutWriter(options.Stdout), *writeBundle+"\n")
 				return err
 			},
+		}, nil
+	}
+	if *spawnProcesses {
+		processLauncher, err := NewProcessLauncher(builder.Manifest().Processes, ProcessLaunchOptions{
+			Stdout:    commandrun.StdoutWriter(options.Stdout),
+			Stderr:    commandrun.OutputWriter(options.Stderr),
+			BinaryDir: strings.TrimSpace(*processBinaryDir),
+		})
+		if err != nil {
+			return nil, err
+		}
+		startup := append([]string{}, builder.StartupLines(build, *yolo, strings.TrimSpace(os.Getenv("LOG_LEVEL")))...)
+		startup = append(startup, "  launch_mode=external-processes")
+		return &commandrun.PreparedCommand{
+			Logger:          logger,
+			Lifecycle:       processLauncher,
+			StartupLines:    startup,
+			ReadyLines:      builder.ReadyLines(),
+			Ready:           builder.ReadyProbe(),
+			ReadyTimeout:    15 * time.Second,
+			ShutdownTimeout: 15 * time.Second,
+			IgnoredErrors:   []error{http.ErrServerClosed, context.Canceled},
 		}, nil
 	}
 

@@ -135,3 +135,28 @@ func TestPrepareCommandPrintManifest(t *testing.T) {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
+
+func TestPrepareCommandSpawnProcessesUsesProcessLauncher(t *testing.T) {
+	binDir := installTestProcessBinaries(t, "langgraph", "runtime-node", "runtime-state", "runtime-sandbox")
+	prepared, err := PrepareCommand(flag.NewFlagSet("runtime-stack-spawn", flag.ContinueOnError), langgraphcmd.BuildInfo{}, CommandOptions{
+		Stderr: new(strings.Builder),
+		Args: []string{
+			"-spawn-processes",
+			"-process-binary-dir=" + binDir,
+			"-preset=shared-remote",
+			"-worker-addr=:19081",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareCommand() error = %v", err)
+	}
+	if prepared == nil {
+		t.Fatal("PrepareCommand() = nil")
+	}
+	if _, ok := prepared.Lifecycle.(*ProcessLauncher); !ok {
+		t.Fatalf("Lifecycle type = %T, want *ProcessLauncher", prepared.Lifecycle)
+	}
+	if !strings.Contains(strings.Join(prepared.StartupLines, "\n"), "launch_mode=external-processes") {
+		t.Fatalf("StartupLines = %#v", prepared.StartupLines)
+	}
+}
