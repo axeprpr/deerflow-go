@@ -112,6 +112,79 @@ func TestLocalRunEventStoreAppendsEventsAndUpdatesSnapshot(t *testing.T) {
 	}
 }
 
+func TestGetRunNormalizesLifecycleOnlyOutcomeFields(t *testing.T) {
+	server := &Server{
+		runs:     map[string]*Run{},
+		dataRoot: t.TempDir(),
+	}
+	server.snapshotStore = newCompatRunStateStore(server, nil, nil)
+	server.eventStore = server.snapshotStore.(harnessruntime.RunEventStore)
+
+	server.snapshotStore.SaveRunSnapshot(harnessruntime.RunSnapshot{
+		Record: harnessruntime.RunRecord{
+			RunID:           "run-1",
+			ThreadID:        "thread-1",
+			AssistantID:     "lead_agent",
+			Attempt:         2,
+			ResumeFromEvent: 7,
+			ResumeReason:    "replay",
+			Status:          "running",
+			Outcome: harnessruntime.RunOutcomeDescriptor{
+				RunStatus: "running",
+				TaskLifecycle: harnessruntime.TaskLifecycleDescriptor{
+					Status:            "running",
+					PendingTasks:      []string{"delegate research"},
+					ExpectedArtifacts: []string{"/mnt/user-data/outputs/report.md"},
+				},
+			},
+			CreatedAt: time.Now().UTC().Add(-time.Minute),
+			UpdatedAt: time.Now().UTC().Add(-time.Minute),
+		},
+		Events: []harnessruntime.RunEvent{
+			{
+				ID:       "run-1:1",
+				Event:    "task_running",
+				RunID:    "run-1",
+				ThreadID: "thread-1",
+				Outcome: harnessruntime.RunOutcomeDescriptor{
+					RunStatus: "running",
+					TaskLifecycle: harnessruntime.TaskLifecycleDescriptor{
+						Status:            "running",
+						PendingTasks:      []string{"delegate research"},
+						ExpectedArtifacts: []string{"/mnt/user-data/outputs/report.md"},
+					},
+				},
+			},
+		},
+	})
+
+	run := server.getRun("run-1")
+	if run == nil {
+		t.Fatal("getRun() returned nil")
+	}
+	if run.Outcome.Attempt != 2 || run.Outcome.ResumeFromEvent != 7 || run.Outcome.ResumeReason != "replay" {
+		t.Fatalf("run outcome recovery = %+v", run.Outcome)
+	}
+	if len(run.Outcome.PendingTasks) != 1 || run.Outcome.PendingTasks[0] != "delegate research" {
+		t.Fatalf("run pending tasks = %#v", run.Outcome.PendingTasks)
+	}
+	if len(run.Outcome.ExpectedArtifacts) != 1 || run.Outcome.ExpectedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("run expected artifacts = %#v", run.Outcome.ExpectedArtifacts)
+	}
+	if len(run.Events) != 1 {
+		t.Fatalf("len(run.Events) = %d, want 1", len(run.Events))
+	}
+	if run.Events[0].Attempt != 2 || run.Events[0].ResumeFromEvent != 7 || run.Events[0].ResumeReason != "replay" {
+		t.Fatalf("event recovery = %+v", run.Events[0])
+	}
+	if len(run.Events[0].Outcome.PendingTasks) != 1 || run.Events[0].Outcome.PendingTasks[0] != "delegate research" {
+		t.Fatalf("event pending tasks = %#v", run.Events[0].Outcome.PendingTasks)
+	}
+	if len(run.Events[0].Outcome.ExpectedArtifacts) != 1 || run.Events[0].Outcome.ExpectedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("event expected artifacts = %#v", run.Events[0].Outcome.ExpectedArtifacts)
+	}
+}
+
 func TestLocalThreadStateStoreUpdatesSessionMetadataAndStatus(t *testing.T) {
 	server := &Server{
 		sessions: map[string]*Session{},
