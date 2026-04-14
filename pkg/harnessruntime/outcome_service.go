@@ -56,6 +56,8 @@ func (s OutcomeService) DescribeWithTaskState(record RunRecord, outcome RunOutco
 	descriptor := s.Describe(record, outcome, errText)
 	descriptor.TaskState = taskState
 	descriptor.TaskLifecycle = NewTaskLifecycleService().Describe(outcome, taskState, paused)
+	descriptor.PendingTasks = append([]string(nil), descriptor.TaskLifecycle.PendingTasks...)
+	descriptor.ExpectedArtifacts = append([]string(nil), descriptor.TaskLifecycle.ExpectedArtifacts...)
 	return descriptor
 }
 

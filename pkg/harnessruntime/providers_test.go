@@ -819,7 +819,7 @@ func TestRunStateServiceTransitionsRecords(t *testing.T) {
 	now := time.Date(2026, 4, 11, 11, 0, 0, 0, time.UTC)
 	runtime := &fakeRunStateRuntime{
 		taskState: harness.TaskState{
-			Items: []harness.TaskItem{{Text: "verify artifact", Status: harness.TaskStatusPending}},
+			Items:           []harness.TaskItem{{Text: "verify artifact", Status: harness.TaskStatusPending}},
 			ExpectedOutputs: []string{"/mnt/user-data/outputs/report.md"},
 		},
 	}
@@ -837,6 +837,12 @@ func TestRunStateServiceTransitionsRecords(t *testing.T) {
 	if len(record.Outcome.TaskState.Items) != 1 || record.Outcome.TaskState.Items[0].Text != "verify artifact" {
 		t.Fatalf("begin task state = %+v", record.Outcome.TaskState)
 	}
+	if len(record.Outcome.PendingTasks) != 1 || record.Outcome.PendingTasks[0] != "verify artifact" {
+		t.Fatalf("begin pending tasks = %#v", record.Outcome.PendingTasks)
+	}
+	if len(record.Outcome.ExpectedArtifacts) != 1 || record.Outcome.ExpectedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("begin expected artifacts = %#v", record.Outcome.ExpectedArtifacts)
+	}
 
 	record = service.MarkError(record, context.DeadlineExceeded)
 	if record.Status != "error" || record.Outcome.RunStatus != "error" || runtime.threadStatus != "thread-1:error" {
@@ -848,6 +854,12 @@ func TestRunStateServiceTransitionsRecords(t *testing.T) {
 	if len(record.Outcome.TaskState.Items) != 1 || record.Outcome.TaskState.Items[0].Text != "verify artifact" {
 		t.Fatalf("error task state = %+v", record.Outcome.TaskState)
 	}
+	if len(record.Outcome.PendingTasks) != 1 || record.Outcome.PendingTasks[0] != "verify artifact" {
+		t.Fatalf("error pending tasks = %#v", record.Outcome.PendingTasks)
+	}
+	if len(record.Outcome.ExpectedArtifacts) != 1 || record.Outcome.ExpectedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("error expected artifacts = %#v", record.Outcome.ExpectedArtifacts)
+	}
 
 	record = service.MarkCanceled(record)
 	if record.Status != "interrupted" || !record.Outcome.Interrupted || runtime.threadStatus != "thread-1:interrupted" {
@@ -858,6 +870,12 @@ func TestRunStateServiceTransitionsRecords(t *testing.T) {
 	}
 	if len(record.Outcome.TaskState.Items) != 1 || record.Outcome.TaskState.Items[0].Text != "verify artifact" {
 		t.Fatalf("canceled task state = %+v", record.Outcome.TaskState)
+	}
+	if len(record.Outcome.PendingTasks) != 1 || record.Outcome.PendingTasks[0] != "verify artifact" {
+		t.Fatalf("canceled pending tasks = %#v", record.Outcome.PendingTasks)
+	}
+	if len(record.Outcome.ExpectedArtifacts) != 1 || record.Outcome.ExpectedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("canceled expected artifacts = %#v", record.Outcome.ExpectedArtifacts)
 	}
 
 	record = service.Finalize(record, CompletionOutcome{

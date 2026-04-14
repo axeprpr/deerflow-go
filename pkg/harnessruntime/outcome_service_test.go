@@ -62,4 +62,10 @@ func TestOutcomeServiceDescribeWithTaskStateBuildsLifecycle(t *testing.T) {
 	if len(outcome.TaskState.Items) != 1 || outcome.TaskState.Items[0].ID != "task-1" {
 		t.Fatalf("TaskState = %+v", outcome.TaskState)
 	}
+	if len(outcome.PendingTasks) != 1 || outcome.PendingTasks[0] != "inspect repo" {
+		t.Fatalf("PendingTasks = %#v", outcome.PendingTasks)
+	}
+	if len(outcome.ExpectedArtifacts) != 1 || outcome.ExpectedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("ExpectedArtifacts = %#v", outcome.ExpectedArtifacts)
+	}
 }
