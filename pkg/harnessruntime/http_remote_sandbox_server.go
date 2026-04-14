@@ -20,12 +20,13 @@ type HTTPRemoteSandboxServer struct {
 	config   SandboxManagerConfig
 	protocol RemoteSandboxProtocol
 
-	mu            sync.Mutex
-	sessions      map[string]*remoteSandboxServerLease
-	evictedLeases int64
-	stopCh        chan struct{}
-	wg            sync.WaitGroup
-	closed        bool
+	mu             sync.Mutex
+	sessions       map[string]*remoteSandboxServerLease
+	evictedLeases  int64
+	rejectedLeases int64
+	stopCh         chan struct{}
+	wg             sync.WaitGroup
+	closed         bool
 }
 
 type remoteSandboxServerLease struct {
@@ -74,6 +75,7 @@ func (s *HTTPRemoteSandboxServer) handleHealth(w http.ResponseWriter, r *http.Re
 	s.mu.Lock()
 	activeLeases := len(s.sessions)
 	evictedLeases := s.evictedLeases
+	rejectedLeases := s.rejectedLeases
 	now := time.Now().UTC()
 	var oldestLeaseAgeMilli int64
 	var oldestIdleAgeMilli int64
@@ -111,6 +113,7 @@ func (s *HTTPRemoteSandboxServer) handleHealth(w http.ResponseWriter, r *http.Re
 		"backend":               s.config.Backend,
 		"active_leases":         activeLeases,
 		"evicted_leases":        evictedLeases,
+		"rejected_leases":       rejectedLeases,
 		"oldest_lease_age_ms":   oldestLeaseAgeMilli,
 		"oldest_idle_age_ms":    oldestIdleAgeMilli,
 		"heartbeat_interval_ms": s.config.HeartbeatInterval.Milliseconds(),
@@ -132,6 +135,9 @@ func (s *HTTPRemoteSandboxServer) handleLeases(w http.ResponseWriter, r *http.Re
 	if max := s.config.MaxActiveLeases; max > 0 {
 		s.mu.Lock()
 		active := len(s.sessions)
+		if active >= max {
+			s.rejectedLeases++
+		}
 		s.mu.Unlock()
 		if active >= max {
 			http.Error(w, fmt.Sprintf("max active leases reached (%d)", max), http.StatusTooManyRequests)
@@ -262,6 +268,7 @@ func (s *HTTPRemoteSandboxServer) createLease() (string, sandbox.Session, error)
 	now := time.Now().UTC()
 	s.mu.Lock()
 	if max := s.config.MaxActiveLeases; max > 0 && len(s.sessions) >= max {
+		s.rejectedLeases++
 		s.mu.Unlock()
 		_ = session.Close()
 		return "", nil, fmt.Errorf("max active leases reached (%d)", max)

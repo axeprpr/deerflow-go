@@ -39,6 +39,9 @@ func TestHTTPRemoteSandboxServerHealthEndpoint(t *testing.T) {
 	if got, _ := body["max_active_leases"].(float64); got != 0 {
 		t.Fatalf("max_active_leases = %v, want 0", got)
 	}
+	if got, _ := body["rejected_leases"].(float64); got != 0 {
+		t.Fatalf("rejected_leases = %v, want 0", got)
+	}
 	if got, _ := body["oldest_lease_age_ms"].(float64); got != 0 {
 		t.Fatalf("oldest_lease_age_ms = %v, want 0", got)
 	}
@@ -185,6 +188,19 @@ func TestHTTPRemoteSandboxServerEnforcesMaxActiveLeases(t *testing.T) {
 	}
 	if _, err := service.AcquireLease(harness.AgentRequest{Features: harness.FeatureSet{Sandbox: true}}); err == nil {
 		t.Fatal("second AcquireLease() error = nil, want 429 limit")
+	}
+	resp, err := http.Get(server.URL + DefaultRemoteSandboxHealthPath)
+	if err != nil {
+		t.Fatalf("health get error = %v", err)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode health body error = %v", err)
+	}
+	resp.Body.Close()
+	if got, _ := body["rejected_leases"].(float64); got < 1 {
+		t.Fatalf("rejected_leases = %v, want >= 1", got)
 	}
 	if err := first.Release(); err != nil {
 		t.Fatalf("first Release() error = %v", err)
