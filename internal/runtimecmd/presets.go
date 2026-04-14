@@ -58,6 +58,7 @@ func applyNodePreset(config NodeConfig) NodeConfig {
 	if config.Preset == "" {
 		config.Preset = RuntimeNodePresetAuto
 	}
+	config = DefaultExecutionProfile(config.effectivePreset(), config.Role).Apply(config)
 	return DefaultStateProfile(config.effectivePreset(), config.Role).Apply(config)
 }
 
