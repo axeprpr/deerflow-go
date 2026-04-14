@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"sync"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -66,17 +67,19 @@ func DefaultRuntimeNodeProviders() RuntimeNodeProviders {
 }
 
 type RuntimeNode struct {
-	Config        RuntimeNodeConfig
-	Providers     RuntimeNodeProviders
-	State         RuntimeStatePlane
-	Dispatcher    RunDispatcher
-	Sandbox       *SandboxResourceManager
-	RemoteWorker  *HTTPRemoteWorkerNode
-	RemoteSandbox *HTTPRemoteSandboxServer
-	RemoteState   *HTTPRemoteStateServer
-	Memory        *MemoryService
-	Tools         harness.ToolRuntime
-	Runtime       *harness.Runtime
+	Config         RuntimeNodeConfig
+	Providers      RuntimeNodeProviders
+	State          RuntimeStatePlane
+	Dispatcher     RunDispatcher
+	Sandbox        *SandboxResourceManager
+	RemoteWorker   *HTTPRemoteWorkerNode
+	RemoteSandbox  *HTTPRemoteSandboxServer
+	RemoteState    *HTTPRemoteStateServer
+	Memory         *MemoryService
+	Tools          harness.ToolRuntime
+	Runtime        *harness.Runtime
+	runtimeMu      sync.RWMutex
+	runtimeRefresh runtimeRefreshKey
 }
 
 func (c RuntimeNodeConfig) BuildRuntimeNode(runtime DispatchRuntimeConfig) (*RuntimeNode, error) {
@@ -199,6 +202,8 @@ func (n *RuntimeNode) RuntimeView() *harness.Runtime {
 	if n == nil {
 		return nil
 	}
+	n.runtimeMu.RLock()
+	defer n.runtimeMu.RUnlock()
 	return n.Runtime
 }
 
@@ -506,6 +511,8 @@ func (n *RuntimeNode) BindRuntime(runtime *harness.Runtime) {
 	if n == nil {
 		return
 	}
+	n.runtimeMu.Lock()
+	defer n.runtimeMu.Unlock()
 	n.Runtime = runtime
 }
 

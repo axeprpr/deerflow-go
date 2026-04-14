@@ -142,7 +142,7 @@ func BuildDefaultWorkerRuntimeSystemLauncherWithMemory(ctx context.Context, name
 	return BuildDefaultRuntimeSystemLauncherWithMemory(ctx, DefaultWorkerRuntimeNodeConfig(name, root), dataRoot, provider, clarify, maxTurns, profileBuilder, source, specs)
 }
 
-func RefreshHarnessRuntime(node *RuntimeNode, provider llm.LLMProvider, maxTurns int, current *harness.Runtime, profileBuilder RuntimeProfileBuilderFactory) *harness.Runtime {
+func buildHarnessRuntime(node *RuntimeNode, provider llm.LLMProvider, maxTurns int, current *harness.Runtime, profileBuilder RuntimeProfileBuilderFactory) *harness.Runtime {
 	var (
 		memoryRuntime  *harness.MemoryRuntime
 		sandboxRuntime harness.SandboxRuntime
@@ -176,7 +176,7 @@ func RefreshHarnessRuntime(node *RuntimeNode, provider llm.LLMProvider, maxTurns
 	if profileBuilder != nil {
 		options = append(options, harness.WithProfileBuilder(profileBuilder(memoryRuntime, toolRuntime, sandboxRuntime)))
 	}
-	runtime := harness.NewRuntime(harness.RuntimeDeps{
+	return harness.NewRuntime(harness.RuntimeDeps{
 		LLMProvider:     provider,
 		Tools:           toolRegistry,
 		ToolRuntime:     toolRuntime,
@@ -185,6 +185,10 @@ func RefreshHarnessRuntime(node *RuntimeNode, provider llm.LLMProvider, maxTurns
 		SandboxRuntime:  sandboxRuntime,
 		SandboxProvider: sandboxProvider,
 	}, memoryRuntime, options...)
+}
+
+func RefreshHarnessRuntime(node *RuntimeNode, provider llm.LLMProvider, maxTurns int, current *harness.Runtime, profileBuilder RuntimeProfileBuilderFactory) *harness.Runtime {
+	runtime := buildHarnessRuntime(node, provider, maxTurns, current, profileBuilder)
 	if node != nil {
 		node.BindRuntime(runtime)
 	}
