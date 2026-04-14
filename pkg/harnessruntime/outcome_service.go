@@ -62,6 +62,12 @@ func (s OutcomeService) DescribeWithTaskState(record RunRecord, outcome RunOutco
 }
 
 func (s OutcomeService) BindRecord(record RunRecord, descriptor RunOutcomeDescriptor) RunOutcomeDescriptor {
+	if len(descriptor.PendingTasks) == 0 && len(descriptor.TaskLifecycle.PendingTasks) > 0 {
+		descriptor.PendingTasks = append([]string(nil), descriptor.TaskLifecycle.PendingTasks...)
+	}
+	if len(descriptor.ExpectedArtifacts) == 0 && len(descriptor.TaskLifecycle.ExpectedArtifacts) > 0 {
+		descriptor.ExpectedArtifacts = append([]string(nil), descriptor.TaskLifecycle.ExpectedArtifacts...)
+	}
 	descriptor.Attempt = record.Attempt
 	descriptor.ResumeFromEvent = record.ResumeFromEvent
 	descriptor.ResumeReason = record.ResumeReason

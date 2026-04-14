@@ -99,3 +99,28 @@ func TestOutcomeServiceDescribeWithTaskStateBuildsLifecycle(t *testing.T) {
 		t.Fatalf("ExpectedArtifacts = %#v", outcome.ExpectedArtifacts)
 	}
 }
+
+func TestOutcomeServiceBindRecordBackfillsTaskDetailsFromLifecycle(t *testing.T) {
+	descriptor := NewOutcomeService().BindRecord(RunRecord{
+		Attempt:         4,
+		ResumeFromEvent: 11,
+		ResumeReason:    "resume-after-disconnect",
+	}, RunOutcomeDescriptor{
+		RunStatus: "incomplete",
+		TaskLifecycle: TaskLifecycleDescriptor{
+			Status:            "incomplete",
+			PendingTasks:      []string{"verify artifact"},
+			ExpectedArtifacts: []string{"/mnt/user-data/outputs/report.md"},
+		},
+	})
+
+	if descriptor.Attempt != 4 || descriptor.ResumeFromEvent != 11 || descriptor.ResumeReason != "resume-after-disconnect" {
+		t.Fatalf("record fields = %+v", descriptor)
+	}
+	if len(descriptor.PendingTasks) != 1 || descriptor.PendingTasks[0] != "verify artifact" {
+		t.Fatalf("PendingTasks = %#v", descriptor.PendingTasks)
+	}
+	if len(descriptor.ExpectedArtifacts) != 1 || descriptor.ExpectedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("ExpectedArtifacts = %#v", descriptor.ExpectedArtifacts)
+	}
+}
