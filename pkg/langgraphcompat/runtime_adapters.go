@@ -336,6 +336,10 @@ func (a runtimeRunStateAdapter) ClearThreadTaskLifecycle(threadID string) {
 	}
 }
 
+func (a runtimeRunStateAdapter) ThreadStateStore() harnessruntime.ThreadStateStore {
+	return a.server.ensureThreadStateStore()
+}
+
 func (a runtimeContextAdapter) ClarificationManager() *clarification.Manager {
 	return a.server.clarify
 }

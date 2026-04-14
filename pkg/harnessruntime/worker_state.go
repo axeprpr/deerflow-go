@@ -48,6 +48,10 @@ func (r workerRunStateRuntime) ClearThreadTaskLifecycle(threadID string) {
 	}
 }
 
+func (r workerRunStateRuntime) ThreadStateStore() ThreadStateStore {
+	return r.threads
+}
+
 func (r workerCompletionRuntime) SetThreadTitle(threadID string, title string) {
 	if r.threads != nil {
 		r.threads.SetThreadMetadata(threadID, "title", title)
@@ -124,8 +128,8 @@ func loadWorkerRunRecord(plan WorkerExecutionPlan, snapshots RunSnapshotStore) R
 		ResumeFromEvent: plan.ResumeFromEvent,
 		ResumeReason:    plan.ResumeReason,
 		Status:          "running",
-		CreatedAt: now,
-		UpdatedAt: now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	record.Outcome = NewOutcomeService().DescribeRunning(record)
 	return record

@@ -69,7 +69,7 @@ func NewCoordinator(deps CoordinatorDeps) Coordinator {
 	return Coordinator{
 		runtime:      deps.Runtime,
 		dispatcher:   deps.Dispatcher,
-		recovery:     NewRecoveryPlanner(),
+		recovery:     NewRecoveryPlannerWithThreads(threadStoreFromRunStateRuntime(deps.RunState)),
 		preflight:    NewPreflightService(deps.Preflight),
 		context:      NewContextService(deps.Context, deps.Runtime),
 		runState:     NewRunStateService(deps.RunState),
@@ -193,4 +193,14 @@ func (p RunPlan) WithMessages(threadID, assistantID string, existingMessages, me
 	p.ExistingMessages = append([]models.Message(nil), existingMessages...)
 	p.Messages = append([]models.Message(nil), messages...)
 	return p
+}
+
+func threadStoreFromRunStateRuntime(runtime RunStateRuntime) ThreadStateStore {
+	type threadStoreProvider interface {
+		ThreadStateStore() ThreadStateStore
+	}
+	if provider, ok := runtime.(threadStoreProvider); ok {
+		return provider.ThreadStateStore()
+	}
+	return nil
 }

@@ -1,12 +1,18 @@
 package harnessruntime
 
-type RecoveryPlanner struct{}
+type RecoveryPlanner struct {
+	threads ThreadStateStore
+}
 
 func NewRecoveryPlanner() RecoveryPlanner {
 	return RecoveryPlanner{}
 }
 
-func (RecoveryPlanner) NextRecord(record RunRecord, afterEvent int, reason string) RunRecord {
+func NewRecoveryPlannerWithThreads(threads ThreadStateStore) RecoveryPlanner {
+	return RecoveryPlanner{threads: threads}
+}
+
+func (p RecoveryPlanner) NextRecord(record RunRecord, afterEvent int, reason string) RunRecord {
 	if record.Attempt <= 0 {
 		record.Attempt = 1
 	}
@@ -15,7 +21,7 @@ func (RecoveryPlanner) NextRecord(record RunRecord, afterEvent int, reason strin
 	record.ResumeReason = reason
 	record.Status = "running"
 	record.Error = ""
-	record.Outcome = NewOutcomeService().DescribeRunning(record)
+	record.Outcome = NewOutcomeService().DescribeLiveRunning(record, p.threads)
 	return record
 }
 

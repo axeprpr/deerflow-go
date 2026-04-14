@@ -1,6 +1,10 @@
 package harnessruntime
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/axeprpr/deerflow-go/pkg/harness"
+)
 
 func TestRecoveryPlannerAdvancesAttemptAndOutcome(t *testing.T) {
 	planner := NewRecoveryPlanner()
@@ -44,5 +48,35 @@ func TestRecoveryPlannerBuildsResumedPlan(t *testing.T) {
 	}
 	if plan.Attempt != 2 || plan.ResumeFromEvent != 4 || plan.ResumeReason != "retry" {
 		t.Fatalf("plan recovery = %+v", plan)
+	}
+}
+
+func TestRecoveryPlannerCarriesLiveTaskStateIntoResumedOutcome(t *testing.T) {
+	threads := NewInMemoryThreadStateStore()
+	taskState := harness.TaskState{
+		Items: []harness.TaskItem{
+			{ID: "task-1", Text: "inspect repo", Status: harness.TaskStatusInProgress},
+		},
+		ExpectedOutputs: []string{"/mnt/user-data/outputs/report.md"},
+	}
+	threads.SetThreadMetadata("thread-1", DefaultTaskStateMetadataKey, taskState.Value())
+	planner := NewRecoveryPlannerWithThreads(threads)
+
+	record := planner.NextRecord(RunRecord{
+		RunID:       "run-1",
+		ThreadID:    "thread-1",
+		AssistantID: "lead_agent",
+		Attempt:     1,
+		Status:      "error",
+	}, 3, "resume-after-crash")
+
+	if record.Outcome.RunStatus != "running" {
+		t.Fatalf("Outcome = %+v", record.Outcome)
+	}
+	if len(record.Outcome.TaskState.Items) != 1 || record.Outcome.TaskState.Items[0].ID != "task-1" {
+		t.Fatalf("TaskState = %+v", record.Outcome.TaskState)
+	}
+	if len(record.Outcome.TaskLifecycle.ExpectedArtifacts) != 1 || record.Outcome.TaskLifecycle.ExpectedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("TaskLifecycle = %+v", record.Outcome.TaskLifecycle)
 	}
 }
