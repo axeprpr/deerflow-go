@@ -127,7 +127,7 @@ func (c Coordinator) Submit(ctx context.Context, plan RunPlan) (*DispatchResult,
 func (c Coordinator) Resume(ctx context.Context, plan RunPlan, record RunRecord, afterEvent int, reason string) (RunRecord, *DispatchResult, error) {
 	next := c.recovery.NextRecord(record, afterEvent, reason)
 	if isIdempotentResume(record, next, afterEvent, reason) {
-		return c.runState.Begin(next), nil, nil
+		return c.runState.ReconcileLive(next), nil, nil
 	}
 	record = c.runState.Begin(next)
 	plan.RunID = record.RunID

@@ -68,6 +68,28 @@ func (s RunStateService) Begin(record RunRecord) RunRecord {
 	return record
 }
 
+func (s RunStateService) ReconcileLive(record RunRecord) RunRecord {
+	if record.Status == "" {
+		record.Status = "running"
+	}
+	if !isRunningStatus(record.Outcome.RunStatus) {
+		record.Outcome = NewOutcomeService().DescribeLiveRunning(record, s.threadStateStore())
+	} else {
+		record.Outcome = NewOutcomeService().BindRecord(record, record.Outcome)
+	}
+	applyThreadMutation := s.shouldMutateThreadState(record)
+	if s.runtime != nil && applyThreadMutation {
+		if !record.Outcome.TaskLifecycle.IsZero() {
+			s.runtime.SetThreadTaskLifecycle(record.ThreadID, record.Outcome.TaskLifecycle)
+		}
+		s.runtime.MarkThreadStatus(record.ThreadID, "busy")
+	}
+	if applyThreadMutation {
+		s.setActiveRunOwnership(record)
+	}
+	return record
+}
+
 func (s RunStateService) MarkCanceled(record RunRecord) RunRecord {
 	taskState := s.loadTaskState(record.ThreadID)
 	outcome := NewOutcomeService().DescribeWithTaskState(record, RunOutcome{RunStatus: "interrupted", Interrupted: true}, "", taskState, false)

@@ -238,8 +238,8 @@ func TestCoordinatorResumeSkipsDispatchForIdempotentRecoveryContext(t *testing.T
 	if record.Attempt != 2 || record.ResumeFromEvent != 7 || record.ResumeReason != "worker-retry" {
 		t.Fatalf("record = %+v", record)
 	}
-	if runState.saved.Attempt != 2 || runState.saved.Status != "running" {
-		t.Fatalf("runState saved = %+v", runState.saved)
+	if runState.saved.RunID != "" {
+		t.Fatalf("runState saved = %+v, want unchanged snapshot on idempotent recovery", runState.saved)
 	}
 	if runState.threadStatus != "thread-1:busy" {
 		t.Fatalf("runState threadStatus = %q", runState.threadStatus)
