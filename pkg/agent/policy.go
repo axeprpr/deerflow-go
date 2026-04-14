@@ -20,7 +20,7 @@ const defaultTodoReminderThreshold = 3
 const loopWarningMessage = "[LOOP DETECTED] You are repeating the same tool calls. Stop calling tools and produce your final answer now. If you cannot complete the task, summarize what you accomplished so far."
 const loopHardStopMessage = "[FORCED STOP] Repeated tool calls exceeded the safety limit. Producing final answer with results collected so far."
 const todoReminderPrefix = "[todo reminder]"
-const todoReminderMessage = todoReminderPrefix + "\nYou have been doing multi-step work for several rounds without updating the plan. Call write_todos to reflect progress (completed/in_progress/pending) before continuing."
+const todoReminderMessage = todoReminderPrefix + "\nYou have been doing multi-step work for several rounds without updating the plan. Call write_todos to reflect progress (completed/in_progress/pending) before continuing. If the task must produce final files, include `expected_outputs` with absolute `/mnt/user-data/outputs/...` paths so completion can be verified."
 
 type RunPolicy struct {
 	ToolTurns ToolTurnPolicy

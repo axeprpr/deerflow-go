@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/axeprpr/deerflow-go/pkg/llm"
@@ -113,6 +114,9 @@ func TestDefaultTaskProgressPolicyInjectsReminderAfterToolRounds(t *testing.T) {
 	})
 	if reminder == "" {
 		t.Fatal("Reminder() = empty, want reminder")
+	}
+	if !strings.Contains(reminder, "expected_outputs") {
+		t.Fatalf("Reminder() = %q, want expected_outputs guidance", reminder)
 	}
 }
 
