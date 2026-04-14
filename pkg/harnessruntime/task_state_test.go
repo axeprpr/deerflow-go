@@ -203,3 +203,41 @@ func TestDeriveTaskStateFromResultTracksMultipleSubagentTasks(t *testing.T) {
 		t.Fatalf("Items[1]=%+v", state.Items[1])
 	}
 }
+
+func TestTaskStateProviderLoadTaskStateMergesLiveAndRunState(t *testing.T) {
+	t.Parallel()
+
+	provider := TaskStateProvider{
+		Load: func(threadID string) harness.TaskState {
+			if threadID != "thread-1" {
+				t.Fatalf("threadID=%q", threadID)
+			}
+			return harness.TaskState{
+				Items: []harness.TaskItem{
+					{Text: "delegate review", Status: harness.TaskStatusInProgress},
+				},
+				VerifiedOutputs: []string{"/mnt/user-data/outputs/report.md"},
+			}
+		},
+	}
+
+	state := provider.LoadTaskState(&harness.RunState{
+		ThreadID: "thread-1",
+		TaskState: harness.TaskState{
+			Items: []harness.TaskItem{
+				{Text: "draft report", Status: harness.TaskStatusCompleted},
+			},
+			ExpectedOutputs: []string{"/mnt/user-data/outputs/report.md"},
+		},
+	})
+
+	if len(state.Items) != 2 {
+		t.Fatalf("Items=%+v", state.Items)
+	}
+	if len(state.ExpectedOutputs) != 1 || state.ExpectedOutputs[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("ExpectedOutputs=%v", state.ExpectedOutputs)
+	}
+	if len(state.VerifiedOutputs) != 1 || state.VerifiedOutputs[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("VerifiedOutputs=%v", state.VerifiedOutputs)
+	}
+}

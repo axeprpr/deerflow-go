@@ -52,6 +52,35 @@ func TestRuntimeConversationAdapterLoadTaskStatePreservesExpectedOutputs(t *test
 	}
 }
 
+func TestRuntimeConversationAdapterLoadTaskStateMergesThreadRuntimeState(t *testing.T) {
+	server := &Server{
+		sessions: map[string]*Session{},
+		runs:     map[string]*Run{},
+	}
+	session := server.ensureSession("thread-1", nil)
+	session.Todos = []Todo{
+		{Content: "draft report", Status: "completed"},
+	}
+	server.ensureThreadStateStore().SetThreadMetadata("thread-1", harnessruntime.DefaultTaskStateMetadataKey, harness.TaskState{
+		Items: []harness.TaskItem{
+			{Text: "present report", Status: harness.TaskStatusInProgress},
+		},
+		ExpectedOutputs: []string{"/mnt/user-data/outputs/report.md"},
+		VerifiedOutputs: []string{"/mnt/user-data/outputs/report.md"},
+	}.Value())
+
+	state := server.runtimeConversationAdapter().LoadTaskState("thread-1")
+	if len(state.Items) != 2 {
+		t.Fatalf("Items=%+v", state.Items)
+	}
+	if got := len(state.ExpectedOutputs); got != 1 || state.ExpectedOutputs[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("ExpectedOutputs=%v", state.ExpectedOutputs)
+	}
+	if got := len(state.VerifiedOutputs); got != 1 || state.VerifiedOutputs[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("VerifiedOutputs=%v", state.VerifiedOutputs)
+	}
+}
+
 func TestRuntimeMemoryAdapterResolveMemorySessionID(t *testing.T) {
 	adapter := (&Server{}).runtimeMemoryAdapter()
 	if got := adapter.ResolveMemorySessionID("thread-1", "planner"); got != "agent:planner" {

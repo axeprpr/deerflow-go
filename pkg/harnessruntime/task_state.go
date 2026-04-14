@@ -34,20 +34,26 @@ func (p TaskStateProvider) LoadTaskState(state *harness.RunState) harness.TaskSt
 	if state == nil {
 		return harness.TaskState{}
 	}
-	if !state.TaskState.IsZero() {
-		return state.TaskState
-	}
+	base := state.TaskState
 	if p.Load != nil {
-		if resolved, err := harness.NormalizeTaskState(p.Load(state.ThreadID)); err == nil {
-			if !resolved.IsZero() {
-				return resolved
+		if loaded, err := harness.NormalizeTaskState(p.Load(state.ThreadID)); err == nil && !loaded.IsZero() {
+			if base.IsZero() {
+				base = loaded
+			} else if merged, err := mergeTaskProgressState(loaded, base); err == nil {
+				base = merged
 			}
 		}
 	}
 	if resolved, ok := resolveTaskStateFromRunState(state, nil, DefaultTaskStateMetadataKey); ok {
+		if base.IsZero() {
+			return resolved
+		}
+		if merged, err := mergeTaskProgressState(base, resolved); err == nil {
+			return merged
+		}
 		return resolved
 	}
-	return harness.TaskState{}
+	return base
 }
 
 func (p TaskStateProvider) DeriveTaskState(state *harness.RunState, result *agent.RunResult) harness.TaskState {
@@ -247,6 +253,10 @@ func mergeTaskProgressState(base harness.TaskState, update harness.TaskState) (h
 		merged.VerifiedOutputs = append(merged.VerifiedOutputs, update.VerifiedOutputs...)
 	}
 	return harness.NormalizeTaskState(merged)
+}
+
+func MergeTaskProgressState(base harness.TaskState, update harness.TaskState) (harness.TaskState, error) {
+	return mergeTaskProgressState(base, update)
 }
 
 func parseTaskStatePayload(data map[string]any) (harness.TaskState, bool) {

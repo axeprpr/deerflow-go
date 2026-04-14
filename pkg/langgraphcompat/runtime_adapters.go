@@ -128,10 +128,25 @@ func (a runtimeConversationAdapter) LoadTaskState(threadID string) harness.TaskS
 	}
 	session := a.server.ensureSession(threadID, nil)
 	base := harness.TaskState{}
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		if state, ok := store.LoadThreadRuntimeState(threadID); ok {
+			if taskState, ok := harness.ParseTaskState(state.Metadata[harnessruntime.DefaultTaskStateMetadataKey]); ok {
+				base = taskState
+			}
+		}
+	}
 	if state, ok := harness.ParseTaskState(session.Metadata[harnessruntime.DefaultTaskStateMetadataKey]); ok {
-		base = state
+		if base.IsZero() {
+			base = state
+		} else if merged, err := harnessruntime.MergeTaskProgressState(base, state); err == nil {
+			base = merged
+		}
 	} else if state, ok := taskStateFromTodosRaw(session.Metadata["todos"]); ok {
-		base = state
+		if base.IsZero() {
+			base = state
+		} else if merged, err := harnessruntime.MergeTaskProgressState(base, state); err == nil {
+			base = merged
+		}
 	}
 	if len(session.Todos) > 0 {
 		items := make([]harness.TaskItem, 0, len(session.Todos))
@@ -146,7 +161,7 @@ func (a runtimeConversationAdapter) LoadTaskState(threadID string) harness.TaskS
 			if base.IsZero() {
 				return state
 			}
-			if merged, err := harness.MergeTaskStates(base, state); err == nil {
+			if merged, err := harnessruntime.MergeTaskProgressState(base, state); err == nil {
 				return merged
 			}
 			return state
@@ -161,7 +176,7 @@ func (a runtimeConversationAdapter) DeriveTaskState(threadID string, result *age
 		if loaded.IsZero() {
 			return state
 		}
-		if merged, err := harness.MergeTaskStates(loaded, state); err == nil {
+		if merged, err := harnessruntime.MergeTaskProgressState(loaded, state); err == nil {
 			return merged
 		}
 		return state
