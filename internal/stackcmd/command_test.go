@@ -2,6 +2,7 @@ package stackcmd
 
 import (
 	"flag"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -204,5 +205,70 @@ func TestPrepareCommandWriteBundleRejectsInvalidRestartPolicy(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "invalid restart policy") {
 		t.Fatalf("PrepareCommand() error = %v, want invalid restart policy", err)
+	}
+}
+
+func TestPrepareCommandSpawnBundleUsesProcessLauncher(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Preset = StackPresetSharedRemote
+	cfg.Worker.Addr = ":19081"
+	dir := t.TempDir()
+	if err := WriteBundle(dir, cfg.Manifest()); err != nil {
+		t.Fatalf("WriteBundle() error = %v", err)
+	}
+	binDir := installTestProcessBinaries(t, "langgraph", "runtime-node", "runtime-state", "runtime-sandbox")
+
+	prepared, err := PrepareCommand(flag.NewFlagSet("runtime-stack-spawn-bundle", flag.ContinueOnError), langgraphcmd.BuildInfo{}, CommandOptions{
+		Stderr: new(strings.Builder),
+		Args: []string{
+			"-spawn-bundle=" + dir,
+			"-process-binary-dir=" + binDir,
+			"-spawn-restart-policy=always",
+			"-spawn-max-restarts=2",
+			"-spawn-failure-isolation",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareCommand() error = %v", err)
+	}
+	if prepared == nil {
+		t.Fatal("PrepareCommand() = nil")
+	}
+	launcher, ok := prepared.Lifecycle.(*ProcessLauncher)
+	if !ok {
+		t.Fatalf("Lifecycle type = %T, want *ProcessLauncher", prepared.Lifecycle)
+	}
+	if len(launcher.lifecycles) != 4 {
+		t.Fatalf("spawn bundle lifecycles = %d, want 4", len(launcher.lifecycles))
+	}
+	if launcher.lifecycles[0].restartPolicy != ProcessRestartAlways {
+		t.Fatalf("restart policy = %q", launcher.lifecycles[0].restartPolicy)
+	}
+	if launcher.lifecycles[0].maxRestarts != 2 {
+		t.Fatalf("max restarts = %d", launcher.lifecycles[0].maxRestarts)
+	}
+	if !launcher.failureIsolation {
+		t.Fatal("failure isolation = false, want true")
+	}
+	joined := strings.Join(prepared.StartupLines, "\n")
+	if !strings.Contains(joined, "launch_mode=external-processes-bundle") {
+		t.Fatalf("StartupLines = %#v", prepared.StartupLines)
+	}
+	if !strings.Contains(joined, dir) {
+		t.Fatalf("StartupLines = %#v", prepared.StartupLines)
+	}
+}
+
+func TestPrepareCommandSpawnBundleRejectsInvalidBundle(t *testing.T) {
+	binDir := installTestProcessBinaries(t, "langgraph", "runtime-node")
+	_, err := PrepareCommand(flag.NewFlagSet("runtime-stack-spawn-bundle-invalid", flag.ContinueOnError), langgraphcmd.BuildInfo{}, CommandOptions{
+		Stderr: new(strings.Builder),
+		Args: []string{
+			"-spawn-bundle=" + filepath.Join(t.TempDir(), "missing"),
+			"-process-binary-dir=" + binDir,
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "stack-manifest.json") {
+		t.Fatalf("PrepareCommand() error = %v, want missing stack-manifest", err)
 	}
 }

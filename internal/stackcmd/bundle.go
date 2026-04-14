@@ -151,12 +151,9 @@ func ValidateBundle(dir string) error {
 	if dir == "" {
 		return fmt.Errorf("bundle dir required")
 	}
-	var manifest StackManifest
-	if err := readJSONFile(filepath.Join(dir, "stack-manifest.json"), &manifest); err != nil {
-		return fmt.Errorf("read stack-manifest.json: %w", err)
-	}
-	if err := manifest.ValidateProcessGraph(); err != nil {
-		return fmt.Errorf("invalid process graph: %w", err)
+	manifest, err := LoadBundleManifest(dir)
+	if err != nil {
+		return err
 	}
 
 	var hostPlan HostPlan
@@ -180,6 +177,21 @@ func ValidateBundle(dir string) error {
 		}
 	}
 	return nil
+}
+
+func LoadBundleManifest(dir string) (StackManifest, error) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return StackManifest{}, fmt.Errorf("bundle dir required")
+	}
+	var manifest StackManifest
+	if err := readJSONFile(filepath.Join(dir, "stack-manifest.json"), &manifest); err != nil {
+		return StackManifest{}, fmt.Errorf("read stack-manifest.json: %w", err)
+	}
+	if err := manifest.ValidateProcessGraph(); err != nil {
+		return StackManifest{}, fmt.Errorf("invalid process graph: %w", err)
+	}
+	return manifest, nil
 }
 
 func buildHostPlan(manifest StackManifest, options BundleOptions) (HostPlan, error) {

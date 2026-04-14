@@ -36,6 +36,7 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 	printManifest := fs.Bool("print-manifest", false, "print resolved runtime stack manifest and exit")
 	writeBundle := fs.String("write-bundle", "", "write stack manifest and per-process specs to a directory, then exit")
 	validateBundle := fs.String("validate-bundle", "", "validate an existing runtime bundle directory and exit")
+	spawnBundle := fs.String("spawn-bundle", "", "launch stack using external processes from an existing bundle directory")
 	bundleRestartPolicy := fs.String("bundle-restart-policy", string(bundleDefaultRestartPolicy), "host-plan restart policy for write-bundle: never|on-failure|always")
 	bundleMaxRestarts := fs.Int("bundle-max-restarts", bundleDefaultMaxRestarts, "host-plan max restart attempts per process for write-bundle (<=0 means unlimited)")
 	bundleRestartDelay := fs.Duration("bundle-restart-delay", bundleDefaultRestartDelay, "host-plan restart delay for write-bundle")
@@ -98,6 +99,52 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 			},
 		}, nil
 	}
+	if strings.TrimSpace(*spawnBundle) != "" {
+		restartPolicy, err := parseProcessRestartPolicy(*spawnRestartPolicy)
+		if err != nil {
+			return nil, err
+		}
+		if err := ValidateBundle(*spawnBundle); err != nil {
+			return nil, err
+		}
+		manifest, err := LoadBundleManifest(*spawnBundle)
+		if err != nil {
+			return nil, err
+		}
+		processLauncher, err := NewProcessLauncher(manifest.Processes, ProcessLaunchOptions{
+			Stdout:            commandrun.StdoutWriter(options.Stdout),
+			Stderr:            commandrun.OutputWriter(options.Stderr),
+			BinaryDir:         strings.TrimSpace(*processBinaryDir),
+			RestartPolicy:     restartPolicy,
+			MaxRestarts:       *spawnMaxRestarts,
+			RestartDelay:      *spawnRestartDelay,
+			DependencyTimeout: *spawnDependencyTimeout,
+			FailureIsolation:  *spawnFailureIsolation,
+		})
+		if err != nil {
+			return nil, err
+		}
+		startup := []string{
+			"Starting split runtime stack from bundle...",
+			"  bundle_dir=" + strings.TrimSpace(*spawnBundle),
+			"  launch_mode=external-processes-bundle",
+		}
+		if *spawnFailureIsolation {
+			startup = append(startup, "  failure_isolation=enabled")
+		} else {
+			startup = append(startup, "  failure_isolation=disabled")
+		}
+		return &commandrun.PreparedCommand{
+			Logger:          logger,
+			Lifecycle:       processLauncher,
+			StartupLines:    startup,
+			ReadyLines:      manifest.ReadyLines(),
+			Ready:           readyProbeForTargets(manifest.ReadyTargets()),
+			ReadyTimeout:    15 * time.Second,
+			ShutdownTimeout: 15 * time.Second,
+			IgnoredErrors:   []error{http.ErrServerClosed, context.Canceled},
+		}, nil
+	}
 	if *spawnProcesses {
 		restartPolicy, err := parseProcessRestartPolicy(*spawnRestartPolicy)
 		if err != nil {
@@ -149,4 +196,17 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 		ShutdownTimeout: 15 * time.Second,
 		IgnoredErrors:   []error{http.ErrServerClosed, context.Canceled},
 	}, nil
+}
+
+func readyProbeForTargets(targets []string) commandrun.ReadyFunc {
+	filtered := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if trimmed := strings.TrimSpace(target); trimmed != "" {
+			filtered = append(filtered, trimmed)
+		}
+	}
+	return commandrun.HTTPReadyProbe{
+		Interval: 50 * time.Millisecond,
+		Targets:  filtered,
+	}.Wait
 }
