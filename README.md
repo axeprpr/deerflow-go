@@ -84,6 +84,8 @@ flowchart TD
   - `processes/worker.json`
   - `processes/state.json`
   - `processes/sandbox.json`
+- `-spawn-processes`: launch the manifest as real OS processes (no `.sh`), using per-process `binary + args`
+- `-process-binary-dir=<dir>`: resolve process binaries from a specific directory in external-process mode
 
 Each process spec includes component identity, bind address, readiness target, startup dependencies, binary, and args so orchestration can stay cross-platform (Linux/macOS/Windows/Electron-managed runtime).
 
@@ -103,3 +105,14 @@ Reference documents:
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [API Diff](docs/API_DIFF.md)
+
+## Remaining Large Workstreams
+
+- Deployment split hardening:
+  - keep single-node fast path
+  - continue hardening gateway/worker/state/sandbox multi-process production topology
+- Shared-state recovery baseline:
+  - continue cross-instance recovery/join/replay coverage and operational diagnostics
+  - run responses now include recovery metadata (`attempt`, `resume_from_event`, `resume_reason`, `outcome`) for debugging
+- Sandbox backend completion:
+  - keep `local-linux` default, continue strengthening `container`, `remote`, and `windows-restricted` backends
