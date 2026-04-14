@@ -54,7 +54,7 @@ func (w RuntimeWorker) execute(ctx context.Context, req DispatchRequest) (*Dispa
 	handle := NewStaticExecutionHandle(prepared.Execution, prepared.Lifecycle.ThreadID)
 	if w.complete {
 		recorder := NewWorkerRunEventRecorder(w.events)
-		ctx = bindWorkerExecutionContext(ctx, runtime, w.specs, req.Plan, recorder)
+		ctx = bindWorkerExecutionContextWithTracker(ctx, runtime, w.specs, req.Plan, recorder, NewThreadTaskLifecycleTracker(w.threads, req.Plan.ThreadID))
 		runState := NewRunStateService(workerRunStateRuntime{
 			snapshots: w.snapshots,
 			threads:   w.threads,
@@ -107,6 +107,29 @@ func bindWorkerExecutionContext(ctx context.Context, runtime *harness.Runtime, s
 	}
 	base.Hooks = mergeWorkerRunHooks(base.Hooks, harness.RunHooks{
 		TaskSink: func(evt subagent.TaskEvent) {
+			recorder.RecordTaskEvent(plan, evt)
+		},
+		ClarificationSink: func(item *clarification.Clarification) {
+			recorder.RecordClarification(plan, item)
+		},
+	})
+	if runtime != nil {
+		return runtime.BindContext(ctx, base)
+	}
+	return harness.BindContext(ctx, base)
+}
+
+func bindWorkerExecutionContextWithTracker(ctx context.Context, runtime *harness.Runtime, specs WorkerSpecRuntime, plan WorkerExecutionPlan, recorder WorkerRunEventRecorder, tracker ThreadTaskLifecycleTracker) context.Context {
+	base := harness.ContextSpec{ThreadID: plan.ThreadID}
+	if resolver, ok := specs.(WorkerContextRuntime); ok {
+		base = resolver.ResolveWorkerContextSpec(plan.ThreadID)
+		if base.ThreadID == "" {
+			base.ThreadID = plan.ThreadID
+		}
+	}
+	base.Hooks = mergeWorkerRunHooks(base.Hooks, harness.RunHooks{
+		TaskSink: func(evt subagent.TaskEvent) {
+			tracker.Observe(evt)
 			recorder.RecordTaskEvent(plan, evt)
 		},
 		ClarificationSink: func(item *clarification.Clarification) {

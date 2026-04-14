@@ -128,7 +128,13 @@ func (s *Server) buildRunExecution(ctx context.Context, prepared *preparedRunReq
 }
 
 func (s *Server) bindRunContext(ctx context.Context, threadID string, taskSink func(subagent.TaskEvent), clarificationSink func(*clarification.Clarification)) context.Context {
-	return s.runtimeCoordinator().BindContext(ctx, threadID, taskSink, clarificationSink)
+	tracker := harnessruntime.NewThreadTaskLifecycleTracker(s.ensureThreadStateStore(), threadID)
+	return s.runtimeCoordinator().BindContext(ctx, threadID, func(evt subagent.TaskEvent) {
+		tracker.Observe(evt)
+		if taskSink != nil {
+			taskSink(evt)
+		}
+	}, clarificationSink)
 }
 
 func (s *Server) markRunError(run *Run, threadID string, err error) {
