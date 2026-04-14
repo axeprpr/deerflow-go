@@ -53,6 +53,9 @@ func (c Config) Validate() error {
 			return fmt.Errorf("invalid sandbox config: %w", err)
 		}
 	}
+	if err := cfg.Manifest().ValidateProcessGraph(); err != nil {
+		return fmt.Errorf("invalid process graph: %w", err)
+	}
 	return nil
 }
 

@@ -2,6 +2,7 @@ package stackcmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/axeprpr/deerflow-go/internal/langgraphcmd"
 	"github.com/axeprpr/deerflow-go/internal/runtimecmd"
@@ -30,14 +31,19 @@ type StackManifest struct {
 }
 
 type ProcessManifest struct {
-	Name   string   `json:"name"`
-	Binary string   `json:"binary"`
-	Args   []string `json:"args"`
+	Name      string        `json:"name"`
+	Component ComponentKind `json:"component"`
+	Addr      string        `json:"addr"`
+	ReadyURL  string        `json:"ready_url"`
+	DependsOn []string      `json:"depends_on,omitempty"`
+	Binary    string        `json:"binary"`
+	Args      []string      `json:"args"`
 }
 
 func (c Config) Manifest() StackManifest {
 	cfg := c.withDefaults()
 	spec := cfg.DeploymentSpec()
+	launchSpec := cfg.LaunchSpec()
 	manifest := StackManifest{
 		Preset:         cfg.effectivePreset(),
 		Profile:        cfg.Profile(),
@@ -53,14 +59,14 @@ func (c Config) Manifest() StackManifest {
 				Kind:      ComponentGateway,
 				Addr:      cfg.Gateway.Addr,
 				Node:      cfg.Gateway.Runtime.Manifest(),
-				ReadyURL:  cfg.LaunchSpec().GatewayHealthURL(),
+				ReadyURL:  launchSpec.GatewayHealthURL(),
 				Dedicated: true,
 			},
 			{
 				Kind:      ComponentWorker,
 				Addr:      cfg.Worker.Addr,
 				Node:      cfg.Worker.Manifest(),
-				ReadyURL:  cfg.LaunchSpec().WorkerHealthURL(),
+				ReadyURL:  launchSpec.WorkerHealthURL(),
 				Dedicated: true,
 			},
 		},
@@ -71,22 +77,52 @@ func (c Config) Manifest() StackManifest {
 				Kind:      ComponentState,
 				Addr:      cfg.State.Runtime.Addr,
 				Node:      cfg.State.Runtime.Manifest(),
-				ReadyURL:  cfg.LaunchSpec().WorkerStateHealthURL(),
+				ReadyURL:  launchSpec.WorkerStateHealthURL(),
 				Dedicated: true,
 			},
 			ComponentManifest{
 				Kind:      ComponentSandbox,
 				Addr:      cfg.Sandbox.Runtime.Addr,
 				Node:      cfg.Sandbox.Runtime.Manifest(),
-				ReadyURL:  cfg.LaunchSpec().WorkerSandboxHealthURL(),
+				ReadyURL:  launchSpec.WorkerSandboxHealthURL(),
 				Dedicated: true,
 			},
 		)
 		manifest.Processes = []ProcessManifest{
-			{Name: "gateway", Binary: "langgraph", Args: cfg.Gateway.CLIArgs()},
-			{Name: "worker", Binary: "runtime-node", Args: cfg.Worker.CLIArgs("")},
-			{Name: "state", Binary: "runtime-state", Args: cfg.State.CLIArgs()},
-			{Name: "sandbox", Binary: "runtime-sandbox", Args: cfg.Sandbox.CLIArgs()},
+			{
+				Name:      "gateway",
+				Component: ComponentGateway,
+				Addr:      cfg.Gateway.Addr,
+				ReadyURL:  launchSpec.GatewayHealthURL(),
+				DependsOn: []string{"worker"},
+				Binary:    "langgraph",
+				Args:      cfg.Gateway.CLIArgs(),
+			},
+			{
+				Name:      "worker",
+				Component: ComponentWorker,
+				Addr:      cfg.Worker.Addr,
+				ReadyURL:  launchSpec.WorkerHealthURL(),
+				DependsOn: []string{"state", "sandbox"},
+				Binary:    "runtime-node",
+				Args:      cfg.Worker.CLIArgs(""),
+			},
+			{
+				Name:      "state",
+				Component: ComponentState,
+				Addr:      cfg.State.Runtime.Addr,
+				ReadyURL:  launchSpec.WorkerStateHealthURL(),
+				Binary:    "runtime-state",
+				Args:      cfg.State.CLIArgs(),
+			},
+			{
+				Name:      "sandbox",
+				Component: ComponentSandbox,
+				Addr:      cfg.Sandbox.Runtime.Addr,
+				ReadyURL:  launchSpec.WorkerSandboxHealthURL(),
+				Binary:    "runtime-sandbox",
+				Args:      cfg.Sandbox.CLIArgs(),
+			},
 		}
 		return manifest
 	}
@@ -95,22 +131,94 @@ func (c Config) Manifest() StackManifest {
 			Kind:      ComponentState,
 			Addr:      cfg.Worker.Addr,
 			Node:      cfg.Worker.Manifest(),
-			ReadyURL:  cfg.LaunchSpec().WorkerStateHealthURL(),
+			ReadyURL:  launchSpec.WorkerStateHealthURL(),
 			Dedicated: false,
 		},
 		ComponentManifest{
 			Kind:      ComponentSandbox,
 			Addr:      cfg.Worker.Addr,
 			Node:      cfg.Worker.Manifest(),
-			ReadyURL:  cfg.LaunchSpec().WorkerSandboxHealthURL(),
+			ReadyURL:  launchSpec.WorkerSandboxHealthURL(),
 			Dedicated: false,
 		},
 	)
 	manifest.Processes = []ProcessManifest{
-		{Name: "gateway", Binary: "langgraph", Args: cfg.Gateway.CLIArgs()},
-		{Name: "worker", Binary: "runtime-node", Args: cfg.Worker.CLIArgs("")},
+		{
+			Name:      "gateway",
+			Component: ComponentGateway,
+			Addr:      cfg.Gateway.Addr,
+			ReadyURL:  launchSpec.GatewayHealthURL(),
+			DependsOn: []string{"worker"},
+			Binary:    "langgraph",
+			Args:      cfg.Gateway.CLIArgs(),
+		},
+		{
+			Name:      "worker",
+			Component: ComponentWorker,
+			Addr:      cfg.Worker.Addr,
+			ReadyURL:  launchSpec.WorkerHealthURL(),
+			Binary:    "runtime-node",
+			Args:      cfg.Worker.CLIArgs(""),
+		},
 	}
 	return manifest
+}
+
+func (m StackManifest) ValidateProcessGraph() error {
+	if len(m.Processes) == 0 {
+		return nil
+	}
+	processByName := make(map[string]ProcessManifest, len(m.Processes))
+	for _, process := range m.Processes {
+		name := strings.TrimSpace(process.Name)
+		if name == "" {
+			return fmt.Errorf("process name is required")
+		}
+		if _, exists := processByName[name]; exists {
+			return fmt.Errorf("duplicate process %q", name)
+		}
+		process.Name = name
+		processByName[name] = process
+	}
+	for _, process := range processByName {
+		for _, dep := range process.DependsOn {
+			dep = strings.TrimSpace(dep)
+			if dep == "" {
+				return fmt.Errorf("process %q has empty dependency", process.Name)
+			}
+			if dep == process.Name {
+				return fmt.Errorf("process %q cannot depend on itself", process.Name)
+			}
+			if _, ok := processByName[dep]; !ok {
+				return fmt.Errorf("process %q depends on unknown process %q", process.Name, dep)
+			}
+		}
+	}
+	state := map[string]uint8{}
+	var visit func(string) error
+	visit = func(name string) error {
+		switch state[name] {
+		case 1:
+			return fmt.Errorf("cycle detected at %q", name)
+		case 2:
+			return nil
+		}
+		state[name] = 1
+		process := processByName[name]
+		for _, dep := range process.DependsOn {
+			if err := visit(dep); err != nil {
+				return fmt.Errorf("%s -> %w", name, err)
+			}
+		}
+		state[name] = 2
+		return nil
+	}
+	for name := range processByName {
+		if err := visit(name); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (m StackManifest) StartupLines(build langgraphcmd.BuildInfo, yolo bool, logLevel string) []string {

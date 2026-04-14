@@ -14,6 +14,9 @@ func WriteBundle(dir string, manifest StackManifest) error {
 	if dir == "" {
 		return fmt.Errorf("bundle dir required")
 	}
+	if err := manifest.ValidateProcessGraph(); err != nil {
+		return fmt.Errorf("invalid process graph: %w", err)
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}

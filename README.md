@@ -85,7 +85,7 @@ flowchart TD
   - `processes/state.json`
   - `processes/sandbox.json`
 
-Each process spec includes binary, args, env, and readiness metadata, so orchestration can stay cross-platform (Linux/macOS/Windows/Electron-managed runtime).
+Each process spec includes component identity, bind address, readiness target, startup dependencies, binary, and args so orchestration can stay cross-platform (Linux/macOS/Windows/Electron-managed runtime).
 
 ## Layers
 

@@ -1,6 +1,7 @@
 package stackcmd
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -37,6 +38,22 @@ func TestManifestIncludesDedicatedRemoteComponents(t *testing.T) {
 	if manifest.Processes[1].Binary != "runtime-node" {
 		t.Fatalf("worker process = %+v", manifest.Processes[1])
 	}
+	processes := processManifestByName(manifest.Processes)
+	if processes["gateway"].Component != ComponentGateway {
+		t.Fatalf("gateway component = %q", processes["gateway"].Component)
+	}
+	if processes["worker"].Component != ComponentWorker {
+		t.Fatalf("worker component = %q", processes["worker"].Component)
+	}
+	if !reflect.DeepEqual(processes["gateway"].DependsOn, []string{"worker"}) {
+		t.Fatalf("gateway depends_on = %#v", processes["gateway"].DependsOn)
+	}
+	if !reflect.DeepEqual(processes["worker"].DependsOn, []string{"state", "sandbox"}) {
+		t.Fatalf("worker depends_on = %#v", processes["worker"].DependsOn)
+	}
+	if processes["state"].ReadyURL == "" || processes["sandbox"].ReadyURL == "" {
+		t.Fatalf("state/sandbox ready url = %q / %q", processes["state"].ReadyURL, processes["sandbox"].ReadyURL)
+	}
 }
 
 func TestManifestReadyLinesUseDedicatedLabels(t *testing.T) {
@@ -66,4 +83,65 @@ func TestManifestStartupLinesIncludeComponentProfiles(t *testing.T) {
 	if !strings.Contains(joined, "worker_dispatch=") {
 		t.Fatalf("StartupLines = %q", joined)
 	}
+}
+
+func TestManifestProcessDependenciesForSharedSQLitePreset(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Preset = StackPresetSharedSQLite
+	cfg.Worker.Addr = ":19081"
+
+	manifest := cfg.Manifest()
+	if len(manifest.Processes) != 2 {
+		t.Fatalf("processes = %d", len(manifest.Processes))
+	}
+	processes := processManifestByName(manifest.Processes)
+	if !reflect.DeepEqual(processes["gateway"].DependsOn, []string{"worker"}) {
+		t.Fatalf("gateway depends_on = %#v", processes["gateway"].DependsOn)
+	}
+	if len(processes["worker"].DependsOn) != 0 {
+		t.Fatalf("worker depends_on = %#v", processes["worker"].DependsOn)
+	}
+}
+
+func TestManifestValidateProcessGraphDedicatedRemotePreset(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Preset = StackPresetSharedRemote
+	cfg.Worker.Addr = ":19081"
+
+	if err := cfg.Manifest().ValidateProcessGraph(); err != nil {
+		t.Fatalf("ValidateProcessGraph() error = %v", err)
+	}
+}
+
+func TestManifestValidateProcessGraphRejectsUnknownDependency(t *testing.T) {
+	manifest := StackManifest{
+		Processes: []ProcessManifest{
+			{Name: "gateway", DependsOn: []string{"worker"}},
+		},
+	}
+	err := manifest.ValidateProcessGraph()
+	if err == nil || !strings.Contains(err.Error(), "unknown process") {
+		t.Fatalf("ValidateProcessGraph() error = %v, want unknown process", err)
+	}
+}
+
+func TestManifestValidateProcessGraphRejectsCycle(t *testing.T) {
+	manifest := StackManifest{
+		Processes: []ProcessManifest{
+			{Name: "gateway", DependsOn: []string{"worker"}},
+			{Name: "worker", DependsOn: []string{"gateway"}},
+		},
+	}
+	err := manifest.ValidateProcessGraph()
+	if err == nil || !strings.Contains(err.Error(), "cycle detected") {
+		t.Fatalf("ValidateProcessGraph() error = %v, want cycle detected", err)
+	}
+}
+
+func processManifestByName(processes []ProcessManifest) map[string]ProcessManifest {
+	index := make(map[string]ProcessManifest, len(processes))
+	for _, process := range processes {
+		index[process.Name] = process
+	}
+	return index
 }

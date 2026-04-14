@@ -31,6 +31,13 @@ func TestWriteBundleWritesManifestAndProcesses(t *testing.T) {
 			t.Fatalf("process %s = %q", name, string(data))
 		}
 	}
+	gatewayData, err := os.ReadFile(filepath.Join(dir, "processes", "gateway.json"))
+	if err != nil {
+		t.Fatalf("gateway process read error = %v", err)
+	}
+	if !strings.Contains(string(gatewayData), "\"depends_on\"") || !strings.Contains(string(gatewayData), "\"component\"") {
+		t.Fatalf("gateway process = %q", string(gatewayData))
+	}
 }
 
 func TestPrepareCommandWriteBundle(t *testing.T) {
@@ -54,6 +61,19 @@ func TestPrepareCommandWriteBundle(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "stack-manifest.json")); err != nil {
 		t.Fatalf("manifest stat error = %v", err)
+	}
+}
+
+func TestWriteBundleRejectsInvalidProcessGraph(t *testing.T) {
+	dir := t.TempDir()
+	manifest := StackManifest{
+		Processes: []ProcessManifest{
+			{Name: "gateway", DependsOn: []string{"worker"}},
+		},
+	}
+	err := WriteBundle(dir, manifest)
+	if err == nil || !strings.Contains(err.Error(), "invalid process graph") {
+		t.Fatalf("WriteBundle() error = %v, want invalid process graph", err)
 	}
 }
 
