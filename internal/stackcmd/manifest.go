@@ -239,7 +239,7 @@ func (m StackManifest) StartupLines(build langgraphcmd.BuildInfo, yolo bool, log
 		case ComponentState:
 			lines = append(lines, fmt.Sprintf("  %s: addr=%s provider=%s store=%s", component.KindLabel(), component.Addr, firstNonEmpty(string(component.Node.StateProvider), "(auto)"), firstNonEmpty(component.Node.StateStore, "(derived)")))
 		case ComponentSandbox:
-			lines = append(lines, fmt.Sprintf("  %s: addr=%s backend=%s", component.KindLabel(), component.Addr, firstNonEmpty(string(component.Node.Sandbox), "(default)")))
+			lines = append(lines, fmt.Sprintf("  %s: addr=%s backend=%s max_active_leases=%d", component.KindLabel(), component.Addr, firstNonEmpty(string(component.Node.Sandbox), "(default)"), component.Node.SandboxProfile.Limits.MaxActiveLeases))
 		}
 	}
 	return lines

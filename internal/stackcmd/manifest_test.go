@@ -70,6 +70,23 @@ func TestManifestReadyLinesUseDedicatedLabels(t *testing.T) {
 	}
 }
 
+func TestManifestIncludesSandboxMaxActiveLeases(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Preset = StackPresetSharedRemote
+	cfg.Worker.Addr = ":19081"
+	cfg.Worker.SandboxMaxActiveLeases = 6
+
+	manifest := cfg.Manifest()
+	processes := processManifestByName(manifest.Processes)
+	if !strings.Contains(strings.Join(processes["sandbox"].Args, " "), "-sandbox-max-active-leases=6") {
+		t.Fatalf("sandbox args = %#v", processes["sandbox"].Args)
+	}
+	joined := strings.Join(manifest.StartupLines(langgraphcmd.BuildInfo{}, false, ""), "\n")
+	if !strings.Contains(joined, "max_active_leases=6") {
+		t.Fatalf("StartupLines = %q", joined)
+	}
+}
+
 func TestManifestStartupLinesIncludeComponentProfiles(t *testing.T) {
 	cfg := DefaultConfig()
 	lines := cfg.Manifest().StartupLines(langgraphcmd.BuildInfo{}, false, "")

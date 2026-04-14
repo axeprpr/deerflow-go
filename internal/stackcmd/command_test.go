@@ -1,6 +1,7 @@
 package stackcmd
 
 import (
+	"encoding/json"
 	"flag"
 	"path/filepath"
 	"strings"
@@ -134,6 +135,59 @@ func TestPrepareCommandPrintManifest(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "\"worker_dispatch\"") {
 		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestPrepareCommandPrintManifestIncludesSandboxMaxActiveLeases(t *testing.T) {
+	var stdout strings.Builder
+	prepared, err := PrepareCommand(flag.NewFlagSet("runtime-stack-manifest-sandbox-leases", flag.ContinueOnError), langgraphcmd.BuildInfo{}, CommandOptions{
+		Stdout: &stdout,
+		Args: []string{
+			"-print-manifest",
+			"-preset=shared-remote",
+			"-worker-addr=:19081",
+			"-sandbox-max-active-leases=9",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareCommand() error = %v", err)
+	}
+	if err := prepared.Run(); err != nil {
+		t.Fatalf("prepared.Run() error = %v", err)
+	}
+	var manifest StackManifest
+	if err := json.Unmarshal([]byte(stdout.String()), &manifest); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if got := manifestSandboxMaxActiveLeases(manifest); got != 9 {
+		t.Fatalf("sandbox max active leases = %d, want 9", got)
+	}
+}
+
+func TestPrepareCommandPrintManifestSandboxServiceLeaseOverride(t *testing.T) {
+	var stdout strings.Builder
+	prepared, err := PrepareCommand(flag.NewFlagSet("runtime-stack-manifest-sandbox-override", flag.ContinueOnError), langgraphcmd.BuildInfo{}, CommandOptions{
+		Stdout: &stdout,
+		Args: []string{
+			"-print-manifest",
+			"-preset=shared-remote",
+			"-worker-addr=:19081",
+			"-sandbox-max-active-leases=9",
+			"-sandbox-service-max-active-leases=4",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareCommand() error = %v", err)
+	}
+	if err := prepared.Run(); err != nil {
+		t.Fatalf("prepared.Run() error = %v", err)
+	}
+	var manifest StackManifest
+	if err := json.Unmarshal([]byte(stdout.String()), &manifest); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if got := manifestSandboxMaxActiveLeases(manifest); got != 4 {
+		t.Fatalf("sandbox max active leases = %d, want 4", got)
 	}
 }
 
@@ -271,4 +325,13 @@ func TestPrepareCommandSpawnBundleRejectsInvalidBundle(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "stack-manifest.json") {
 		t.Fatalf("PrepareCommand() error = %v, want missing stack-manifest", err)
 	}
+}
+
+func manifestSandboxMaxActiveLeases(manifest StackManifest) int {
+	for _, component := range manifest.Components {
+		if component.Kind == ComponentSandbox {
+			return component.Node.SandboxProfile.Limits.MaxActiveLeases
+		}
+	}
+	return 0
 }

@@ -119,6 +119,9 @@ func (c Config) applyDedicatedRemoteServices(prevGatewayEndpoint, prevGatewaySta
 		stateURL := stateServiceEndpoint(c.State.Runtime.Addr)
 		c.State = c.State.WithDefaults()
 		c.Sandbox = c.Sandbox.WithDefaults()
+		if c.Sandbox.Runtime.SandboxMaxActiveLeases <= 0 && c.Worker.SandboxMaxActiveLeases > 0 {
+			c.Sandbox.Runtime.SandboxMaxActiveLeases = c.Worker.SandboxMaxActiveLeases
+		}
 		c.Gateway.Runtime.StateProvider = harnessruntime.RuntimeStateProviderModeAuto
 		c.Gateway.Runtime.StateBackend = harnessruntime.RuntimeStateStoreBackendRemote
 		c.Gateway.Runtime.SnapshotBackend = harnessruntime.RuntimeStateStoreBackendRemote

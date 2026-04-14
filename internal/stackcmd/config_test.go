@@ -125,3 +125,33 @@ func TestConfigWithSharedRemotePresetPreservesExplicitServiceAddrs(t *testing.T)
 		t.Fatalf("sandbox endpoint = %q", cfg.Worker.SandboxEndpoint)
 	}
 }
+
+func TestConfigWithSharedRemotePresetInheritsSandboxMaxActiveLeases(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Preset = StackPresetSharedRemote
+	cfg.Worker.Addr = ":19081"
+	cfg.Worker.SandboxMaxActiveLeases = 7
+
+	cfg = cfg.withDefaults()
+
+	if cfg.Worker.SandboxMaxActiveLeases != 7 {
+		t.Fatalf("worker sandbox max active leases = %d", cfg.Worker.SandboxMaxActiveLeases)
+	}
+	if cfg.Sandbox.Runtime.SandboxMaxActiveLeases != 7 {
+		t.Fatalf("sandbox service max active leases = %d", cfg.Sandbox.Runtime.SandboxMaxActiveLeases)
+	}
+}
+
+func TestConfigWithSharedRemotePresetSandboxServiceLeaseOverrideWins(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Preset = StackPresetSharedRemote
+	cfg.Worker.Addr = ":19081"
+	cfg.Worker.SandboxMaxActiveLeases = 7
+	cfg.Sandbox.Runtime.SandboxMaxActiveLeases = 11
+
+	cfg = cfg.withDefaults()
+
+	if cfg.Sandbox.Runtime.SandboxMaxActiveLeases != 11 {
+		t.Fatalf("sandbox service max active leases = %d", cfg.Sandbox.Runtime.SandboxMaxActiveLeases)
+	}
+}

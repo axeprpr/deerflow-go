@@ -8,8 +8,8 @@ import (
 )
 
 type Binding struct {
-	cfg          *Config
-	stateBinding *statecmd.Binding
+	cfg            *Config
+	stateBinding   *statecmd.Binding
 	sandboxBinding *sandboxcmd.Binding
 }
 
@@ -41,6 +41,7 @@ func BindFlags(fs *flag.FlagSet, defaults Config) *Binding {
 	fs.StringVar((*string)(&cfg.Worker.SandboxBackend), "sandbox-backend", string(cfg.Worker.SandboxBackend), "worker sandbox backend")
 	fs.StringVar(&cfg.Worker.SandboxEndpoint, "sandbox-endpoint", cfg.Worker.SandboxEndpoint, "remote sandbox endpoint")
 	fs.StringVar(&cfg.Worker.SandboxImage, "sandbox-image", cfg.Worker.SandboxImage, "container sandbox image")
+	fs.IntVar(&cfg.Worker.SandboxMaxActiveLeases, "sandbox-max-active-leases", cfg.Worker.SandboxMaxActiveLeases, "max active sandbox leases for worker sandbox server (<=0 means unlimited)")
 	return &Binding{cfg: &cfg, stateBinding: stateBinding, sandboxBinding: sandboxBinding}
 }
 
