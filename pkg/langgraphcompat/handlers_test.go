@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
+	"github.com/axeprpr/deerflow-go/pkg/harness"
+	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/llm"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
@@ -310,6 +312,7 @@ license: MIT
 
 func TestForwardAgentEventEmitsLangChainToolEndEvent(t *testing.T) {
 	s := &Server{
+		sessions:    map[string]*Session{},
 		runs:        map[string]*Run{},
 		runRegistry: newRunRegistry(),
 	}
@@ -506,6 +509,7 @@ func TestForwardAgentEventDoesNotEmitCreatedAgentNameUpdateAfterFailedSetupAgent
 
 func TestForwardAgentEventEmitsLangChainToolStartEvent(t *testing.T) {
 	s := &Server{
+		sessions:    map[string]*Session{},
 		runs:        map[string]*Run{},
 		runRegistry: newRunRegistry(),
 	}
@@ -636,6 +640,55 @@ func TestForwardTaskEventIncludesStructuredMessageMetadata(t *testing.T) {
 	}
 }
 
+func TestForwardTaskEventSyncsRunningOutcomeFromLiveTaskState(t *testing.T) {
+	s := &Server{
+		sessions:    map[string]*Session{},
+		runs:        map[string]*Run{},
+		runRegistry: newRunRegistry(),
+	}
+	run := &Run{
+		RunID:       "run-task-live",
+		ThreadID:    "thread-task-live",
+		AssistantID: "lead_agent",
+		Status:      "running",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.saveRun(run)
+	taskState := harness.TaskState{
+		Items: []harness.TaskItem{
+			{ID: "task-1", Text: "inspect repo", Status: harness.TaskStatusInProgress},
+		},
+		ExpectedOutputs: []string{"/mnt/user-data/outputs/report.md"},
+	}
+	s.ensureThreadStateStore().SetThreadMetadata(run.ThreadID, harnessruntime.DefaultTaskStateMetadataKey, taskState.Value())
+	s.ensureThreadStateStore().SetThreadMetadata(run.ThreadID, harnessruntime.DefaultTaskLifecycleMetadataKey, harnessruntime.NewTaskLifecycleService().Describe(
+		harnessruntime.RunOutcome{RunStatus: "running"},
+		taskState,
+		false,
+	).Value())
+
+	s.forwardTaskEvent(nil, nil, run, newStreamModeFilter(nil), subagent.TaskEvent{
+		Type:        "task_running",
+		TaskID:      "task-1",
+		Description: "inspect repo",
+	})
+
+	stored := s.getRun(run.RunID)
+	if stored == nil {
+		t.Fatal("stored run missing")
+	}
+	if stored.Outcome.RunStatus != "running" {
+		t.Fatalf("outcome status=%q want running", stored.Outcome.RunStatus)
+	}
+	if len(stored.Outcome.TaskState.Items) != 1 || stored.Outcome.TaskState.Items[0].ID != "task-1" {
+		t.Fatalf("task_state=%+v", stored.Outcome.TaskState)
+	}
+	if len(stored.Outcome.TaskLifecycle.ExpectedArtifacts) != 1 || stored.Outcome.TaskLifecycle.ExpectedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("task_lifecycle=%+v", stored.Outcome.TaskLifecycle)
+	}
+}
+
 func TestForwardAgentEventEmitsFinalAssistantMessageTupleWithUsage(t *testing.T) {
 	s := &Server{
 		runs:        map[string]*Run{},
@@ -733,6 +786,56 @@ func TestForwardAgentEventEmitsNormalizedFinalAssistantText(t *testing.T) {
 	}
 
 	t.Fatal("missing normalized assistant messages-tuple payload")
+}
+
+func TestForwardAgentEventToolCallEndSyncsRunningOutcomeFromLiveTaskState(t *testing.T) {
+	s := &Server{
+		sessions:    map[string]*Session{},
+		runs:        map[string]*Run{},
+		runRegistry: newRunRegistry(),
+	}
+	run := &Run{
+		RunID:       "run-tool-live",
+		ThreadID:    "thread-tool-live",
+		AssistantID: "lead_agent",
+		Status:      "running",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	s.saveRun(run)
+	taskState := harness.TaskState{
+		Items: []harness.TaskItem{
+			{ID: "task-1", Text: "write report", Status: harness.TaskStatusCompleted},
+		},
+		ExpectedOutputs: []string{"/mnt/user-data/outputs/report.md"},
+		VerifiedOutputs: []string{"/mnt/user-data/outputs/report.md"},
+	}
+	s.ensureThreadStateStore().SetThreadMetadata(run.ThreadID, harnessruntime.DefaultTaskStateMetadataKey, taskState.Value())
+	s.ensureThreadStateStore().SetThreadMetadata(run.ThreadID, harnessruntime.DefaultTaskLifecycleMetadataKey, harnessruntime.NewTaskLifecycleService().Describe(
+		harnessruntime.RunOutcome{RunStatus: "running"},
+		taskState,
+		false,
+	).Value())
+
+	s.forwardAgentEvent(nil, nil, run, newStreamModeFilter(nil), agent.AgentEvent{
+		Type: agent.AgentEventToolCallEnd,
+		ToolEvent: &agent.ToolCallEvent{
+			ID:     "call-1",
+			Name:   "write_todos",
+			Status: models.CallStatusCompleted,
+		},
+	})
+
+	stored := s.getRun(run.RunID)
+	if stored == nil {
+		t.Fatal("stored run missing")
+	}
+	if len(stored.Outcome.TaskState.VerifiedOutputs) != 1 || stored.Outcome.TaskState.VerifiedOutputs[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("task_state=%+v", stored.Outcome.TaskState)
+	}
+	if len(stored.Outcome.TaskLifecycle.VerifiedArtifacts) != 1 || stored.Outcome.TaskLifecycle.VerifiedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("task_lifecycle=%+v", stored.Outcome.TaskLifecycle)
+	}
 }
 
 func TestForwardAgentEventRewritesFinalAssistantArtifactLinks(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
+	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
 	"github.com/axeprpr/deerflow-go/pkg/models"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
@@ -190,6 +191,44 @@ func (s *Server) recordAndSendEventFiltered(w http.ResponseWriter, flusher http.
 	}
 }
 
+func (s *Server) syncRunningRunFromThreadState(run *Run) {
+	if s == nil || run == nil || strings.TrimSpace(run.Status) != "running" {
+		return
+	}
+	taskState := s.runtimeCompletionAdapter().LoadThreadTaskState(run.ThreadID)
+	lifecycle := run.Outcome.TaskLifecycle
+	if store := s.ensureThreadStateStore(); store != nil {
+		if state, ok := store.LoadThreadRuntimeState(run.ThreadID); ok {
+			if live, ok := harnessruntime.ParseTaskLifecycle(state.Metadata[harnessruntime.DefaultTaskLifecycleMetadataKey]); ok {
+				lifecycle = live
+			}
+		}
+	}
+	if lifecycle.IsZero() {
+		lifecycle = harnessruntime.NewTaskLifecycleService().Describe(harnessruntime.RunOutcome{RunStatus: "running"}, taskState, false)
+	}
+	if taskState.IsZero() && lifecycle.IsZero() {
+		return
+	}
+	outcome := run.Outcome
+	outcome.RunStatus = "running"
+	outcome.Interrupted = false
+	outcome.Error = ""
+	outcome.TaskState = harness.TaskState{}
+	if normalized, err := harness.NormalizeTaskState(taskState); err == nil {
+		outcome.TaskState = normalized
+	}
+	outcome.TaskLifecycle = lifecycle
+	outcome = harnessruntime.NewOutcomeService().BindRecord(runRecordFromRun(run), outcome)
+	record := runRecordFromRun(run)
+	record.Status = "running"
+	record.Error = ""
+	record.Outcome = outcome
+	record.UpdatedAt = time.Now().UTC()
+	applyRunRecord(run, record)
+	harnessruntime.NewSnapshotStoreService(s.ensureSnapshotStore()).SaveRecord(record)
+}
+
 func compactToolAliasPayload(run *Run, eventName string, toolEvent *agent.ToolCallEvent, includeRuntimeIDs bool) map[string]any {
 	payload := map[string]any{
 		"event": eventName,
@@ -285,6 +324,7 @@ func (s *Server) forwardAgentEvent(w http.ResponseWriter, flusher http.Flusher, 
 		if toolName == "present_files" || toolName == "present_file" || toolMayAffectArtifacts(toolName) {
 			s.recordAndSendEventFiltered(w, flusher, run, filter, "updates", toolUpdatesPayload(state, nil))
 		}
+		s.syncRunningRunFromThreadState(run)
 	case agent.AgentEventEnd:
 		msg := Message{
 			Type:    "ai",
@@ -344,6 +384,7 @@ func (s *Server) forwardTaskEvent(w http.ResponseWriter, flusher http.Flusher, r
 		"error":          evt.Error,
 	}
 	s.recordAndSendEventFiltered(w, flusher, run, filter, evt.Type, data)
+	s.syncRunningRunFromThreadState(run)
 }
 
 func harnessruntimeEventIndex(event harnessruntime.RunEvent) int {
