@@ -13,6 +13,7 @@ const (
 )
 
 type TaskItem struct {
+	ID     string `json:"id,omitempty"`
 	Text   string `json:"text,omitempty"`
 	Status string `json:"status,omitempty"`
 }
@@ -44,6 +45,7 @@ func NormalizeTaskState(state TaskState) (TaskState, error) {
 	}
 	inProgress := 0
 	for _, item := range state.Items {
+		id := strings.Join(strings.Fields(strings.TrimSpace(item.ID)), " ")
 		text := strings.Join(strings.Fields(strings.TrimSpace(item.Text)), " ")
 		status := NormalizeTaskStatus(item.Status)
 		if text == "" {
@@ -56,6 +58,7 @@ func NormalizeTaskState(state TaskState) (TaskState, error) {
 			inProgress++
 		}
 		normalized.Items = append(normalized.Items, TaskItem{
+			ID:     id,
 			Text:   text,
 			Status: status,
 		})
@@ -167,10 +170,14 @@ func (s TaskState) Value() map[string]any {
 	}
 	items := make([]map[string]any, 0, len(s.Items))
 	for _, item := range s.Items {
-		items = append(items, map[string]any{
+		value := map[string]any{
 			"text":   item.Text,
 			"status": item.Status,
-		})
+		}
+		if item.ID != "" {
+			value["id"] = item.ID
+		}
+		items = append(items, value)
 	}
 	out := map[string]any{
 		"items": items,
@@ -218,6 +225,7 @@ func taskStateFromMap(raw map[string]any) (TaskState, error) {
 				return TaskState{}, fmt.Errorf("items[%d] must be an object", idx)
 			}
 			state.Items = append(state.Items, TaskItem{
+				ID:     stringFromAny(obj["id"]),
 				Text:   stringFromAny(obj["text"]),
 				Status: stringFromAny(obj["status"]),
 			})
@@ -226,6 +234,7 @@ func taskStateFromMap(raw map[string]any) (TaskState, error) {
 		state.Items = make([]TaskItem, 0, len(items))
 		for _, item := range items {
 			state.Items = append(state.Items, TaskItem{
+				ID:     stringFromAny(item["id"]),
 				Text:   stringFromAny(item["text"]),
 				Status: stringFromAny(item["status"]),
 			})

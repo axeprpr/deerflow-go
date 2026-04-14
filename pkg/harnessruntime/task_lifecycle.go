@@ -93,14 +93,15 @@ func (t ThreadTaskLifecycleTracker) Observe(evt subagent.TaskEvent) {
 		return
 	}
 	taskState := t.loadTaskState()
+	taskID := strings.Join(strings.Fields(strings.TrimSpace(evt.TaskID)), " ")
 	description := strings.Join(strings.Fields(strings.TrimSpace(evt.Description)), " ")
 	switch strings.TrimSpace(evt.Type) {
 	case "task_started", "task_running":
-		taskState = upsertTaskStateItem(taskState, description, harness.TaskStatusInProgress)
+		taskState = upsertTaskStateItem(taskState, taskID, description, harness.TaskStatusInProgress)
 	case "task_completed":
-		taskState = upsertTaskStateItem(taskState, description, harness.TaskStatusCompleted)
+		taskState = upsertTaskStateItem(taskState, taskID, description, harness.TaskStatusCompleted)
 	case "task_failed", "task_timed_out":
-		taskState = upsertTaskStateItem(taskState, description, harness.TaskStatusPending)
+		taskState = upsertTaskStateItem(taskState, taskID, description, harness.TaskStatusPending)
 	default:
 		return
 	}
@@ -149,7 +150,8 @@ func normalizeLifecycleStrings(raw any) []string {
 	}
 }
 
-func upsertTaskStateItem(state harness.TaskState, text string, status string) harness.TaskState {
+func upsertTaskStateItem(state harness.TaskState, id string, text string, status string) harness.TaskState {
+	id = strings.Join(strings.Fields(strings.TrimSpace(id)), " ")
 	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
 	status = harness.NormalizeTaskStatus(status)
 	if text == "" || status == "" {
@@ -158,14 +160,17 @@ func upsertTaskStateItem(state harness.TaskState, text string, status string) ha
 	items := append([]harness.TaskItem(nil), state.Items...)
 	found := false
 	for i := range items {
-		if items[i].Text == text {
+		if taskItemKey(items[i]) == taskItemKey(harness.TaskItem{ID: id, Text: text}) {
 			items[i].Status = status
+			if items[i].ID == "" {
+				items[i].ID = id
+			}
 			found = true
 			break
 		}
 	}
 	if !found {
-		items = append(items, harness.TaskItem{Text: text, Status: status})
+		items = append(items, harness.TaskItem{ID: id, Text: text, Status: status})
 	}
 	normalized, err := harness.NormalizeTaskState(harness.TaskState{
 		Items:           items,

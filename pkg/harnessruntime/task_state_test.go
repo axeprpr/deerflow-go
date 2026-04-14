@@ -204,6 +204,57 @@ func TestDeriveTaskStateFromResultTracksMultipleSubagentTasks(t *testing.T) {
 	}
 }
 
+func TestDeriveTaskStateFromResultKeepsDistinctSubagentTaskIDs(t *testing.T) {
+	t.Parallel()
+
+	state, ok := DeriveTaskStateFromResult(&agent.RunResult{
+		Messages: []models.Message{
+			{
+				Role: models.RoleAI,
+				ToolCalls: []models.ToolCall{
+					{ID: "call-task-1", Name: "task", Arguments: map[string]any{"description": "delegate research"}},
+					{ID: "call-task-2", Name: "task", Arguments: map[string]any{"description": "delegate research"}},
+				},
+			},
+			{
+				Role: models.RoleTool,
+				ToolResult: &models.ToolResult{
+					CallID:   "call-task-1",
+					ToolName: "task",
+					Status:   models.CallStatusCompleted,
+					Data: map[string]any{
+						"task_id":     "task-1",
+						"description": "delegate research",
+						"status":      "completed",
+					},
+				},
+			},
+			{
+				Role: models.RoleTool,
+				ToolResult: &models.ToolResult{
+					CallID:   "call-task-2",
+					ToolName: "task",
+					Status:   models.CallStatusFailed,
+					Data: map[string]any{
+						"task_id":     "task-2",
+						"description": "delegate research",
+						"status":      "failed",
+					},
+				},
+			},
+		},
+	})
+	if !ok {
+		t.Fatal("DeriveTaskStateFromResult() ok = false, want true")
+	}
+	if len(state.Items) != 2 {
+		t.Fatalf("Items=%+v want len=2", state.Items)
+	}
+	if state.Items[0].ID != "task-1" || state.Items[1].ID != "task-2" {
+		t.Fatalf("Items=%+v", state.Items)
+	}
+}
+
 func TestTaskStateProviderLoadTaskStateMergesLiveAndRunState(t *testing.T) {
 	t.Parallel()
 

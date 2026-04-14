@@ -114,3 +114,28 @@ func TestThreadTaskLifecycleTrackerRecomputesLifecycleFromTaskState(t *testing.T
 		t.Fatalf("verified artifacts=%#v", lifecycle.VerifiedArtifacts)
 	}
 }
+
+func TestThreadTaskLifecycleTrackerKeepsDistinctTaskIDsWithSameDescription(t *testing.T) {
+	t.Parallel()
+
+	store := NewInMemoryThreadStateStore()
+	tracker := NewThreadTaskLifecycleTracker(store, "thread-1")
+
+	tracker.Observe(subagent.TaskEvent{Type: "task_completed", TaskID: "task-1", Description: "delegate research"})
+	tracker.Observe(subagent.TaskEvent{Type: "task_failed", TaskID: "task-2", Description: "delegate research"})
+
+	state, ok := store.LoadThreadRuntimeState("thread-1")
+	if !ok {
+		t.Fatal("thread state missing")
+	}
+	taskState, ok := harness.ParseTaskState(state.Metadata[DefaultTaskStateMetadataKey])
+	if !ok {
+		t.Fatalf("task state=%#v", state.Metadata[DefaultTaskStateMetadataKey])
+	}
+	if len(taskState.Items) != 2 {
+		t.Fatalf("task state=%+v", taskState)
+	}
+	if taskState.Items[0].ID == taskState.Items[1].ID {
+		t.Fatalf("task ids=%+v", taskState.Items)
+	}
+}

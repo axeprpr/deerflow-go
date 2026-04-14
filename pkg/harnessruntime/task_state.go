@@ -211,6 +211,7 @@ func taskStateFromSubagentToolResult(result *models.ToolResult, call models.Tool
 	}
 	state, err := harness.NormalizeTaskState(harness.TaskState{
 		Items: []harness.TaskItem{{
+			ID:     strings.TrimSpace(anyString(result.Data["task_id"])),
 			Text:   description,
 			Status: status,
 		}},
@@ -236,8 +237,11 @@ func mergeTaskProgressState(base harness.TaskState, update harness.TaskState) (h
 	for _, item := range update.Items {
 		replaced := false
 		for i := range merged.Items {
-			if merged.Items[i].Text == item.Text {
+			if taskItemKey(merged.Items[i]) == taskItemKey(item) {
 				merged.Items[i].Status = item.Status
+				if merged.Items[i].ID == "" {
+					merged.Items[i].ID = item.ID
+				}
 				replaced = true
 				break
 			}
@@ -257,6 +261,13 @@ func mergeTaskProgressState(base harness.TaskState, update harness.TaskState) (h
 
 func MergeTaskProgressState(base harness.TaskState, update harness.TaskState) (harness.TaskState, error) {
 	return mergeTaskProgressState(base, update)
+}
+
+func taskItemKey(item harness.TaskItem) string {
+	if key := strings.Join(strings.Fields(strings.TrimSpace(item.ID)), " "); key != "" {
+		return "id:" + key
+	}
+	return "text:" + strings.Join(strings.Fields(strings.TrimSpace(item.Text)), " ")
 }
 
 func parseTaskStatePayload(data map[string]any) (harness.TaskState, bool) {
