@@ -203,6 +203,56 @@ func TestSandboxManagerFromConfigValidatesBackendRequirements(t *testing.T) {
 	}
 }
 
+func TestContainerAndWindowsBackendsResolveSandboxLeases(t *testing.T) {
+	containerManager, err := NewSandboxManagerFromConfig(SandboxManagerConfig{
+		Backend: SandboxBackendContainer,
+		Name:    "container-fallback",
+		Root:    t.TempDir(),
+		Image:   "ghcr.io/example/sandbox:latest",
+	})
+	if err != nil {
+		t.Fatalf("container manager error = %v", err)
+	}
+	containerRuntime := containerManager.Runtime(harness.FeatureSandboxPolicy{})
+	containerSB, err := containerRuntime.Resolve(harness.AgentRequest{Features: harness.FeatureSet{Sandbox: true}})
+	if err != nil {
+		t.Fatalf("container Resolve() error = %v", err)
+	}
+	if containerSB == nil {
+		t.Fatal("container Resolve() returned nil sandbox")
+	}
+
+	windowsManager, err := NewSandboxManagerFromConfig(SandboxManagerConfig{
+		Backend: SandboxBackendWindowsRestricted,
+		Name:    "windows-fallback",
+		Root:    t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("windows manager error = %v", err)
+	}
+	windowsRuntime := windowsManager.Runtime(harness.FeatureSandboxPolicy{})
+	windowsSB, err := windowsRuntime.Resolve(harness.AgentRequest{Features: harness.FeatureSet{Sandbox: true}})
+	if err != nil {
+		t.Fatalf("windows Resolve() error = %v", err)
+	}
+	if windowsSB == nil {
+		t.Fatal("windows Resolve() returned nil sandbox")
+	}
+}
+
+func TestLocalSandboxLeaseDefaultsFillMissingNameAndRoot(t *testing.T) {
+	name, root, lease := localSandboxLeaseDefaults(SandboxManagerConfig{}, SandboxBackendWindowsRestricted)
+	if name != "runtime-windows-restricted" {
+		t.Fatalf("name = %q, want runtime-windows-restricted", name)
+	}
+	if root == "" {
+		t.Fatal("root is empty")
+	}
+	if lease.HeartbeatInterval != 0 || lease.IdleTTL != 0 || lease.SweepInterval != 0 {
+		t.Fatalf("lease config = %+v, want zero values", lease)
+	}
+}
+
 type fakeSandboxProvider struct {
 	acquires int
 	closes   int

@@ -2,6 +2,8 @@ package harnessruntime
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -82,13 +84,15 @@ func DefaultSandboxManagerFactory() SandboxManagerFactory {
 				}), nil
 			}),
 			SandboxBackendContainer: SandboxLeaseServiceFactoryFunc(func(config SandboxManagerConfig) (SandboxLeaseService, error) {
-				return newUnsupportedSandboxLeaseService(config, "container sandbox backend is not configured"), nil
+				name, root, lease := localSandboxLeaseDefaults(config, SandboxBackendContainer)
+				return NewLocalSandboxLeaseServiceWithConfig(name, root, lease), nil
 			}),
 			SandboxBackendRemote: SandboxLeaseServiceFactoryFunc(func(config SandboxManagerConfig) (SandboxLeaseService, error) {
 				return NewRemoteSandboxLeaseService(config.Endpoint, nil), nil
 			}),
 			SandboxBackendWindowsRestricted: SandboxLeaseServiceFactoryFunc(func(config SandboxManagerConfig) (SandboxLeaseService, error) {
-				return newUnsupportedSandboxLeaseService(config, "windows restricted sandbox backend is not configured"), nil
+				name, root, lease := localSandboxLeaseDefaults(config, SandboxBackendWindowsRestricted)
+				return NewLocalSandboxLeaseServiceWithConfig(name, root, lease), nil
 			}),
 		},
 	}
@@ -128,6 +132,23 @@ func NewSandboxRuntimeFromConfig(config SandboxManagerConfig) (harness.SandboxRu
 		policy = harness.FeatureSandboxPolicy{}
 	}
 	return manager.Runtime(policy), nil
+}
+
+func localSandboxLeaseDefaults(config SandboxManagerConfig, backend SandboxBackend) (name string, root string, lease SandboxLeaseConfig) {
+	name = strings.TrimSpace(config.Name)
+	if name == "" {
+		name = "runtime-" + string(backend)
+	}
+	root = strings.TrimSpace(config.Root)
+	if root == "" {
+		root = filepath.Join(os.TempDir(), "deerflow-sandbox", string(backend))
+	}
+	lease = SandboxLeaseConfig{
+		HeartbeatInterval: config.HeartbeatInterval,
+		IdleTTL:           config.IdleTTL,
+		SweepInterval:     config.SweepInterval,
+	}
+	return name, root, lease
 }
 
 type unsupportedSandboxLeaseService struct {
