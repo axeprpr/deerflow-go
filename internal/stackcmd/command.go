@@ -34,7 +34,7 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 	}
 	logger := log.New(commandrun.OutputWriter(options.Stderr), "[runtime-stack] ", log.LstdFlags)
 	printManifest := fs.Bool("print-manifest", false, "print resolved runtime stack manifest and exit")
-	writeBundle := fs.String("write-bundle", "", "write stack manifest and launch scripts to a directory, then exit")
+	writeBundle := fs.String("write-bundle", "", "write stack manifest and per-process specs to a directory, then exit")
 
 	yolo := fs.Bool("yolo", false, "YOLO mode: no auth, defaults for all settings")
 	cfg := DefaultConfig()
