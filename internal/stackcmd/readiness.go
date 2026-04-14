@@ -8,7 +8,7 @@ import (
 )
 
 func (c Config) ReadyProbe() commandrun.ReadyFunc {
-	targets := c.DeploymentSpec().ReadyTargets()
+	targets := c.Manifest().ReadyTargets()
 	filtered := make([]string, 0, len(targets))
 	for _, target := range targets {
 		if trimmed := strings.TrimSpace(target); trimmed != "" {

@@ -24,6 +24,9 @@ func TestBuilderCarriesResolvedDeploymentSpec(t *testing.T) {
 	if spec.Components[2].Addr != ":19082" {
 		t.Fatalf("state component addr = %q", spec.Components[2].Addr)
 	}
+	if len(builder.Manifest().Components) != len(spec.Components) {
+		t.Fatalf("manifest components = %d, want %d", len(builder.Manifest().Components), len(spec.Components))
+	}
 }
 
 func TestBuilderBuildLauncherUsesResolvedSpec(t *testing.T) {
@@ -37,5 +40,8 @@ func TestBuilderBuildLauncherUsesResolvedSpec(t *testing.T) {
 	}
 	if launcher.DeploymentSpec().WorkerDispatch == "" {
 		t.Fatal("launcher.DeploymentSpec().WorkerDispatch = empty")
+	}
+	if launcher.Manifest().WorkerDispatch == "" {
+		t.Fatal("launcher.Manifest().WorkerDispatch = empty")
 	}
 }

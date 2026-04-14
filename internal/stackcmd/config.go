@@ -100,30 +100,14 @@ func (c Config) alignSharedStateStores() Config {
 
 func (c Config) StartupLines(build langgraphcmd.BuildInfo, yolo bool, logLevel string) []string {
 	cfg := c.withDefaults()
-	spec := cfg.DeploymentSpec()
 	lines := cfg.Gateway.StartupLines(build, yolo, logLevel)
-	lines = append(lines,
-		fmt.Sprintf("Starting split runtime stack preset=%s...", cfg.effectivePreset()),
-		fmt.Sprintf("  Worker: role=%s addr=%s transport=%s sandbox=%s state_provider=%s", cfg.Worker.Role, cfg.Worker.Addr, cfg.Worker.TransportBackend, cfg.Worker.SandboxBackend, cfg.Worker.StateProvider),
-		fmt.Sprintf("  Shared state: root=%s store=%s snapshot=%s event=%s thread=%s", firstNonEmpty(cfg.Worker.StateRoot, "(memory)"), firstNonEmpty(cfg.Worker.StateStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.SnapshotStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.EventStoreURL, "(derived)"), firstNonEmpty(cfg.Worker.ThreadStoreURL, "(derived)")),
-	)
-	if cfg.usesDedicatedStateService() {
-		for _, component := range spec.Components {
-			switch component.Kind {
-			case ComponentState:
-				lines = append(lines, fmt.Sprintf("  State service: addr=%s provider=%s store=%s", component.Addr, cfg.State.Runtime.StateProvider, firstNonEmpty(cfg.State.Runtime.StateStoreURL, "(derived)")))
-			case ComponentSandbox:
-				lines = append(lines, fmt.Sprintf("  Sandbox service: addr=%s backend=%s", component.Addr, cfg.Sandbox.Runtime.SandboxBackend))
-			}
-		}
-	}
-	return lines
+	return append(lines, cfg.Manifest().StartupLines(build, yolo, logLevel)...)
 }
 
 func (c Config) ReadyLines() []string {
 	cfg := c.withDefaults()
 	lines := cfg.Gateway.ReadyLines()
-	lines = append(lines, cfg.DeploymentSpec().ReadyLines()...)
+	lines = append(lines, cfg.Manifest().ReadyLines()...)
 	return lines
 }
 

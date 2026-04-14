@@ -11,6 +11,7 @@ type Launcher struct {
 	components     []LaunchComponent
 	spec           LaunchSpec
 	deploymentSpec DeploymentSpec
+	manifest       StackManifest
 }
 
 func NewLauncher(components []LaunchComponent) *Launcher {
@@ -38,6 +39,13 @@ func (l *Launcher) DeploymentSpec() DeploymentSpec {
 		return DeploymentSpec{}
 	}
 	return l.deploymentSpec
+}
+
+func (l *Launcher) Manifest() StackManifest {
+	if l == nil {
+		return StackManifest{}
+	}
+	return l.manifest
 }
 
 func (l *Launcher) Components() []LaunchComponent {
@@ -70,5 +78,6 @@ func (c Config) BuildLauncher(ctx context.Context) (*Launcher, error) {
 	launcher := NewLauncher(components)
 	launcher.spec = cfg.LaunchSpec()
 	launcher.deploymentSpec = cfg.DeploymentSpec()
+	launcher.manifest = cfg.Manifest()
 	return launcher, nil
 }

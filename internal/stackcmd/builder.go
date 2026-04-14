@@ -11,6 +11,7 @@ type Builder struct {
 	input      Config
 	config     Config
 	deployment DeploymentSpec
+	manifest   StackManifest
 }
 
 func NewBuilder(config Config) Builder {
@@ -19,6 +20,7 @@ func NewBuilder(config Config) Builder {
 		input:      config,
 		config:     resolved,
 		deployment: resolved.DeploymentSpec(),
+		manifest:   resolved.Manifest(),
 	}
 }
 
@@ -32,6 +34,10 @@ func (b Builder) Config() Config {
 
 func (b Builder) DeploymentSpec() DeploymentSpec {
 	return b.deployment
+}
+
+func (b Builder) Manifest() StackManifest {
+	return b.manifest
 }
 
 func (b Builder) Validate() error {
@@ -48,15 +54,16 @@ func (b Builder) BuildLauncher(ctx context.Context) (*Launcher, error) {
 		return nil, err
 	}
 	launcher.deploymentSpec = b.deployment
+	launcher.manifest = b.manifest
 	return launcher, nil
 }
 
 func (b Builder) StartupLines(build langgraphcmd.BuildInfo, yolo bool, logLevel string) []string {
-	return b.config.StartupLines(build, yolo, logLevel)
+	return append(b.config.Gateway.StartupLines(build, yolo, logLevel), b.manifest.StartupLines(build, yolo, logLevel)...)
 }
 
 func (b Builder) ReadyLines() []string {
-	return b.config.ReadyLines()
+	return append(b.config.Gateway.ReadyLines(), b.manifest.ReadyLines()...)
 }
 
 func (b Builder) ReadyProbe() commandrun.ReadyFunc {

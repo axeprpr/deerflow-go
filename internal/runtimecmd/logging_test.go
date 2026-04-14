@@ -17,13 +17,14 @@ func TestNodeConfigStartupLines(t *testing.T) {
 		t.Fatal("StartupLines() returned no lines")
 	}
 	joined := strings.Join(lines, "\n")
+	manifest := cfg.Manifest()
 	if !strings.Contains(joined, "runtime node starting role=worker") {
 		t.Fatalf("StartupLines() = %q", joined)
 	}
-	if !strings.Contains(joined, "preset=auto") {
+	if !strings.Contains(joined, "preset="+string(manifest.Preset)) {
 		t.Fatalf("StartupLines() = %q", joined)
 	}
-	if !strings.Contains(joined, "state_provider=auto") {
+	if !strings.Contains(joined, "state_provider="+string(manifest.StateProvider)) {
 		t.Fatalf("StartupLines() = %q", joined)
 	}
 	if !strings.Contains(joined, "worker_addr=") {
