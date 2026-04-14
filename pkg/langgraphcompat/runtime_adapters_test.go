@@ -112,6 +112,34 @@ func TestRuntimeMemoryAdapterPlansSharedScopesFromThreadMetadata(t *testing.T) {
 	}
 }
 
+func TestRuntimeMemoryAdapterPlansSharedScopesFallbackToSessionMetadata(t *testing.T) {
+	server := &Server{
+		sessions:         map[string]*Session{},
+		runs:             map[string]*Run{},
+		threadStateStore: harnessruntime.NewInMemoryThreadStateStore(),
+	}
+	session := server.ensureSession("thread-1", nil)
+	applyThreadMemoryScope(session, threadMemoryScope{
+		UserID:    "user-1",
+		GroupID:   "group-1",
+		Namespace: "project-a",
+	})
+	server.threadStateStore.SaveThreadRuntimeState(harnessruntime.ThreadRuntimeState{
+		ThreadID: "thread-1",
+		Status:   "idle",
+		Metadata: map[string]any{},
+	})
+
+	plan := server.runtimeMemoryAdapter().PlanMemoryScopes("thread-1", "planner")
+	wantPrimary := "__scope__:agent:planner:project-a"
+	if plan.Primary.Key() != wantPrimary {
+		t.Fatalf("Primary = %q, want %q", plan.Primary.Key(), wantPrimary)
+	}
+	if len(plan.Inject) != 4 || len(plan.Update) != 4 {
+		t.Fatalf("plan = %+v", plan)
+	}
+}
+
 func TestRuntimeConversationAdapterCompactConversationUsesExistingImplementation(t *testing.T) {
 	server := &Server{
 		sessions: map[string]*Session{},

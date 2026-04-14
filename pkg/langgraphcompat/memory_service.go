@@ -107,17 +107,23 @@ func (s *Server) resolveThreadMemoryScope(threadID string) (threadMemoryScope, b
 	if threadID == "" {
 		return threadMemoryScope{}, false
 	}
+	scope := threadMemoryScope{}
+	found := false
 	if store := s.ensureThreadStateStore(); store != nil {
 		if state, ok := store.LoadThreadRuntimeState(threadID); ok {
-			scope := threadMemoryScopeFromMetadata(state.Metadata)
-			return scope, true
+			scope = scope.Merge(threadMemoryScopeFromMetadata(state.Metadata))
+			found = true
 		}
 	}
 	if thread, ok := s.findThreadResponse(threadID); ok {
-		scope := threadMemoryScopeFromRaw(thread)
+		threadScope := threadMemoryScopeFromRaw(thread)
 		if metadata := mapFromAny(thread["metadata"]); len(metadata) > 0 {
-			scope = threadMemoryScopeFromMetadata(metadata).Merge(scope)
+			threadScope = threadMemoryScopeFromMetadata(metadata).Merge(threadScope)
 		}
+		scope = scope.Merge(threadScope)
+		found = true
+	}
+	if found {
 		return scope, true
 	}
 	return threadMemoryScope{}, false

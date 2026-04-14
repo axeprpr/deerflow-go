@@ -1557,6 +1557,20 @@ func TestThreadMemoryScopeHandlers(t *testing.T) {
 	if putRes.Code != http.StatusOK {
 		t.Fatalf("PUT status=%d body=%s", putRes.Code, putRes.Body.String())
 	}
+	store := s.ensureThreadStateStore()
+	state, ok := store.LoadThreadRuntimeState("thread-memory-scope-api")
+	if !ok {
+		t.Fatal("thread state missing after PUT")
+	}
+	if got := stringValue(state.Metadata["memory_user_id"]); got != "user-2" {
+		t.Fatalf("PUT state.memory_user_id=%q", got)
+	}
+	if got := stringValue(state.Metadata["memory_group_id"]); got != "group-2" {
+		t.Fatalf("PUT state.memory_group_id=%q", got)
+	}
+	if got := stringValue(state.Metadata["memory_namespace"]); got != "workspace-b" {
+		t.Fatalf("PUT state.memory_namespace=%q", got)
+	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/threads/thread-memory-scope-api/memory-scope", nil)
 	deleteReq.SetPathValue("thread_id", "thread-memory-scope-api")
@@ -1572,5 +1586,18 @@ func TestThreadMemoryScopeHandlers(t *testing.T) {
 	scope, _ = deleteBody["memory_scope"].(map[string]any)
 	if len(scope) != 0 {
 		t.Fatalf("DELETE memory_scope=%#v", scope)
+	}
+	state, ok = store.LoadThreadRuntimeState("thread-memory-scope-api")
+	if !ok {
+		t.Fatal("thread state missing after DELETE")
+	}
+	if got := stringValue(state.Metadata["memory_user_id"]); got != "" {
+		t.Fatalf("DELETE state.memory_user_id=%q", got)
+	}
+	if got := stringValue(state.Metadata["memory_group_id"]); got != "" {
+		t.Fatalf("DELETE state.memory_group_id=%q", got)
+	}
+	if got := stringValue(state.Metadata["memory_namespace"]); got != "" {
+		t.Fatalf("DELETE state.memory_namespace=%q", got)
 	}
 }

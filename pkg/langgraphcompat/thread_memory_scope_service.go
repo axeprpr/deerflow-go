@@ -2,6 +2,7 @@ package langgraphcompat
 
 import (
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -29,9 +30,25 @@ func (s *Server) updateThreadMemoryScope(threadID string, scope threadMemoryScop
 	if err := s.persistSessionFile(session); err != nil {
 		return nil, http.StatusInternalServerError, "failed to persist thread"
 	}
+	s.syncThreadMemoryScopeMetadata(threadID, scope)
 	return map[string]any{"memory_scope": scope.Response()}, 0, ""
 }
 
 func (s *Server) deleteThreadMemoryScope(threadID string) (map[string]any, int, string) {
 	return s.updateThreadMemoryScope(threadID, threadMemoryScope{})
+}
+
+func (s *Server) syncThreadMemoryScopeMetadata(threadID string, scope threadMemoryScope) {
+	s.syncThreadMemoryScopeMetadataKey(threadID, "memory_user_id", scope.UserID)
+	s.syncThreadMemoryScopeMetadataKey(threadID, "memory_group_id", scope.GroupID)
+	s.syncThreadMemoryScopeMetadataKey(threadID, "memory_namespace", scope.Namespace)
+}
+
+func (s *Server) syncThreadMemoryScopeMetadataKey(threadID string, key string, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		s.deleteThreadMetadata(threadID, key)
+		return
+	}
+	s.setThreadMetadata(threadID, key, value)
 }

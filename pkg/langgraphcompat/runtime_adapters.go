@@ -200,13 +200,10 @@ func (a runtimeMemoryAdapter) PlanMemoryScopes(threadID string, agentName string
 		ThreadID:  threadID,
 		AgentName: agentName,
 	}
-	if store := a.server.ensureThreadStateStore(); store != nil {
-		if state, ok := store.LoadThreadRuntimeState(threadID); ok {
-			scope := threadMemoryScopeFromMetadata(state.Metadata)
-			hints.UserID = scope.UserID
-			hints.GroupID = scope.GroupID
-			hints.Namespace = scope.Namespace
-		}
+	if scope, ok := a.server.resolveThreadMemoryScope(threadID); ok {
+		hints.UserID = scope.UserID
+		hints.GroupID = scope.GroupID
+		hints.Namespace = scope.Namespace
 	}
 	return harnessruntime.NewMemoryScopeService(nil).Plan(hints)
 }
