@@ -218,6 +218,13 @@ func (s *Server) setThreadTaskState(threadID string, taskState harness.TaskState
 	session.UpdatedAt = time.Now().UTC()
 	snapshot = cloneSession(session)
 	s.sessionsMu.Unlock()
+	if store := s.ensureThreadStateStore(); store != nil {
+		if taskState.IsZero() {
+			store.ClearThreadMetadata(threadID, harnessruntime.DefaultTaskStateMetadataKey)
+		} else {
+			store.SetThreadMetadata(threadID, harnessruntime.DefaultTaskStateMetadataKey, taskState.Value())
+		}
+	}
 	_ = s.persistSessionSnapshot(snapshot)
 }
 

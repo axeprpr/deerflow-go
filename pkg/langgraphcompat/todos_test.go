@@ -135,4 +135,15 @@ func TestTodoToolPersistsStructuredTaskState(t *testing.T) {
 	if got, _ := resultState["expected_outputs"].([]string); len(got) != 1 || got[0] != "/mnt/user-data/outputs/report.md" {
 		t.Fatalf("result expected_outputs=%#v", resultState["expected_outputs"])
 	}
+	storeState, ok := s.ensureThreadStateStore().LoadThreadRuntimeState(threadID)
+	if !ok {
+		t.Fatal("LoadThreadRuntimeState() ok = false, want true")
+	}
+	persisted, ok := storeState.Metadata[harnessruntime.DefaultTaskStateMetadataKey].(map[string]any)
+	if !ok {
+		t.Fatalf("thread store task_state=%#v", storeState.Metadata[harnessruntime.DefaultTaskStateMetadataKey])
+	}
+	if got, _ := persisted["expected_outputs"].([]string); len(got) != 1 || got[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("thread store expected_outputs=%#v", persisted["expected_outputs"])
+	}
 }
