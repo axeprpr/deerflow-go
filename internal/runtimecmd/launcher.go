@@ -2,7 +2,6 @@ package runtimecmd
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/harnessruntime"
@@ -39,8 +38,5 @@ func (c NodeConfig) BuildLauncher(ctx context.Context) (*harnessruntime.RuntimeN
 }
 
 func (c NodeConfig) ReadyLine(spec harnessruntime.RuntimeNodeLaunchSpec) (string, error) {
-	if !spec.ServesRemoteWorker {
-		return "", fmt.Errorf("runtime node role %q does not expose a remote worker server", spec.Role)
-	}
-	return fmt.Sprintf("runtime node ready role=%s addr=%s sandbox=%t state=%t", spec.Role, spec.RemoteWorkerAddr, spec.ServesRemoteSandbox, spec.ServesRemoteState), nil
+	return c.Manifest().ReadyLine(spec)
 }
