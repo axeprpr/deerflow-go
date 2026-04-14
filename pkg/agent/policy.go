@@ -68,6 +68,7 @@ type ToolLoopState struct {
 
 type TaskProgressState struct {
 	RoundsSinceUpdate int
+	LastTodoHash      string
 }
 
 type DefaultToolTurnPolicy struct{}
@@ -265,13 +266,62 @@ func (DefaultTaskProgressPolicy) ObserveToolCalls(state *TaskProgressState, call
 	if state == nil || len(calls) == 0 {
 		return
 	}
+	updated := false
 	for _, call := range calls {
 		if strings.EqualFold(strings.TrimSpace(call.Name), "write_todos") {
-			state.RoundsSinceUpdate = 0
-			return
+			hash := hashTodoUpdateCall(call)
+			if hash == "" {
+				hash = "write_todos"
+			}
+			if hash != state.LastTodoHash {
+				state.LastTodoHash = hash
+				state.RoundsSinceUpdate = 0
+				updated = true
+				break
+			}
 		}
 	}
+	if updated {
+		return
+	}
 	state.RoundsSinceUpdate++
+}
+
+func hashTodoUpdateCall(call models.ToolCall) string {
+	payload := map[string]any{
+		"name":      strings.TrimSpace(call.Name),
+		"arguments": normalizedAny(call.Arguments),
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	sum := md5.Sum(data)
+	return fmt.Sprintf("%x", sum[:])
+}
+
+func normalizedAny(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		out := make(map[string]any, len(v))
+		for _, key := range keys {
+			out[key] = normalizedAny(v[key])
+		}
+		return out
+	case []any:
+		out := make([]any, 0, len(v))
+		for _, item := range v {
+			out = append(out, normalizedAny(item))
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 func resolveRunPolicy(policy *RunPolicy) *RunPolicy {

@@ -124,9 +124,51 @@ func TestDefaultTaskProgressPolicyResetsAfterWriteTodos(t *testing.T) {
 	policy := resolveRunPolicy(nil)
 	state := newTaskProgressState()
 	policy.Task.ObserveToolCalls(state, []models.ToolCall{{Name: "read_file"}})
-	policy.Task.ObserveToolCalls(state, []models.ToolCall{{Name: "write_todos"}})
+	policy.Task.ObserveToolCalls(state, []models.ToolCall{{
+		Name:      "write_todos",
+		Arguments: map[string]any{"todos": []any{map[string]any{"content": "draft", "status": "in_progress"}}},
+	}})
 	if state.RoundsSinceUpdate != 0 {
 		t.Fatalf("RoundsSinceUpdate = %d, want 0", state.RoundsSinceUpdate)
+	}
+}
+
+func TestDefaultTaskProgressPolicyRequiresMaterialTodoUpdate(t *testing.T) {
+	policy := resolveRunPolicy(nil)
+	state := newTaskProgressState()
+
+	call := models.ToolCall{
+		Name:      "write_todos",
+		Arguments: map[string]any{"todos": []any{map[string]any{"content": "draft", "status": "in_progress"}}},
+	}
+	policy.Task.ObserveToolCalls(state, []models.ToolCall{call})
+	if state.RoundsSinceUpdate != 0 {
+		t.Fatalf("RoundsSinceUpdate after first update = %d, want 0", state.RoundsSinceUpdate)
+	}
+	firstHash := state.LastTodoHash
+	if firstHash == "" {
+		t.Fatal("LastTodoHash is empty after first update")
+	}
+
+	policy.Task.ObserveToolCalls(state, []models.ToolCall{call})
+	if state.RoundsSinceUpdate != 1 {
+		t.Fatalf("RoundsSinceUpdate after repeated update = %d, want 1", state.RoundsSinceUpdate)
+	}
+	if state.LastTodoHash != firstHash {
+		t.Fatalf("LastTodoHash changed on repeated update: %q -> %q", firstHash, state.LastTodoHash)
+	}
+
+	policy.Task.ObserveToolCalls(state, []models.ToolCall{{
+		Name: "write_todos",
+		Arguments: map[string]any{
+			"todos": []any{map[string]any{"content": "draft", "status": "completed"}},
+		},
+	}})
+	if state.RoundsSinceUpdate != 0 {
+		t.Fatalf("RoundsSinceUpdate after changed update = %d, want 0", state.RoundsSinceUpdate)
+	}
+	if state.LastTodoHash == firstHash {
+		t.Fatalf("LastTodoHash did not change after material update: %q", state.LastTodoHash)
 	}
 }
 
