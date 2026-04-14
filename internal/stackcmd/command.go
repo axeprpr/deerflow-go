@@ -42,18 +42,18 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 	cfg = binding.Config()
 	cfg.Gateway.ApplyYoloEnvironment(*yolo)
 	cfg.Gateway.ApplyProcessEnvironment()
-	cfg = cfg.withDefaults()
+	builder := NewBuilder(cfg)
 
-	launcher, err := cfg.BuildLauncher(context.Background())
+	launcher, err := builder.BuildLauncher(context.Background())
 	if err != nil {
 		return nil, err
 	}
 	return &commandrun.PreparedCommand{
 		Logger:          logger,
 		Lifecycle:       launcher,
-		StartupLines:    cfg.StartupLines(build, *yolo, strings.TrimSpace(os.Getenv("LOG_LEVEL"))),
-		ReadyLines:      cfg.ReadyLines(),
-		Ready:           cfg.ReadyProbe(),
+		StartupLines:    builder.StartupLines(build, *yolo, strings.TrimSpace(os.Getenv("LOG_LEVEL"))),
+		ReadyLines:      builder.ReadyLines(),
+		Ready:           builder.ReadyProbe(),
 		ReadyTimeout:    15 * time.Second,
 		ShutdownTimeout: 15 * time.Second,
 		IgnoredErrors:   []error{http.ErrServerClosed, context.Canceled},
