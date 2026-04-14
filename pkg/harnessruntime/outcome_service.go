@@ -1,5 +1,7 @@
 package harnessruntime
 
+import "github.com/axeprpr/deerflow-go/pkg/harness"
+
 type RunOutcome struct {
 	Interrupted bool
 	RunStatus   string
@@ -11,6 +13,7 @@ type RunOutcomeDescriptor struct {
 	Error             string
 	PendingTasks      []string
 	ExpectedArtifacts []string
+	TaskLifecycle     TaskLifecycleDescriptor
 	Attempt           int
 	ResumeFromEvent   int
 	ResumeReason      string
@@ -40,6 +43,7 @@ func (s OutcomeService) Describe(record RunRecord, outcome RunOutcome, errText s
 		RunStatus:       outcome.RunStatus,
 		Interrupted:     outcome.Interrupted,
 		Error:           errText,
+		TaskLifecycle:   NewTaskLifecycleService().Describe(outcome, harness.TaskState{}, false),
 		Attempt:         record.Attempt,
 		ResumeFromEvent: record.ResumeFromEvent,
 		ResumeReason:    record.ResumeReason,

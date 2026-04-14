@@ -17,6 +17,18 @@ func (r workerRunStateRuntime) MarkThreadStatus(threadID string, status string) 
 	}
 }
 
+func (r workerRunStateRuntime) SetThreadTaskLifecycle(threadID string, lifecycle TaskLifecycleDescriptor) {
+	if r.threads != nil {
+		r.threads.SetThreadMetadata(threadID, DefaultTaskLifecycleMetadataKey, lifecycle.Value())
+	}
+}
+
+func (r workerRunStateRuntime) ClearThreadTaskLifecycle(threadID string) {
+	if r.threads != nil {
+		r.threads.ClearThreadMetadata(threadID, DefaultTaskLifecycleMetadataKey)
+	}
+}
+
 func loadWorkerRunRecord(plan WorkerExecutionPlan, snapshots RunSnapshotStore) RunRecord {
 	record, ok := NewSnapshotStoreService(snapshots).LoadRecord(plan.RunID)
 	if ok {

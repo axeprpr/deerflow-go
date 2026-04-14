@@ -211,6 +211,18 @@ func (a runtimeCompletionAdapter) ClearThreadTaskState(threadID string) {
 	}
 }
 
+func (a runtimeCompletionAdapter) SetThreadTaskLifecycle(threadID string, lifecycle harnessruntime.TaskLifecycleDescriptor) {
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		store.SetThreadMetadata(threadID, harnessruntime.DefaultTaskLifecycleMetadataKey, lifecycle.Value())
+	}
+}
+
+func (a runtimeCompletionAdapter) ClearThreadTaskLifecycle(threadID string) {
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		store.ClearThreadMetadata(threadID, harnessruntime.DefaultTaskLifecycleMetadataKey)
+	}
+}
+
 func (a runtimeCompletionAdapter) SetThreadInterrupts(threadID string, interrupts []any) {
 	if store := a.server.ensureThreadStateStore(); store != nil {
 		store.SetThreadMetadata(threadID, "interrupts", interrupts)
@@ -272,6 +284,18 @@ func (a runtimeRunStateAdapter) SaveRunRecord(record harnessruntime.RunRecord) {
 func (a runtimeRunStateAdapter) MarkThreadStatus(threadID string, status string) {
 	if store := a.server.ensureThreadStateStore(); store != nil {
 		store.MarkThreadStatus(threadID, status)
+	}
+}
+
+func (a runtimeRunStateAdapter) SetThreadTaskLifecycle(threadID string, lifecycle harnessruntime.TaskLifecycleDescriptor) {
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		store.SetThreadMetadata(threadID, harnessruntime.DefaultTaskLifecycleMetadataKey, lifecycle.Value())
+	}
+}
+
+func (a runtimeRunStateAdapter) ClearThreadTaskLifecycle(threadID string) {
+	if store := a.server.ensureThreadStateStore(); store != nil {
+		store.ClearThreadMetadata(threadID, harnessruntime.DefaultTaskLifecycleMetadataKey)
 	}
 }
 

@@ -62,6 +62,8 @@ func (fakeTitleRuntime) ComputeThreadTitle(_ context.Context, threadID string, m
 type fakeCompletionRuntime struct {
 	title       string
 	taskState   harness.TaskState
+	taskLife    TaskLifecycleDescriptor
+	lifeCleared bool
 	taskCleared bool
 	interrupts  []any
 	status      string
@@ -79,6 +81,8 @@ type fakePreflightRuntime struct {
 type fakeRunStateRuntime struct {
 	saved        RunRecord
 	threadStatus string
+	taskLife     TaskLifecycleDescriptor
+	lifeCleared  bool
 }
 
 type fakeCoordinationRuntime struct {
@@ -105,6 +109,16 @@ func (r *fakeCompletionRuntime) SetThreadTaskState(_ string, taskState harness.T
 func (r *fakeCompletionRuntime) ClearThreadTaskState(_ string) {
 	r.taskState = harness.TaskState{}
 	r.taskCleared = true
+}
+
+func (r *fakeCompletionRuntime) SetThreadTaskLifecycle(_ string, lifecycle TaskLifecycleDescriptor) {
+	r.taskLife = lifecycle
+	r.lifeCleared = false
+}
+
+func (r *fakeCompletionRuntime) ClearThreadTaskLifecycle(_ string) {
+	r.taskLife = TaskLifecycleDescriptor{}
+	r.lifeCleared = true
 }
 
 func (r *fakeCompletionRuntime) SetThreadInterrupts(_ string, interrupts []any) {
@@ -149,6 +163,16 @@ func (r *fakeRunStateRuntime) SaveRunRecord(record RunRecord) {
 
 func (r *fakeRunStateRuntime) MarkThreadStatus(threadID string, status string) {
 	r.threadStatus = threadID + ":" + status
+}
+
+func (r *fakeRunStateRuntime) SetThreadTaskLifecycle(_ string, lifecycle TaskLifecycleDescriptor) {
+	r.taskLife = lifecycle
+	r.lifeCleared = false
+}
+
+func (r *fakeRunStateRuntime) ClearThreadTaskLifecycle(_ string) {
+	r.taskLife = TaskLifecycleDescriptor{}
+	r.lifeCleared = true
 }
 
 func (r *fakeCoordinationRuntime) LoadRunRecord(_ string) (RunRecord, bool) {
@@ -490,6 +514,9 @@ func TestCompletionServiceMarksRunIncompleteFromTaskState(t *testing.T) {
 	if got := len(runtime.taskState.Items); got != 2 {
 		t.Fatalf("taskState.Items=%d want=2", got)
 	}
+	if runtime.taskLife.Status != "incomplete" || len(runtime.taskLife.PendingTasks) != 2 {
+		t.Fatalf("taskLife=%+v", runtime.taskLife)
+	}
 }
 
 func TestCompletionServiceDerivesTaskStateFromWriteTodosResult(t *testing.T) {
@@ -561,6 +588,34 @@ func TestCompletionServiceAllowsVerifiedExpectedOutputs(t *testing.T) {
 	if runtime.taskState.VerifiedOutputs[0] != "/mnt/user-data/outputs/report.md" {
 		t.Fatalf("VerifiedOutputs=%v", runtime.taskState.VerifiedOutputs)
 	}
+	if runtime.taskLife.Status != "success" || len(runtime.taskLife.VerifiedArtifacts) != 1 {
+		t.Fatalf("taskLife=%+v", runtime.taskLife)
+	}
+}
+
+func TestCompletionServiceMarksClarificationInterruptAsPausedLifecycle(t *testing.T) {
+	t.Parallel()
+
+	runtime := &fakeCompletionRuntime{}
+	service := NewCompletionService(runtime, "generated_title", "clarification_interrupt")
+	outcome := service.Apply("thread-1", &harness.RunState{
+		ThreadID: "thread-1",
+		TaskState: harness.TaskState{
+			Items: []harness.TaskItem{{Text: "clarify requirement", Status: harness.TaskStatusInProgress}},
+		},
+		Metadata: map[string]any{
+			"clarification_interrupt": map[string]any{"question": "Need detail?"},
+		},
+	}, &agent.RunResult{})
+	if outcome.RunStatus != "interrupted" || !outcome.Interrupted {
+		t.Fatalf("outcome=%+v", outcome)
+	}
+	if outcome.Descriptor.TaskLifecycle.Status != "paused" {
+		t.Fatalf("task lifecycle=%+v", outcome.Descriptor.TaskLifecycle)
+	}
+	if runtime.taskLife.Status != "paused" {
+		t.Fatalf("runtime task lifecycle=%+v", runtime.taskLife)
+	}
 }
 
 func TestOutcomeServiceMapsInterruptedState(t *testing.T) {
@@ -583,6 +638,9 @@ func TestOutcomeServiceMapsInterruptedState(t *testing.T) {
 	}
 	if desc.Attempt != 2 || desc.ResumeFromEvent != 5 || desc.ResumeReason != "retry" {
 		t.Fatalf("descriptor recovery = %+v", desc)
+	}
+	if desc.TaskLifecycle.Status != "interrupted" {
+		t.Fatalf("descriptor lifecycle = %+v", desc.TaskLifecycle)
 	}
 }
 
@@ -721,23 +779,38 @@ func TestRunStateServiceTransitionsRecords(t *testing.T) {
 	if record.Status != "running" || record.Outcome.RunStatus != "running" || runtime.threadStatus != "thread-1:busy" {
 		t.Fatalf("begin record = %+v runtime=%+v", record, runtime)
 	}
+	if runtime.taskLife.Status != "running" {
+		t.Fatalf("begin task lifecycle = %+v", runtime.taskLife)
+	}
 
 	record = service.MarkError(record, context.DeadlineExceeded)
 	if record.Status != "error" || record.Outcome.RunStatus != "error" || runtime.threadStatus != "thread-1:error" {
 		t.Fatalf("error record = %+v runtime=%+v", record, runtime)
+	}
+	if runtime.taskLife.Status != "error" {
+		t.Fatalf("error task lifecycle = %+v", runtime.taskLife)
 	}
 
 	record = service.MarkCanceled(record)
 	if record.Status != "interrupted" || !record.Outcome.Interrupted || runtime.threadStatus != "thread-1:interrupted" {
 		t.Fatalf("canceled record = %+v runtime=%+v", record, runtime)
 	}
+	if runtime.taskLife.Status != "interrupted" {
+		t.Fatalf("canceled task lifecycle = %+v", runtime.taskLife)
+	}
 
 	record = service.Finalize(record, CompletionOutcome{
 		RunOutcome: RunOutcome{RunStatus: "success"},
-		Descriptor: RunOutcomeDescriptor{RunStatus: "success"},
+		Descriptor: RunOutcomeDescriptor{
+			RunStatus:     "success",
+			TaskLifecycle: TaskLifecycleDescriptor{Status: "success"},
+		},
 	})
 	if record.Status != "success" || record.Outcome.RunStatus != "success" || runtime.saved.Status != "success" {
 		t.Fatalf("finalized record = %+v runtime=%+v", record, runtime)
+	}
+	if runtime.taskLife.Status != "success" {
+		t.Fatalf("finalized task lifecycle = %+v", runtime.taskLife)
 	}
 }
 

@@ -11,6 +11,8 @@ type CompletionRuntime interface {
 	SetThreadTitle(threadID string, title string)
 	SetThreadTaskState(threadID string, taskState harness.TaskState)
 	ClearThreadTaskState(threadID string)
+	SetThreadTaskLifecycle(threadID string, lifecycle TaskLifecycleDescriptor)
+	ClearThreadTaskLifecycle(threadID string)
 	SetThreadInterrupts(threadID string, interrupts []any)
 	ClearThreadInterrupts(threadID string)
 	MarkThreadStatus(threadID string, status string)
@@ -50,15 +52,19 @@ func (s CompletionService) Apply(threadID string, state *harness.RunState, resul
 	}
 	outcomes := NewOutcomeService()
 
+	taskState := harness.TaskState{}
 	if title := strings.TrimSpace(metadataString(state, s.titleMetadataKey)); title != "" && s.runtime != nil {
 		s.runtime.SetThreadTitle(threadID, title)
 	}
 	if resolved, ok := resolveTaskStateFromRunState(state, result, DefaultTaskStateMetadataKey); ok && state != nil {
 		state.TaskState = resolved
+		taskState = resolved
+	} else if state != nil {
+		taskState = state.TaskState
 	}
 	if s.runtime != nil {
-		if state != nil && !state.TaskState.IsZero() {
-			s.runtime.SetThreadTaskState(threadID, state.TaskState)
+		if !taskState.IsZero() {
+			s.runtime.SetThreadTaskState(threadID, taskState)
 		} else {
 			s.runtime.ClearThreadTaskState(threadID)
 		}
@@ -78,20 +84,28 @@ func (s CompletionService) Apply(threadID string, state *harness.RunState, resul
 		if len(interrupt) == 0 && result != nil {
 			interrupt = harness.ClarificationInterruptFromMessages(result.Messages)
 		}
+		lifecycle := NewTaskLifecycleService().Describe(decision.Outcome, taskState, true)
 		if s.runtime != nil {
 			s.runtime.SetThreadInterrupts(threadID, []any{interrupt})
+			s.runtime.SetThreadTaskLifecycle(threadID, lifecycle)
 			s.runtime.MarkThreadStatus(threadID, "interrupted")
 		}
+		descriptor := outcomes.Describe(RunRecord{
+			ThreadID: threadID,
+		}, decision.Outcome, "")
+		descriptor.TaskLifecycle = lifecycle
 		return CompletionOutcome{
 			RunOutcome: decision.Outcome,
-			Descriptor: outcomes.Describe(RunRecord{
-				ThreadID: threadID,
-			}, decision.Outcome, ""),
+			Descriptor: descriptor,
 		}
 	}
 	if !decision.Allowed {
+		lifecycle := NewTaskLifecycleService().Describe(decision.Outcome, taskState, false)
+		lifecycle.PendingTasks = append([]string(nil), decision.PendingTasks...)
+		lifecycle.ExpectedArtifacts = append([]string(nil), decision.ExpectedArtifacts...)
 		if s.runtime != nil {
 			s.runtime.ClearThreadInterrupts(threadID)
+			s.runtime.SetThreadTaskLifecycle(threadID, lifecycle)
 			s.runtime.MarkThreadStatus(threadID, "idle")
 		}
 		descriptor := outcomes.Describe(RunRecord{
@@ -99,21 +113,26 @@ func (s CompletionService) Apply(threadID string, state *harness.RunState, resul
 		}, decision.Outcome, decision.Reason)
 		descriptor.PendingTasks = append([]string(nil), decision.PendingTasks...)
 		descriptor.ExpectedArtifacts = append([]string(nil), decision.ExpectedArtifacts...)
+		descriptor.TaskLifecycle = lifecycle
 		return CompletionOutcome{
 			RunOutcome: decision.Outcome,
 			Descriptor: descriptor,
 		}
 	}
 
+	lifecycle := NewTaskLifecycleService().Describe(decision.Outcome, taskState, false)
 	if s.runtime != nil {
 		s.runtime.ClearThreadInterrupts(threadID)
+		s.runtime.SetThreadTaskLifecycle(threadID, lifecycle)
 		s.runtime.MarkThreadStatus(threadID, "idle")
 	}
+	descriptor := outcomes.Describe(RunRecord{
+		ThreadID: threadID,
+	}, decision.Outcome, "")
+	descriptor.TaskLifecycle = lifecycle
 	return CompletionOutcome{
 		RunOutcome: decision.Outcome,
-		Descriptor: outcomes.Describe(RunRecord{
-			ThreadID: threadID,
-		}, decision.Outcome, ""),
+		Descriptor: descriptor,
 	}
 }
 
