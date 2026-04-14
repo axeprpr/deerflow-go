@@ -6,12 +6,14 @@ type RunOutcome struct {
 }
 
 type RunOutcomeDescriptor struct {
-	RunStatus       string
-	Interrupted     bool
-	Error           string
-	Attempt         int
-	ResumeFromEvent int
-	ResumeReason    string
+	RunStatus         string
+	Interrupted       bool
+	Error             string
+	PendingTasks      []string
+	ExpectedArtifacts []string
+	Attempt           int
+	ResumeFromEvent   int
+	ResumeReason      string
 }
 
 type OutcomeService struct{}

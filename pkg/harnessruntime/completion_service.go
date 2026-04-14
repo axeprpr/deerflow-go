@@ -94,11 +94,14 @@ func (s CompletionService) Apply(threadID string, state *harness.RunState, resul
 			s.runtime.ClearThreadInterrupts(threadID)
 			s.runtime.MarkThreadStatus(threadID, "idle")
 		}
+		descriptor := outcomes.Describe(RunRecord{
+			ThreadID: threadID,
+		}, decision.Outcome, decision.Reason)
+		descriptor.PendingTasks = append([]string(nil), decision.PendingTasks...)
+		descriptor.ExpectedArtifacts = append([]string(nil), decision.ExpectedArtifacts...)
 		return CompletionOutcome{
 			RunOutcome: decision.Outcome,
-			Descriptor: outcomes.Describe(RunRecord{
-				ThreadID: threadID,
-			}, decision.Outcome, decision.Reason),
+			Descriptor: descriptor,
 		}
 	}
 

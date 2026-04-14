@@ -456,6 +456,9 @@ func TestCompletionServiceMarksRunIncompleteWhenPendingTasksRemain(t *testing.T)
 	if outcome.Descriptor.Error != "pending-tasks" {
 		t.Fatalf("Descriptor.Error = %q, want %q", outcome.Descriptor.Error, "pending-tasks")
 	}
+	if got := len(outcome.Descriptor.PendingTasks); got != 2 {
+		t.Fatalf("Descriptor.PendingTasks=%v want len=2", outcome.Descriptor.PendingTasks)
+	}
 	if runtime.status != "idle" || !runtime.cleared {
 		t.Fatalf("unexpected runtime state: status=%q cleared=%v", runtime.status, runtime.cleared)
 	}
@@ -480,6 +483,9 @@ func TestCompletionServiceMarksRunIncompleteFromTaskState(t *testing.T) {
 	}
 	if outcome.Descriptor.Error != "pending-tasks" {
 		t.Fatalf("Descriptor.Error = %q, want %q", outcome.Descriptor.Error, "pending-tasks")
+	}
+	if got := len(outcome.Descriptor.PendingTasks); got != 2 {
+		t.Fatalf("Descriptor.PendingTasks=%v want len=2", outcome.Descriptor.PendingTasks)
 	}
 	if got := len(runtime.taskState.Items); got != 2 {
 		t.Fatalf("taskState.Items=%d want=2", got)
@@ -545,6 +551,9 @@ func TestCompletionServiceAllowsVerifiedExpectedOutputs(t *testing.T) {
 	})
 	if outcome.RunStatus != "success" {
 		t.Fatalf("RunStatus = %q, want %q", outcome.RunStatus, "success")
+	}
+	if len(outcome.Descriptor.PendingTasks) != 0 || len(outcome.Descriptor.ExpectedArtifacts) != 0 {
+		t.Fatalf("Descriptor=%+v want no pending task details", outcome.Descriptor)
 	}
 	if got := len(runtime.taskState.VerifiedOutputs); got != 1 {
 		t.Fatalf("VerifiedOutputs=%v want len=1", runtime.taskState.VerifiedOutputs)

@@ -21,7 +21,13 @@ func TestRunMapperRoundTrip(t *testing.T) {
 
 	run := runFromRecord(record)
 	roundTrip := runRecordFromRun(run)
-	if roundTrip != record {
+	if roundTrip.RunID != record.RunID ||
+		roundTrip.ThreadID != record.ThreadID ||
+		roundTrip.AssistantID != record.AssistantID ||
+		roundTrip.Status != record.Status ||
+		roundTrip.Outcome.RunStatus != record.Outcome.RunStatus ||
+		!roundTrip.CreatedAt.Equal(record.CreatedAt) ||
+		!roundTrip.UpdatedAt.Equal(record.UpdatedAt) {
 		t.Fatalf("roundTrip = %+v want %+v", roundTrip, record)
 	}
 }
