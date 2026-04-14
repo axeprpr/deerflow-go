@@ -44,15 +44,10 @@ func DefaultPresetSpec(preset StackPreset) PresetSpec {
 }
 
 func BuildPresetConfig(preset StackPreset) Config {
-	gateway, worker, state, sb := defaultSplitComponents()
-	cfg := Config{
-		Preset:  preset,
-		Gateway: gateway,
-		Worker:  worker,
-		State:   state,
-		Sandbox: sb,
-	}
-	return cfg.applyPresetDefaults()
+	return BuildProfileConfig(StackProfile{
+		Name:   string(preset),
+		Preset: DefaultPresetSpec(preset),
+	})
 }
 
 func (c Config) PresetSpec() PresetSpec {

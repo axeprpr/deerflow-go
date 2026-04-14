@@ -31,7 +31,7 @@ const (
 )
 
 func DefaultConfig() Config {
-	return BuildPresetConfig(StackPresetSharedSQLite)
+	return DefaultStackProfileConfig(StackPresetSharedSQLite)
 }
 
 func (c Config) Validate() error {
@@ -70,7 +70,7 @@ func (c Config) withDefaults() Config {
 }
 
 func (c Config) applyPresetDefaults() Config {
-	return c.PresetSpec().Apply(c)
+	return c.Profile().Preset.Apply(c)
 }
 
 func (c Config) effectivePreset() StackPreset {
@@ -201,7 +201,7 @@ func gatewayUsesRemoteState(cfg runtimecmd.NodeConfig) bool {
 }
 
 func (c Config) usesDedicatedStateService() bool {
-	return c.effectivePreset() == StackPresetSharedRemote
+	return c.Profile().Preset.DedicatedStateService
 }
 
 func stateRootFromDataRoot(dataRoot string) string {

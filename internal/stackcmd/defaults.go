@@ -71,6 +71,7 @@ func (c Config) applySplitIdentityDefaults() Config {
 }
 
 func (c Config) applySplitStoreDefaults() Config {
+	profile := c.Profile()
 	if c.Worker.StateProvider == "" {
 		c.Worker.StateProvider = c.Gateway.Runtime.StateProvider
 	}
@@ -89,7 +90,7 @@ func (c Config) applySplitStoreDefaults() Config {
 	if strings.TrimSpace(c.Worker.ThreadStoreURL) == "" && !gatewayUsesRemoteState(c.Gateway.Runtime) {
 		c.Worker.ThreadStoreURL = c.Gateway.Runtime.ThreadStoreURL
 	}
-	c.Worker.TransportBackend = firstNonEmptyTransport(c.Worker.TransportBackend, harnessruntime.WorkerTransportBackendQueue)
+	c.Worker.TransportBackend = firstNonEmptyTransport(c.Worker.TransportBackend, profile.WorkerTransport)
 	if !gatewayUsesRemoteState(c.Gateway.Runtime) {
 		c.Worker.StateBackend = firstNonEmptyState(c.Worker.StateBackend, c.Gateway.Runtime.StateBackend)
 		c.Worker.SnapshotBackend = firstNonEmptyState(c.Worker.SnapshotBackend, c.Gateway.Runtime.SnapshotBackend)
@@ -171,14 +172,15 @@ func (c Config) applyDedicatedRemoteServices(prevGatewayEndpoint, prevGatewaySta
 
 func (c Config) applyStateProviderDefaults() Config {
 	c.Gateway.Runtime.Endpoint = workerDispatchEndpoint(c.Worker.Addr)
+	profile := c.Profile()
 	if c.usesDedicatedStateService() {
-		c.Gateway.Runtime.StateProvider = harnessruntime.RuntimeStateProviderModeAuto
-		c.Worker.StateProvider = harnessruntime.RuntimeStateProviderModeAuto
+		c.Gateway.Runtime.StateProvider = profile.GatewayStateProvider
+		c.Worker.StateProvider = profile.WorkerStateProvider
 		return c
 	}
 	if gatewayUsesRemoteState(c.Gateway.Runtime) {
 		if c.Gateway.Runtime.StateProvider == harnessruntime.RuntimeStateProviderModeSharedSQLite {
-			c.Gateway.Runtime.StateProvider = harnessruntime.RuntimeStateProviderModeAuto
+			c.Gateway.Runtime.StateProvider = profile.GatewayStateProvider
 		}
 		return c
 	}
