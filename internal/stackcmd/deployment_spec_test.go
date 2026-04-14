@@ -42,3 +42,29 @@ func TestLauncherCarriesDeploymentSpec(t *testing.T) {
 		t.Fatal("DeploymentSpec().WorkerDispatch = empty")
 	}
 }
+
+func TestBuildComponentsUsesDedicatedServicesForSharedRemotePreset(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Preset = StackPresetSharedRemote
+	cfg.Worker.Addr = ":19081"
+
+	components, err := cfg.BuildComponents(context.Background())
+	if err != nil {
+		t.Fatalf("BuildComponents() error = %v", err)
+	}
+	if len(components) != 4 {
+		t.Fatalf("components = %d", len(components))
+	}
+	if components[0].Kind != ComponentGateway {
+		t.Fatalf("components[0].Kind = %q", components[0].Kind)
+	}
+	if components[1].Kind != ComponentState {
+		t.Fatalf("components[1].Kind = %q", components[1].Kind)
+	}
+	if components[2].Kind != ComponentSandbox {
+		t.Fatalf("components[2].Kind = %q", components[2].Kind)
+	}
+	if components[3].Kind != ComponentWorker {
+		t.Fatalf("components[3].Kind = %q", components[3].Kind)
+	}
+}
