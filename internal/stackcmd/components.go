@@ -18,12 +18,6 @@ func (c Config) BuildComponents(ctx context.Context) ([]LaunchComponent, error) 
 	}
 	components := make([]LaunchComponent, 0, 4)
 
-	gatewayLauncher, err := cfg.Gateway.BuildLauncher()
-	if err != nil {
-		return nil, err
-	}
-	components = append(components, LaunchComponent{Kind: ComponentGateway, Lifecycle: gatewayLauncher})
-
 	if cfg.usesDedicatedStateService() {
 		stateLauncher, err := cfg.State.BuildLauncher()
 		if err != nil {
@@ -43,5 +37,11 @@ func (c Config) BuildComponents(ctx context.Context) ([]LaunchComponent, error) 
 		return nil, err
 	}
 	components = append(components, LaunchComponent{Kind: ComponentWorker, Lifecycle: workerLauncher})
+
+	gatewayLauncher, err := cfg.Gateway.BuildLauncher()
+	if err != nil {
+		return nil, err
+	}
+	components = append(components, LaunchComponent{Kind: ComponentGateway, Lifecycle: gatewayLauncher})
 	return components, nil
 }

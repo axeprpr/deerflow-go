@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
@@ -56,6 +57,8 @@ type runtimeSnapshotAdapter struct {
 type runtimeWorkerSpecAdapter struct {
 	server *Server
 }
+
+var detachedRunCancelGracePeriod = 5 * time.Second
 
 func (s *Server) runtimeConversationAdapter() runtimeConversationAdapter {
 	return runtimeConversationAdapter{server: s}
@@ -353,7 +356,47 @@ func (a runtimeCoordinationAdapter) LoadRunRecord(runID string) (harnessruntime.
 }
 
 func (a runtimeCoordinationAdapter) CancelRun(runID string) bool {
-	return a.server.cancelActiveRun(runID)
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return false
+	}
+	if a.server.cancelActiveRun(runID) {
+		return true
+	}
+
+	record, ok := harnessruntime.NewSnapshotStoreService(a.server.ensureSnapshotStore()).LoadRecord(runID)
+	if !ok || !isRunningRunStatus(record.Status) {
+		return false
+	}
+	if detachedRunCancelGracePeriod > 0 {
+		if record.UpdatedAt.IsZero() || time.Since(record.UpdatedAt) < detachedRunCancelGracePeriod {
+			return false
+		}
+	}
+
+	record = harnessruntime.NewRunStateService(a.server.runtimeRunStateAdapter()).MarkCanceled(record)
+	_, replayedEnd := harnessruntime.NewEventFeedService(a.server.runtimeEventAdapter()).ReplayFrom(runID, 0)
+	if !replayedEnd {
+		harnessruntime.NewEventLogService(a.server.runtimeEventAdapter()).RecordWithContext(harnessruntime.RunEventContext{
+			Attempt:         record.Attempt,
+			ResumeFromEvent: record.ResumeFromEvent,
+			ResumeReason:    record.ResumeReason,
+			Outcome:         record.Outcome,
+		}, record.RunID, record.ThreadID, "end", map[string]any{
+			"run_id": record.RunID,
+			"status": record.Status,
+		})
+	}
+	return true
+}
+
+func isRunningRunStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "", "running", "queued", "busy":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a runtimeQueryAdapter) LoadRunRecord(runID string) (harnessruntime.RunRecord, bool) {
