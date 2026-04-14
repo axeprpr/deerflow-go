@@ -10,7 +10,7 @@ import (
 	"github.com/axeprpr/deerflow-go/internal/langgraphcmd"
 )
 
-func TestWriteBundleWritesManifestAndScripts(t *testing.T) {
+func TestWriteBundleWritesManifestAndProcesses(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Preset = StackPresetSharedRemote
 	cfg.Worker.Addr = ":19081"
@@ -22,13 +22,13 @@ func TestWriteBundleWritesManifestAndScripts(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "stack-manifest.json")); err != nil {
 		t.Fatalf("manifest stat error = %v", err)
 	}
-	for _, name := range []string{"gateway.sh", "worker.sh", "state.sh", "sandbox.sh"} {
-		data, err := os.ReadFile(filepath.Join(dir, name))
+	for _, name := range []string{"gateway.json", "worker.json", "state.json", "sandbox.json"} {
+		data, err := os.ReadFile(filepath.Join(dir, "processes", name))
 		if err != nil {
-			t.Fatalf("script %s read error = %v", name, err)
+			t.Fatalf("process %s read error = %v", name, err)
 		}
-		if !strings.Contains(string(data), "exec ") {
-			t.Fatalf("script %s = %q", name, string(data))
+		if !strings.Contains(string(data), "\"binary\"") {
+			t.Fatalf("process %s = %q", name, string(data))
 		}
 	}
 }
