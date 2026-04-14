@@ -96,6 +96,44 @@ func TestWorkerRunEventRecorderRecordsTaskClarificationAndCompletion(t *testing.
 	}
 }
 
+func TestWorkerRunEventRecorderCarriesLiveTaskLifecycleIntoTaskEvents(t *testing.T) {
+	store := NewInMemoryRunEventStore()
+	threads := NewInMemoryThreadStateStore()
+	threads.SetThreadMetadata("thread-worker-live", DefaultTaskStateMetadataKey, harness.TaskState{
+		Items: []harness.TaskItem{
+			{Text: "delegate research", Status: harness.TaskStatusInProgress},
+		},
+		ExpectedOutputs: []string{"/mnt/user-data/outputs/report.md"},
+	}.Value())
+
+	recorder := NewWorkerRunEventRecorder(store, threads)
+	plan := WorkerExecutionPlan{
+		RunID:    "run-worker-live",
+		ThreadID: "thread-worker-live",
+		Attempt:  1,
+	}
+
+	recorder.RecordTaskEvent(plan, subagent.TaskEvent{
+		Type:        "task_running",
+		TaskID:      "task-1",
+		Description: "delegate research",
+	})
+
+	events := store.LoadRunEvents(plan.RunID)
+	if len(events) != 1 {
+		t.Fatalf("event count = %d, want 1", len(events))
+	}
+	if events[0].Outcome.TaskLifecycle.Status != "running" {
+		t.Fatalf("task lifecycle = %+v", events[0].Outcome.TaskLifecycle)
+	}
+	if len(events[0].Outcome.TaskLifecycle.PendingTasks) != 1 || events[0].Outcome.TaskLifecycle.PendingTasks[0] != "delegate research" {
+		t.Fatalf("pending tasks = %#v", events[0].Outcome.TaskLifecycle.PendingTasks)
+	}
+	if len(events[0].Outcome.TaskLifecycle.ExpectedArtifacts) != 1 || events[0].Outcome.TaskLifecycle.ExpectedArtifacts[0] != "/mnt/user-data/outputs/report.md" {
+		t.Fatalf("expected artifacts = %#v", events[0].Outcome.TaskLifecycle.ExpectedArtifacts)
+	}
+}
+
 type workerContextRuntimeStub struct {
 	spec harness.ContextSpec
 }

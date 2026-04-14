@@ -5,15 +5,21 @@ import (
 
 	"github.com/axeprpr/deerflow-go/pkg/agent"
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
+	"github.com/axeprpr/deerflow-go/pkg/harness"
 	"github.com/axeprpr/deerflow-go/pkg/subagent"
 )
 
 type WorkerRunEventRecorder struct {
-	store RunEventRecorder
+	store   RunEventRecorder
+	threads ThreadStateStore
 }
 
-func NewWorkerRunEventRecorder(store RunEventRecorder) WorkerRunEventRecorder {
-	return WorkerRunEventRecorder{store: store}
+func NewWorkerRunEventRecorder(store RunEventRecorder, threads ...ThreadStateStore) WorkerRunEventRecorder {
+	recorder := WorkerRunEventRecorder{store: store}
+	if len(threads) > 0 {
+		recorder.threads = threads[0]
+	}
+	return recorder
 }
 
 func (r WorkerRunEventRecorder) RecordAgentEvent(plan WorkerExecutionPlan, evt agent.AgentEvent) {
@@ -21,12 +27,7 @@ func (r WorkerRunEventRecorder) RecordAgentEvent(plan WorkerExecutionPlan, evt a
 		return
 	}
 	record := EventLogService{store: r.store}
-	ctx := RunEventContext{
-		Attempt:         plan.Attempt,
-		ResumeFromEvent: plan.ResumeFromEvent,
-		ResumeReason:    plan.ResumeReason,
-		Outcome:         runningOutcomeDescriptor(plan),
-	}
+	ctx := workerRunEventContext(plan, r.threads)
 	recordEvent := func(eventType string, data any) {
 		record.RecordWithContext(ctx, plan.RunID, plan.ThreadID, eventType, data)
 	}
@@ -108,7 +109,7 @@ func (r WorkerRunEventRecorder) RecordTaskEvent(plan WorkerExecutionPlan, evt su
 	if r.store == nil {
 		return
 	}
-	EventLogService{store: r.store}.RecordWithContext(workerRunEventContext(plan), plan.RunID, plan.ThreadID, evt.Type, map[string]any{
+	EventLogService{store: r.store}.RecordWithContext(workerRunEventContext(plan, r.threads), plan.RunID, plan.ThreadID, evt.Type, map[string]any{
 		"type":           evt.Type,
 		"task_id":        evt.TaskID,
 		"request_id":     evt.RequestID,
@@ -125,7 +126,7 @@ func (r WorkerRunEventRecorder) RecordClarification(plan WorkerExecutionPlan, it
 	if r.store == nil || item == nil {
 		return
 	}
-	EventLogService{store: r.store}.RecordWithContext(workerRunEventContext(plan), plan.RunID, plan.ThreadID, "clarification_request", item)
+	EventLogService{store: r.store}.RecordWithContext(workerRunEventContext(plan, r.threads), plan.RunID, plan.ThreadID, "clarification_request", item)
 }
 
 func (r WorkerRunEventRecorder) RecordCompletion(plan WorkerExecutionPlan, result *agent.RunResult, outcome RunOutcomeDescriptor) {
@@ -136,7 +137,7 @@ func (r WorkerRunEventRecorder) RecordCompletion(plan WorkerExecutionPlan, resul
 	if result != nil && result.Usage != nil {
 		payload["usage"] = result.Usage
 	}
-	ctx := workerRunEventContext(plan)
+	ctx := workerRunEventContext(plan, r.threads)
 	if outcome.RunStatus == "" {
 		outcome = RunOutcomeDescriptor{
 			RunStatus: "success",
@@ -150,12 +151,12 @@ func (r WorkerRunEventRecorder) RecordCompletion(plan WorkerExecutionPlan, resul
 	EventLogService{store: r.store}.RecordWithContext(ctx, plan.RunID, plan.ThreadID, "end", payload)
 }
 
-func workerRunEventContext(plan WorkerExecutionPlan) RunEventContext {
+func workerRunEventContext(plan WorkerExecutionPlan, threads ThreadStateStore) RunEventContext {
 	return RunEventContext{
 		Attempt:         plan.Attempt,
 		ResumeFromEvent: plan.ResumeFromEvent,
 		ResumeReason:    plan.ResumeReason,
-		Outcome:         runningOutcomeDescriptor(plan),
+		Outcome:         runningOutcomeDescriptor(plan, threads),
 	}
 }
 
@@ -166,10 +167,25 @@ func workerToolMessageID(toolCallID string) string {
 	return "tool:" + strings.TrimSpace(toolCallID)
 }
 
-func runningOutcomeDescriptor(plan WorkerExecutionPlan) RunOutcomeDescriptor {
-	return NewOutcomeService().DescribeRunning(RunRecord{
+func runningOutcomeDescriptor(plan WorkerExecutionPlan, threads ThreadStateStore) RunOutcomeDescriptor {
+	outcome := NewOutcomeService().DescribeRunning(RunRecord{
 		Attempt:         plan.Attempt,
 		ResumeFromEvent: plan.ResumeFromEvent,
 		ResumeReason:    plan.ResumeReason,
 	})
+	if threads == nil {
+		return outcome
+	}
+	state, ok := threads.LoadThreadRuntimeState(plan.ThreadID)
+	if !ok {
+		return outcome
+	}
+	if lifecycle, ok := ParseTaskLifecycle(state.Metadata[DefaultTaskLifecycleMetadataKey]); ok {
+		outcome.TaskLifecycle = lifecycle
+		return outcome
+	}
+	if taskState, ok := harness.ParseTaskState(state.Metadata[DefaultTaskStateMetadataKey]); ok {
+		outcome.TaskLifecycle = NewTaskLifecycleService().Describe(RunOutcome{RunStatus: "running"}, taskState, false)
+	}
+	return outcome
 }
