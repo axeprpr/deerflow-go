@@ -2007,6 +2007,269 @@ func TestAgentRunStopsAfterSuccessfulPresentFiles(t *testing.T) {
 	}
 }
 
+func TestAgentRunAppliesReadFilePerCallBudget(t *testing.T) {
+	t.Setenv("DEERFLOW_READ_FILE_MAX_CALLS", "10")
+	t.Setenv("DEERFLOW_READ_FILE_MAX_TOTAL_CHARS", "1000")
+	t.Setenv("DEERFLOW_READ_FILE_MAX_CHARS_PER_CALL", "32")
+
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name: "read_file",
+		Handler: func(_ context.Context, call models.ToolCall) (models.ToolResult, error) {
+			return models.ToolResult{
+				CallID:   call.ID,
+				ToolName: call.Name,
+				Status:   models.CallStatusCompleted,
+				Content:  strings.Repeat("x", 256),
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register read_file: %v", err)
+	}
+
+	var chatCalls int
+	provider := chatOnlyProvider{t: t, chat: func(req llm.ChatRequest) llm.ChatResponse {
+		chatCalls++
+		switch chatCalls {
+		case 1:
+			return llm.ChatResponse{
+				Model: "test-model",
+				Message: models.Message{
+					Role: models.RoleAI,
+					ToolCalls: []models.ToolCall{{
+						ID:   "call-read-1",
+						Name: "read_file",
+						Arguments: map[string]any{
+							"description": "read file",
+							"path":        "/mnt/user-data/uploads/demo.txt",
+						},
+					}},
+				},
+				Stop: "tool_calls",
+			}
+		case 2:
+			last := req.Messages[len(req.Messages)-1]
+			if last.ToolResult == nil || last.ToolResult.ToolName != "read_file" {
+				t.Fatalf("last message=%#v want read_file tool result", last)
+			}
+			if len([]rune(last.ToolResult.Content)) > 32 {
+				t.Fatalf("tool result len=%d want <=32", len([]rune(last.ToolResult.Content)))
+			}
+			return llm.ChatResponse{
+				Model: "test-model",
+				Message: models.Message{
+					Role:    models.RoleAI,
+					Content: "done",
+				},
+				Stop: "stop",
+			}
+		default:
+			t.Fatalf("unexpected Chat call %d", chatCalls)
+			return llm.ChatResponse{}
+		}
+	}}
+
+	agent := New(AgentConfig{
+		LLMProvider: provider,
+		Tools:       registry,
+		MaxTurns:    4,
+	})
+
+	result, err := agent.Run(context.Background(), "session-read-budget", []models.Message{{
+		ID:        "m1",
+		SessionID: "session-read-budget",
+		Role:      models.RoleHuman,
+		Content:   "read it",
+	}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "done" {
+		t.Fatalf("FinalOutput=%q want done", result.FinalOutput)
+	}
+}
+
+func TestAgentRunInjectsRunFactStoreOnNextTurn(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name: "read_file",
+		Handler: func(_ context.Context, call models.ToolCall) (models.ToolResult, error) {
+			return models.ToolResult{
+				CallID:   call.ID,
+				ToolName: call.Name,
+				Status:   models.CallStatusCompleted,
+				Content:  "ok",
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register read_file: %v", err)
+	}
+
+	var chatCalls int
+	provider := chatOnlyProvider{t: t, chat: func(req llm.ChatRequest) llm.ChatResponse {
+		chatCalls++
+		switch chatCalls {
+		case 1:
+			return llm.ChatResponse{
+				Model: "test-model",
+				Message: models.Message{
+					Role: models.RoleAI,
+					Content: "```json\n" +
+						`{"tender_id":"TB-2026-041","deadline":"2026-05-30 17:00 CST"}` + "\n```",
+					ToolCalls: []models.ToolCall{{
+						ID:   "call-read-1",
+						Name: "read_file",
+						Arguments: map[string]any{
+							"path": "/mnt/user-data/uploads/demo.txt",
+						},
+					}},
+				},
+				Stop: "tool_calls",
+			}
+		case 2:
+			if !strings.Contains(req.SystemPrompt, "<run_fact_store>") {
+				t.Fatalf("system prompt=%q want run_fact_store", req.SystemPrompt)
+			}
+			if !strings.Contains(req.SystemPrompt, "tender_id: TB-2026-041") {
+				t.Fatalf("system prompt=%q want tender_id fact", req.SystemPrompt)
+			}
+			if !strings.Contains(req.SystemPrompt, "deadline: 2026-05-30 17:00 CST") {
+				t.Fatalf("system prompt=%q want deadline fact", req.SystemPrompt)
+			}
+			return llm.ChatResponse{
+				Model: "test-model",
+				Message: models.Message{
+					Role:    models.RoleAI,
+					Content: "done",
+				},
+				Stop: "stop",
+			}
+		default:
+			t.Fatalf("unexpected Chat call %d", chatCalls)
+			return llm.ChatResponse{}
+		}
+	}}
+
+	agent := New(AgentConfig{
+		LLMProvider: provider,
+		Tools:       registry,
+		MaxTurns:    4,
+	})
+
+	result, err := agent.Run(context.Background(), "session-fact-store", []models.Message{{
+		ID:        "m1",
+		SessionID: "session-fact-store",
+		Role:      models.RoleHuman,
+		Content:   "extract fields and keep consistent",
+	}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "done" {
+		t.Fatalf("FinalOutput=%q want done", result.FinalOutput)
+	}
+}
+
+func TestAgentRunBlocksReadFileWhenCallBudgetExceeded(t *testing.T) {
+	t.Setenv("DEERFLOW_READ_FILE_MAX_CALLS", "1")
+	t.Setenv("DEERFLOW_READ_FILE_MAX_TOTAL_CHARS", "1000")
+	t.Setenv("DEERFLOW_READ_FILE_MAX_CHARS_PER_CALL", "1000")
+
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name: "read_file",
+		Handler: func(_ context.Context, call models.ToolCall) (models.ToolResult, error) {
+			return models.ToolResult{
+				CallID:   call.ID,
+				ToolName: call.Name,
+				Status:   models.CallStatusCompleted,
+				Content:  "content",
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register read_file: %v", err)
+	}
+
+	var chatCalls int
+	provider := chatOnlyProvider{t: t, chat: func(req llm.ChatRequest) llm.ChatResponse {
+		chatCalls++
+		switch chatCalls {
+		case 1:
+			return llm.ChatResponse{
+				Model: "test-model",
+				Message: models.Message{
+					Role: models.RoleAI,
+					ToolCalls: []models.ToolCall{{
+						ID:   "call-read-1",
+						Name: "read_file",
+						Arguments: map[string]any{
+							"description": "read file #1",
+							"path":        "/mnt/user-data/uploads/one.txt",
+						},
+					}},
+				},
+				Stop: "tool_calls",
+			}
+		case 2:
+			return llm.ChatResponse{
+				Model: "test-model",
+				Message: models.Message{
+					Role: models.RoleAI,
+					ToolCalls: []models.ToolCall{{
+						ID:   "call-read-2",
+						Name: "read_file",
+						Arguments: map[string]any{
+							"description": "read file #2",
+							"path":        "/mnt/user-data/uploads/two.txt",
+						},
+					}},
+				},
+				Stop: "tool_calls",
+			}
+		case 3:
+			last := req.Messages[len(req.Messages)-1]
+			if last.ToolResult == nil || last.ToolResult.ToolName != "read_file" {
+				t.Fatalf("last message=%#v want read_file tool result", last)
+			}
+			if last.ToolResult.Status != models.CallStatusFailed {
+				t.Fatalf("tool status=%s want failed", last.ToolResult.Status)
+			}
+			if !strings.Contains(strings.ToLower(last.ToolResult.Error), "budget exceeded") {
+				t.Fatalf("error=%q want budget exceeded", last.ToolResult.Error)
+			}
+			return llm.ChatResponse{
+				Model: "test-model",
+				Message: models.Message{
+					Role:    models.RoleAI,
+					Content: "done",
+				},
+				Stop: "stop",
+			}
+		default:
+			t.Fatalf("unexpected Chat call %d", chatCalls)
+			return llm.ChatResponse{}
+		}
+	}}
+
+	agent := New(AgentConfig{
+		LLMProvider: provider,
+		Tools:       registry,
+		MaxTurns:    6,
+	})
+	result, err := agent.Run(context.Background(), "session-read-call-limit", []models.Message{{
+		ID:        "m1",
+		SessionID: "session-read-call-limit",
+		Role:      models.RoleHuman,
+		Content:   "read twice",
+	}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "done" {
+		t.Fatalf("FinalOutput=%q want done", result.FinalOutput)
+	}
+}
+
 func TestAgentRunCompletesArtifactWorkflowWithFinalAssistantReply(t *testing.T) {
 	dataRoot := t.TempDir()
 	t.Setenv("DEERFLOW_DATA_ROOT", dataRoot)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,6 +28,9 @@ const defaultRequestTimeout = 10 * time.Minute
 const defaultMaxConcurrentSubagents = 3
 const minMaxConcurrentSubagents = 2
 const maxMaxConcurrentSubagents = 4
+const defaultReadFileMaxCallsPerRun = 24
+const defaultReadFileMaxCharsPerCall = 20000
+const defaultReadFileMaxCharsPerRun = 180000
 
 var messageSeq uint64
 var agentRequestSeq uint64
@@ -47,6 +51,8 @@ type Agent struct {
 	maxConcurrentSubagents int
 	requestTimeout         time.Duration
 	runPolicy              *RunPolicy
+	readFileBudget         readFileBudgetPolicy
+	runFactStore           runFactStorePolicy
 	guardrailProvider      guardrails.Provider
 	guardrailFailClosed    bool
 	guardrailPassport      string
@@ -98,6 +104,8 @@ func New(cfg AgentConfig) *Agent {
 		maxConcurrentSubagents: clampMaxConcurrentSubagents(cfg.MaxConcurrentSubagents),
 		requestTimeout:         requestTimeout,
 		runPolicy:              resolveRunPolicy(cfg.RunPolicy),
+		readFileBudget:         resolveReadFileBudgetPolicy(),
+		runFactStore:           resolveRunFactStorePolicy(),
 		guardrailProvider:      guardrailProvider,
 		guardrailFailClosed:    guardrailFailClosed,
 		guardrailPassport:      guardrailPassport,
@@ -179,6 +187,8 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 	usage := &Usage{}
 	loopState := newToolLoopState()
 	taskState := newTaskProgressState()
+	readFileBudgetState := newReadFileBudgetState()
+	runFactStoreState := newRunFactStoreState(a.runFactStore)
 
 	for turn := 0; turn < a.maxTurns; turn++ {
 		visibleTools := a.visibleTools(deferredState)
@@ -200,7 +210,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			ReasoningEffort: a.reasoningEffort,
 			Temperature:     a.temperature,
 			MaxTokens:       a.maxTokens,
-			SystemPrompt:    a.buildSystemPrompt(ctx, sessionID, deferredState),
+			SystemPrompt:    a.buildSystemPrompt(ctx, sessionID, deferredState, runFactStoreState),
 		}
 
 		var (
@@ -314,6 +324,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 		assistantMessage = llm.NormalizeAssistantMessage(assistantMessage)
 		if assistantMessage.Content != "" || len(assistantMessage.ToolCalls) > 0 || llm.HasReasoningContent(assistantMessage) {
 			runMessages = append(runMessages, assistantMessage)
+			runFactStoreState.observeAssistantMessage(assistantMessage)
 		}
 
 		if len(toolCalls) == 0 {
@@ -383,9 +394,13 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			viewedImages := make([]viewedImage, 0)
 			var pause bool
 			var err error
-			runMessages, viewedImages, pause, err = a.executeToolCalls(ctx, sessionID, aiMessageID, runMessages, toolCalls, deferredState, emit)
+			beforeToolMessages := len(runMessages)
+			runMessages, viewedImages, pause, err = a.executeToolCalls(ctx, sessionID, aiMessageID, runMessages, toolCalls, deferredState, readFileBudgetState, emit)
 			if err != nil {
 				return nil, err
+			}
+			if beforeToolMessages >= 0 && beforeToolMessages <= len(runMessages) {
+				runFactStoreState.observeMessages(runMessages[beforeToolMessages:])
 			}
 			if len(viewedImages) > 0 {
 				runMessages = append(runMessages, viewedImagesMessage(sessionID, viewedImages, modelLikelySupportsVision(a.model)))
@@ -410,9 +425,13 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 		viewedImages := make([]viewedImage, 0)
 		pause := false
 		var execErr error
-		runMessages, viewedImages, pause, execErr = a.executeToolCalls(ctx, sessionID, aiMessageID, runMessages, toolCalls, deferredState, emit)
+		beforeToolMessages := len(runMessages)
+		runMessages, viewedImages, pause, execErr = a.executeToolCalls(ctx, sessionID, aiMessageID, runMessages, toolCalls, deferredState, readFileBudgetState, emit)
 		if execErr != nil {
 			return nil, execErr
+		}
+		if beforeToolMessages >= 0 && beforeToolMessages <= len(runMessages) {
+			runFactStoreState.observeMessages(runMessages[beforeToolMessages:])
 		}
 		a.runPolicy.Task.ObserveToolCalls(taskState, toolCalls)
 		if len(viewedImages) > 0 {
@@ -492,13 +511,14 @@ func (a *Agent) executeToolCalls(
 	runMessages []models.Message,
 	toolCalls []models.ToolCall,
 	deferredState *deferredToolState,
+	readFileBudgetState *readFileBudgetState,
 	emit func(AgentEvent),
 ) ([]models.Message, []viewedImage, bool, error) {
 	viewedImages := make([]viewedImage, 0)
 
 	for i := 0; i < len(toolCalls); {
 		if toolCalls[i].Name != "task" {
-			result, pause, err := a.executeSingleToolCall(ctx, sessionID, aiMessageID, toolCalls[i], deferredState, emit, &runMessages, &viewedImages)
+			result, pause, err := a.executeSingleToolCall(ctx, sessionID, aiMessageID, toolCalls[i], deferredState, readFileBudgetState, emit, &runMessages, &viewedImages)
 			_ = result
 			if err != nil {
 				return nil, nil, false, err
@@ -514,7 +534,7 @@ func (a *Agent) executeToolCalls(
 		for j < len(toolCalls) && toolCalls[j].Name == "task" {
 			j++
 		}
-		results, err := a.executeParallelTaskCalls(ctx, sessionID, aiMessageID, toolCalls[i:j], deferredState, emit)
+		results, err := a.executeParallelTaskCalls(ctx, sessionID, aiMessageID, toolCalls[i:j], deferredState, readFileBudgetState, emit)
 		if err != nil {
 			return nil, nil, false, err
 		}
@@ -558,6 +578,7 @@ func (a *Agent) executeParallelTaskCalls(
 	aiMessageID string,
 	taskCalls []models.ToolCall,
 	deferredState *deferredToolState,
+	readFileBudgetState *readFileBudgetState,
 	emit func(AgentEvent),
 ) ([]toolExecutionRecord, error) {
 	type resultEnvelope struct {
@@ -592,7 +613,7 @@ func (a *Agent) executeParallelTaskCalls(
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			result, toolErr := a.performToolCall(ctx, sessionID, call, deferredState)
+			result, toolErr := a.performToolCall(ctx, sessionID, call, deferredState, readFileBudgetState)
 			toolMessage := models.Message{
 				ID:         newMessageID("tool"),
 				SessionID:  sessionID,
@@ -630,6 +651,7 @@ func (a *Agent) executeSingleToolCall(
 	aiMessageID string,
 	call models.ToolCall,
 	deferredState *deferredToolState,
+	readFileBudgetState *readFileBudgetState,
 	emit func(AgentEvent),
 	runMessages *[]models.Message,
 	viewedImages *[]viewedImage,
@@ -650,7 +672,7 @@ func (a *Agent) executeSingleToolCall(
 		ToolEvent: newToolCallEvent(runningCall, nil),
 	})
 
-	result, err := a.performToolCall(ctx, sessionID, call, deferredState)
+	result, err := a.performToolCall(ctx, sessionID, call, deferredState, readFileBudgetState)
 	if err != nil {
 		return models.ToolResult{}, false, err
 	}
@@ -692,8 +714,17 @@ func (a *Agent) executeSingleToolCall(
 	return result, false, nil
 }
 
-func (a *Agent) performToolCall(ctx context.Context, sessionID string, call models.ToolCall, deferredState *deferredToolState) (models.ToolResult, error) {
+func (a *Agent) performToolCall(ctx context.Context, sessionID string, call models.ToolCall, deferredState *deferredToolState, readFileBudgetState *readFileBudgetState) (models.ToolResult, error) {
 	toolStarted := time.Now().UTC()
+	if strings.EqualFold(strings.TrimSpace(call.Name), "read_file") {
+		if budgetResult, blocked := a.readFileBudget.beforeCall(call, readFileBudgetState); blocked {
+			budgetResult.Duration = time.Since(toolStarted)
+			if budgetResult.CompletedAt.IsZero() {
+				budgetResult.CompletedAt = time.Now().UTC()
+			}
+			return sanitizedToolResult(budgetResult), nil
+		}
+	}
 	if strings.TrimSpace(call.Name) == "ask_clarification" {
 		result, err := clarification.InterceptToolCall(ctx, call)
 		if err != nil {
@@ -723,6 +754,9 @@ func (a *Agent) performToolCall(ctx context.Context, sessionID string, call mode
 	result.Duration = time.Since(toolStarted)
 	if result.CompletedAt.IsZero() {
 		result.CompletedAt = time.Now().UTC()
+	}
+	if strings.EqualFold(strings.TrimSpace(call.Name), "read_file") {
+		result = a.readFileBudget.afterCall(call, result, readFileBudgetState)
 	}
 	result = sanitizedToolResult(result)
 	return result, nil
@@ -879,6 +913,126 @@ func clampMaxConcurrentSubagents(value int) int {
 	return value
 }
 
+type readFileBudgetPolicy struct {
+	MaxCallsPerRun  int
+	MaxCharsPerRun  int
+	MaxCharsPerCall int
+}
+
+type readFileBudgetState struct {
+	CallsUsed int
+	CharsUsed int
+}
+
+func resolveReadFileBudgetPolicy() readFileBudgetPolicy {
+	return readFileBudgetPolicy{
+		MaxCallsPerRun:  intFromEnvWithDefault("DEERFLOW_READ_FILE_MAX_CALLS", defaultReadFileMaxCallsPerRun),
+		MaxCharsPerRun:  intFromEnvWithDefault("DEERFLOW_READ_FILE_MAX_TOTAL_CHARS", defaultReadFileMaxCharsPerRun),
+		MaxCharsPerCall: intFromEnvWithDefault("DEERFLOW_READ_FILE_MAX_CHARS_PER_CALL", defaultReadFileMaxCharsPerCall),
+	}
+}
+
+func intFromEnvWithDefault(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return value
+}
+
+func newReadFileBudgetState() *readFileBudgetState {
+	return &readFileBudgetState{}
+}
+
+func (p readFileBudgetPolicy) beforeCall(call models.ToolCall, state *readFileBudgetState) (models.ToolResult, bool) {
+	if state == nil || p.MaxCallsPerRun <= 0 {
+		return models.ToolResult{}, false
+	}
+	if state.CallsUsed < p.MaxCallsPerRun {
+		return models.ToolResult{}, false
+	}
+	msg := fmt.Sprintf(
+		"read_file call budget exceeded (%d/%d). Narrow the request with start_line/end_line or use grep/glob before reading more files.",
+		state.CallsUsed,
+		p.MaxCallsPerRun,
+	)
+	return models.ToolResult{
+		CallID:      call.ID,
+		ToolName:    call.Name,
+		Status:      models.CallStatusFailed,
+		Content:     msg,
+		Error:       msg,
+		CompletedAt: time.Now().UTC(),
+		Data: map[string]any{
+			"read_file_budget": map[string]any{
+				"calls_used":  state.CallsUsed,
+				"calls_limit": p.MaxCallsPerRun,
+			},
+		},
+	}, true
+}
+
+func (p readFileBudgetPolicy) afterCall(call models.ToolCall, result models.ToolResult, state *readFileBudgetState) models.ToolResult {
+	if state == nil {
+		return result
+	}
+	state.CallsUsed++
+	content := result.Content
+	if p.MaxCharsPerCall > 0 {
+		content = truncateWithBudgetMarker(content, p.MaxCharsPerCall, fmt.Sprintf(
+			"read_file per-call budget: showing first %d chars",
+			p.MaxCharsPerCall,
+		))
+	}
+	if p.MaxCharsPerRun > 0 {
+		remaining := p.MaxCharsPerRun - state.CharsUsed
+		if remaining < 0 {
+			remaining = 0
+		}
+		content = truncateWithBudgetMarker(content, remaining, fmt.Sprintf(
+			"read_file total budget reached (%d chars per run)",
+			p.MaxCharsPerRun,
+		))
+	}
+	result.Content = content
+	state.CharsUsed += len([]rune(content))
+	if result.Data == nil {
+		result.Data = map[string]any{}
+	}
+	result.Data["read_file_budget"] = map[string]any{
+		"calls_used":     state.CallsUsed,
+		"calls_limit":    p.MaxCallsPerRun,
+		"chars_used":     state.CharsUsed,
+		"chars_limit":    p.MaxCharsPerRun,
+		"per_call_limit": p.MaxCharsPerCall,
+	}
+	return result
+}
+
+func truncateWithBudgetMarker(content string, limit int, reason string) string {
+	if limit < 0 {
+		limit = 0
+	}
+	runes := []rune(content)
+	if len(runes) <= limit {
+		return content
+	}
+	if limit == 0 {
+		return fmt.Sprintf("[truncated by runtime budget: %s]", strings.TrimSpace(reason))
+	}
+	marker := fmt.Sprintf("\n... [truncated by runtime budget: %s] ...", strings.TrimSpace(reason))
+	markerLen := len([]rune(marker))
+	keep := limit - markerLen
+	if keep <= 0 {
+		return string(runes[:limit])
+	}
+	return string(runes[:keep]) + marker
+}
+
 func truncateTaskToolCalls(calls []models.ToolCall, limit int) []models.ToolCall {
 	limit = clampMaxConcurrentSubagents(limit)
 	taskCount := 0
@@ -908,13 +1062,16 @@ func truncateTaskToolCalls(calls []models.ToolCall, limit int) []models.ToolCall
 }
 
 func (a *Agent) BuildSystemPrompt(ctx context.Context, sessionID string) string {
-	return a.buildSystemPrompt(ctx, sessionID, newDeferredToolState(a.deferredTools))
+	return a.buildSystemPrompt(ctx, sessionID, newDeferredToolState(a.deferredTools), nil)
 }
 
-func (a *Agent) buildSystemPrompt(_ context.Context, _ string, deferredState *deferredToolState) string {
+func (a *Agent) buildSystemPrompt(_ context.Context, _ string, deferredState *deferredToolState, factState *runFactStoreState) string {
 	sections := []string{strings.TrimSpace(a.systemPrompt)}
 	if deferredPrompt := deferredState.prompt(); deferredPrompt != "" {
 		sections = append(sections, deferredPrompt)
+	}
+	if factPrompt := factState.prompt(); factPrompt != "" {
+		sections = append(sections, factPrompt)
 	}
 	return strings.Join(sections, "\n\n")
 }
