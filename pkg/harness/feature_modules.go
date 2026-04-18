@@ -124,7 +124,7 @@ func SummarizationLifecycleHooks(cfg SummarizationLifecycleConfig) *LifecycleHoo
 }
 
 func MemoryLifecycleHooks(cfg MemoryLifecycleConfig) *LifecycleHooks {
-	if cfg.Runtime == nil || !cfg.Runtime.Enabled() || cfg.ResolveSession == nil {
+	if cfg.Runtime == nil || !cfg.Runtime.Enabled() || (cfg.ResolveSession == nil && cfg.PlanScopes == nil) {
 		return nil
 	}
 	key := strings.TrimSpace(cfg.SessionKey)

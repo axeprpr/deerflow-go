@@ -10,8 +10,61 @@ permissions:
   contents: write
 
 jobs:
+  smoke-runtime-linux:
+    name: smoke-runtime-linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Electron dependencies
+        working-directory: desktop/electron
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build runtime binaries
+        working-directory: desktop/electron
+        run: pnpm build:runtime
+
+      - name: Check Electron main entry syntax
+        run: node --check desktop/electron/main.js
+
+      - name: Verify packaged runtime binaries
+        run: |
+          for bin in langgraph runtime-node runtime-state runtime-sandbox runtime-stack; do
+            test -x "desktop/electron/runtime/bin/${bin}" || { echo "missing runtime binary: ${bin}"; exit 1; }
+          done
+
+      - name: Write and validate runtime bundle
+        run: |
+          BUNDLE_DIR="$(mktemp -d)"
+          desktop/electron/runtime/bin/runtime-stack -write-bundle="${BUNDLE_DIR}" -preset=shared-remote -worker-addr=:19081
+          test -f "${BUNDLE_DIR}/stack-manifest.json"
+          test -f "${BUNDLE_DIR}/host-plan.json"
+          test -f "${BUNDLE_DIR}/host/electron/runtime-processes.json"
+          desktop/electron/runtime/bin/runtime-stack -validate-bundle="${BUNDLE_DIR}"
+
   build-electron:
     name: build-${{ matrix.os-name }}
+    needs:
+      - smoke-runtime-linux
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
