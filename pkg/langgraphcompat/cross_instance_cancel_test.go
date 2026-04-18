@@ -313,3 +313,75 @@ func TestCrossInstanceCancelIsIdempotentUnderConcurrentStaleRequests(t *testing.
 		t.Fatalf("end event count=%d want=1 events=%+v", endEvents, events)
 	}
 }
+
+func TestCrossInstanceCancelIsIdempotentAcrossConcurrentGateways(t *testing.T) {
+	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
+
+	sharedRoot := t.TempDir()
+	baseConfig := harnessruntime.DefaultGatewayRuntimeNodeConfig("gateway-a", sharedRoot, "http://worker:8081/dispatch")
+	baseConfig.State.Backend = harnessruntime.RuntimeStateStoreBackendSQLite
+	baseConfig.State.SnapshotBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	baseConfig.State.EventBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	baseConfig.State.ThreadBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	baseConfig.State.Root = filepath.Join(sharedRoot, "runtime-state")
+
+	serverA, err := NewServer(":0", "", "test-model", WithRuntimeNodeConfig(baseConfig))
+	if err != nil {
+		t.Fatalf("NewServer(serverA) error = %v", err)
+	}
+	serverB, err := NewServer(":0", "", "test-model", WithRuntimeNodeConfig(baseConfig))
+	if err != nil {
+		t.Fatalf("NewServer(serverB) error = %v", err)
+	}
+	serverC, err := NewServer(":0", "", "test-model", WithRuntimeNodeConfig(baseConfig))
+	if err != nil {
+		t.Fatalf("NewServer(serverC) error = %v", err)
+	}
+
+	now := time.Now().UTC().Add(-3 * detachedRunCancelGracePeriod)
+	run := &Run{
+		RunID:       "run-cross-instance-gateway-concurrent-cancel",
+		ThreadID:    "thread-cross-instance-gateway-concurrent-cancel",
+		AssistantID: "assistant-1",
+		Status:      "running",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Outcome:     harnessruntime.RunOutcomeDescriptor{RunStatus: "running"},
+	}
+	serverA.saveRun(run)
+
+	const workersPerGateway = 8
+	statuses := make(chan int, workersPerGateway*2)
+	var wg sync.WaitGroup
+	wg.Add(workersPerGateway * 2)
+	for i := 0; i < workersPerGateway; i++ {
+		go func() {
+			defer wg.Done()
+			resp := performCompatRequest(t, serverB.httpServer.Handler, http.MethodPost, "/threads/"+run.ThreadID+"/runs/"+run.RunID+"/cancel", nil, nil)
+			statuses <- resp.Code
+		}()
+		go func() {
+			defer wg.Done()
+			resp := performCompatRequest(t, serverC.httpServer.Handler, http.MethodPost, "/threads/"+run.ThreadID+"/runs/"+run.RunID+"/cancel", nil, nil)
+			statuses <- resp.Code
+		}()
+	}
+	wg.Wait()
+	close(statuses)
+
+	accepted := 0
+	conflict := 0
+	for status := range statuses {
+		switch status {
+		case http.StatusAccepted:
+			accepted++
+		case http.StatusConflict:
+			conflict++
+		default:
+			t.Fatalf("unexpected cancel status=%d", status)
+		}
+	}
+	if accepted != 1 {
+		t.Fatalf("accepted cancel count=%d want=1 (conflict=%d)", accepted, conflict)
+	}
+}

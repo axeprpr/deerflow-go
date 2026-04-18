@@ -98,3 +98,45 @@ func TestRuntimeNodeConfigBuildRemoteStateStores(t *testing.T) {
 		t.Fatalf("thread store type = %T", plane.Threads)
 	}
 }
+
+func TestHTTPRemoteStateServerTryCancelStaleRunRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	serverStore := RuntimeStatePlane{
+		Snapshots: NewInMemoryRunStore(),
+		Events:    NewInMemoryRunEventStore(),
+		Threads:   NewInMemoryThreadStateStore(),
+	}
+	stateServer := NewHTTPRemoteStateServer(serverStore, JSONRemoteStateProtocol{})
+	httpServer := httptest.NewServer(stateServer.Handler())
+	defer httpServer.Close()
+
+	snapshots := NewRemoteRunSnapshotStore(httpServer.URL, nil, nil)
+	cancelStore, ok := snapshots.(RunSnapshotCancelStore)
+	if !ok {
+		t.Fatalf("snapshot store %T does not implement RunSnapshotCancelStore", snapshots)
+	}
+
+	now := time.Now().UTC().Add(-2 * time.Minute)
+	snapshots.SaveRunSnapshot(RunSnapshot{
+		Record: RunRecord{
+			RunID:     "run-remote-cancel",
+			ThreadID:  "thread-remote-cancel",
+			Status:    "running",
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+	})
+
+	record, changed := cancelStore.TryCancelStaleRun("run-remote-cancel", time.Now().UTC().Add(-30*time.Second))
+	if !changed {
+		t.Fatal("TryCancelStaleRun() changed=false, want true")
+	}
+	if record.Status != "interrupted" || !record.Outcome.Interrupted {
+		t.Fatalf("record = %#v", record)
+	}
+
+	if _, changed := cancelStore.TryCancelStaleRun("run-remote-cancel", time.Now().UTC().Add(-30*time.Second)); changed {
+		t.Fatal("second TryCancelStaleRun() changed=true, want false")
+	}
+}

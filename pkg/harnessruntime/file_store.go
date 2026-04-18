@@ -5,11 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 type JSONFileRunStore struct {
-	root string
-	mu   sync.Mutex
+	root  string
+	mu    sync.Mutex
 	codec RunSnapshotMarshaler
 }
 
@@ -74,6 +75,34 @@ func (s *JSONFileRunStore) SaveRunSnapshot(snapshot RunSnapshot) {
 		return
 	}
 	_ = os.WriteFile(filepath.Join(s.root, snapshot.Record.RunID+".json"), data, 0o644)
+}
+
+func (s *JSONFileRunStore) TryCancelStaleRun(runID string, staleBefore time.Time) (RunRecord, bool) {
+	if s == nil || strings.TrimSpace(runID) == "" || s.root == "" {
+		return RunRecord{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	path := filepath.Join(s.root, strings.TrimSpace(runID)+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return RunRecord{}, false
+	}
+	codec := defaultRunSnapshotCodec(s.codec)
+	snapshot, err := codec.Decode(data)
+	if err != nil || !canCancelDetachedRecord(snapshot.Record, staleBefore) {
+		return RunRecord{}, false
+	}
+	snapshot.Record = applyDetachedCancel(snapshot.Record, time.Now().UTC())
+	encoded, err := codec.Encode(snapshot)
+	if err != nil {
+		return RunRecord{}, false
+	}
+	if err := os.WriteFile(path, encoded, 0o644); err != nil {
+		return RunRecord{}, false
+	}
+	return snapshot.Record, true
 }
 
 func (s *JSONFileRunStore) NextRunEventIndex(runID string) int {

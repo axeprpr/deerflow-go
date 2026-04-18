@@ -1,6 +1,7 @@
 package harnessruntime
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -117,5 +118,56 @@ func TestSQLiteRuntimeStatePlaneSharesOneDatabase(t *testing.T) {
 	thread, ok := plane.Threads.LoadThreadRuntimeState("thread-1")
 	if !ok || thread.Status != "busy" {
 		t.Fatalf("thread = %#v ok=%v", thread, ok)
+	}
+}
+
+func TestSQLiteRunSnapshotStoreTryCancelStaleRunIsAtomic(t *testing.T) {
+	store, err := NewSQLiteRunSnapshotStore(t.TempDir() + "/snapshots.sqlite3")
+	if err != nil {
+		t.Fatalf("NewSQLiteRunSnapshotStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	now := time.Now().UTC().Add(-2 * time.Minute)
+	store.SaveRunSnapshot(RunSnapshot{
+		Record: RunRecord{
+			RunID:     "run-atomic-cancel",
+			ThreadID:  "thread-atomic-cancel",
+			Status:    "running",
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+	})
+
+	const workers = 16
+	results := make(chan bool, workers)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			_, changed := store.TryCancelStaleRun("run-atomic-cancel", time.Now().UTC().Add(-30*time.Second))
+			results <- changed
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	changed := 0
+	for ok := range results {
+		if ok {
+			changed++
+		}
+	}
+	if changed != 1 {
+		t.Fatalf("TryCancelStaleRun changed=%d want=1", changed)
+	}
+
+	loaded, ok := store.LoadRunSnapshot("run-atomic-cancel")
+	if !ok {
+		t.Fatal("LoadRunSnapshot() = false, want true")
+	}
+	if loaded.Record.Status != "interrupted" || !loaded.Record.Outcome.Interrupted {
+		t.Fatalf("loaded record = %#v", loaded.Record)
 	}
 }

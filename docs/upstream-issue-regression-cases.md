@@ -38,7 +38,7 @@
 | P0 | P0-1 Skill 可发现且可触发 | 已覆盖 | `pkg/langgraphcompat/issue_regression_test.go`，`runtime_prompt/runtime_skill_paths` 相关回归 |
 | P0 | P0-2 Tool-call 连续性不丢失 | 已覆盖 | `pkg/agent/issue_regression_test.go`，tool-call/tool-result 配对回归 |
 | P0 | P0-3 长 CSV 分析不应重复执行已完成步骤 | 已覆盖 | `pkg/langgraphcompat/issue_regression_test.go` 的 deterministic golden + `live_behavior_test.go` 的真实 CSV 长链路回归 |
-| P0 | P0-4 跨实例 stale cancel 并发幂等 | 已覆盖 | `pkg/langgraphcompat/cross_instance_cancel_test.go` 并发 `cancel` 仅一次 `202` + 单次 `end` 终态事件 |
+| P0 | P0-4 跨实例 stale cancel 并发幂等 | 已覆盖 | `pkg/langgraphcompat/cross_instance_cancel_test.go` 覆盖单 gateway 并发与多 gateway 并发，两者都只允许一次 `202` + 单次 `end` 终态事件 |
 | P1 | P1-1 联网搜索工具可用 | 部分覆盖 | 默认 runtime tool surface + 失败诊断回归 + `web_test.go` 的真实联网 smoke；agent 路径仍待收敛 |
 | P1 | P1-2 模型映射和 provider 错误可诊断 | 已覆盖 | `runtime_model_resolution_test.go` + `pkg/agent/issue_regression_test.go` |
 | P2 | P2-1 认证签名错误 | 未覆盖 | 当前仅记录，不纳入 runtime 主回归 |
@@ -56,7 +56,7 @@
 
 - 上传文件生成的 markdown 伴生文件不再默认出现在线程 `artifacts` 中（避免污染 UI artifact 面板和无关用例）
 - 保留兼容开关：`DEERFLOW_ARTIFACT_INCLUDE_UPLOAD_MARKDOWN=true` 时恢复旧行为
-- 跨实例 stale run 并发 `cancel` 收口为幂等：并发请求只接受一次，且终态 `end` 事件只写一次
+- 跨实例 stale run 并发 `cancel` 收口为幂等：单 gateway 并发与多 gateway 并发都只接受一次，且终态 `end` 事件只写一次
 
 ## P0 用例
 

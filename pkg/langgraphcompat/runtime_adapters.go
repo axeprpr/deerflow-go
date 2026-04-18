@@ -368,12 +368,35 @@ func (a runtimeCoordinationAdapter) CancelRun(runID string) bool {
 		return true
 	}
 
+	staleBefore := time.Time{}
+	if detachedRunCancelGracePeriod > 0 {
+		staleBefore = time.Now().UTC().Add(-detachedRunCancelGracePeriod)
+	}
+	if snapshots, ok := a.server.ensureSnapshotStore().(harnessruntime.RunSnapshotCancelStore); ok {
+		if record, changed := snapshots.TryCancelStaleRun(runID, staleBefore); changed {
+			record = harnessruntime.NewRunStateService(a.server.runtimeRunStateAdapter()).MarkCanceled(record)
+			_, replayedEnd := harnessruntime.NewEventFeedService(a.server.runtimeEventAdapter()).ReplayFrom(runID, 0)
+			if !replayedEnd {
+				harnessruntime.NewEventLogService(a.server.runtimeEventAdapter()).RecordWithContext(harnessruntime.RunEventContext{
+					Attempt:         record.Attempt,
+					ResumeFromEvent: record.ResumeFromEvent,
+					ResumeReason:    record.ResumeReason,
+					Outcome:         record.Outcome,
+				}, record.RunID, record.ThreadID, "end", map[string]any{
+					"run_id": record.RunID,
+					"status": record.Status,
+				})
+			}
+			return true
+		}
+	}
+
 	record, ok := harnessruntime.NewSnapshotStoreService(a.server.ensureSnapshotStore()).LoadRecord(runID)
 	if !ok || !isRunningRunStatus(record.Status) {
 		return false
 	}
 	if detachedRunCancelGracePeriod > 0 {
-		if record.UpdatedAt.IsZero() || time.Since(record.UpdatedAt) < detachedRunCancelGracePeriod {
+		if record.UpdatedAt.IsZero() || record.UpdatedAt.After(staleBefore) {
 			return false
 		}
 	}

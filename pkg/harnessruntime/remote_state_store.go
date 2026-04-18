@@ -2,6 +2,7 @@ package harnessruntime
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -51,6 +52,36 @@ func (s *remoteRunSnapshotStore) SaveRunSnapshot(snapshot RunSnapshot) {
 		return
 	}
 	_, _, _ = s.client.Do(context.Background(), http.MethodPut, joinRemoteStateSnapshotURL(s.endpoint, snapshot.Record.RunID), body, "application/json")
+}
+
+func (s *remoteRunSnapshotStore) TryCancelStaleRun(runID string, staleBefore time.Time) (RunRecord, bool) {
+	payload, err := s.protocol.EncodeAny(map[string]any{
+		"stale_before": staleBefore.UTC(),
+	})
+	if err != nil {
+		return RunRecord{}, false
+	}
+	body, _, err := s.client.Do(context.Background(), http.MethodPost, joinRemoteStateSnapshotCancelURL(s.endpoint, runID), payload, "application/json")
+	if err != nil {
+		return RunRecord{}, false
+	}
+	value, err := s.protocol.DecodeAny(body)
+	if err != nil {
+		return RunRecord{}, false
+	}
+	result, ok := value.(map[string]any)
+	if !ok {
+		return RunRecord{}, false
+	}
+	changed, _ := result["changed"].(bool)
+	if !changed {
+		return RunRecord{}, false
+	}
+	record, ok := decodeRemoteRunRecord(result["record"])
+	if !ok {
+		return RunRecord{}, false
+	}
+	return record, true
 }
 
 type remoteRunEventStore struct {
@@ -225,4 +256,22 @@ func defaultHTTPRemoteStateClient(client *HTTPRemoteStateClient) *HTTPRemoteStat
 		return client
 	}
 	return NewHTTPRemoteStateClient(nil)
+}
+
+func decodeRemoteRunRecord(value any) (RunRecord, bool) {
+	if value == nil {
+		return RunRecord{}, false
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return RunRecord{}, false
+	}
+	var record RunRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return RunRecord{}, false
+	}
+	if strings.TrimSpace(record.RunID) == "" {
+		return RunRecord{}, false
+	}
+	return record, true
 }

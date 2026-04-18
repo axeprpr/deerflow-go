@@ -67,6 +67,10 @@ func joinRemoteStateSnapshotURL(endpoint, runID string) string {
 	return joinRemoteStateURL(endpoint, DefaultRemoteStateSnapshotsPath+"/"+url.PathEscape(strings.TrimSpace(runID)))
 }
 
+func joinRemoteStateSnapshotCancelURL(endpoint, runID string) string {
+	return joinRemoteStateSnapshotURL(endpoint, runID) + "/cancel"
+}
+
 func joinRemoteStateSnapshotsListURL(endpoint, threadID string) string {
 	raw := joinRemoteStateURL(endpoint, DefaultRemoteStateSnapshotsPath)
 	if strings.TrimSpace(threadID) == "" {

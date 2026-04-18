@@ -1,6 +1,9 @@
 package harnessruntime
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 type InMemoryRunStore struct {
 	mu               sync.RWMutex
@@ -53,6 +56,21 @@ func (s *InMemoryRunStore) SaveRunSnapshot(snapshot RunSnapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.snapshots[snapshot.Record.RunID] = cloneRunSnapshot(snapshot)
+}
+
+func (s *InMemoryRunStore) TryCancelStaleRun(runID string, staleBefore time.Time) (RunRecord, bool) {
+	if s == nil {
+		return RunRecord{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snapshot, ok := s.snapshots[runID]
+	if !ok || !canCancelDetachedRecord(snapshot.Record, staleBefore) {
+		return RunRecord{}, false
+	}
+	snapshot.Record = applyDetachedCancel(snapshot.Record, time.Now().UTC())
+	s.snapshots[runID] = cloneRunSnapshot(snapshot)
+	return snapshot.Record, true
 }
 
 func (s *InMemoryRunStore) NextRunEventIndex(runID string) int {
@@ -131,4 +149,3 @@ func cloneRunSnapshot(snapshot RunSnapshot) RunSnapshot {
 		Events: append([]RunEvent(nil), snapshot.Events...),
 	}
 }
-

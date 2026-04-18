@@ -5,11 +5,14 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 )
 
 type HTTPRemoteStateServer struct {
 	state    RuntimeStatePlane
 	protocol RemoteStateProtocol
+	mu       sync.Mutex
 }
 
 func NewHTTPRemoteStateServer(state RuntimeStatePlane, protocol RemoteStateProtocol) *HTTPRemoteStateServer {
@@ -58,13 +61,19 @@ func (s *HTTPRemoteStateServer) handleSnapshots(w http.ResponseWriter, r *http.R
 }
 
 func (s *HTTPRemoteStateServer) handleSnapshot(w http.ResponseWriter, r *http.Request) {
-	runID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, DefaultRemoteStateSnapshotsPath+"/"))
+	trimmed := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, DefaultRemoteStateSnapshotsPath+"/"))
+	parts := strings.SplitN(trimmed, "/", 2)
+	runID := strings.TrimSpace(parts[0])
+	suffix := ""
+	if len(parts) == 2 {
+		suffix = "/" + strings.TrimSpace(parts[1])
+	}
 	if runID == "" {
 		http.NotFound(w, r)
 		return
 	}
-	switch r.Method {
-	case http.MethodGet:
+	switch {
+	case r.Method == http.MethodGet && suffix == "":
 		snapshot, ok := s.state.Snapshots.LoadRunSnapshot(runID)
 		if !ok {
 			http.NotFound(w, r)
@@ -77,7 +86,7 @@ func (s *HTTPRemoteStateServer) handleSnapshot(w http.ResponseWriter, r *http.Re
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(payload)
-	case http.MethodPut:
+	case r.Method == http.MethodPut && suffix == "":
 		defer r.Body.Close()
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -94,6 +103,39 @@ func (s *HTTPRemoteStateServer) handleSnapshot(w http.ResponseWriter, r *http.Re
 		}
 		s.state.Snapshots.SaveRunSnapshot(snapshot)
 		w.WriteHeader(http.StatusNoContent)
+	case r.Method == http.MethodPost && suffix == "/cancel":
+		if s.state.Snapshots == nil {
+			http.Error(w, "snapshot store is not configured", http.StatusServiceUnavailable)
+			return
+		}
+		staleBefore := time.Time{}
+		if r.Body != nil {
+			defer r.Body.Close()
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if len(body) > 0 {
+				value, err := s.protocol.DecodeAny(body)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				staleBefore = decodeStaleBeforeFromRemoteStateValue(value)
+			}
+		}
+		record, changed := s.tryCancelSnapshot(runID, staleBefore)
+		payload, err := s.protocol.EncodeAny(map[string]any{
+			"changed": changed,
+			"record":  record,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(payload)
 	default:
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 	}
@@ -168,6 +210,42 @@ func (s *HTTPRemoteStateServer) handleEvents(w http.ResponseWriter, r *http.Requ
 	default:
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 	}
+}
+
+func (s *HTTPRemoteStateServer) tryCancelSnapshot(runID string, staleBefore time.Time) (RunRecord, bool) {
+	if s == nil || s.state.Snapshots == nil {
+		return RunRecord{}, false
+	}
+	if cancelStore, ok := s.state.Snapshots.(RunSnapshotCancelStore); ok {
+		return cancelStore.TryCancelStaleRun(runID, staleBefore)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snapshot, ok := s.state.Snapshots.LoadRunSnapshot(runID)
+	if !ok || !canCancelDetachedRecord(snapshot.Record, staleBefore) {
+		return RunRecord{}, false
+	}
+	snapshot.Record = applyDetachedCancel(snapshot.Record, time.Now().UTC())
+	s.state.Snapshots.SaveRunSnapshot(snapshot)
+	return snapshot.Record, true
+}
+
+func decodeStaleBeforeFromRemoteStateValue(value any) time.Time {
+	payload, ok := value.(map[string]any)
+	if !ok || payload == nil {
+		return time.Time{}
+	}
+	raw, _ := payload["stale_before"].(string)
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}
+	}
+	staleBefore, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return staleBefore.UTC()
 }
 
 func (s *HTTPRemoteStateServer) handleThreads(w http.ResponseWriter, r *http.Request) {

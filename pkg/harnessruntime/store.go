@@ -1,11 +1,19 @@
 package harnessruntime
 
+import "time"
+
 // RunSnapshotStore persists run records together with their replayable event history.
 // Implementations may be in-memory, file-backed, or remote.
 type RunSnapshotStore interface {
 	LoadRunSnapshot(runID string) (RunSnapshot, bool)
 	ListRunSnapshots(threadID string) []RunSnapshot
 	SaveRunSnapshot(snapshot RunSnapshot)
+}
+
+// RunSnapshotCancelStore provides an optional atomic transition for detached
+// stale-run cancellation under concurrent cross-instance requests.
+type RunSnapshotCancelStore interface {
+	TryCancelStaleRun(runID string, staleBefore time.Time) (RunRecord, bool)
 }
 
 // RunEventStore persists ordered events for one run.

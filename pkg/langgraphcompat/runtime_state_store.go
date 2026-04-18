@@ -10,6 +10,7 @@ import (
 type compatRunStateStore struct {
 	server        *Server
 	snapshots     harnessruntime.RunSnapshotStore
+	cancelStore   harnessruntime.RunSnapshotCancelStore
 	events        harnessruntime.RunEventStore
 	replaceEvents harnessruntime.RunEventReplaceStore
 }
@@ -80,6 +81,7 @@ func newCompatRunStateStore(server *Server, snapshots harnessruntime.RunSnapshot
 	return &compatRunStateStore{
 		server:        server,
 		snapshots:     store,
+		cancelStore:   asRunSnapshotCancelStore(store),
 		events:        events,
 		replaceEvents: asRunEventReplaceStore(events),
 	}
@@ -179,7 +181,28 @@ func (s *compatRunStateStore) SubscribeRunEvents(runID string, buffer int) (<-ch
 	return harnessruntime.NewInMemoryRunEventStore().SubscribeRunEvents(runID, buffer)
 }
 
+func (s *compatRunStateStore) TryCancelStaleRun(runID string, staleBefore time.Time) (harnessruntime.RunRecord, bool) {
+	if s == nil || s.cancelStore == nil {
+		return harnessruntime.RunRecord{}, false
+	}
+	record, changed := s.cancelStore.TryCancelStaleRun(runID, staleBefore)
+	if !changed {
+		return harnessruntime.RunRecord{}, false
+	}
+	if s.server != nil {
+		if snapshot, ok := s.LoadRunSnapshot(runID); ok {
+			s.server.saveRunSnapshotState(snapshot, true)
+		}
+	}
+	return record, true
+}
+
 func asRunEventReplaceStore(store harnessruntime.RunEventStore) harnessruntime.RunEventReplaceStore {
 	replace, _ := store.(harnessruntime.RunEventReplaceStore)
 	return replace
+}
+
+func asRunSnapshotCancelStore(store harnessruntime.RunSnapshotStore) harnessruntime.RunSnapshotCancelStore {
+	cancel, _ := store.(harnessruntime.RunSnapshotCancelStore)
+	return cancel
 }

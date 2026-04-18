@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -159,6 +160,54 @@ func (s *SQLiteRunSnapshotStore) SaveRunSnapshot(snapshot RunSnapshot) {
 			thread_id = excluded.thread_id,
 			snapshot_json = excluded.snapshot_json
 	`, snapshot.Record.RunID, snapshot.Record.ThreadID, data)
+}
+
+func (s *SQLiteRunSnapshotStore) TryCancelStaleRun(runID string, staleBefore time.Time) (RunRecord, bool) {
+	if s == nil || s.db == nil || strings.TrimSpace(runID) == "" {
+		return RunRecord{}, false
+	}
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return RunRecord{}, false
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "begin immediate"); err != nil {
+		return RunRecord{}, false
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(ctx, "rollback")
+		}
+	}()
+
+	var data []byte
+	if err := conn.QueryRowContext(ctx, `select snapshot_json from run_snapshots where run_id = ?`, strings.TrimSpace(runID)).Scan(&data); err != nil {
+		return RunRecord{}, false
+	}
+	snapshot, err := defaultRunSnapshotCodec(s.codec).Decode(data)
+	if err != nil || !canCancelDetachedRecord(snapshot.Record, staleBefore) {
+		return RunRecord{}, false
+	}
+	snapshot.Record = applyDetachedCancel(snapshot.Record, time.Now().UTC())
+	encoded, err := defaultRunSnapshotCodec(s.codec).Encode(snapshot)
+	if err != nil {
+		return RunRecord{}, false
+	}
+	if _, err := conn.ExecContext(ctx, `
+		update run_snapshots
+		set thread_id = ?, snapshot_json = ?
+		where run_id = ?
+	`, snapshot.Record.ThreadID, encoded, strings.TrimSpace(runID)); err != nil {
+		return RunRecord{}, false
+	}
+	if _, err := conn.ExecContext(ctx, "commit"); err != nil {
+		return RunRecord{}, false
+	}
+	committed = true
+	return snapshot.Record, true
 }
 
 type SQLiteRunEventStore struct {
