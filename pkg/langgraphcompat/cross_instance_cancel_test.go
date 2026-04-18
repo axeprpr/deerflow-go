@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -228,5 +229,87 @@ func TestCrossInstanceCancelKeepsOwnedActiveRunForJoinSelection(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for join stream after stale cancel")
+	}
+}
+
+func TestCrossInstanceCancelIsIdempotentUnderConcurrentStaleRequests(t *testing.T) {
+	t.Setenv("DEERFLOW_DATA_ROOT", t.TempDir())
+
+	sharedRoot := t.TempDir()
+	baseConfig := harnessruntime.DefaultGatewayRuntimeNodeConfig("gateway-a", sharedRoot, "http://worker:8081/dispatch")
+	baseConfig.State.Backend = harnessruntime.RuntimeStateStoreBackendSQLite
+	baseConfig.State.SnapshotBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	baseConfig.State.EventBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	baseConfig.State.ThreadBackend = harnessruntime.RuntimeStateStoreBackendSQLite
+	baseConfig.State.Root = filepath.Join(sharedRoot, "runtime-state")
+
+	serverA, err := NewServer(":0", "", "test-model", WithRuntimeNodeConfig(baseConfig))
+	if err != nil {
+		t.Fatalf("NewServer(serverA) error = %v", err)
+	}
+	serverB, err := NewServer(":0", "", "test-model", WithRuntimeNodeConfig(baseConfig))
+	if err != nil {
+		t.Fatalf("NewServer(serverB) error = %v", err)
+	}
+
+	now := time.Now().UTC().Add(-3 * detachedRunCancelGracePeriod)
+	run := &Run{
+		RunID:       "run-cross-instance-concurrent-cancel",
+		ThreadID:    "thread-cross-instance-concurrent-cancel",
+		AssistantID: "assistant-1",
+		Status:      "running",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Outcome:     harnessruntime.RunOutcomeDescriptor{RunStatus: "running"},
+	}
+	serverA.saveRun(run)
+
+	const workers = 12
+	statuses := make(chan int, workers)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			resp := performCompatRequest(t, serverB.httpServer.Handler, http.MethodPost, "/threads/"+run.ThreadID+"/runs/"+run.RunID+"/cancel", nil, nil)
+			statuses <- resp.Code
+		}()
+	}
+	wg.Wait()
+	close(statuses)
+
+	accepted := 0
+	conflict := 0
+	for status := range statuses {
+		switch status {
+		case http.StatusAccepted:
+			accepted++
+		case http.StatusConflict:
+			conflict++
+		default:
+			t.Fatalf("unexpected cancel status=%d", status)
+		}
+	}
+	if accepted != 1 {
+		t.Fatalf("accepted cancel count=%d want=1 (conflict=%d)", accepted, conflict)
+	}
+
+	getResp := performCompatRequest(t, serverB.httpServer.Handler, http.MethodGet, "/threads/"+run.ThreadID+"/runs/"+run.RunID, nil, nil)
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", getResp.Code, getResp.Body.String())
+	}
+	if !strings.Contains(getResp.Body.String(), `"status":"interrupted"`) {
+		t.Fatalf("run body missing interrupted status: %s", getResp.Body.String())
+	}
+
+	events := serverB.ensureEventStore().LoadRunEvents(run.RunID)
+	endEvents := 0
+	for _, evt := range events {
+		if evt.Event == "end" {
+			endEvents++
+		}
+	}
+	if endEvents != 1 {
+		t.Fatalf("end event count=%d want=1 events=%+v", endEvents, events)
 	}
 }

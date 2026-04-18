@@ -361,6 +361,13 @@ func (a runtimeCoordinationAdapter) CancelRun(runID string) bool {
 		return true
 	}
 
+	unlock := a.server.lockDetachedCancel(runID)
+	defer unlock()
+
+	if a.server.cancelActiveRun(runID) {
+		return true
+	}
+
 	record, ok := harnessruntime.NewSnapshotStoreService(a.server.ensureSnapshotStore()).LoadRecord(runID)
 	if !ok || !isRunningRunStatus(record.Status) {
 		return false

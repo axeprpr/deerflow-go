@@ -477,9 +477,26 @@ func openSQLiteStateDB(path string, schema string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
+	// Keep a single pooled connection so SQLite session pragmas remain stable
+	// and concurrent readers/writers coordinate via busy_timeout instead of
+	// returning transient "database is locked" errors.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	if err := db.PingContext(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping sqlite: %w", err)
+	}
+	if _, err := db.ExecContext(context.Background(), "pragma busy_timeout = 5000;"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("configure sqlite busy_timeout: %w", err)
+	}
+	if _, err := db.ExecContext(context.Background(), "pragma journal_mode = wal;"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("configure sqlite journal_mode: %w", err)
+	}
+	if _, err := db.ExecContext(context.Background(), "pragma synchronous = normal;"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("configure sqlite synchronous mode: %w", err)
 	}
 	if _, err := db.ExecContext(context.Background(), schema); err != nil {
 		_ = db.Close()

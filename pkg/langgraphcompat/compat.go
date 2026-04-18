@@ -66,12 +66,19 @@ type Server struct {
 	channelService   *gatewayChannelService
 	channelConfig    gatewayChannelsConfig
 	compatFSManaged  bool
+	detachedCancelMu sync.Mutex
+	detachedCancels  map[string]*detachedCancelEntry
 	mcpMu            sync.Mutex
 	mcpConnector     gatewayMCPConnector
 	mcpClients       map[string]gatewayMCPClient
 	mcpToolNames     map[string]struct{}
 	mcpDeferredTools []models.Tool
 	channels         gatewayChannelsStatus
+}
+
+type detachedCancelEntry struct {
+	mu   sync.Mutex
+	refs int
 }
 
 type HealthStatus struct {
