@@ -120,6 +120,7 @@ Reference documents:
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [API Diff](docs/API_DIFF.md)
+- [Electron Local Runtime](desktop/electron/README.md)
 
 ## Remaining Large Workstreams
 
