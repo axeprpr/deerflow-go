@@ -304,6 +304,70 @@ func TestIssue2123ToolCallContinuitySurvivesFailedToolRetry(t *testing.T) {
 	}
 }
 
+func TestToolCallConvergenceDropsAskClarificationWhenMixedWithExecution(t *testing.T) {
+	calls := []models.ToolCall{
+		{ID: "c1", Name: "ask_clarification", Arguments: map[string]any{"question": "Need detail?", "clarification_type": "missing_info"}},
+		{ID: "c2", Name: "write_file", Arguments: map[string]any{"path": "/mnt/user-data/outputs/index.html", "content": "<html></html>"}},
+	}
+	pruned := pruneToolCallsForConvergence(nil, calls)
+	if len(pruned) != 1 {
+		t.Fatalf("len(pruned)=%d want=1", len(pruned))
+	}
+	if got := strings.TrimSpace(pruned[0].Name); got != "write_file" {
+		t.Fatalf("remaining tool=%q want write_file", got)
+	}
+}
+
+func TestToolCallConvergenceKeepsAskClarificationWhenStandalone(t *testing.T) {
+	calls := []models.ToolCall{
+		{ID: "c1", Name: "ask_clarification", Arguments: map[string]any{"question": "Need detail?", "clarification_type": "missing_info"}},
+	}
+	pruned := pruneToolCallsForConvergence(nil, calls)
+	if len(pruned) != 1 || strings.TrimSpace(pruned[0].Name) != "ask_clarification" {
+		t.Fatalf("pruned=%#v want standalone ask_clarification", pruned)
+	}
+}
+
+func TestToolCallConvergenceDropsWebSearchWhenURLFetchPresent(t *testing.T) {
+	messages := []models.Message{{
+		ID:      "m1",
+		Role:    models.RoleHuman,
+		Content: "联网获取 https://platform.openai.com/docs/api-reference 提炼要点。",
+	}}
+	calls := []models.ToolCall{
+		{ID: "f1", Name: "web_fetch", Arguments: map[string]any{"url": "https://platform.openai.com/docs/api-reference"}},
+		{ID: "s1", Name: "web_search", Arguments: map[string]any{"query": "OpenAI API reference"}},
+	}
+	pruned := pruneToolCallsForConvergence(messages, calls)
+	if len(pruned) != 1 {
+		t.Fatalf("len(pruned)=%d want=1", len(pruned))
+	}
+	if got := strings.TrimSpace(pruned[0].Name); got != "web_fetch" {
+		t.Fatalf("remaining tool=%q want web_fetch", got)
+	}
+}
+
+func TestToolCallConvergenceRewritesSingleWebSearchToWebFetchWhenURLInTurn(t *testing.T) {
+	messages := []models.Message{{
+		ID:      "m1",
+		Role:    models.RoleHuman,
+		Content: "联网获取 https://platform.openai.com/docs/pricing ，总结 3 点。",
+	}}
+	calls := []models.ToolCall{
+		{ID: "s1", Name: "web_search", Arguments: map[string]any{"query": "OpenAI API pricing"}},
+	}
+	pruned := pruneToolCallsForConvergence(messages, calls)
+	if len(pruned) != 1 {
+		t.Fatalf("len(pruned)=%d want=1", len(pruned))
+	}
+	if got := strings.TrimSpace(pruned[0].Name); got != "web_fetch" {
+		t.Fatalf("remaining tool=%q want web_fetch", got)
+	}
+	if got := strings.TrimSpace(stringFromAny(pruned[0].Arguments["url"])); got != "https://platform.openai.com/docs/pricing" {
+		t.Fatalf("rewritten url=%q want explicit URL from turn", got)
+	}
+}
+
 func assertLastToolRoundTrip(t *testing.T, messages []models.Message, callID, toolName string) {
 	t.Helper()
 	if len(messages) < 2 {

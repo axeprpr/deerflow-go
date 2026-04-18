@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,6 +37,7 @@ const defaultSchemaRepairMaxOutputChars = 16000
 
 var messageSeq uint64
 var agentRequestSeq uint64
+var explicitURLPattern = regexp.MustCompile(`https?://[^\s<>"'` + "`" + `]+`)
 
 // Agent runs our custom ReAct loop while delegating model streaming and tool schemas to Eino.
 type Agent struct {
@@ -315,6 +317,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 		toolCalls = truncateTaskToolCalls(toolCalls, a.maxConcurrentSubagents)
 		toolCalls = normalizeToolCalls(toolCalls)
 		toolCalls = rewriteSkillToolAliases(ctx, toolCalls)
+		toolCalls = pruneToolCallsForConvergence(runMessages, toolCalls)
 
 		assistantMetadata := map[string]string{"stop_reason": stopReason}
 		if streamUsage != nil {
@@ -1664,18 +1667,36 @@ func missingWebSearchToolCallRetryPrompt(messages []models.Message, assistant mo
 		return ""
 	}
 	hasWebSearch := false
+	hasWebFetch := false
 	for _, tool := range visibleTools {
 		if strings.EqualFold(strings.TrimSpace(tool.Name), "web_search") {
 			hasWebSearch = true
-			break
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(tool.Name), "web_fetch") {
+			hasWebFetch = true
 		}
 	}
-	if !hasWebSearch || len(assistant.ToolCalls) > 0 {
+	if len(assistant.ToolCalls) > 0 {
 		return ""
 	}
 
 	assistantLower := strings.ToLower(strings.TrimSpace(assistant.Content))
 	if assistantLower == "" {
+		return ""
+	}
+
+	if targetURL := turnExplicitURL(messages); targetURL != "" {
+		if !hasWebFetch || messagesHaveToolResult(messages, "web_fetch") {
+			return ""
+		}
+		return fmt.Sprintf(
+			"Do not simulate fetched page content in plain text. Call `web_fetch` now with URL `%s`, then continue using the tool output.",
+			targetURL,
+		)
+	}
+
+	if !hasWebSearch {
 		return ""
 	}
 	mentionsWebSearch := strings.Contains(assistantLower, "web_search") ||
@@ -1812,6 +1833,140 @@ func rewriteSkillToolAliases(ctx context.Context, calls []models.ToolCall) []mod
 		})
 	}
 	return out
+}
+
+func pruneToolCallsForConvergence(messages []models.Message, calls []models.ToolCall) []models.ToolCall {
+	if len(calls) == 0 {
+		return calls
+	}
+	pruned := append([]models.ToolCall(nil), calls...)
+
+	if targetURL := turnExplicitURL(messages); targetURL != "" {
+		if hasCallNamed(pruned, "web_search") && !hasCallNamed(pruned, "web_fetch") {
+			for idx, call := range pruned {
+				if strings.EqualFold(strings.TrimSpace(call.Name), "web_search") {
+					pruned[idx] = rewriteWebSearchAsFetch(call, targetURL)
+				}
+			}
+		}
+	}
+
+	if hasCallNamed(pruned, "ask_clarification") && hasNonClarificationCall(pruned) {
+		filtered := make([]models.ToolCall, 0, len(pruned))
+		for _, call := range pruned {
+			if strings.EqualFold(strings.TrimSpace(call.Name), "ask_clarification") {
+				continue
+			}
+			filtered = append(filtered, call)
+		}
+		pruned = filtered
+	}
+
+	if len(pruned) > 1 && hasCallNamed(pruned, "web_fetch") && hasCallNamed(pruned, "web_search") {
+		if turnHasExplicitURL(messages) || webFetchCallsContainURL(pruned) {
+			filtered := make([]models.ToolCall, 0, len(pruned))
+			for _, call := range pruned {
+				if strings.EqualFold(strings.TrimSpace(call.Name), "web_search") {
+					continue
+				}
+				filtered = append(filtered, call)
+			}
+			pruned = filtered
+		}
+	}
+
+	return pruned
+}
+
+func rewriteWebSearchAsFetch(call models.ToolCall, targetURL string) models.ToolCall {
+	rewritten := call
+	rewritten.Name = "web_fetch"
+	description := strings.TrimSpace(stringFromAny(call.Arguments["description"]))
+	if description == "" {
+		description = strings.TrimSpace(stringFromAny(call.Arguments["query"]))
+	}
+	rewritten.Arguments = map[string]any{
+		"url": targetURL,
+	}
+	if description != "" {
+		rewritten.Arguments["description"] = description
+	}
+	return rewritten
+}
+
+func hasCallNamed(calls []models.ToolCall, name string) bool {
+	for _, call := range calls {
+		if strings.EqualFold(strings.TrimSpace(call.Name), name) {
+			return true
+		}
+	}
+	return false
+}
+
+func messagesHaveToolResult(messages []models.Message, toolName string) bool {
+	toolName = strings.TrimSpace(toolName)
+	if toolName == "" {
+		return false
+	}
+	for _, msg := range messages {
+		if msg.Role != models.RoleTool || msg.ToolResult == nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(msg.ToolResult.ToolName), toolName) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasNonClarificationCall(calls []models.ToolCall) bool {
+	for _, call := range calls {
+		if !strings.EqualFold(strings.TrimSpace(call.Name), "ask_clarification") {
+			return true
+		}
+	}
+	return false
+}
+
+func turnHasExplicitURL(messages []models.Message) bool {
+	return turnExplicitURL(messages) != ""
+}
+
+func turnExplicitURL(messages []models.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != models.RoleHuman {
+			continue
+		}
+		text := strings.TrimSpace(msg.Content)
+		if text == "" {
+			continue
+		}
+		for _, candidate := range explicitURLPattern.FindAllString(text, -1) {
+			candidate = strings.TrimSpace(candidate)
+			candidate = strings.TrimRight(candidate, ".,;:!，。；：！)]}>\"'")
+			if strings.HasPrefix(candidate, "http://") || strings.HasPrefix(candidate, "https://") {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
+func webFetchCallsContainURL(calls []models.ToolCall) bool {
+	for _, call := range calls {
+		if !strings.EqualFold(strings.TrimSpace(call.Name), "web_fetch") {
+			continue
+		}
+		raw := strings.TrimSpace(stringFromAny(call.Arguments["url"]))
+		if raw == "" {
+			raw = strings.TrimSpace(stringFromAny(call.Arguments["uri"]))
+		}
+		if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeSkillPaths(ctx context.Context) map[string]string {

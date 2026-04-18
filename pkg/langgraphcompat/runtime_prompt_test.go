@@ -35,7 +35,7 @@ func TestResolveRunConfigIncludesWorkingDirectoryGuidance(t *testing.T) {
 	if !strings.Contains(cfg.SystemPrompt, "<clarification_system>") {
 		t.Fatalf("system prompt missing clarification workflow: %q", cfg.SystemPrompt)
 	}
-	if !strings.Contains(cfg.SystemPrompt, "WORKFLOW PRIORITY: CLARIFY -> PLAN -> ACT") {
+	if !strings.Contains(cfg.SystemPrompt, "Use `ask_clarification` only when progress is blocked") {
 		t.Fatalf("system prompt missing clarification priority guidance: %q", cfg.SystemPrompt)
 	}
 	if !strings.Contains(cfg.SystemPrompt, "PRIORITY CHECK") {
