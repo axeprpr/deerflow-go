@@ -4,10 +4,13 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/axeprpr/deerflow-go/pkg/tools"
 )
+
+const envIncludeUploadMarkdownArtifacts = "DEERFLOW_ARTIFACT_INCLUDE_UPLOAD_MARKDOWN"
 
 func (s *Server) uploadedFilesState(threadID string) []map[string]any {
 	entries, err := os.ReadDir(s.uploadsDir(threadID))
@@ -202,15 +205,17 @@ func (s *Server) collectArtifactFiles(session *Session) []tools.PresentFile {
 		}
 		autoFiles = append(autoFiles, file)
 	}
-	for _, file := range collectPresentFiles(s.uploadsDir(session.ThreadID), "/mnt/user-data/uploads", true) {
-		file = s.normalizePresentFile(session.ThreadID, file)
-		if file.ID == "" || file.Path == "" || !presentFileExists(file) {
-			continue
+	if includeUploadMarkdownArtifacts() {
+		for _, file := range collectPresentFiles(s.uploadsDir(session.ThreadID), "/mnt/user-data/uploads", true) {
+			file = s.normalizePresentFile(session.ThreadID, file)
+			if file.ID == "" || file.Path == "" || !presentFileExists(file) {
+				continue
+			}
+			if _, ok := seen[file.Path]; ok {
+				continue
+			}
+			autoFiles = append(autoFiles, file)
 		}
-		if _, ok := seen[file.Path]; ok {
-			continue
-		}
-		autoFiles = append(autoFiles, file)
 	}
 	sort.Slice(autoFiles, func(i, j int) bool {
 		if autoFiles[i].CreatedAt.Equal(autoFiles[j].CreatedAt) {
@@ -220,4 +225,13 @@ func (s *Server) collectArtifactFiles(session *Session) []tools.PresentFile {
 	})
 	files = append(files, autoFiles...)
 	return files
+}
+
+func includeUploadMarkdownArtifacts() bool {
+	raw := strings.TrimSpace(os.Getenv(envIncludeUploadMarkdownArtifacts))
+	if raw == "" {
+		return false
+	}
+	parsed, err := strconv.ParseBool(raw)
+	return err == nil && parsed
 }

@@ -129,6 +129,7 @@ func TestThreadFilesListUploadMarkdownBeforeOriginalFile(t *testing.T) {
 }
 
 func TestThreadStateArtifactsAppendUploadMarkdownAfterOutputs(t *testing.T) {
+	t.Setenv(envIncludeUploadMarkdownArtifacts, "1")
 	s, _ := newCompatTestServer(t)
 	threadID := "thread-artifacts-include-upload-markdown"
 	session := s.ensureSession(threadID, nil)
@@ -174,6 +175,7 @@ func TestThreadStateArtifactsAppendUploadMarkdownAfterOutputs(t *testing.T) {
 }
 
 func TestThreadStateArtifactsSortAcrossRootsByNewestModifiedTime(t *testing.T) {
+	t.Setenv(envIncludeUploadMarkdownArtifacts, "1")
 	s, _ := newCompatTestServer(t)
 	threadID := "thread-artifacts-global-sort"
 	s.ensureSession(threadID, nil)

@@ -179,6 +179,9 @@ func TestRuntimeWorkerSpecAdapterRehydratesThreadScopedState(t *testing.T) {
 	}
 	session := server.ensureSession("thread-1", nil)
 	session.PresentFiles = tools.NewPresentFileRegistry()
+	session.Values["pinned_facts"] = map[string]any{
+		"tender_id": "TB-2026-041",
+	}
 
 	got := server.runtimeWorkerSpecAdapter().ResolveWorkerAgentSpec("thread-1", harnessruntime.PortableAgentSpec{
 		Model:        "model-1",
@@ -190,6 +193,9 @@ func TestRuntimeWorkerSpecAdapterRehydratesThreadScopedState(t *testing.T) {
 	}
 	if len(got.DeferredTools) != 1 || got.DeferredTools[0].Name != "web_search" {
 		t.Fatalf("DeferredTools = %#v", got.DeferredTools)
+	}
+	if got.PinnedFacts["tender_id"] != "TB-2026-041" {
+		t.Fatalf("PinnedFacts = %#v", got.PinnedFacts)
 	}
 	if got.Model != "model-1" || got.SystemPrompt != "system" {
 		t.Fatalf("resolved spec = %#v", got)

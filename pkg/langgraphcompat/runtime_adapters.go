@@ -535,6 +535,7 @@ func (a runtimeWorkerSpecAdapter) ResolveWorkerAgentSpec(threadID string, spec h
 	}
 	session := a.server.ensureSession(threadID, nil)
 	resolved.PresentFiles = session.PresentFiles
+	resolved.PinnedFacts = pinnedFactsFromValues(session.Values)
 	if len(a.server.mcpDeferredTools) > 0 {
 		resolved.DeferredTools = append([]models.Tool(nil), a.server.mcpDeferredTools...)
 	}

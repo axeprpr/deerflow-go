@@ -17,6 +17,7 @@ type PortableAgentSpec struct {
 	Model                  string
 	ReasoningEffort        string
 	SystemPrompt           string
+	PinnedFacts            map[string]string
 	Temperature            *float64
 	MaxTokens              *int
 	RequestTimeout         time.Duration
@@ -33,6 +34,7 @@ func PortableAgentSpecFromAgentSpec(spec harness.AgentSpec) PortableAgentSpec {
 		Model:                  spec.Model,
 		ReasoningEffort:        spec.ReasoningEffort,
 		SystemPrompt:           spec.SystemPrompt,
+		PinnedFacts:            copyPortableStringMap(spec.PinnedFacts),
 		Temperature:            spec.Temperature,
 		MaxTokens:              spec.MaxTokens,
 		RequestTimeout:         spec.RequestTimeout,
@@ -50,12 +52,24 @@ func (s PortableAgentSpec) AgentSpec() harness.AgentSpec {
 		Model:                  s.Model,
 		ReasoningEffort:        s.ReasoningEffort,
 		SystemPrompt:           s.SystemPrompt,
+		PinnedFacts:            copyPortableStringMap(s.PinnedFacts),
 		Temperature:            s.Temperature,
 		MaxTokens:              s.MaxTokens,
 		RequestTimeout:         s.RequestTimeout,
 		GuardrailFailClosed:    s.GuardrailFailClosed,
 		GuardrailPassport:      s.GuardrailPassport,
 	}
+}
+
+func copyPortableStringMap(raw map[string]string) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(raw))
+	for key, value := range raw {
+		out[key] = value
+	}
+	return out
 }
 
 type WorkerSpecRuntime interface {

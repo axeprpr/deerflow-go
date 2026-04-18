@@ -182,6 +182,128 @@ func TestIssue2139WebSearchTextSimulationTriggersRetryAndRealToolCall(t *testing
 	}
 }
 
+func TestIssueC07UploadTextSimulationTriggersRetryAndReadFileToolCall(t *testing.T) {
+	registry := tools.NewRegistry()
+	readFileCalls := 0
+	if err := registry.Register(models.Tool{
+		Name:        "read_file",
+		Description: "read uploaded file",
+		Handler: func(_ context.Context, call models.ToolCall) (models.ToolResult, error) {
+			readFileCalls++
+			path := strings.TrimSpace(stringFromAny(call.Arguments["path"]))
+			if path == "" {
+				return models.ToolResult{}, errors.New("missing required argument \"path\"")
+			}
+			return models.ToolResult{
+				CallID:   call.ID,
+				ToolName: call.Name,
+				Status:   models.CallStatusCompleted,
+				Content:  "风险1: 供应延期\n风险2: 范围变更\n风险3: 预算收紧",
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register read_file: %v", err)
+	}
+
+	provider := &issueC07UploadReadFileProvider{t: t}
+	runAgent := New(AgentConfig{
+		LLMProvider: provider,
+		Tools:       registry,
+		MaxTurns:    4,
+	})
+
+	result, err := runAgent.Run(context.Background(), "issue-c07", []models.Message{{
+		ID:        "m1",
+		SessionID: "issue-c07",
+		Role:      models.RoleHuman,
+		Content:   "<uploaded_files>\n- weekly_note.txt (2.0 KB)\n  Path: /mnt/user-data/uploads/weekly_note.txt\n</uploaded_files>\n\n基于我上传的 weekly_note.txt，输出 3 条风险和 2 条建议。",
+	}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "done" {
+		t.Fatalf("FinalOutput=%q want done", result.FinalOutput)
+	}
+	if readFileCalls != 1 {
+		t.Fatalf("read_file calls=%d want 1", readFileCalls)
+	}
+	if provider.calls != 3 {
+		t.Fatalf("provider calls=%d want 3", provider.calls)
+	}
+	if !messagesContainToolResult(result.Messages, "read_file") {
+		t.Fatalf("messages=%#v want read_file tool result", result.Messages)
+	}
+	if !messagesContainHumanText(result.Messages, "Do not answer from filename metadata only. Call `read_file` now") {
+		t.Fatalf("messages=%#v want read_file retry prompt", result.Messages)
+	}
+}
+
+func TestIssue2123ToolCallContinuitySurvivesFailedToolRetry(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name:        "read_file",
+		Description: "read file",
+		Handler: func(_ context.Context, call models.ToolCall) (models.ToolResult, error) {
+			return models.ToolResult{
+				CallID:   call.ID,
+				ToolName: call.Name,
+				Status:   models.CallStatusCompleted,
+				Content:  "skill loaded",
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register read_file: %v", err)
+	}
+
+	webSearchAttempts := 0
+	if err := registry.Register(models.Tool{
+		Name:        "web_search",
+		Description: "search web",
+		Handler: func(_ context.Context, call models.ToolCall) (models.ToolResult, error) {
+			webSearchAttempts++
+			if webSearchAttempts == 1 {
+				return models.ToolResult{
+					CallID:   call.ID,
+					ToolName: call.Name,
+					Status:   models.CallStatusFailed,
+					Content:  "temporary upstream timeout",
+				}, nil
+			}
+			return models.ToolResult{
+				CallID:   call.ID,
+				ToolName: call.Name,
+				Status:   models.CallStatusCompleted,
+				Content:  "search ok",
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register web_search: %v", err)
+	}
+
+	provider := &issue2123RetryProvider{t: t}
+	runAgent := New(AgentConfig{
+		LLMProvider: provider,
+		Tools:       registry,
+		MaxTurns:    6,
+	})
+
+	result, err := runAgent.Run(context.Background(), "issue-2123-retry", []models.Message{{
+		ID:        "m1",
+		SessionID: "issue-2123-retry",
+		Role:      models.RoleHuman,
+		Content:   "先读取 skill，再联网查价格，失败请重试一次",
+	}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "done" {
+		t.Fatalf("FinalOutput=%q want done", result.FinalOutput)
+	}
+	if webSearchAttempts != 2 {
+		t.Fatalf("web_search attempts=%d want 2", webSearchAttempts)
+	}
+}
+
 func assertLastToolRoundTrip(t *testing.T, messages []models.Message, callID, toolName string) {
 	t.Helper()
 	if len(messages) < 2 {
@@ -203,6 +325,22 @@ func assertLastToolRoundTrip(t *testing.T, messages []models.Message, callID, to
 	}
 }
 
+func assertToolResultStatus(t *testing.T, messages []models.Message, callID, toolName string, status models.CallStatus) {
+	t.Helper()
+	for _, msg := range messages {
+		if msg.Role != models.RoleTool || msg.ToolResult == nil {
+			continue
+		}
+		if msg.ToolResult.CallID == callID && msg.ToolResult.ToolName == toolName {
+			if msg.ToolResult.Status != status {
+				t.Fatalf("tool result %s/%s status=%s want %s", toolName, callID, msg.ToolResult.Status, status)
+			}
+			return
+		}
+	}
+	t.Fatalf("tool result %s/%s not found in messages=%#v", toolName, callID, messages)
+}
+
 type issue2124FailingProvider struct {
 	err error
 }
@@ -221,6 +359,76 @@ func (p issue2124FailingProvider) Stream(context.Context, llm.ChatRequest) (<-ch
 type issue2139WebSearchSimulationProvider struct {
 	t     *testing.T
 	calls int
+}
+
+type issueC07UploadReadFileProvider struct {
+	t     *testing.T
+	calls int
+}
+
+func (p *issueC07UploadReadFileProvider) PrefersStructuredToolCalls() bool { return true }
+
+func (p *issueC07UploadReadFileProvider) Chat(_ context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	p.calls++
+	switch p.calls {
+	case 1:
+		if !toolListContains(req.Tools, "read_file") {
+			p.t.Fatalf("tools=%v want read_file", toolNames(req.Tools))
+		}
+		return llm.ChatResponse{
+			Model: "test-model",
+			Message: models.Message{
+				Role:    models.RoleAI,
+				Content: "我会基于你上传的 weekly_note.txt 给出风险和建议。",
+			},
+			Stop: "stop",
+		}, nil
+	case 2:
+		if len(req.Messages) == 0 || req.Messages[len(req.Messages)-1].Role != models.RoleHuman {
+			p.t.Fatalf("last message=%#v want human retry prompt", req.Messages)
+		}
+		if !strings.Contains(req.Messages[len(req.Messages)-1].Content, "Do not answer from filename metadata only. Call `read_file` now") {
+			p.t.Fatalf("retry prompt=%q", req.Messages[len(req.Messages)-1].Content)
+		}
+		return llm.ChatResponse{
+			Model: "test-model",
+			Message: models.Message{
+				Role: models.RoleAI,
+				ToolCalls: []models.ToolCall{{
+					ID:   "read-1",
+					Name: "read_file",
+					Arguments: map[string]any{
+						"path": "/mnt/user-data/uploads/weekly_note.txt",
+					},
+				}},
+			},
+			Stop: "tool_calls",
+		}, nil
+	case 3:
+		if !messagesContainToolResult(req.Messages, "read_file") {
+			p.t.Fatalf("messages=%#v want read_file result in history", req.Messages)
+		}
+		return llm.ChatResponse{
+			Model: "test-model",
+			Message: models.Message{
+				Role:    models.RoleAI,
+				Content: "done",
+			},
+			Stop: "stop",
+		}, nil
+	default:
+		p.t.Fatalf("unexpected Chat call %d", p.calls)
+		return llm.ChatResponse{}, nil
+	}
+}
+
+func (p *issueC07UploadReadFileProvider) Stream(context.Context, llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	if p.t != nil {
+		p.t.Fatal("Stream() should not be used for structured tool turns")
+	}
+	ch := make(chan llm.StreamChunk)
+	close(ch)
+	return ch, nil
 }
 
 func (p *issue2139WebSearchSimulationProvider) PrefersStructuredToolCalls() bool { return true }
@@ -280,6 +488,85 @@ func (p *issue2139WebSearchSimulationProvider) Chat(_ context.Context, req llm.C
 }
 
 func (p *issue2139WebSearchSimulationProvider) Stream(context.Context, llm.ChatRequest) (<-chan llm.StreamChunk, error) {
+	if p.t != nil {
+		p.t.Fatal("Stream() should not be used for structured tool turns")
+	}
+	ch := make(chan llm.StreamChunk)
+	close(ch)
+	return ch, nil
+}
+
+type issue2123RetryProvider struct {
+	t     *testing.T
+	calls int
+}
+
+func (p *issue2123RetryProvider) PrefersStructuredToolCalls() bool { return true }
+
+func (p *issue2123RetryProvider) Chat(_ context.Context, req llm.ChatRequest) (llm.ChatResponse, error) {
+	p.calls++
+	switch p.calls {
+	case 1:
+		return llm.ChatResponse{
+			Model: "test-model",
+			Message: models.Message{
+				Role: models.RoleAI,
+				ToolCalls: []models.ToolCall{
+					{
+						ID:   "read-1",
+						Name: "read_file",
+						Arguments: map[string]any{
+							"path": "/mnt/skills/public/frontend-design/SKILL.md",
+						},
+					},
+					{
+						ID:   "web-1",
+						Name: "web_search",
+						Arguments: map[string]any{
+							"query": "OpenAI API pricing",
+						},
+					},
+				},
+			},
+			Stop: "tool_calls",
+		}, nil
+	case 2:
+		assertToolResultStatus(p.t, req.Messages, "read-1", "read_file", models.CallStatusCompleted)
+		assertToolResultStatus(p.t, req.Messages, "web-1", "web_search", models.CallStatusFailed)
+		return llm.ChatResponse{
+			Model: "test-model",
+			Message: models.Message{
+				Role: models.RoleAI,
+				ToolCalls: []models.ToolCall{
+					{
+						ID:   "web-2",
+						Name: "web_search",
+						Arguments: map[string]any{
+							"query": "OpenAI API pricing",
+						},
+					},
+				},
+			},
+			Stop: "tool_calls",
+		}, nil
+	case 3:
+		assertToolResultStatus(p.t, req.Messages, "web-1", "web_search", models.CallStatusFailed)
+		assertToolResultStatus(p.t, req.Messages, "web-2", "web_search", models.CallStatusCompleted)
+		return llm.ChatResponse{
+			Model: "test-model",
+			Message: models.Message{
+				Role:    models.RoleAI,
+				Content: "done",
+			},
+			Stop: "stop",
+		}, nil
+	default:
+		p.t.Fatalf("unexpected Chat call %d", p.calls)
+		return llm.ChatResponse{}, nil
+	}
+}
+
+func (p *issue2123RetryProvider) Stream(context.Context, llm.ChatRequest) (<-chan llm.StreamChunk, error) {
 	if p.t != nil {
 		p.t.Fatal("Stream() should not be used for structured tool turns")
 	}

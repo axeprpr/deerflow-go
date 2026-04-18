@@ -48,11 +48,13 @@ func resolveRunFactStorePolicy() runFactStorePolicy {
 	return policy
 }
 
-func newRunFactStoreState(policy runFactStorePolicy) *runFactStoreState {
-	return &runFactStoreState{
+func newRunFactStoreState(policy runFactStorePolicy, seeded map[string]string) *runFactStoreState {
+	state := &runFactStoreState{
 		policy: policy,
 		facts:  map[string]string{},
 	}
+	state.upsertAll(seeded)
+	return state
 }
 
 func (s *runFactStoreState) observeMessages(messages []models.Message) {
@@ -88,8 +90,12 @@ func (s *runFactStoreState) upsertAll(facts map[string]string) {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	for _, key := range keys {
-		value := strings.TrimSpace(facts[key])
+	for _, rawKey := range keys {
+		key := normalizeFactKey(rawKey)
+		if key == "" {
+			continue
+		}
+		value := strings.TrimSpace(facts[rawKey])
 		if value == "" {
 			continue
 		}
@@ -124,6 +130,17 @@ func (s *runFactStoreState) prompt() string {
 	}
 	b.WriteString("</run_fact_store>")
 	return b.String()
+}
+
+func (s *runFactStoreState) snapshot() map[string]string {
+	if s == nil || len(s.facts) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(s.facts))
+	for key, value := range s.facts {
+		out[key] = value
+	}
+	return out
 }
 
 func extractFactCandidates(text string, maxValueChars int) map[string]string {

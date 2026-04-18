@@ -53,6 +53,18 @@ func requireLiveBehaviorBaseURL(t *testing.T) string {
 	return strings.TrimRight(baseURL, "/")
 }
 
+func liveBehaviorStreamTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("DEERFLOW_LIVE_STREAM_TIMEOUT"))
+	if raw == "" {
+		return 4 * time.Minute
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 4 * time.Minute
+	}
+	return d
+}
+
 func runLiveBehaviorThread(t *testing.T, baseURL, threadID, prompt string) liveBehaviorThread {
 	t.Helper()
 
@@ -92,7 +104,7 @@ func runLiveBehaviorThread(t *testing.T, baseURL, threadID, prompt string) liveB
 		t.Fatalf("marshal payload: %v", err)
 	}
 
-	client := &http.Client{Timeout: 4 * time.Minute}
+	client := &http.Client{Timeout: liveBehaviorStreamTimeout()}
 	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/api/langgraph/threads/%s/runs/stream", baseURL, threadID), bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("new stream request: %v", err)
@@ -284,6 +296,62 @@ func TestLiveBehaviorAmbiguousPromptRequestsMoreDetail(t *testing.T) {
 	}
 }
 
+func TestLiveBehaviorClarificationThenConcreteFollowupExecutes(t *testing.T) {
+	baseURL := requireLiveBehaviorBaseURL(t)
+	threadID := uuid.NewString()
+
+	first := runLiveBehaviorThread(t, baseURL, threadID, "帮我做一个页面")
+	if first.Status != "idle" && first.Status != "interrupted" {
+		t.Fatalf("first run status=%q want idle or interrupted", first.Status)
+	}
+	if len(first.Values.Artifacts) != 0 {
+		t.Fatalf("first run should not create artifacts, got %v", first.Values.Artifacts)
+	}
+
+	firstMessages := decodeLiveBehaviorMessages(t, first.Values.Messages)
+	sawClarification := false
+	for _, msg := range firstMessages {
+		for _, call := range msg.ToolCalls {
+			if call.Name == "ask_clarification" {
+				sawClarification = true
+			}
+		}
+		content := strings.TrimSpace(liveBehaviorContentString(msg.Content))
+		if (msg.Role == "assistant" || msg.Type == "ai") && looksLikeDetailRequest(content) {
+			sawClarification = true
+		}
+	}
+	if !sawClarification {
+		t.Fatal("first run should request clarification detail")
+	}
+
+	second := runLiveBehaviorThread(t, baseURL, threadID, "请用纯 HTML/CSS/JS 生成一个单页欢迎页（深蓝科技风，含标题/副标题/按钮），输出到 /mnt/user-data/outputs/index.html 并展示结果。")
+	if second.Status != "idle" {
+		t.Fatalf("second run status=%q want idle", second.Status)
+	}
+
+	artifactSet := map[string]struct{}{}
+	for _, artifact := range second.Values.Artifacts {
+		artifactSet[artifact] = struct{}{}
+	}
+	if _, ok := artifactSet["/mnt/user-data/outputs/index.html"]; !ok {
+		t.Fatalf("second run artifacts=%v missing /mnt/user-data/outputs/index.html", second.Values.Artifacts)
+	}
+
+	secondMessages := decodeLiveBehaviorMessages(t, second.Values.Messages)
+	sawWriteOrPresent := false
+	for _, msg := range secondMessages {
+		for _, call := range msg.ToolCalls {
+			if call.Name == "write_file" || call.Name == "present_files" {
+				sawWriteOrPresent = true
+			}
+		}
+	}
+	if !sawWriteOrPresent {
+		t.Fatal("second run should execute artifact writing/presenting tools")
+	}
+}
+
 func looksLikeDetailRequest(text string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(text))
 	if normalized == "" {
@@ -292,6 +360,8 @@ func looksLikeDetailRequest(text string) bool {
 	for _, token := range []string{
 		"detail",
 		"clarification",
+		"clarify",
+		"more information",
 		"more detail",
 		"具体",
 		"细节",

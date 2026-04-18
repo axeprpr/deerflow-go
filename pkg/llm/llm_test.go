@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/clarification"
 	"github.com/axeprpr/deerflow-go/pkg/models"
@@ -115,6 +117,32 @@ func TestEinoProviderDoesNotPreferStructuredToolCalls(t *testing.T) {
 	provider := &EinoProvider{}
 	if provider.PrefersStructuredToolCalls() {
 		t.Fatal("EinoProvider should keep tool turns on the streaming path")
+	}
+}
+
+func TestEinoProviderPrefersStructuredToolCallsForModel(t *testing.T) {
+	t.Setenv(envForceStructuredModels, "")
+	t.Setenv(envForceStreamModels, "")
+	provider := &EinoProvider{}
+
+	if !provider.PrefersStructuredToolCallsForModel("gpt-4.1-mini") {
+		t.Fatal("gpt-4.1-mini should default to structured tool-call mode")
+	}
+	if provider.PrefersStructuredToolCallsForModel("qwen3.5-27b") {
+		t.Fatal("qwen3.5-27b should default to streaming tool-call mode")
+	}
+}
+
+func TestEinoProviderPrefersStructuredToolCallsForModel_EnvOverride(t *testing.T) {
+	t.Setenv(envForceStructuredModels, "qwen3.5-27b,deepseek-v3*")
+	t.Setenv(envForceStreamModels, "qwen3.5-27b")
+	provider := &EinoProvider{}
+
+	if provider.PrefersStructuredToolCallsForModel("qwen3.5-27b") {
+		t.Fatal("stream override should win when both env lists include same model")
+	}
+	if !provider.PrefersStructuredToolCallsForModel("deepseek-v3-0324") {
+		t.Fatal("structured wildcard override should match model")
 	}
 }
 
@@ -514,5 +542,63 @@ func TestRepairStructuredToolCallsFillsMissingArgumentsByID(t *testing.T) {
 	}
 	if got, _ := repaired[0].Arguments["path"].(string); got != "/mnt/skills/public/frontend-design/SKILL.md" {
 		t.Fatalf("path=%q", got)
+	}
+}
+
+func TestToEinoToolCalls_AlwaysEncodesArgumentsAsJSONObject(t *testing.T) {
+	got := toEinoToolCalls([]models.ToolCall{
+		{
+			Name:      "read_file",
+			Arguments: nil,
+		},
+	})
+	if len(got) != 1 {
+		t.Fatalf("len=%d want 1", len(got))
+	}
+	if got[0].Function.Arguments != "{}" {
+		t.Fatalf("arguments=%q want {}", got[0].Function.Arguments)
+	}
+}
+
+func TestDecodeToolArguments_DoubleEncodedJSON(t *testing.T) {
+	args := decodeToolArguments(`"{\"path\":\"/mnt/user-data/uploads/demo.txt\"}"`)
+	if got, _ := args["path"].(string); got != "/mnt/user-data/uploads/demo.txt" {
+		t.Fatalf("path=%q", got)
+	}
+}
+
+func TestIsRetryableProviderError(t *testing.T) {
+	if !isRetryableProviderError(errors.New("429 Too Many Requests")) {
+		t.Fatal("429 should be retryable")
+	}
+	if !isRetryableProviderError(errors.New("upstream timeout")) {
+		t.Fatal("upstream timeout should be retryable")
+	}
+	if isRetryableProviderError(context.DeadlineExceeded) {
+		t.Fatal("context deadline exceeded should not be retried at provider layer")
+	}
+}
+
+func TestEinoProviderWithRetryRetriesTransientFailures(t *testing.T) {
+	p := &EinoProvider{
+		retry: retryPolicy{
+			MaxRetries: 2,
+			BaseDelay:  time.Millisecond,
+			MaxDelay:   2 * time.Millisecond,
+		},
+	}
+	attempts := 0
+	err := p.withRetry(context.Background(), func() error {
+		attempts++
+		if attempts < 3 {
+			return fmt.Errorf("429 too many requests")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("withRetry() error = %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("attempts=%d want 3", attempts)
 	}
 }

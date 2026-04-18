@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -17,6 +18,7 @@ func NormalizeToolCall(call ToolCall) (ToolCall, bool) {
 	if call.Name == "" {
 		return ToolCall{}, false
 	}
+	call.Arguments = normalizeToolArguments(call.Arguments)
 	if call.ID == "" {
 		call.ID = newNormalizedToolCallID(call.Name)
 	}
@@ -53,4 +55,56 @@ func NormalizeToolResult(result ToolResult) (ToolResult, bool) {
 func newNormalizedToolCallID(name string) string {
 	seq := atomic.AddUint64(&normalizedToolCallSeq, 1)
 	return fmt.Sprintf("%s_norm_%d_%d", name, time.Now().UTC().UnixNano(), seq)
+}
+
+func normalizeToolArguments(args map[string]any) map[string]any {
+	if len(args) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(args))
+	for key, value := range args {
+		trimmed := strings.TrimSpace(key)
+		if trimmed == "" {
+			continue
+		}
+		out[trimmed] = normalizeToolArgumentValue(value)
+	}
+	if len(out) == 0 {
+		return map[string]any{}
+	}
+	return out
+}
+
+func normalizeToolArgumentValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return normalizeToolArguments(typed)
+	case map[any]any:
+		out := make(map[string]any, len(typed))
+		for key, nested := range typed {
+			strKey := strings.TrimSpace(fmt.Sprint(key))
+			if strKey == "" {
+				continue
+			}
+			out[strKey] = normalizeToolArgumentValue(nested)
+		}
+		if len(out) == 0 {
+			return map[string]any{}
+		}
+		return out
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, nested := range typed {
+			out = append(out, normalizeToolArgumentValue(nested))
+		}
+		return out
+	case json.RawMessage:
+		var decoded any
+		if err := json.Unmarshal(typed, &decoded); err != nil {
+			return strings.TrimSpace(string(typed))
+		}
+		return normalizeToolArgumentValue(decoded)
+	default:
+		return value
+	}
 }

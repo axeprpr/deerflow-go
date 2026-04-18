@@ -266,6 +266,22 @@ func TestNormalizeToolCall(t *testing.T) {
 	}
 }
 
+func TestNormalizeToolCall_NormalizesArgumentContainer(t *testing.T) {
+	call, ok := NormalizeToolCall(ToolCall{
+		Name:      "read_file",
+		Arguments: nil,
+	})
+	if !ok {
+		t.Fatal("NormalizeToolCall() = false, want true")
+	}
+	if call.Arguments == nil {
+		t.Fatal("NormalizeToolCall() should normalize nil arguments to an empty object")
+	}
+	if len(call.Arguments) != 0 {
+		t.Fatalf("arguments=%#v want empty map", call.Arguments)
+	}
+}
+
 func TestNormalizeToolResult(t *testing.T) {
 	result, ok := NormalizeToolResult(ToolResult{
 		CallID:   "call_1",

@@ -658,26 +658,38 @@ func streamSSEHeartbeats(ctx context.Context, done <-chan struct{}, w http.Respo
 	}
 }
 
-func (s *Server) saveSession(threadID string, messages []models.Message) {
+func (s *Server) saveSession(threadID string, messages []models.Message, pinnedFacts map[string]string) {
 	s.sessionsMu.Lock()
 	var session *Session
 	if session, exists := s.sessions[threadID]; exists {
 		session.Messages = append([]models.Message(nil), messages...)
 		session.Status = "idle"
+		if session.Values == nil {
+			session.Values = map[string]any{}
+		}
+		if normalized := pinnedFactsToAny(pinnedFacts); len(normalized) > 0 {
+			session.Values[pinnedFactsValueKey] = normalized
+		}
 		session.UpdatedAt = time.Now().UTC()
 	} else {
 		session = &Session{
 			ThreadID:     threadID,
 			Messages:     append([]models.Message(nil), messages...),
+			Values:       map[string]any{},
 			Metadata:     make(map[string]any),
+			Configurable: defaultThreadConfig(threadID),
 			Status:       "idle",
 			PresentFiles: tools.NewPresentFileRegistry(),
 			CreatedAt:    time.Now().UTC(),
 			UpdatedAt:    time.Now().UTC(),
 		}
+		if normalized := pinnedFactsToAny(pinnedFacts); len(normalized) > 0 {
+			session.Values[pinnedFactsValueKey] = normalized
+		}
 		s.sessions[threadID] = session
 	}
 	s.sessionsMu.Unlock()
+	_ = s.persistSessionSnapshot(session)
 	_ = s.persistSessionFile(session)
 	_ = s.appendThreadHistorySnapshot(threadID)
 }

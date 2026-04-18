@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -27,13 +29,26 @@ const (
 	defaultSiliconFlowBaseURL  = "https://api.siliconflow.cn/v1"
 	defaultHTTPDumpDir         = "/tmp/deerflow-eino-dump"
 	defaultModelRequestTimeout = 10 * time.Minute
+	defaultLLMMaxRetries       = 2
+	defaultLLMRetryBaseDelay   = 400 * time.Millisecond
+	defaultLLMRetryMaxDelay    = 4 * time.Second
+	envForceStructuredModels   = "DEERFLOW_TOOLCALL_STRUCTURED_MODELS"
+	envForceStreamModels       = "DEERFLOW_TOOLCALL_STREAM_MODELS"
 )
+
+var defaultStructuredToolCallModels = []string{
+	"gpt-4.1*",
+	"gpt-4o*",
+	"o3*",
+	"o4-mini*",
+}
 
 var httpDumpSeq uint64
 
 type EinoProvider struct {
 	provider string
 	base     einoModel.ToolCallingChatModel
+	retry    retryPolicy
 }
 
 func (p *EinoProvider) PrefersStructuredToolCalls() bool {
@@ -41,6 +56,23 @@ func (p *EinoProvider) PrefersStructuredToolCalls() bool {
 	// In practice this matches upstream DeerFlow's agent loop better and
 	// avoids stalling on a second synchronous completion after a tool result.
 	return false
+}
+
+func (p *EinoProvider) PrefersStructuredToolCallsForModel(model string) bool {
+	canonical, leaf := canonicalModelNames(model)
+	if canonical == "" {
+		return p.PrefersStructuredToolCalls()
+	}
+	if modelMatchesAny(canonical, leaf, modelPatternsFromEnv(envForceStreamModels)) {
+		return false
+	}
+	if modelMatchesAny(canonical, leaf, modelPatternsFromEnv(envForceStructuredModels)) {
+		return true
+	}
+	if modelMatchesAny(canonical, leaf, defaultStructuredToolCallModels) {
+		return true
+	}
+	return p.PrefersStructuredToolCalls()
 }
 
 func NewEinoProvider(name string) (*EinoProvider, error) {
@@ -62,6 +94,7 @@ func NewEinoProvider(name string) (*EinoProvider, error) {
 	return &EinoProvider{
 		provider: provider,
 		base:     model,
+		retry:    resolveRetryPolicy(),
 	}, nil
 }
 
@@ -75,8 +108,12 @@ func (p *EinoProvider) Chat(ctx context.Context, req ChatRequest) (ChatResponse,
 		return ChatResponse{}, err
 	}
 
-	resp, err := p.base.Generate(ctx, msgs, callOpts...)
-	if err != nil {
+	var resp *einoSchema.Message
+	if err := p.withRetry(ctx, func() error {
+		var chatErr error
+		resp, chatErr = p.base.Generate(ctx, msgs, callOpts...)
+		return chatErr
+	}); err != nil {
 		return ChatResponse{}, err
 	}
 
@@ -98,8 +135,15 @@ func (p *EinoProvider) Stream(ctx context.Context, req ChatRequest) (<-chan Stre
 		return nil, err
 	}
 
-	stream, err := p.base.Stream(ctx, msgs, callOpts...)
-	if err != nil {
+	var stream streamReader
+	if err := p.withRetry(ctx, func() error {
+		next, streamErr := p.base.Stream(ctx, msgs, callOpts...)
+		if streamErr != nil {
+			return streamErr
+		}
+		stream = next
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 
@@ -127,6 +171,21 @@ func (p *EinoProvider) Stream(ctx context.Context, req ChatRequest) (<-chan Stre
 			if recvErr != nil {
 				if recvErr == io.EOF {
 					break
+				}
+				if len(chunks) == 0 {
+					restartErr := p.withRetry(ctx, func() error {
+						stream.Close()
+						next, streamErr := p.base.Stream(ctx, msgs, callOpts...)
+						if streamErr != nil {
+							return streamErr
+						}
+						stream = next
+						return nil
+					})
+					if restartErr == nil {
+						continue
+					}
+					recvErr = fmt.Errorf("%w (stream restart failed: %v)", recvErr, restartErr)
 				}
 				send(StreamChunk{Err: recvErr, Done: true})
 				return
@@ -357,6 +416,76 @@ func floatSeconds(value any) float64 {
 	default:
 		return 0
 	}
+}
+
+func modelPatternsFromEnv(key string) []string {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil
+	}
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n'
+	})
+	out := make([]string, 0, len(fields))
+	for _, item := range fields {
+		pattern := strings.ToLower(strings.TrimSpace(item))
+		if pattern == "" {
+			continue
+		}
+		out = append(out, pattern)
+	}
+	return out
+}
+
+func canonicalModelNames(model string) (canonical string, leaf string) {
+	canonical = strings.ToLower(strings.TrimSpace(model))
+	if canonical == "" {
+		return "", ""
+	}
+	leaf = canonical
+	if idx := strings.LastIndex(leaf, "/"); idx >= 0 && idx+1 < len(leaf) {
+		leaf = leaf[idx+1:]
+	}
+	return canonical, leaf
+}
+
+func modelMatchesAny(canonical, leaf string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if modelPatternMatches(canonical, leaf, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func modelPatternMatches(canonical, leaf, pattern string) bool {
+	pattern = strings.ToLower(strings.TrimSpace(pattern))
+	if pattern == "" {
+		return false
+	}
+	wildcard := strings.HasSuffix(pattern, "*")
+	if wildcard {
+		pattern = strings.TrimSuffix(pattern, "*")
+	}
+	if pattern == "" {
+		return false
+	}
+	targets := []string{canonical}
+	if leaf != "" && leaf != canonical {
+		targets = append(targets, leaf)
+	}
+	for _, target := range targets {
+		if wildcard {
+			if strings.HasPrefix(target, pattern) {
+				return true
+			}
+			continue
+		}
+		if target == pattern {
+			return true
+		}
+	}
+	return false
 }
 
 func newHTTPDumpRoundTripper(base http.RoundTripper, provider string) http.RoundTripper {
@@ -628,13 +757,12 @@ func toEinoToolCalls(calls []models.ToolCall) []einoSchema.ToolCall {
 		if !ok {
 			continue
 		}
-		raw, _ := json.Marshal(normalized.Arguments)
 		out = append(out, einoSchema.ToolCall{
 			ID:   normalized.ID,
 			Type: "function",
 			Function: einoSchema.FunctionCall{
 				Name:      normalized.Name,
-				Arguments: string(raw),
+				Arguments: encodeToolArguments(normalized.Arguments),
 			},
 		})
 	}
@@ -644,10 +772,7 @@ func toEinoToolCalls(calls []models.ToolCall) []einoSchema.ToolCall {
 func fromEinoToolCalls(calls []einoSchema.ToolCall) []models.ToolCall {
 	out := make([]models.ToolCall, 0, len(calls))
 	for _, call := range calls {
-		args := map[string]any{}
-		if strings.TrimSpace(call.Function.Arguments) != "" {
-			_ = json.Unmarshal([]byte(call.Function.Arguments), &args)
-		}
+		args := decodeToolArguments(call.Function.Arguments)
 		normalized, ok := models.NormalizeToolCall(models.ToolCall{
 			ID:        call.ID,
 			Name:      call.Function.Name,
@@ -725,13 +850,215 @@ func collectStreamToolCalls(chunks []*einoSchema.Message) []models.ToolCall {
 func decodeToolArguments(raw string) map[string]any {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil
+		return map[string]any{}
 	}
 	var args map[string]any
 	if err := json.Unmarshal([]byte(raw), &args); err != nil {
-		return nil
+		var wrapped string
+		if err := json.Unmarshal([]byte(raw), &wrapped); err == nil {
+			decoded := decodeToolArguments(wrapped)
+			if len(decoded) > 0 {
+				return decoded
+			}
+		}
+		return map[string]any{}
+	}
+	if len(args) == 0 {
+		return map[string]any{}
 	}
 	return args
+}
+
+func encodeToolArguments(args map[string]any) string {
+	normalized := sanitizeJSONMap(args)
+	if len(normalized) == 0 {
+		return "{}"
+	}
+	raw, err := json.Marshal(normalized)
+	if err != nil {
+		return "{}"
+	}
+	encoded := strings.TrimSpace(string(raw))
+	if encoded == "" || encoded == "null" {
+		return "{}"
+	}
+	return encoded
+}
+
+func sanitizeJSONMap(args map[string]any) map[string]any {
+	if len(args) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(args))
+	for key, value := range args {
+		trimmed := strings.TrimSpace(key)
+		if trimmed == "" {
+			continue
+		}
+		out[trimmed] = sanitizeJSONValue(value)
+	}
+	if len(out) == 0 {
+		return map[string]any{}
+	}
+	return out
+}
+
+func sanitizeJSONValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return sanitizeJSONMap(typed)
+	case map[any]any:
+		out := make(map[string]any, len(typed))
+		for key, nested := range typed {
+			name := strings.TrimSpace(fmt.Sprint(key))
+			if name == "" {
+				continue
+			}
+			out[name] = sanitizeJSONValue(nested)
+		}
+		if len(out) == 0 {
+			return map[string]any{}
+		}
+		return out
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, nested := range typed {
+			out = append(out, sanitizeJSONValue(nested))
+		}
+		return out
+	case json.RawMessage:
+		var decoded any
+		if err := json.Unmarshal(typed, &decoded); err != nil {
+			return strings.TrimSpace(string(typed))
+		}
+		return sanitizeJSONValue(decoded)
+	default:
+		return value
+	}
+}
+
+type streamReader interface {
+	Recv() (*einoSchema.Message, error)
+	Close()
+}
+
+type retryPolicy struct {
+	MaxRetries int
+	BaseDelay  time.Duration
+	MaxDelay   time.Duration
+}
+
+func resolveRetryPolicy() retryPolicy {
+	p := retryPolicy{
+		MaxRetries: intFromEnv("DEERFLOW_LLM_MAX_RETRIES", defaultLLMMaxRetries),
+		BaseDelay:  durationFromEnvMS("DEERFLOW_LLM_RETRY_BASE_DELAY_MS", defaultLLMRetryBaseDelay),
+		MaxDelay:   durationFromEnvMS("DEERFLOW_LLM_RETRY_MAX_DELAY_MS", defaultLLMRetryMaxDelay),
+	}
+	if p.MaxRetries < 0 {
+		p.MaxRetries = 0
+	}
+	if p.BaseDelay <= 0 {
+		p.BaseDelay = defaultLLMRetryBaseDelay
+	}
+	if p.MaxDelay <= 0 {
+		p.MaxDelay = defaultLLMRetryMaxDelay
+	}
+	if p.MaxDelay < p.BaseDelay {
+		p.MaxDelay = p.BaseDelay
+	}
+	return p
+}
+
+func intFromEnv(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return value
+}
+
+func durationFromEnvMS(key string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return time.Duration(value) * time.Millisecond
+}
+
+func (p *EinoProvider) withRetry(ctx context.Context, fn func() error) error {
+	policy := p.retry
+	var lastErr error
+	for attempt := 0; attempt <= policy.MaxRetries; attempt++ {
+		if attempt > 0 {
+			delay := policy.BaseDelay << (attempt - 1)
+			if delay > policy.MaxDelay || delay < 0 {
+				delay = policy.MaxDelay
+			}
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+		err := fn()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isRetryableProviderError(err) || attempt >= policy.MaxRetries || ctx.Err() != nil {
+			return err
+		}
+	}
+	return lastErr
+}
+
+func isRetryableProviderError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary()) {
+		return true
+	}
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	if text == "" {
+		return false
+	}
+	for _, needle := range []string{
+		"429",
+		"too many requests",
+		"rate limit",
+		"status code 500",
+		"status code 502",
+		"status code 503",
+		"status code 504",
+		"service unavailable",
+		"bad gateway",
+		"gateway timeout",
+		"temporarily unavailable",
+		"upstream timeout",
+		"connection reset",
+		"connection refused",
+		"unexpected eof",
+	} {
+		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func needsStructuredToolCallRepair(calls []models.ToolCall) bool {

@@ -20,11 +20,14 @@ func TestPortableAgentSpecRoundTripPreservesPortableFields(t *testing.T) {
 		Model:                  "model-1",
 		ReasoningEffort:        "medium",
 		SystemPrompt:           "system",
-		Temperature:            &temp,
-		MaxTokens:              &maxTokens,
-		RequestTimeout:         2 * time.Minute,
-		GuardrailFailClosed:    &failClosed,
-		GuardrailPassport:      "passport-1",
+		PinnedFacts: map[string]string{
+			"tender_id": "TB-2026-041",
+		},
+		Temperature:         &temp,
+		MaxTokens:           &maxTokens,
+		RequestTimeout:      2 * time.Minute,
+		GuardrailFailClosed: &failClosed,
+		GuardrailPassport:   "passport-1",
 	}
 
 	port := PortableAgentSpecFromAgentSpec(spec)
@@ -44,6 +47,9 @@ func TestPortableAgentSpecRoundTripPreservesPortableFields(t *testing.T) {
 	}
 	if got.MaxTokens == nil || *got.MaxTokens != maxTokens {
 		t.Fatalf("AgentSpec() maxTokens = %#v", got.MaxTokens)
+	}
+	if got.PinnedFacts["tender_id"] != "TB-2026-041" {
+		t.Fatalf("AgentSpec() pinned facts = %#v", got.PinnedFacts)
 	}
 	if got.GuardrailPassport != "passport-1" {
 		t.Fatalf("AgentSpec() passport = %q", got.GuardrailPassport)

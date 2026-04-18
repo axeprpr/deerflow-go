@@ -22,9 +22,10 @@ type Usage struct {
 
 // RunResult is the normalized outcome of an agent run.
 type RunResult struct {
-	Messages    []models.Message `json:"messages"`
-	FinalOutput string           `json:"final_output"`
-	Usage       *Usage           `json:"usage,omitempty"`
+	Messages    []models.Message  `json:"messages"`
+	FinalOutput string            `json:"final_output"`
+	Usage       *Usage            `json:"usage,omitempty"`
+	PinnedFacts map[string]string `json:"pinned_facts,omitempty"`
 }
 
 // AgentConfig holds the dependencies required to construct an agent.
@@ -33,6 +34,7 @@ type AgentConfig struct {
 	Tools                  *tools.Registry
 	DeferredTools          []models.Tool
 	PresentFiles           *tools.PresentFileRegistry
+	PinnedFacts            map[string]string
 	RunPolicy              *RunPolicy
 	AgentType              AgentType
 	MaxTurns               int

@@ -650,7 +650,7 @@ func TestThreadStateIncludesStructuredUploadedFiles(t *testing.T) {
 	if !ok {
 		t.Fatalf("artifacts=%#v", state.Values["artifacts"])
 	}
-	wantArtifacts := []string{"/mnt/user-data/uploads/report.md"}
+	wantArtifacts := []string{}
 	if strings.Join(artifacts, ",") != strings.Join(wantArtifacts, ",") {
 		t.Fatalf("artifacts=%#v want=%#v", artifacts, wantArtifacts)
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strconv"
@@ -31,6 +32,7 @@ const maxMaxConcurrentSubagents = 4
 const defaultReadFileMaxCallsPerRun = 24
 const defaultReadFileMaxCharsPerCall = 20000
 const defaultReadFileMaxCharsPerRun = 180000
+const defaultSchemaRepairMaxOutputChars = 16000
 
 var messageSeq uint64
 var agentRequestSeq uint64
@@ -53,6 +55,8 @@ type Agent struct {
 	runPolicy              *RunPolicy
 	readFileBudget         readFileBudgetPolicy
 	runFactStore           runFactStorePolicy
+	schemaRepair           schemaRepairPolicy
+	pinnedFacts            map[string]string
 	guardrailProvider      guardrails.Provider
 	guardrailFailClosed    bool
 	guardrailPassport      string
@@ -66,6 +70,10 @@ type Agent struct {
 
 type structuredToolCallProvider interface {
 	PrefersStructuredToolCalls() bool
+}
+
+type modelStructuredToolCallProvider interface {
+	PrefersStructuredToolCallsForModel(model string) bool
 }
 
 func New(cfg AgentConfig) *Agent {
@@ -106,6 +114,8 @@ func New(cfg AgentConfig) *Agent {
 		runPolicy:              resolveRunPolicy(cfg.RunPolicy),
 		readFileBudget:         resolveReadFileBudgetPolicy(),
 		runFactStore:           resolveRunFactStorePolicy(),
+		schemaRepair:           resolveSchemaRepairPolicy(),
+		pinnedFacts:            cloneStringMap(cfg.PinnedFacts),
 		guardrailProvider:      guardrailProvider,
 		guardrailFailClosed:    guardrailFailClosed,
 		guardrailPassport:      guardrailPassport,
@@ -188,7 +198,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 	loopState := newToolLoopState()
 	taskState := newTaskProgressState()
 	readFileBudgetState := newReadFileBudgetState()
-	runFactStoreState := newRunFactStoreState(a.runFactStore)
+	runFactStoreState := newRunFactStoreState(a.runFactStore, a.pinnedFacts)
 
 	for turn := 0; turn < a.maxTurns; turn++ {
 		visibleTools := a.visibleTools(deferredState)
@@ -338,6 +348,16 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 				})
 				continue
 			}
+			if retryPrompt := missingReadFileToolCallRetryPrompt(runMessages, assistantMessage, req.Tools); retryPrompt != "" && turn+1 < a.maxTurns {
+				runMessages = append(runMessages, models.Message{
+					ID:        newMessageID("human"),
+					SessionID: sessionID,
+					Role:      models.RoleHuman,
+					Content:   retryPrompt,
+					CreatedAt: time.Now().UTC(),
+				})
+				continue
+			}
 			if strings.TrimSpace(assistantMessage.Content) == "" {
 				if retryPrompt := a.runPolicy.Retry.RecoverableToolRetryPrompt(runMessages); retryPrompt != "" && turn+1 < a.maxTurns {
 					runMessages = append(runMessages, models.Message{
@@ -350,6 +370,10 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 					continue
 				}
 			}
+			assistantMessage.Content = a.repairStructuredOutput(runMessages, assistantMessage.Content, runFactStoreState)
+			if len(runMessages) > 0 {
+				runMessages[len(runMessages)-1] = assistantMessage
+			}
 			emit(AgentEvent{
 				Type:      AgentEventEnd,
 				MessageID: aiMessageID,
@@ -357,11 +381,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 				Metadata:  assistantMessage.Metadata,
 				Usage:     cloneUsage(usage),
 			})
-			return &RunResult{
-				Messages:    runMessages,
-				FinalOutput: assistantMessage.Content,
-				Usage:       usage,
-			}, nil
+			return runResultWithFacts(runMessages, assistantMessage.Content, usage, runFactStoreState), nil
 		}
 
 		decision := a.runPolicy.Loop.Evaluate(loopState, toolCalls)
@@ -384,11 +404,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 					Metadata:  assistantMessage.Metadata,
 					Usage:     cloneUsage(usage),
 				})
-				return &RunResult{
-					Messages:    runMessages,
-					FinalOutput: finalOutput,
-					Usage:       usage,
-				}, nil
+				return runResultWithFacts(runMessages, finalOutput, usage, runFactStoreState), nil
 			}
 
 			viewedImages := make([]viewedImage, 0)
@@ -406,11 +422,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 				runMessages = append(runMessages, viewedImagesMessage(sessionID, viewedImages, modelLikelySupportsVision(a.model)))
 			}
 			if pause {
-				return &RunResult{
-					Messages:    runMessages,
-					FinalOutput: assistantMessage.Content,
-					Usage:       usage,
-				}, nil
+				return runResultWithFacts(runMessages, assistantMessage.Content, usage, runFactStoreState), nil
 			}
 			runMessages = append(runMessages, models.Message{
 				ID:        newMessageID("human"),
@@ -438,11 +450,7 @@ func (a *Agent) Run(ctx context.Context, sessionID string, messages []models.Mes
 			runMessages = append(runMessages, viewedImagesMessage(sessionID, viewedImages, modelLikelySupportsVision(a.model)))
 		}
 		if pause {
-			return &RunResult{
-				Messages:    runMessages,
-				FinalOutput: assistantMessage.Content,
-				Usage:       usage,
-			}, nil
+			return runResultWithFacts(runMessages, assistantMessage.Content, usage, runFactStoreState), nil
 		}
 	}
 
@@ -496,9 +504,12 @@ func (a *Agent) recoverToolTurn(
 	return true, nil
 }
 
-func prefersStructuredToolCalls(provider llm.LLMProvider) bool {
+func prefersStructuredToolCalls(provider llm.LLMProvider, model string) bool {
 	if provider == nil {
 		return false
+	}
+	if structured, ok := provider.(modelStructuredToolCallProvider); ok {
+		return structured.PrefersStructuredToolCallsForModel(model)
 	}
 	structured, ok := provider.(structuredToolCallProvider)
 	return ok && structured.PrefersStructuredToolCalls()
@@ -920,8 +931,14 @@ type readFileBudgetPolicy struct {
 }
 
 type readFileBudgetState struct {
-	CallsUsed int
-	CharsUsed int
+	CallsUsed  int
+	CharsUsed  int
+	CallResult map[string]models.ToolResult
+}
+
+type schemaRepairPolicy struct {
+	Enabled        bool
+	MaxOutputChars int
 }
 
 func resolveReadFileBudgetPolicy() readFileBudgetPolicy {
@@ -945,11 +962,34 @@ func intFromEnvWithDefault(key string, fallback int) int {
 }
 
 func newReadFileBudgetState() *readFileBudgetState {
-	return &readFileBudgetState{}
+	return &readFileBudgetState{
+		CallResult: map[string]models.ToolResult{},
+	}
 }
 
 func (p readFileBudgetPolicy) beforeCall(call models.ToolCall, state *readFileBudgetState) (models.ToolResult, bool) {
-	if state == nil || p.MaxCallsPerRun <= 0 {
+	if state == nil {
+		return models.ToolResult{}, false
+	}
+	if key := readFileDedupeKey(call); key != "" {
+		if cached, ok := state.CallResult[key]; ok {
+			result := cloneToolResultValue(cached)
+			result.CallID = strings.TrimSpace(call.ID)
+			result.ToolName = strings.TrimSpace(call.Name)
+			result.CompletedAt = time.Now().UTC()
+			result.Duration = 0
+			if result.Data == nil {
+				result.Data = map[string]any{}
+			}
+			result.Data["read_file_dedupe"] = map[string]any{
+				"hit":       true,
+				"cache_key": key,
+			}
+			result.Data["read_file_budget"] = p.budgetData(state)
+			return result, true
+		}
+	}
+	if p.MaxCallsPerRun <= 0 {
 		return models.ToolResult{}, false
 	}
 	if state.CallsUsed < p.MaxCallsPerRun {
@@ -1000,17 +1040,91 @@ func (p readFileBudgetPolicy) afterCall(call models.ToolCall, result models.Tool
 	}
 	result.Content = content
 	state.CharsUsed += len([]rune(content))
+	if result.Status == models.CallStatusCompleted {
+		if key := readFileDedupeKey(call); key != "" {
+			cached := cloneToolResultValue(result)
+			cached.CallID = ""
+			cached.Duration = 0
+			state.CallResult[key] = cached
+		}
+	}
 	if result.Data == nil {
 		result.Data = map[string]any{}
 	}
-	result.Data["read_file_budget"] = map[string]any{
+	result.Data["read_file_budget"] = p.budgetData(state)
+	return result
+}
+
+func (p readFileBudgetPolicy) budgetData(state *readFileBudgetState) map[string]any {
+	if state == nil {
+		return map[string]any{
+			"calls_used":     0,
+			"calls_limit":    p.MaxCallsPerRun,
+			"chars_used":     0,
+			"chars_limit":    p.MaxCharsPerRun,
+			"per_call_limit": p.MaxCharsPerCall,
+		}
+	}
+	return map[string]any{
 		"calls_used":     state.CallsUsed,
 		"calls_limit":    p.MaxCallsPerRun,
 		"chars_used":     state.CharsUsed,
 		"chars_limit":    p.MaxCharsPerRun,
 		"per_call_limit": p.MaxCharsPerCall,
 	}
-	return result
+}
+
+func readFileDedupeKey(call models.ToolCall) string {
+	path := strings.TrimSpace(stringFromAny(call.Arguments["path"]))
+	if path == "" {
+		return ""
+	}
+	startRaw := call.Arguments["start_line"]
+	if startRaw == nil {
+		startRaw = call.Arguments["startLine"]
+	}
+	endRaw := call.Arguments["end_line"]
+	if endRaw == nil {
+		endRaw = call.Arguments["endLine"]
+	}
+	start := intFromAny(startRaw)
+	end := intFromAny(endRaw)
+	return fmt.Sprintf("%s|%d|%d", path, start, end)
+}
+
+func intFromAny(raw any) int64 {
+	switch value := raw.(type) {
+	case int:
+		return int64(value)
+	case int64:
+		return value
+	case int32:
+		return int64(value)
+	case float64:
+		return int64(value)
+	case float32:
+		return int64(value)
+	case json.Number:
+		if n, err := value.Int64(); err == nil {
+			return n
+		}
+	case string:
+		if n, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+func resolveSchemaRepairPolicy() schemaRepairPolicy {
+	policy := schemaRepairPolicy{
+		Enabled:        boolFromEnvWithDefault("DEERFLOW_SCHEMA_REPAIR_ENABLED", true),
+		MaxOutputChars: intFromEnvWithDefault("DEERFLOW_SCHEMA_REPAIR_MAX_OUTPUT_CHARS", defaultSchemaRepairMaxOutputChars),
+	}
+	if policy.MaxOutputChars <= 0 {
+		policy.MaxOutputChars = defaultSchemaRepairMaxOutputChars
+	}
+	return policy
 }
 
 func truncateWithBudgetMarker(content string, limit int, reason string) string {
@@ -1074,6 +1188,120 @@ func (a *Agent) buildSystemPrompt(_ context.Context, _ string, deferredState *de
 		sections = append(sections, factPrompt)
 	}
 	return strings.Join(sections, "\n\n")
+}
+
+func (a *Agent) repairStructuredOutput(messages []models.Message, content string, factState *runFactStoreState) string {
+	if a == nil || !a.schemaRepair.Enabled {
+		return content
+	}
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return content
+	}
+	if a.schemaRepair.MaxOutputChars > 0 && len([]rune(trimmed)) > a.schemaRepair.MaxOutputChars {
+		return content
+	}
+	if !shouldRepairStructuredOutput(messages, trimmed) {
+		return content
+	}
+
+	facts := factState.snapshot()
+	requiredKeys := make([]string, 0, len(facts))
+	for key := range facts {
+		requiredKeys = append(requiredKeys, key)
+	}
+	sort.Strings(requiredKeys)
+
+	obj, strict := parseStrictJSONObject(trimmed)
+	if obj == nil {
+		obj = parseFirstJSONObject(trimmed)
+	}
+	if obj == nil {
+		if len(requiredKeys) == 0 {
+			return content
+		}
+		repaired := make(map[string]any, len(requiredKeys))
+		for _, key := range requiredKeys {
+			repaired[key] = facts[key]
+		}
+		if encoded, err := json.MarshalIndent(repaired, "", "  "); err == nil {
+			return string(encoded)
+		}
+		return content
+	}
+
+	changed := !strict
+	for _, key := range requiredKeys {
+		if _, ok := obj[key]; ok {
+			continue
+		}
+		if value := strings.TrimSpace(facts[key]); value != "" {
+			obj[key] = value
+			changed = true
+		}
+	}
+	if !changed {
+		return content
+	}
+	encoded, err := json.MarshalIndent(obj, "", "  ")
+	if err != nil {
+		return content
+	}
+	return string(encoded)
+}
+
+func shouldRepairStructuredOutput(messages []models.Message, content string) bool {
+	contentLower := strings.ToLower(strings.TrimSpace(content))
+	if strings.Contains(contentLower, "```json") {
+		return true
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != models.RoleHuman {
+			continue
+		}
+		text := strings.ToLower(strings.TrimSpace(msg.Content))
+		if text == "" {
+			continue
+		}
+		for _, keyword := range []string{
+			"json",
+			"schema",
+			"structured",
+			"字段",
+			"结构化",
+			"只返回",
+			"仅返回",
+			"输出为json",
+			"返回json",
+		} {
+			if strings.Contains(text, keyword) {
+				return true
+			}
+		}
+		if len([]rune(text)) > 24 {
+			return false
+		}
+	}
+	return false
+}
+
+func parseStrictJSONObject(text string) (map[string]any, bool) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || !strings.HasPrefix(trimmed, "{") || !strings.HasSuffix(trimmed, "}") {
+		return nil, false
+	}
+	dec := json.NewDecoder(strings.NewReader(trimmed))
+	dec.UseNumber()
+	var obj map[string]any
+	if err := dec.Decode(&obj); err != nil {
+		return nil, false
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		return nil, false
+	}
+	return obj, true
 }
 
 func (a *Agent) visibleTools(deferredState *deferredToolState) []models.Tool {
@@ -1241,6 +1469,26 @@ func normalizeRunError(ctx context.Context, err error, timeout time.Duration) er
 		}
 	}
 	return err
+}
+
+func runResultWithFacts(messages []models.Message, finalOutput string, usage *Usage, factState *runFactStoreState) *RunResult {
+	return &RunResult{
+		Messages:    append([]models.Message(nil), messages...),
+		FinalOutput: finalOutput,
+		Usage:       usage,
+		PinnedFacts: factState.snapshot(),
+	}
+}
+
+func cloneStringMap(raw map[string]string) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(raw))
+	for key, value := range raw {
+		out[key] = value
+	}
+	return out
 }
 
 func mergeToolCalls(existing, incoming []models.ToolCall) []models.ToolCall {
@@ -1466,6 +1714,52 @@ func missingWebSearchToolCallRetryPrompt(messages []models.Message, assistant mo
 	return ""
 }
 
+func missingReadFileToolCallRetryPrompt(messages []models.Message, assistant models.Message, visibleTools []models.Tool) string {
+	if len(visibleTools) == 0 {
+		return ""
+	}
+	hasReadFile := false
+	for _, tool := range visibleTools {
+		if strings.EqualFold(strings.TrimSpace(tool.Name), "read_file") {
+			hasReadFile = true
+			break
+		}
+	}
+	if !hasReadFile || len(assistant.ToolCalls) > 0 {
+		return ""
+	}
+	assistantLower := strings.ToLower(strings.TrimSpace(assistant.Content))
+	if assistantLower == "" {
+		return ""
+	}
+	for _, msg := range messages {
+		if msg.Role != models.RoleTool || msg.ToolResult == nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(msg.ToolResult.ToolName), "read_file") {
+			return ""
+		}
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != models.RoleHuman {
+			continue
+		}
+		human := strings.TrimSpace(msg.Content)
+		if human == "" {
+			return ""
+		}
+		if !strings.Contains(human, "<uploaded_files>") {
+			return ""
+		}
+		if strings.Contains(human, "Do not answer from filename metadata only. Call `read_file` now") {
+			return ""
+		}
+		return "Do not answer from filename metadata only. Call `read_file` now on the relevant uploaded file path(s), then continue with evidence from file content."
+	}
+	return ""
+}
+
 func normalizeToolCalls(calls []models.ToolCall) []models.ToolCall {
 	if len(calls) == 0 {
 		return nil
@@ -1631,6 +1925,17 @@ func cloneToolResult(result *models.ToolResult) *models.ToolResult {
 		}
 	}
 	return &copyResult
+}
+
+func cloneToolResultValue(result models.ToolResult) models.ToolResult {
+	cloned := result
+	if len(result.Data) > 0 {
+		cloned.Data = make(map[string]any, len(result.Data))
+		for key, value := range result.Data {
+			cloned.Data[key] = value
+		}
+	}
+	return cloned
 }
 
 func formatToolArguments(args map[string]any) string {

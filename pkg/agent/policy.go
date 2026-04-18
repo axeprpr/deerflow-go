@@ -131,8 +131,8 @@ func newTaskProgressState() *TaskProgressState {
 	return &TaskProgressState{}
 }
 
-func (p DefaultToolTurnPolicy) UseStructuredToolCalls(provider llm.LLMProvider, _ llm.ChatRequest) bool {
-	return prefersStructuredToolCalls(provider)
+func (p DefaultToolTurnPolicy) UseStructuredToolCalls(provider llm.LLMProvider, req llm.ChatRequest) bool {
+	return prefersStructuredToolCalls(provider, req.Model)
 }
 
 func (DefaultToolExecutionPolicy) ShouldPauseAfterToolCall(call models.ToolCall, result models.ToolResult) bool {

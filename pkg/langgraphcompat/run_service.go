@@ -148,7 +148,7 @@ func (s *Server) markRunCanceled(run *Run, threadID string) {
 }
 
 func (s *Server) finalizeCompletedRun(ctx context.Context, prepared *preparedRunRequest, result *agent.RunResult) *completedRun {
-	s.saveSession(prepared.ThreadID, result.Messages)
+	s.saveSession(prepared.ThreadID, result.Messages, result.PinnedFacts)
 	completion := s.runtimeCoordinator().Finalize(ctx, prepared.ThreadID, prepared.Lifecycle, result, runRecordFromRun(prepared.Run))
 	applyRunRecord(prepared.Run, completion.Run)
 

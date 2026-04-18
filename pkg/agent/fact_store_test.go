@@ -13,7 +13,7 @@ func TestRunFactStoreStateExtractsJSONFactsAndBuildsPrompt(t *testing.T) {
 		MaxEntries:     8,
 		MaxValueChars:  128,
 		MaxPromptChars: 2048,
-	})
+	}, nil)
 	state.observeAssistantMessage(models.Message{
 		Role: models.RoleAI,
 		Content: "```json\n" +
@@ -53,12 +53,35 @@ func TestRunFactStoreStateRespectsMaxEntries(t *testing.T) {
 		MaxEntries:     1,
 		MaxValueChars:  128,
 		MaxPromptChars: 1024,
-	})
+	}, nil)
 	state.observeAssistantMessage(models.Message{
 		Role:    models.RoleAI,
 		Content: `{"a":"1","b":"2"}`,
 	})
 	if len(state.facts) != 1 {
 		t.Fatalf("fact count=%d want 1", len(state.facts))
+	}
+}
+
+func TestRunFactStoreStateSeedsPinnedFacts(t *testing.T) {
+	state := newRunFactStoreState(runFactStorePolicy{
+		Enabled:        true,
+		MaxEntries:     8,
+		MaxValueChars:  128,
+		MaxPromptChars: 2048,
+	}, map[string]string{
+		"tender_id": "TB-2026-041",
+	})
+	state.observeAssistantMessage(models.Message{
+		Role:    models.RoleAI,
+		Content: `{"deadline":"2026-05-30 17:00 CST"}`,
+	})
+
+	pinned := state.snapshot()
+	if pinned["tender_id"] != "TB-2026-041" {
+		t.Fatalf("tender_id=%q want TB-2026-041", pinned["tender_id"])
+	}
+	if pinned["deadline"] != "2026-05-30 17:00 CST" {
+		t.Fatalf("deadline=%q want 2026-05-30 17:00 CST", pinned["deadline"])
 	}
 }

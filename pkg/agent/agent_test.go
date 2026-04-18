@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -2086,6 +2087,178 @@ func TestAgentRunAppliesReadFilePerCallBudget(t *testing.T) {
 	}
 	if result.FinalOutput != "done" {
 		t.Fatalf("FinalOutput=%q want done", result.FinalOutput)
+	}
+}
+
+func TestAgentRunDedupesRepeatedReadFileCalls(t *testing.T) {
+	t.Setenv("DEERFLOW_READ_FILE_MAX_CALLS", "1")
+	t.Setenv("DEERFLOW_READ_FILE_MAX_TOTAL_CHARS", "1000")
+	t.Setenv("DEERFLOW_READ_FILE_MAX_CHARS_PER_CALL", "1000")
+
+	registry := tools.NewRegistry()
+	var readCalls int
+	if err := registry.Register(models.Tool{
+		Name: "read_file",
+		Handler: func(_ context.Context, call models.ToolCall) (models.ToolResult, error) {
+			readCalls++
+			return models.ToolResult{
+				CallID:   call.ID,
+				ToolName: call.Name,
+				Status:   models.CallStatusCompleted,
+				Content:  "same content",
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register read_file: %v", err)
+	}
+
+	var chatCalls int
+	provider := chatOnlyProvider{t: t, chat: func(req llm.ChatRequest) llm.ChatResponse {
+		chatCalls++
+		switch chatCalls {
+		case 1:
+			return llm.ChatResponse{
+				Model: "test-model",
+				Message: models.Message{
+					Role: models.RoleAI,
+					ToolCalls: []models.ToolCall{{
+						ID:   "read-1",
+						Name: "read_file",
+						Arguments: map[string]any{
+							"path":       "/mnt/user-data/uploads/demo.txt",
+							"start_line": 1,
+							"end_line":   20,
+						},
+					}},
+				},
+				Stop: "tool_calls",
+			}
+		case 2:
+			return llm.ChatResponse{
+				Model: "test-model",
+				Message: models.Message{
+					Role: models.RoleAI,
+					ToolCalls: []models.ToolCall{{
+						ID:   "read-2",
+						Name: "read_file",
+						Arguments: map[string]any{
+							"path":       "/mnt/user-data/uploads/demo.txt",
+							"start_line": 1,
+							"end_line":   20,
+						},
+					}},
+				},
+				Stop: "tool_calls",
+			}
+		case 3:
+			last := req.Messages[len(req.Messages)-1]
+			if last.ToolResult == nil {
+				t.Fatalf("last message=%#v want tool result", last)
+			}
+			if last.ToolResult.Status != models.CallStatusCompleted {
+				t.Fatalf("status=%q want completed", last.ToolResult.Status)
+			}
+			dedupe, _ := last.ToolResult.Data["read_file_dedupe"].(map[string]any)
+			if hit, _ := dedupe["hit"].(bool); !hit {
+				t.Fatalf("dedupe=%#v want hit=true", dedupe)
+			}
+			budget, _ := last.ToolResult.Data["read_file_budget"].(map[string]any)
+			if got, _ := budget["calls_used"].(int); got != 1 {
+				t.Fatalf("calls_used=%v want 1", budget["calls_used"])
+			}
+			return llm.ChatResponse{
+				Model: "test-model",
+				Message: models.Message{
+					Role:    models.RoleAI,
+					Content: "done",
+				},
+				Stop: "stop",
+			}
+		default:
+			t.Fatalf("unexpected chat call %d", chatCalls)
+			return llm.ChatResponse{}
+		}
+	}}
+
+	runAgent := New(AgentConfig{
+		LLMProvider: provider,
+		Tools:       registry,
+		MaxTurns:    6,
+	})
+	result, err := runAgent.Run(context.Background(), "session-read-dedupe", []models.Message{{
+		ID:        "m1",
+		SessionID: "session-read-dedupe",
+		Role:      models.RoleHuman,
+		Content:   "read twice",
+	}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.FinalOutput != "done" {
+		t.Fatalf("FinalOutput=%q want done", result.FinalOutput)
+	}
+	if readCalls != 1 {
+		t.Fatalf("read_file calls=%d want 1", readCalls)
+	}
+}
+
+func TestAgentRunRepairsStructuredJSONWithPinnedFacts(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(models.Tool{
+		Name: "noop",
+		Handler: func(_ context.Context, call models.ToolCall) (models.ToolResult, error) {
+			return models.ToolResult{
+				CallID:   call.ID,
+				ToolName: call.Name,
+				Status:   models.CallStatusCompleted,
+				Content:  "ok",
+			}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register noop: %v", err)
+	}
+	provider := chatOnlyProvider{t: t, chat: func(req llm.ChatRequest) llm.ChatResponse {
+		return llm.ChatResponse{
+			Model: "test-model",
+			Message: models.Message{
+				Role:    models.RoleAI,
+				Content: "结果如下：\n{\"tender_id\":\"TB-2026-041\"}",
+			},
+			Stop: "stop",
+		}
+	}}
+
+	runAgent := New(AgentConfig{
+		LLMProvider: provider,
+		Tools:       registry,
+		MaxTurns:    2,
+		PinnedFacts: map[string]string{
+			"tender_id": "TB-2026-041",
+			"deadline":  "2026-05-30 17:00 CST",
+		},
+	})
+	result, err := runAgent.Run(context.Background(), "session-structured-repair", []models.Message{{
+		ID:        "m1",
+		SessionID: "session-structured-repair",
+		Role:      models.RoleHuman,
+		Content:   "请只返回 JSON，并包含 tender_id 和 deadline 字段。",
+	}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(result.FinalOutput), &payload); err != nil {
+		t.Fatalf("FinalOutput=%q is not valid json: %v", result.FinalOutput, err)
+	}
+	if got := strings.TrimSpace(stringFromAny(payload["tender_id"])); got != "TB-2026-041" {
+		t.Fatalf("tender_id=%q want TB-2026-041", got)
+	}
+	if got := strings.TrimSpace(stringFromAny(payload["deadline"])); got != "2026-05-30 17:00 CST" {
+		t.Fatalf("deadline=%q want 2026-05-30 17:00 CST", got)
+	}
+	if result.PinnedFacts["deadline"] != "2026-05-30 17:00 CST" {
+		t.Fatalf("PinnedFacts=%#v want deadline", result.PinnedFacts)
 	}
 }
 

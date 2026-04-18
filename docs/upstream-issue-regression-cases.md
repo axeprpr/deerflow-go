@@ -43,6 +43,19 @@
 | P2 | P2-1 认证签名错误 | 未覆盖 | 当前仅记录，不纳入 runtime 主回归 |
 | P2 | P2-2 切换聊天后内容为空 | 未覆盖 | 当前仅记录，不纳入后端/runtime 主回归 |
 
+## 最近一轮正式对比（2026-04-18）
+
+- 对比脚本：`scripts/compare_upstream_vs_go.py`
+- 模型：`qwen3.5-27b`
+- 结果：
+  - `core`：go `12/12` 通过，上游 `11/12` 通过
+  - `extended`：go `10/10` 通过，上游 `10/10` 通过
+
+本轮新增收口：
+
+- 上传文件生成的 markdown 伴生文件不再默认出现在线程 `artifacts` 中（避免污染 UI artifact 面板和无关用例）
+- 保留兼容开关：`DEERFLOW_ARTIFACT_INCLUDE_UPLOAD_MARKDOWN=true` 时恢复旧行为
+
 ## P0 用例
 
 ### Case P0-1: Skill 可发现且可触发
@@ -358,3 +371,31 @@
 - `csv-long-run-no-repeat`
 
 其中前两条适合先自动化，第三条适合先 live 复测，再决定是否做重型 golden。
+
+## 一键执行
+
+仓库已提供脚本：
+
+- `scripts/run_df_feature_regression.sh`
+
+只跑 deterministic 基线（P0/P1 核心）：
+
+```bash
+./scripts/run_df_feature_regression.sh
+```
+
+追加 live 回归（需先启动网关，并设置 base URL）：
+
+```bash
+RUN_LIVE=1 \
+DEERFLOW_LIVE_BASE_URL=http://127.0.0.1:58080 \
+DEERFLOW_LIVE_STREAM_TIMEOUT=6m \
+./scripts/run_df_feature_regression.sh
+```
+
+说明：
+
+- `DEERFLOW_LIVE_STREAM_TIMEOUT` 默认为 `6m`（脚本内设置），用于降低高时延模型下的误报超时。
+- 脚本内已包含“复杂链路”用例：
+  - 多 tool-call + 失败重试 + 配对连续性（deterministic）
+  - 同线程“先澄清再执行”双阶段 follow-up（live）

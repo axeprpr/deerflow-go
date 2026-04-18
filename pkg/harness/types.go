@@ -30,6 +30,7 @@ type FeatureSet struct {
 type AgentSpec struct {
 	DeferredTools          []models.Tool
 	PresentFiles           *tools.PresentFileRegistry
+	PinnedFacts            map[string]string
 	RunPolicy              *agent.RunPolicy
 	ExecutionMode          string
 	AgentType              agent.AgentType
@@ -51,6 +52,7 @@ func (s AgentSpec) AgentConfig() agent.AgentConfig {
 	return agent.AgentConfig{
 		DeferredTools:          append([]models.Tool(nil), s.DeferredTools...),
 		PresentFiles:           s.PresentFiles,
+		PinnedFacts:            copyStringMap(s.PinnedFacts),
 		RunPolicy:              s.RunPolicy,
 		AgentType:              s.AgentType,
 		MaxTurns:               s.MaxTurns,
@@ -66,6 +68,17 @@ func (s AgentSpec) AgentConfig() agent.AgentConfig {
 		GuardrailFailClosed:    s.GuardrailFailClosed,
 		GuardrailPassport:      s.GuardrailPassport,
 	}
+}
+
+func copyStringMap(raw map[string]string) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(raw))
+	for key, value := range raw {
+		out[key] = value
+	}
+	return out
 }
 
 // Middleware is a placeholder boundary for future harness-managed lifecycle
