@@ -110,7 +110,6 @@ jobs:
         working-directory: desktop/electron
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm ${{ matrix.dist-script }}
 
       - name: Upload Electron artifacts
