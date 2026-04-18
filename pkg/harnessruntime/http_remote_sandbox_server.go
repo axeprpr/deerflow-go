@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -72,63 +73,24 @@ func (s *HTTPRemoteSandboxServer) handleHealth(w http.ResponseWriter, r *http.Re
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 		return
 	}
-	s.mu.Lock()
-	activeLeases := len(s.sessions)
-	evictedLeases := s.evictedLeases
-	rejectedLeases := s.rejectedLeases
-	now := time.Now().UTC()
-	var oldestLeaseAgeMilli int64
-	var oldestIdleAgeMilli int64
-	for _, lease := range s.sessions {
-		if lease == nil {
-			continue
-		}
-		if !lease.createdAt.IsZero() {
-			age := now.Sub(lease.createdAt).Milliseconds()
-			if age < 0 {
-				age = 0
-			}
-			if age > oldestLeaseAgeMilli {
-				oldestLeaseAgeMilli = age
-			}
-		}
-		idleAt := lease.lastTouched
-		if idleAt.IsZero() {
-			idleAt = lease.createdAt
-		}
-		if !idleAt.IsZero() {
-			idle := now.Sub(idleAt).Milliseconds()
-			if idle < 0 {
-				idle = 0
-			}
-			if idle > oldestIdleAgeMilli {
-				oldestIdleAgeMilli = idle
-			}
-		}
-	}
-	s.mu.Unlock()
+	stats := s.leaseStats(false)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"status":                "ok",
-		"backend":               s.config.Backend,
-		"active_leases":         activeLeases,
-		"evicted_leases":        evictedLeases,
-		"rejected_leases":       rejectedLeases,
-		"oldest_lease_age_ms":   oldestLeaseAgeMilli,
-		"oldest_idle_age_ms":    oldestIdleAgeMilli,
-		"heartbeat_interval_ms": s.config.HeartbeatInterval.Milliseconds(),
-		"idle_ttl_ms":           s.config.IdleTTL.Milliseconds(),
-		"sweep_interval_ms":     s.config.SweepInterval.Milliseconds(),
-		"max_active_leases":     s.config.MaxActiveLeases,
-		"paths": map[string]string{
-			"health": DefaultRemoteSandboxHealthPath,
-			"leases": DefaultRemoteSandboxLeasePath,
-		},
-	})
+	_ = json.NewEncoder(w).Encode(stats)
 }
 
 func (s *HTTPRemoteSandboxServer) handleLeases(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+	switch r.Method {
+	case http.MethodGet:
+		verbose := false
+		raw := strings.TrimSpace(r.URL.Query().Get("verbose"))
+		if strings.EqualFold(raw, "1") || strings.EqualFold(raw, "true") {
+			verbose = true
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(s.leaseStats(verbose))
+		return
+	case http.MethodPost:
+	default:
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 		return
 	}
@@ -155,6 +117,111 @@ func (s *HTTPRemoteSandboxServer) handleLeases(w http.ResponseWriter, r *http.Re
 		Dir:                    session.GetDir(),
 		HeartbeatIntervalMilli: s.config.HeartbeatInterval.Milliseconds(),
 	})
+}
+
+func (s *HTTPRemoteSandboxServer) leaseStats(includeLeases bool) map[string]any {
+	s.mu.Lock()
+	activeLeases := len(s.sessions)
+	evictedLeases := s.evictedLeases
+	rejectedLeases := s.rejectedLeases
+	now := time.Now().UTC()
+	var oldestLeaseAgeMilli int64
+	var oldestIdleAgeMilli int64
+	leaseIDs := make([]string, 0, len(s.sessions))
+	byID := make(map[string]*remoteSandboxServerLease, len(s.sessions))
+	for leaseID, lease := range s.sessions {
+		leaseID = strings.TrimSpace(leaseID)
+		if leaseID == "" || lease == nil {
+			continue
+		}
+		leaseIDs = append(leaseIDs, leaseID)
+		byID[leaseID] = lease
+		if !lease.createdAt.IsZero() {
+			age := now.Sub(lease.createdAt).Milliseconds()
+			if age < 0 {
+				age = 0
+			}
+			if age > oldestLeaseAgeMilli {
+				oldestLeaseAgeMilli = age
+			}
+		}
+		idleAt := lease.lastTouched
+		if idleAt.IsZero() {
+			idleAt = lease.createdAt
+		}
+		if !idleAt.IsZero() {
+			idle := now.Sub(idleAt).Milliseconds()
+			if idle < 0 {
+				idle = 0
+			}
+			if idle > oldestIdleAgeMilli {
+				oldestIdleAgeMilli = idle
+			}
+		}
+	}
+	s.mu.Unlock()
+
+	payload := map[string]any{
+		"status":                "ok",
+		"backend":               s.config.Backend,
+		"active_leases":         activeLeases,
+		"evicted_leases":        evictedLeases,
+		"rejected_leases":       rejectedLeases,
+		"oldest_lease_age_ms":   oldestLeaseAgeMilli,
+		"oldest_idle_age_ms":    oldestIdleAgeMilli,
+		"heartbeat_interval_ms": s.config.HeartbeatInterval.Milliseconds(),
+		"idle_ttl_ms":           s.config.IdleTTL.Milliseconds(),
+		"sweep_interval_ms":     s.config.SweepInterval.Milliseconds(),
+		"max_active_leases":     s.config.MaxActiveLeases,
+		"paths": map[string]string{
+			"health": DefaultRemoteSandboxHealthPath,
+			"leases": DefaultRemoteSandboxLeasePath,
+		},
+	}
+	if !includeLeases {
+		return payload
+	}
+	sort.Strings(leaseIDs)
+	leases := make([]map[string]any, 0, len(leaseIDs))
+	for _, leaseID := range leaseIDs {
+		lease := byID[leaseID]
+		if lease == nil {
+			continue
+		}
+		createdAt := lease.createdAt.UTC()
+		idleAt := lease.lastTouched.UTC()
+		if idleAt.IsZero() {
+			idleAt = createdAt
+		}
+		leaseAge := now.Sub(createdAt).Milliseconds()
+		if createdAt.IsZero() || leaseAge < 0 {
+			leaseAge = 0
+		}
+		idleAge := now.Sub(idleAt).Milliseconds()
+		if idleAt.IsZero() || idleAge < 0 {
+			idleAge = 0
+		}
+		dir := ""
+		if lease.session != nil {
+			dir = lease.session.GetDir()
+		}
+		item := map[string]any{
+			"lease_id":          leaseID,
+			"dir":               dir,
+			"lease_age_ms":      leaseAge,
+			"idle_age_ms":       idleAge,
+			"created_at":        createdAt.Format(time.RFC3339Nano),
+			"last_touched":      idleAt.Format(time.RFC3339Nano),
+			"idle_ttl_ms":       s.config.IdleTTL.Milliseconds(),
+			"backend":           s.config.Backend,
+			"heartbeat_ms":      s.config.HeartbeatInterval.Milliseconds(),
+			"max_leases":        s.config.MaxActiveLeases,
+			"sweep_interval_ms": s.config.SweepInterval.Milliseconds(),
+		}
+		leases = append(leases, item)
+	}
+	payload["leases"] = leases
+	return payload
 }
 
 func (s *HTTPRemoteSandboxServer) handleLease(w http.ResponseWriter, r *http.Request) {

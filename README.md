@@ -6,71 +6,68 @@ The goal is not a line-by-line port of upstream DeerFlow. The goal is a compatib
 
 ## Architecture
 
-Upstream DeerFlow:
+`deerflow-go` keeps the upstream UI/API contract, but replaces the Python + LangGraph/LangChain runtime internals with a Go-native runtime core.
+
+UI/API compatibility boundary:
 
 ```mermaid
-flowchart TD
-    UI[Next.js Frontend]
-    Gateway[FastAPI Gateway]
-    API[Gateway API Layer<br/>/api/* + LangGraph-facing routes]
-    Runtime[Python Harness Runtime]
-    Factory[Agent Factory / create_agent]
-    Workflow[LangGraph / LangChain Workflow]
-    Middleware[Middleware Pipeline<br/>clarification / memory / title / summarization / loop detection]
-    Memory[Memory Subsystem]
-    Sandbox[SandboxProvider]
-    Tools[Tools / Skills / MCP / Channels]
-    LLM[Model Providers]
-    State[Threads / Runs / Checkpoints / Artifacts]
+flowchart LR
+    UI[Upstream DeerFlow UI]
+    Compat[pkg/langgraphcompat<br/>HTTP + SSE compatibility]
+    APIA[API routes: /api/*]
+    APIB[Thread/Run stream routes]
 
-    UI --> Gateway
-    Gateway --> API
-    API --> Runtime
-    Gateway --> State
-    Runtime --> Factory
-    Factory --> Workflow
-    Workflow --> Middleware
-    Middleware --> Memory
-    Middleware --> Sandbox
-    Workflow --> Tools
-    Workflow --> LLM
-    Workflow --> State
+    UI --> Compat
+    Compat --> APIA
+    Compat --> APIB
 ```
 
-`deerflow-go`:
+Runtime dependency direction (single-node fast path):
 
 ```mermaid
 flowchart TD
-    UI[Upstream DeerFlow Frontend]
-    Compat[pkg/langgraphcompat<br/>HTTP / SSE / DeerFlow-compatible API]
-    Node[pkg/harnessruntime RuntimeNode<br/>state plane / sandbox manager / dispatch / remote worker]
-    Runtime[pkg/harness + pkg/harnessruntime<br/>runtime assembly / coordinator / recovery / profiles]
-    Agent[pkg/agent<br/>custom ReAct loop]
-    State[Runtime State Plane<br/>snapshots / events / threads]
-    Dispatch[Worker Transport<br/>direct / queued / remote]
-    Remote[Remote Worker Node<br/>HTTP client / server / protocol]
-    SandboxMgr[Sandbox Resource Service<br/>lease / heartbeat / eviction]
-    ToolRuntime[Tool Runtime]
-    Providers[pkg/llm]
+    Compat[pkg/langgraphcompat]
+    Harness[pkg/harness<br/>runtime assembly boundary]
+    RuntimeNode[pkg/harnessruntime<br/>coordinator + dispatch + recovery]
+    Agent[pkg/agent<br/>ReAct loop]
+    LLM[pkg/llm]
     Tools[pkg/tools]
     Memory[pkg/memory]
     Sandbox[pkg/sandbox]
+    State[Runtime state plane<br/>threads/runs/snapshots/events]
 
-    UI --> Compat
-    Compat --> Node
-    Compat --> Runtime
-    Node --> State
-    Node --> Dispatch
-    Node --> Remote
-    Node --> SandboxMgr
-    Runtime --> Agent
-    Runtime --> ToolRuntime
-    Runtime --> Memory
-    Dispatch --> Runtime
-    Agent --> Providers
+    Compat --> Harness
+    Harness --> RuntimeNode
+    RuntimeNode --> Agent
+    Agent --> LLM
     Agent --> Tools
-    ToolRuntime --> Tools
-    SandboxMgr --> Sandbox
+    RuntimeNode --> Memory
+    RuntimeNode --> Sandbox
+    RuntimeNode --> State
+```
+
+Split-process production topology (gateway/worker/state/sandbox):
+
+```mermaid
+flowchart LR
+    UI[Upstream DeerFlow UI]
+    GatewayProc[Process: gateway or langgraph<br/>compat HTTP/SSE]
+    WorkerProc[Process: runtime-node<br/>execution worker]
+    StateProc[Process: runtime-state<br/>shared run/thread state]
+    SandboxProc[Process: runtime-sandbox<br/>lease-based sandbox service]
+    Store[(Shared state/event storage)]
+    Artifacts[(Artifact storage)]
+    Models[(LLM providers)]
+
+    UI --> GatewayProc
+    GatewayProc --> WorkerProc
+    GatewayProc --> StateProc
+    WorkerProc --> StateProc
+    WorkerProc --> SandboxProc
+    StateProc --> Store
+    GatewayProc --> Artifacts
+    WorkerProc --> Artifacts
+    WorkerProc --> Models
 ```
 
 ## Runtime Stack Manifest

@@ -66,6 +66,61 @@ func TestNewProcessLauncherBuildsDependenciesAndPolicyDefaults(t *testing.T) {
 	}
 }
 
+func TestNewProcessLauncherAppliesPerProcessPolicyOverrides(t *testing.T) {
+	binDir := installTestProcessBinaries(t, "gateway-bin", "worker-bin")
+	launcher, err := NewProcessLauncher([]ProcessManifest{
+		{Name: "gateway", Binary: "gateway-bin", ReadyURL: "http://127.0.0.1:29080/healthz", DependsOn: []string{"worker"}},
+		{Name: "worker", Binary: "worker-bin", ReadyURL: "http://127.0.0.1:29081/healthz"},
+	}, ProcessLaunchOptions{
+		BinaryDir:         binDir,
+		RestartPolicy:     ProcessRestartOnFailure,
+		MaxRestarts:       7,
+		RestartDelay:      900 * time.Millisecond,
+		DependencyTimeout: 35 * time.Second,
+		ProcessPolicies: map[string]ProcessPolicy{
+			"worker": {
+				RestartPolicy:     ProcessRestartNever,
+				MaxRestarts:       1,
+				RestartDelay:      250 * time.Millisecond,
+				DependencyTimeout: 12 * time.Second,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewProcessLauncher() error = %v", err)
+	}
+	if len(launcher.lifecycles) != 2 {
+		t.Fatalf("lifecycles=%d want 2", len(launcher.lifecycles))
+	}
+	if launcher.lifecycles[0].name != "worker" {
+		t.Fatalf("first lifecycle=%q want worker", launcher.lifecycles[0].name)
+	}
+	if launcher.lifecycles[0].restartPolicy != ProcessRestartNever {
+		t.Fatalf("worker restart policy=%q want=%q", launcher.lifecycles[0].restartPolicy, ProcessRestartNever)
+	}
+	if launcher.lifecycles[0].maxRestarts != 1 {
+		t.Fatalf("worker max restarts=%d want=1", launcher.lifecycles[0].maxRestarts)
+	}
+	if launcher.lifecycles[0].restartDelay != 250*time.Millisecond {
+		t.Fatalf("worker restart delay=%s want=250ms", launcher.lifecycles[0].restartDelay)
+	}
+	if launcher.lifecycles[0].dependencyTimeout != 12*time.Second {
+		t.Fatalf("worker dependency timeout=%s want=12s", launcher.lifecycles[0].dependencyTimeout)
+	}
+	if launcher.lifecycles[1].restartPolicy != ProcessRestartOnFailure {
+		t.Fatalf("gateway restart policy=%q want=%q", launcher.lifecycles[1].restartPolicy, ProcessRestartOnFailure)
+	}
+	if launcher.lifecycles[1].maxRestarts != 7 {
+		t.Fatalf("gateway max restarts=%d want=7", launcher.lifecycles[1].maxRestarts)
+	}
+	if launcher.lifecycles[1].restartDelay != 900*time.Millisecond {
+		t.Fatalf("gateway restart delay=%s want=900ms", launcher.lifecycles[1].restartDelay)
+	}
+	if launcher.lifecycles[1].dependencyTimeout != 35*time.Second {
+		t.Fatalf("gateway dependency timeout=%s want=35s", launcher.lifecycles[1].dependencyTimeout)
+	}
+}
+
 func TestParseProcessRestartPolicy(t *testing.T) {
 	tests := []struct {
 		in   string

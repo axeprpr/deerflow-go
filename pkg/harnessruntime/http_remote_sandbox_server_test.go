@@ -216,3 +216,82 @@ func TestHTTPRemoteSandboxServerEnforcesMaxActiveLeases(t *testing.T) {
 		t.Fatalf("second Release() error = %v", err)
 	}
 }
+
+func TestHTTPRemoteSandboxServerLeaseListEndpoint(t *testing.T) {
+	httpServer := NewHTTPRemoteSandboxServer(SandboxManagerConfig{
+		Name:              "sandbox-list",
+		Root:              t.TempDir(),
+		HeartbeatInterval: 30 * time.Millisecond,
+		IdleTTL:           2 * time.Second,
+		SweepInterval:     250 * time.Millisecond,
+		MaxActiveLeases:   3,
+	}, nil)
+	server := httptest.NewServer(httpServer.Handler())
+	defer server.Close()
+	defer func() {
+		_ = httpServer.Close(context.Background())
+	}()
+
+	service := NewRemoteSandboxLeaseService(server.URL, nil)
+	lease, err := service.AcquireLease(harness.AgentRequest{Features: harness.FeatureSet{Sandbox: true}})
+	if err != nil {
+		t.Fatalf("AcquireLease() error = %v", err)
+	}
+	if lease.Sandbox == nil {
+		t.Fatal("AcquireLease().Sandbox = nil")
+	}
+	defer func() {
+		_ = lease.Release()
+	}()
+
+	resp, err := http.Get(server.URL + DefaultRemoteSandboxLeasePath)
+	if err != nil {
+		t.Fatalf("GET leases: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var summary map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode summary body error = %v", err)
+	}
+	resp.Body.Close()
+	if got, _ := summary["active_leases"].(float64); got != 1 {
+		t.Fatalf("active_leases = %v, want 1", got)
+	}
+	if _, ok := summary["leases"]; ok {
+		t.Fatalf("summary unexpectedly included leases payload: %#v", summary["leases"])
+	}
+
+	detailResp, err := http.Get(server.URL + DefaultRemoteSandboxLeasePath + "?verbose=1")
+	if err != nil {
+		t.Fatalf("GET leases verbose: %v", err)
+	}
+	if detailResp.StatusCode != http.StatusOK {
+		t.Fatalf("verbose status = %d", detailResp.StatusCode)
+	}
+	var detail map[string]any
+	if err := json.NewDecoder(detailResp.Body).Decode(&detail); err != nil {
+		detailResp.Body.Close()
+		t.Fatalf("decode detail body error = %v", err)
+	}
+	detailResp.Body.Close()
+	leases, ok := detail["leases"].([]any)
+	if !ok || len(leases) != 1 {
+		t.Fatalf("verbose leases = %#v", detail["leases"])
+	}
+	first, ok := leases[0].(map[string]any)
+	if !ok {
+		t.Fatalf("lease detail type = %T", leases[0])
+	}
+	if got, _ := first["lease_id"].(string); got == "" {
+		t.Fatalf("lease_id = %q, want non-empty", got)
+	}
+	if got, _ := first["heartbeat_ms"].(float64); got <= 0 {
+		t.Fatalf("heartbeat_ms = %v, want > 0", got)
+	}
+	if got, _ := first["max_leases"].(float64); got != 3 {
+		t.Fatalf("max_leases = %v, want 3", got)
+	}
+}

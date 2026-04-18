@@ -246,6 +246,69 @@ func TestCoordinatorResumeSkipsDispatchForIdempotentRecoveryContext(t *testing.T
 	}
 }
 
+func TestCoordinatorResumeSkipsDispatchWhenPersistedRunAlreadyRecovered(t *testing.T) {
+	dispatcher := &fakeDispatcher{}
+	runState := &fakeRunStateRuntime{}
+	coordinator := NewCoordinator(CoordinatorDeps{
+		Dispatcher: dispatcher,
+		RunState:   runState,
+		Query: fakeQueryRuntime{
+			recordOK: true,
+			record: RunRecord{
+				RunID:           "run-1",
+				ThreadID:        "thread-1",
+				AssistantID:     "lead_agent",
+				Attempt:         2,
+				Status:          "running",
+				ResumeFromEvent: 9,
+				ResumeReason:    "worker-retry",
+				Outcome:         RunOutcomeDescriptor{RunStatus: "running", Attempt: 2},
+			},
+		},
+	})
+	coordinator.runState.now = func() time.Time { return time.Unix(26, 0).UTC() }
+
+	record, result, err := coordinator.Resume(context.Background(), RunPlan{
+		Model:     "model-1",
+		AgentName: "lead_agent",
+		Spec:      harness.AgentSpec{},
+		Features:  harness.FeatureSet{Sandbox: true},
+		Messages: []models.Message{{
+			Role:      models.RoleHuman,
+			Content:   "resume",
+			SessionID: "thread-1",
+		}},
+	}, RunRecord{
+		RunID:       "run-1",
+		ThreadID:    "thread-1",
+		AssistantID: "lead_agent",
+		Attempt:     1,
+		Status:      "interrupted",
+		Outcome:     RunOutcomeDescriptor{RunStatus: "interrupted", Attempt: 1},
+	}, 9, "worker-retry")
+	if err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+	if result != nil {
+		t.Fatalf("result = %#v, want nil when persisted run already recovered", result)
+	}
+	if dispatcher.called {
+		t.Fatal("dispatcher was called for persisted idempotent recovery")
+	}
+	if record.Attempt != 2 || record.ResumeFromEvent != 9 || record.ResumeReason != "worker-retry" {
+		t.Fatalf("record = %+v", record)
+	}
+	if record.Status != "running" {
+		t.Fatalf("record status = %q, want running", record.Status)
+	}
+	if runState.saved.RunID != "" {
+		t.Fatalf("runState saved = %+v, want unchanged snapshot", runState.saved)
+	}
+	if runState.threadStatus != "thread-1:busy" {
+		t.Fatalf("runState threadStatus = %q", runState.threadStatus)
+	}
+}
+
 func TestCoordinatorFinalizePreservesTaskLifecycleDescriptor(t *testing.T) {
 	t.Parallel()
 

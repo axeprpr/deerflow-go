@@ -116,6 +116,7 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 		restartDelay := *spawnRestartDelay
 		dependencyTimeout := *spawnDependencyTimeout
 		failureIsolation := *spawnFailureIsolation
+		processPolicies := map[string]ProcessPolicy{}
 		policySource := "cli-flags"
 		if *spawnBundleUseHostPlan {
 			hostPlan, err := LoadBundleHostPlan(*spawnBundle)
@@ -130,6 +131,19 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 			restartDelay = time.Duration(hostPlan.RuntimePolicy.RestartDelayMilli) * time.Millisecond
 			dependencyTimeout = time.Duration(hostPlan.RuntimePolicy.DependencyTimeoutMilli) * time.Millisecond
 			failureIsolation = hostPlan.RuntimePolicy.FailureIsolation
+			processPolicies = make(map[string]ProcessPolicy, len(hostPlan.Processes))
+			for _, process := range hostPlan.Processes {
+				policy, err := parseProcessRestartPolicy(process.RestartPolicy)
+				if err != nil {
+					return nil, err
+				}
+				processPolicies[strings.TrimSpace(process.Name)] = ProcessPolicy{
+					RestartPolicy:     policy,
+					MaxRestarts:       process.MaxRestarts,
+					RestartDelay:      time.Duration(process.RestartDelayMilli) * time.Millisecond,
+					DependencyTimeout: time.Duration(process.DependencyTimeoutMilli) * time.Millisecond,
+				}
+			}
 			policySource = "host-plan"
 		}
 		processLauncher, err := NewProcessLauncher(manifest.Processes, ProcessLaunchOptions{
@@ -141,6 +155,7 @@ func PrepareCommand(fs *flag.FlagSet, build langgraphcmd.BuildInfo, options Comm
 			RestartDelay:      restartDelay,
 			DependencyTimeout: dependencyTimeout,
 			FailureIsolation:  failureIsolation,
+			ProcessPolicies:   processPolicies,
 		})
 		if err != nil {
 			return nil, err

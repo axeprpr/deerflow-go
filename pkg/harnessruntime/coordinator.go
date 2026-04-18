@@ -129,6 +129,9 @@ func (c Coordinator) Resume(ctx context.Context, plan RunPlan, record RunRecord,
 	if isIdempotentResume(record, next, afterEvent, reason) {
 		return c.runState.ReconcileLive(next), nil, nil
 	}
+	if persisted, ok := c.query.Run(next.ThreadID, next.RunID); ok && isIdempotentResume(persisted, next, afterEvent, reason) {
+		return c.runState.ReconcileLive(persisted), nil, nil
+	}
 	record = c.runState.Begin(next)
 	plan.RunID = record.RunID
 	plan.ThreadID = record.ThreadID

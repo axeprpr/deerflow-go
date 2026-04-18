@@ -23,6 +23,14 @@ type ProcessLaunchOptions struct {
 	RestartDelay      time.Duration
 	DependencyTimeout time.Duration
 	FailureIsolation  bool
+	ProcessPolicies   map[string]ProcessPolicy
+}
+
+type ProcessPolicy struct {
+	RestartPolicy     ProcessRestartPolicy
+	MaxRestarts       int
+	RestartDelay      time.Duration
+	DependencyTimeout time.Duration
 }
 
 type ProcessRestartPolicy string
@@ -88,7 +96,16 @@ func NewProcessLauncher(processes []ProcessManifest, options ProcessLaunchOption
 		if err != nil {
 			return nil, err
 		}
-		lifecycle, err := newProcessLifecycle(process, dependencyURLs, options, restartPolicy)
+		policy, err := resolveProcessPolicy(strings.TrimSpace(process.Name), options, ProcessPolicy{
+			RestartPolicy:     restartPolicy,
+			MaxRestarts:       options.MaxRestarts,
+			RestartDelay:      options.RestartDelay,
+			DependencyTimeout: options.DependencyTimeout,
+		})
+		if err != nil {
+			return nil, err
+		}
+		lifecycle, err := newProcessLifecycle(process, dependencyURLs, options, policy)
 		if err != nil {
 			return nil, err
 		}
@@ -102,7 +119,40 @@ func NewProcessLauncher(processes []ProcessManifest, options ProcessLaunchOption
 	}, nil
 }
 
-func newProcessLifecycle(process ProcessManifest, dependencyURLs []string, options ProcessLaunchOptions, restartPolicy ProcessRestartPolicy) (*processLifecycle, error) {
+func resolveProcessPolicy(processName string, options ProcessLaunchOptions, defaults ProcessPolicy) (ProcessPolicy, error) {
+	normalized := defaults
+	processName = strings.TrimSpace(processName)
+	if processName == "" || len(options.ProcessPolicies) == 0 {
+		return normalized, nil
+	}
+	override, ok := options.ProcessPolicies[processName]
+	if !ok {
+		return normalized, nil
+	}
+	if override.RestartPolicy != "" {
+		parsed, err := parseProcessRestartPolicy(string(override.RestartPolicy))
+		if err != nil {
+			return ProcessPolicy{}, fmt.Errorf("process %q restart policy: %w", processName, err)
+		}
+		normalized.RestartPolicy = parsed
+	}
+	normalized.MaxRestarts = override.MaxRestarts
+	if override.RestartDelay >= 0 {
+		normalized.RestartDelay = override.RestartDelay
+	}
+	if override.DependencyTimeout > 0 {
+		normalized.DependencyTimeout = override.DependencyTimeout
+	}
+	if normalized.DependencyTimeout <= 0 {
+		normalized.DependencyTimeout = 60 * time.Second
+	}
+	if normalized.RestartDelay < 0 {
+		normalized.RestartDelay = 0
+	}
+	return normalized, nil
+}
+
+func newProcessLifecycle(process ProcessManifest, dependencyURLs []string, options ProcessLaunchOptions, policy ProcessPolicy) (*processLifecycle, error) {
 	name := strings.TrimSpace(process.Name)
 	if name == "" {
 		return nil, fmt.Errorf("process name is required")
@@ -125,10 +175,10 @@ func newProcessLifecycle(process ProcessManifest, dependencyURLs []string, optio
 		stdout:            options.Stdout,
 		stderr:            options.Stderr,
 		dependencies:      append([]string(nil), dependencyURLs...),
-		dependencyTimeout: options.DependencyTimeout,
-		restartPolicy:     restartPolicy,
-		maxRestarts:       options.MaxRestarts,
-		restartDelay:      options.RestartDelay,
+		dependencyTimeout: policy.DependencyTimeout,
+		restartPolicy:     policy.RestartPolicy,
+		maxRestarts:       policy.MaxRestarts,
+		restartDelay:      policy.RestartDelay,
 	}, nil
 }
 

@@ -3,6 +3,7 @@ package stackcmd
 import (
 	"encoding/json"
 	"flag"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -342,6 +343,26 @@ func TestPrepareCommandSpawnBundleUsesHostPlanPolicy(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("WriteBundleWithOptions() error = %v", err)
 	}
+	hostPlan, err := LoadBundleHostPlan(dir)
+	if err != nil {
+		t.Fatalf("LoadBundleHostPlan() error = %v", err)
+	}
+	for i := range hostPlan.Processes {
+		if strings.TrimSpace(hostPlan.Processes[i].Name) != "worker" {
+			continue
+		}
+		hostPlan.Processes[i].RestartPolicy = string(ProcessRestartNever)
+		hostPlan.Processes[i].MaxRestarts = 1
+		hostPlan.Processes[i].RestartDelayMilli = 250
+		hostPlan.Processes[i].DependencyTimeoutMilli = 12000
+	}
+	data, err := json.MarshalIndent(hostPlan, "", "  ")
+	if err != nil {
+		t.Fatalf("Marshal(hostPlan) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "host-plan.json"), data, 0o644); err != nil {
+		t.Fatalf("WriteFile(host-plan.json) error = %v", err)
+	}
 	binDir := installTestProcessBinaries(t, "langgraph", "runtime-node", "runtime-state", "runtime-sandbox")
 
 	prepared, err := PrepareCommand(flag.NewFlagSet("runtime-stack-spawn-bundle-host-plan", flag.ContinueOnError), langgraphcmd.BuildInfo{}, CommandOptions{
@@ -374,6 +395,22 @@ func TestPrepareCommandSpawnBundleUsesHostPlanPolicy(t *testing.T) {
 	if launcher.lifecycles[0].dependencyTimeout != 45*time.Second {
 		t.Fatalf("dependency timeout = %s", launcher.lifecycles[0].dependencyTimeout)
 	}
+	worker := lifecycleByName(launcher, "worker")
+	if worker == nil {
+		t.Fatal("worker lifecycle = nil")
+	}
+	if worker.restartPolicy != ProcessRestartNever {
+		t.Fatalf("worker restart policy = %q", worker.restartPolicy)
+	}
+	if worker.maxRestarts != 1 {
+		t.Fatalf("worker max restarts = %d", worker.maxRestarts)
+	}
+	if worker.restartDelay != 250*time.Millisecond {
+		t.Fatalf("worker restart delay = %s", worker.restartDelay)
+	}
+	if worker.dependencyTimeout != 12*time.Second {
+		t.Fatalf("worker dependency timeout = %s", worker.dependencyTimeout)
+	}
 	if !launcher.failureIsolation {
 		t.Fatal("failure isolation = false, want true")
 	}
@@ -389,4 +426,20 @@ func manifestSandboxMaxActiveLeases(manifest StackManifest) int {
 		}
 	}
 	return 0
+}
+
+func lifecycleByName(launcher *ProcessLauncher, name string) *processLifecycle {
+	if launcher == nil {
+		return nil
+	}
+	name = strings.TrimSpace(name)
+	for _, lifecycle := range launcher.lifecycles {
+		if lifecycle == nil {
+			continue
+		}
+		if strings.TrimSpace(lifecycle.name) == name {
+			return lifecycle
+		}
+	}
+	return nil
 }
