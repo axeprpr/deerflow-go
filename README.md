@@ -122,6 +122,13 @@ Reference documents:
 - [API Diff](docs/API_DIFF.md)
 - [Electron Local Runtime](desktop/electron/README.md)
 
+Electron runtime notes:
+
+- Electron dist now bundles Go runtime binaries under `resources/runtime/bin`
+- desktop launcher supports:
+  - `DEERFLOW_ELECTRON_RUNTIME_MODE=single` (direct `langgraph`)
+  - `DEERFLOW_ELECTRON_RUNTIME_MODE=bundle` (`runtime-stack` host-plan with `gateway/worker/state/sandbox`)
+
 ## Remaining Large Workstreams
 
 - Deployment split hardening:

@@ -6,9 +6,13 @@ It does not modify upstream UI code under `third_party/deerflow-ui/frontend`.
 
 ## What It Starts
 
-1. Backend: local `langgraph` server (`http://127.0.0.1:2026` by default)
-2. Frontend: upstream Next.js UI (`http://127.0.0.1:3000` by default)
-3. Electron window loading the frontend URL
+1. Backend:
+   - `single` mode: local `langgraph` server (`http://127.0.0.1:2026` by default)
+   - `bundle` mode: `runtime-stack` host-plan launcher (`gateway/worker/state/sandbox`)
+2. Frontend:
+   - `dev` / `start`: upstream Next.js UI
+   - `external`: open an existing URL without spawning frontend process
+3. Electron window loading the selected frontend URL
 
 ## Prerequisites
 
@@ -29,6 +33,12 @@ Start desktop app:
 
 ```bash
 pnpm dev
+```
+
+Build bundled runtime binaries (needed for packaging and `bundle` mode):
+
+```bash
+pnpm build:runtime
 ```
 
 ## Packaging
@@ -60,21 +70,41 @@ GitHub Actions workflow: `.github/workflows/electron-release.yml`
 Backend startup command priority:
 
 1. `DEERFLOW_ELECTRON_BACKEND_BIN` (explicit binary path)
-2. `bin/langgraph` (or `bin/langgraph.exe` on Windows)
-3. Fallback: `go run ./cmd/langgraph`
+2. Runtime binary dirs:
+   - `DEERFLOW_ELECTRON_RUNTIME_BINARY_DIR`
+   - packaged `resources/runtime/bin`
+   - `desktop/electron/runtime/bin`
+   - `bin/`
+3. Fallback (dev only): `go run ./cmd/langgraph`
+
+Bundle mode backend flow:
+
+1. resolve `runtime-stack`
+2. validate existing bundle (`-validate-bundle`)
+3. auto rebuild bundle when needed (`-write-bundle`)
+4. launch bundle with host-plan policy (`-spawn-bundle -spawn-bundle-use-host-plan`)
 
 Frontend startup command:
 
 - Default: `pnpm dev -- --hostname <host> --port <port>`
 - If `DEERFLOW_ELECTRON_FRONTEND_MODE=start`: `pnpm start -- --hostname <host> --port <port>`
+- If `DEERFLOW_ELECTRON_FRONTEND_MODE=external`: do not spawn frontend process, open `DEERFLOW_ELECTRON_FRONTEND_EXTERNAL_URL`
 
 ## Environment Variables
 
 - `DEERFLOW_ELECTRON_BACKEND_HOST` (default `127.0.0.1`)
 - `DEERFLOW_ELECTRON_BACKEND_PORT` (default `2026`)
+- `DEERFLOW_ELECTRON_RUNTIME_MODE` (`single` or `bundle`, default `single`)
+- `DEERFLOW_ELECTRON_RUNTIME_BINARY_DIR` (optional runtime binary directory override)
+- `DEERFLOW_ELECTRON_RUNTIME_BUNDLE_DIR` (bundle mode: runtime bundle directory)
+- `DEERFLOW_ELECTRON_RUNTIME_BUNDLE_PRESET` (bundle mode preset, default `shared-remote`)
+- `DEERFLOW_ELECTRON_RUNTIME_BUNDLE_REFRESH` (bundle mode: force rewrite bundle, default `false`)
+- `DEERFLOW_ELECTRON_RUNTIME_DATA_ROOT` (bundle mode data root)
+- `DEERFLOW_ELECTRON_WORKER_PORT` (bundle mode worker port; state/sandbox derive from worker)
 - `DEERFLOW_ELECTRON_FRONTEND_HOST` (default `127.0.0.1`)
 - `DEERFLOW_ELECTRON_FRONTEND_PORT` (default `3000`)
-- `DEERFLOW_ELECTRON_FRONTEND_MODE` (`dev` or `start`, default `dev`)
+- `DEERFLOW_ELECTRON_FRONTEND_MODE` (`dev`, `start`, or `external`; default `dev`, packaged default `external`)
+- `DEERFLOW_ELECTRON_FRONTEND_EXTERNAL_URL` (used when frontend mode is `external`)
 - `DEERFLOW_ELECTRON_BACKEND_BIN` (optional explicit backend binary)
 - `DEERFLOW_ELECTRON_WAIT_TIMEOUT_MS` (default `180000`)
 - `DEERFLOW_ELECTRON_WAIT_INTERVAL_MS` (default `500`)

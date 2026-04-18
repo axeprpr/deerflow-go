@@ -43,6 +43,12 @@ jobs:
         with:
           version: "9"
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Install Electron dependencies
         working-directory: desktop/electron
         run: pnpm install --no-frozen-lockfile

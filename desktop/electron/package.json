@@ -8,13 +8,14 @@
   "author": "deerflow-go",
   "license": "MIT",
   "scripts": {
+    "build:runtime": "node scripts/build-runtime.mjs",
     "dev": "electron .",
     "start": "electron .",
-    "pack": "electron-builder --dir --publish never",
-    "dist": "electron-builder --publish never",
-    "dist:linux": "electron-builder --linux AppImage tar.gz --publish never",
-    "dist:mac": "electron-builder --mac dmg zip --publish never",
-    "dist:win": "electron-builder --win nsis zip --publish never"
+    "pack": "pnpm build:runtime && electron-builder --dir --publish never",
+    "dist": "pnpm build:runtime && electron-builder --publish never",
+    "dist:linux": "pnpm build:runtime && electron-builder --linux AppImage tar.gz --publish never",
+    "dist:mac": "pnpm build:runtime && electron-builder --mac dmg zip --publish never",
+    "dist:win": "pnpm build:runtime && electron-builder --win nsis zip --publish never"
   },
   "devDependencies": {
     "electron": "^37.2.0",
@@ -28,6 +29,15 @@
       "main.js",
       "preload.js",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "runtime/bin",
+        "to": "runtime/bin",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "directories": {
       "output": "release",
