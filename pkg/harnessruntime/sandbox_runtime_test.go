@@ -188,6 +188,13 @@ func TestBackendSpecificSandboxManagersExposeConfiguredBackend(t *testing.T) {
 	if windowsManager.Backend() != SandboxBackendWindowsRestricted {
 		t.Fatalf("windows backend = %q", windowsManager.Backend())
 	}
+	wslManager, err := NewWSL2SandboxManager(SandboxManagerConfig{})
+	if err != nil {
+		t.Fatalf("NewWSL2SandboxManager() error = %v", err)
+	}
+	if wslManager.Backend() != SandboxBackendWSL2 {
+		t.Fatalf("wsl2 backend = %q", wslManager.Backend())
+	}
 }
 
 func TestSandboxManagerFromConfigValidatesBackendRequirements(t *testing.T) {
@@ -250,6 +257,10 @@ func TestLocalSandboxLeaseDefaultsFillMissingNameAndRoot(t *testing.T) {
 	}
 	if lease.HeartbeatInterval != 0 || lease.IdleTTL != 0 || lease.SweepInterval != 0 {
 		t.Fatalf("lease config = %+v, want zero values", lease)
+	}
+	wslName, _, _ := localSandboxLeaseDefaults(SandboxManagerConfig{}, SandboxBackendWSL2)
+	if wslName != "runtime-wsl2" {
+		t.Fatalf("name = %q, want runtime-wsl2", wslName)
 	}
 }
 

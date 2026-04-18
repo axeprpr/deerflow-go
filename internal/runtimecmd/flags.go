@@ -48,7 +48,7 @@ func BindFlags(fs *flag.FlagSet, defaults NodeConfig, prefix, label string) *Nod
 		endpoint:               fs.String(flagName(prefix, "endpoint"), defaults.Endpoint, label+"worker endpoint for gateway role"),
 		maxTurns:               fs.Int(flagName(prefix, "max-turns"), defaults.MaxTurns, label+"default max turns"),
 		transportBackend:       fs.String(flagName(prefix, "transport-backend"), string(defaults.TransportBackend), label+"transport backend: direct|queue|remote"),
-		sandboxBackend:         fs.String(flagName(prefix, "sandbox-backend"), string(defaults.SandboxBackend), label+"sandbox backend: local-linux|container|remote|windows-restricted"),
+		sandboxBackend:         fs.String(flagName(prefix, "sandbox-backend"), string(defaults.SandboxBackend), label+"sandbox backend: local-linux|container|remote|wsl2|windows-restricted"),
 		sandboxEndpoint:        fs.String(flagName(prefix, "sandbox-endpoint"), defaults.SandboxEndpoint, label+"sandbox endpoint for remote backend"),
 		sandboxImage:           fs.String(flagName(prefix, "sandbox-image"), defaults.SandboxImage, label+"sandbox image for container backend"),
 		sandboxMaxActiveLeases: fs.Int(flagName(prefix, "sandbox-max-active-leases"), defaults.SandboxMaxActiveLeases, label+"max active sandbox leases for remote sandbox server (<=0 means unlimited)"),

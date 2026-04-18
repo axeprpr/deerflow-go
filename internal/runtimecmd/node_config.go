@@ -294,7 +294,7 @@ func (c NodeConfig) ValidateForSandboxServer() error {
 	switch node.Sandbox.Normalized().Backend {
 	case harnessruntime.SandboxBackendRemote:
 		return fmt.Errorf("remote sandbox server requires a local sandbox backend")
-	case "", harnessruntime.SandboxBackendLocalLinux, harnessruntime.SandboxBackendContainer, harnessruntime.SandboxBackendWindowsRestricted:
+	case "", harnessruntime.SandboxBackendLocalLinux, harnessruntime.SandboxBackendContainer, harnessruntime.SandboxBackendWSL2, harnessruntime.SandboxBackendWindowsRestricted:
 		return node.Sandbox.Validate()
 	default:
 		return node.Sandbox.Validate()
@@ -364,6 +364,8 @@ func NormalizeSandboxBackend(value string, fallback harnessruntime.SandboxBacken
 		return harnessruntime.SandboxBackendContainer
 	case string(harnessruntime.SandboxBackendRemote):
 		return harnessruntime.SandboxBackendRemote
+	case string(harnessruntime.SandboxBackendWSL2):
+		return harnessruntime.SandboxBackendWSL2
 	case string(harnessruntime.SandboxBackendWindowsRestricted):
 		return harnessruntime.SandboxBackendWindowsRestricted
 	default:

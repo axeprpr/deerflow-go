@@ -93,3 +93,39 @@ func TestSandboxTimeout(t *testing.T) {
 		t.Fatalf("Exec() error = %T, want *TimeoutError", err)
 	}
 }
+
+func TestSandboxWindowsRestrictedCommandPolicyAllowsConfiguredCommand(t *testing.T) {
+	baseDir := t.TempDir()
+	sb, err := NewWithConfig("restricted-allow", baseDir, Config{
+		ExecutionBackend: ExecutionBackendWindowsRestricted,
+		AllowedCommands:  []string{"echo"},
+	})
+	if err != nil {
+		t.Fatalf("NewWithConfig() error = %v", err)
+	}
+	defer sb.Close()
+
+	result, err := sb.Exec(context.Background(), "echo hello", 5*time.Second)
+	if err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+	if got := strings.TrimSpace(result.Stdout()); got != "hello" {
+		t.Fatalf("stdout = %q, want hello", got)
+	}
+}
+
+func TestSandboxWindowsRestrictedCommandPolicyRejectsDisallowedCommand(t *testing.T) {
+	baseDir := t.TempDir()
+	sb, err := NewWithConfig("restricted-deny", baseDir, Config{
+		ExecutionBackend: ExecutionBackendWindowsRestricted,
+		AllowedCommands:  []string{"echo"},
+	})
+	if err != nil {
+		t.Fatalf("NewWithConfig() error = %v", err)
+	}
+	defer sb.Close()
+
+	if _, err := sb.Exec(context.Background(), "python --version", 5*time.Second); err == nil || !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("Exec() error = %v", err)
+	}
+}

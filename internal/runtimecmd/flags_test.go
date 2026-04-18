@@ -95,6 +95,19 @@ func TestBindFlagsStateStoreURLOverridesStateBackend(t *testing.T) {
 	}
 }
 
+func TestBindFlagsSupportsWSL2SandboxBackend(t *testing.T) {
+	fs := flag.NewFlagSet("runtime", flag.ContinueOnError)
+	defaults := DefaultRuntimeWorkerNodeConfig()
+	binding := BindFlags(fs, defaults, "", "")
+	if err := fs.Parse([]string{"-sandbox-backend=wsl2"}); err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	cfg := binding.Config()
+	if cfg.SandboxBackend != harnessruntime.SandboxBackendWSL2 {
+		t.Fatalf("SandboxBackend = %q", cfg.SandboxBackend)
+	}
+}
+
 func TestBindFlagsDerivesBackendsFromStoreURLs(t *testing.T) {
 	fs := flag.NewFlagSet("runtime", flag.ContinueOnError)
 	defaults := DefaultRuntimeWorkerNodeConfig()

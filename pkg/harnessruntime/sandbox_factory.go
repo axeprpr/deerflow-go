@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axeprpr/deerflow-go/pkg/harness"
+	"github.com/axeprpr/deerflow-go/pkg/sandbox"
 )
 
 // SandboxManagerConfig describes the runtime-owned sandbox backend selection.
@@ -56,6 +57,8 @@ func (c SandboxManagerConfig) Validate() error {
 			return fmt.Errorf("remote sandbox backend requires endpoint")
 		}
 		return nil
+	case SandboxBackendWSL2:
+		return nil
 	case SandboxBackendWindowsRestricted:
 		return nil
 	default:
@@ -89,14 +92,22 @@ func DefaultSandboxManagerFactory() SandboxManagerFactory {
 			}),
 			SandboxBackendContainer: SandboxLeaseServiceFactoryFunc(func(config SandboxManagerConfig) (SandboxLeaseService, error) {
 				name, root, lease := localSandboxLeaseDefaults(config, SandboxBackendContainer)
-				return NewLocalSandboxLeaseServiceWithConfig(name, root, lease), nil
+				return NewLocalSandboxLeaseServiceWithSandboxConfig(name, root, lease, sandbox.Config{}), nil
 			}),
 			SandboxBackendRemote: SandboxLeaseServiceFactoryFunc(func(config SandboxManagerConfig) (SandboxLeaseService, error) {
 				return NewRemoteSandboxLeaseService(config.Endpoint, nil), nil
 			}),
+			SandboxBackendWSL2: SandboxLeaseServiceFactoryFunc(func(config SandboxManagerConfig) (SandboxLeaseService, error) {
+				name, root, lease := localSandboxLeaseDefaults(config, SandboxBackendWSL2)
+				return NewLocalSandboxLeaseServiceWithSandboxConfig(name, root, lease, sandbox.Config{
+					ExecutionBackend: sandbox.ExecutionBackendWSL2,
+				}), nil
+			}),
 			SandboxBackendWindowsRestricted: SandboxLeaseServiceFactoryFunc(func(config SandboxManagerConfig) (SandboxLeaseService, error) {
 				name, root, lease := localSandboxLeaseDefaults(config, SandboxBackendWindowsRestricted)
-				return NewLocalSandboxLeaseServiceWithConfig(name, root, lease), nil
+				return NewLocalSandboxLeaseServiceWithSandboxConfig(name, root, lease, sandbox.Config{
+					ExecutionBackend: sandbox.ExecutionBackendWindowsRestricted,
+				}), nil
 			}),
 		},
 	}

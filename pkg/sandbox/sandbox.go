@@ -27,15 +27,31 @@ const (
 type backend string
 
 const (
-	backendDirect   backend = "direct"
-	backendBwrap    backend = "bwrap"
-	backendLandlock backend = "landlock"
+	backendAuto              backend = "auto"
+	backendDirect            backend = "direct"
+	backendBwrap             backend = "bwrap"
+	backendLandlock          backend = "landlock"
+	backendWSL2              backend = "wsl2"
+	backendWindowsRestricted backend = "windows-restricted"
+)
+
+type ExecutionBackend string
+
+const (
+	ExecutionBackendAuto              ExecutionBackend = "auto"
+	ExecutionBackendDirect            ExecutionBackend = "direct"
+	ExecutionBackendBwrap             ExecutionBackend = "bwrap"
+	ExecutionBackendLandlock          ExecutionBackend = "landlock"
+	ExecutionBackendWSL2              ExecutionBackend = "wsl2"
+	ExecutionBackendWindowsRestricted ExecutionBackend = "windows-restricted"
 )
 
 type Config struct {
-	Timeout      time.Duration
-	MaxInstances int
-	CleanupDelay time.Duration
+	Timeout          time.Duration
+	MaxInstances     int
+	CleanupDelay     time.Duration
+	ExecutionBackend ExecutionBackend
+	AllowedCommands  []string
 }
 
 type Session interface {
@@ -66,12 +82,53 @@ type Sandbox struct {
 	sessionDir string
 	processes  []*os.Process
 
-	mu      sync.Mutex
-	backend backend
-	cfg     Config
+	mu              sync.Mutex
+	backend         backend
+	cfg             Config
+	allowedCommands map[string]struct{}
 }
 
 var _ Session = (*Sandbox)(nil)
+
+var defaultWindowsRestrictedAllowedCommands = []string{
+	"echo",
+	"type",
+	"dir",
+	"find",
+	"findstr",
+	"where",
+	"more",
+	"python",
+	"python.exe",
+	"python3",
+	"py",
+	"pip",
+	"pip3",
+	"go",
+	"go.exe",
+	"git",
+	"git.exe",
+	"node",
+	"node.exe",
+	"npm",
+	"npm.cmd",
+	"npx",
+	"npx.cmd",
+	"pnpm",
+	"pnpm.cmd",
+	"yarn",
+	"yarn.cmd",
+	"curl",
+	"curl.exe",
+	"wget",
+	"wget.exe",
+	"tar",
+	"tar.exe",
+	"zip",
+	"unzip",
+	"rg",
+	"rg.exe",
+}
 
 func init() {
 	if os.Getenv(helperEnvEnabled) != "1" {
@@ -101,21 +158,12 @@ func NewWithConfig(sessionID string, baseDir string, cfg Config) (*Sandbox, erro
 		return nil, fmt.Errorf("create session directory: %w", err)
 	}
 
+	cfg = normalizeConfig(cfg)
 	sb := &Sandbox{
-		sessionDir: sessionDir,
-		backend:    backendDirect,
-		cfg:        normalizeConfig(cfg),
-	}
-
-	if CheckLandlockAvailable() {
-		if err := probeLandlock(sessionDir); err == nil {
-			sb.backend = backendLandlock
-			return sb, nil
-		}
-	}
-
-	if probeBubblewrap(sessionDir) == nil {
-		sb.backend = backendBwrap
+		sessionDir:      sessionDir,
+		backend:         resolveBackend(sessionDir, normalizeExecutionBackend(cfg.ExecutionBackend)),
+		cfg:             cfg,
+		allowedCommands: buildCommandAllowSet(cfg.AllowedCommands),
 	}
 
 	return sb, nil
@@ -132,6 +180,9 @@ func (s *Sandbox) Exec(ctx context.Context, cmd string, timeout time.Duration) (
 	}
 	if timeout <= 0 {
 		timeout = s.cfg.Timeout
+	}
+	if err := s.validateCommandPolicy(cmd); err != nil {
+		return nil, err
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -357,7 +408,164 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.CleanupDelay <= 0 {
 		cfg.CleanupDelay = defaultCleanupDelay
 	}
+	cfg.ExecutionBackend = ExecutionBackend(normalizeExecutionBackend(cfg.ExecutionBackend))
+	if normalizeExecutionBackend(cfg.ExecutionBackend) == backendWindowsRestricted && len(cfg.AllowedCommands) == 0 {
+		cfg.AllowedCommands = append([]string(nil), defaultWindowsRestrictedAllowedCommands...)
+	}
+	cfg.AllowedCommands = normalizeAllowedCommands(cfg.AllowedCommands)
 	return cfg
+}
+
+func resolveBackend(sessionDir string, requested backend) backend {
+	switch requested {
+	case backendDirect, backendWSL2, backendWindowsRestricted:
+		return requested
+	case backendBwrap:
+		if probeBubblewrap(sessionDir) == nil {
+			return backendBwrap
+		}
+		return backendDirect
+	case backendLandlock:
+		if CheckLandlockAvailable() {
+			if err := probeLandlock(sessionDir); err == nil {
+				return backendLandlock
+			}
+		}
+		return backendDirect
+	default:
+		if CheckLandlockAvailable() {
+			if err := probeLandlock(sessionDir); err == nil {
+				return backendLandlock
+			}
+		}
+		if probeBubblewrap(sessionDir) == nil {
+			return backendBwrap
+		}
+		return backendDirect
+	}
+}
+
+func normalizeExecutionBackend(value ExecutionBackend) backend {
+	switch strings.ToLower(strings.TrimSpace(string(value))) {
+	case string(ExecutionBackendDirect):
+		return backendDirect
+	case string(ExecutionBackendBwrap):
+		return backendBwrap
+	case string(ExecutionBackendLandlock):
+		return backendLandlock
+	case string(ExecutionBackendWSL2):
+		return backendWSL2
+	case string(ExecutionBackendWindowsRestricted):
+		return backendWindowsRestricted
+	default:
+		return backendAuto
+	}
+}
+
+func normalizeAllowedCommands(commands []string) []string {
+	if len(commands) == 0 {
+		return nil
+	}
+	unique := make([]string, 0, len(commands))
+	seen := map[string]struct{}{}
+	for _, raw := range commands {
+		normalized := canonicalCommandName(raw)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		unique = append(unique, normalized)
+	}
+	return unique
+}
+
+func buildCommandAllowSet(commands []string) map[string]struct{} {
+	if len(commands) == 0 {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(commands))
+	for _, cmd := range commands {
+		normalized := canonicalCommandName(cmd)
+		if normalized == "" {
+			continue
+		}
+		allowed[normalized] = struct{}{}
+	}
+	return allowed
+}
+
+func (s *Sandbox) validateCommandPolicy(command string) error {
+	if s == nil {
+		return errors.New("sandbox is nil")
+	}
+	if s.backend != backendWindowsRestricted {
+		return nil
+	}
+	if len(s.allowedCommands) == 0 {
+		return fmt.Errorf("windows-restricted sandbox has empty command allowlist")
+	}
+	name := primaryCommandName(command)
+	if name == "" {
+		return fmt.Errorf("windows-restricted sandbox could not resolve command: %q", command)
+	}
+	if _, ok := s.allowedCommands[name]; ok {
+		return nil
+	}
+	return fmt.Errorf("windows-restricted sandbox command %q is not allowed", name)
+}
+
+func primaryCommandName(command string) string {
+	token, rest := splitCommandToken(strings.TrimSpace(command))
+	name := canonicalCommandName(token)
+	if name == "" {
+		return ""
+	}
+	if name == "cmd" || name == "cmd.exe" {
+		flagToken, remainder := splitCommandToken(rest)
+		flag := strings.ToLower(strings.TrimSpace(flagToken))
+		if flag == "/c" || flag == "/k" {
+			return primaryCommandName(remainder)
+		}
+		return primaryCommandName(rest)
+	}
+	return name
+}
+
+func splitCommandToken(value string) (token string, rest string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", ""
+	}
+	if value[0] == '"' || value[0] == '\'' {
+		quote := value[0]
+		for i := 1; i < len(value); i++ {
+			if value[i] == quote {
+				return value[1:i], strings.TrimSpace(value[i+1:])
+			}
+		}
+		return strings.Trim(value, "\"'"), ""
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] == ' ' || value[i] == '\t' || value[i] == '\n' || value[i] == '\r' {
+			return value[:i], strings.TrimSpace(value[i+1:])
+		}
+	}
+	return value, ""
+}
+
+func canonicalCommandName(value string) string {
+	trimmed := strings.Trim(strings.TrimSpace(value), "\"'")
+	if trimmed == "" {
+		return ""
+	}
+	base := strings.ToLower(filepath.Base(trimmed))
+	if base == "." || base == string(filepath.Separator) {
+		return ""
+	}
+	return base
 }
 
 func runHelper() int {
@@ -387,7 +595,7 @@ func runHelper() int {
 	case backendBwrap:
 		return runHelperCommand(backendBwrap, dir, cmd, env)
 	default:
-		return runHelperCommand(backendDirect, dir, cmd, env)
+		return runHelperCommand(selectedBackend, dir, cmd, env)
 	}
 }
 

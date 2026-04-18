@@ -55,3 +55,15 @@ func TestDescribeSandboxProfileWindowsRestricted(t *testing.T) {
 		t.Fatalf("heartbeat = %d", profile.Limits.HeartbeatIntervalMilli)
 	}
 }
+
+func TestDescribeSandboxProfileWSL2(t *testing.T) {
+	profile := DescribeSandboxProfile(SandboxManagerConfig{
+		Backend: SandboxBackendWSL2,
+	})
+	if profile.Backend != SandboxBackendWSL2 {
+		t.Fatalf("backend = %q", profile.Backend)
+	}
+	if profile.Isolation != "wsl2" {
+		t.Fatalf("isolation = %q", profile.Isolation)
+	}
+}

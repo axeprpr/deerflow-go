@@ -105,9 +105,13 @@ func NewLocalSandboxLeaseService(name, root string) SandboxLeaseService {
 }
 
 func NewLocalSandboxLeaseServiceWithConfig(name, root string, config SandboxLeaseConfig) SandboxLeaseService {
+	return NewLocalSandboxLeaseServiceWithSandboxConfig(name, root, config, sandbox.Config{})
+}
+
+func NewLocalSandboxLeaseServiceWithSandboxConfig(name, root string, config SandboxLeaseConfig, sandboxConfig sandbox.Config) SandboxLeaseService {
 	normalized := normalizeSandboxLeaseConfig(config)
 	service := &localSandboxLeaseService{
-		provider:          harness.NewLocalSandboxProvider(name, root),
+		provider:          newRuntimeLocalSandboxProvider(name, root, sandboxConfig),
 		heartbeatInterval: normalized.HeartbeatInterval,
 		idleTTL:           normalized.IdleTTL,
 		sweepInterval:     normalized.SweepInterval,
@@ -229,4 +233,48 @@ func (s *localSandboxLeaseService) evictIdle() {
 	}
 	_ = s.provider.Close()
 	s.touch()
+}
+
+type runtimeLocalSandboxProvider struct {
+	name string
+	root string
+	cfg  sandbox.Config
+
+	mu      sync.Mutex
+	sandbox sandbox.Session
+}
+
+func newRuntimeLocalSandboxProvider(name, root string, cfg sandbox.Config) *runtimeLocalSandboxProvider {
+	return &runtimeLocalSandboxProvider{name: name, root: root, cfg: cfg}
+}
+
+func (p *runtimeLocalSandboxProvider) Acquire() (sandbox.Session, error) {
+	if p == nil {
+		return nil, nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.sandbox != nil {
+		return p.sandbox, nil
+	}
+	sb, err := sandbox.NewWithConfig(p.name, p.root, p.cfg)
+	if err != nil {
+		return nil, err
+	}
+	p.sandbox = sb
+	return sb, nil
+}
+
+func (p *runtimeLocalSandboxProvider) Close() error {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.sandbox == nil {
+		return nil
+	}
+	err := p.sandbox.Close()
+	p.sandbox = nil
+	return err
 }

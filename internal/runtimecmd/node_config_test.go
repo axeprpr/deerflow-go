@@ -209,6 +209,12 @@ func TestNormalizeStateProviderSupportsKnownValues(t *testing.T) {
 	}
 }
 
+func TestNormalizeSandboxBackendSupportsWSL2(t *testing.T) {
+	if got := NormalizeSandboxBackend("wsl2", harnessruntime.SandboxBackendLocalLinux); got != harnessruntime.SandboxBackendWSL2 {
+		t.Fatalf("NormalizeSandboxBackend() = %q", got)
+	}
+}
+
 func TestDeriveStateBackendFromStoreURL(t *testing.T) {
 	if got := deriveStateBackendFromStoreURL("sqlite:///tmp/runtime.sqlite3", harnessruntime.RuntimeStateStoreBackendInMemory); got != harnessruntime.RuntimeStateStoreBackendSQLite {
 		t.Fatalf("deriveStateBackendFromStoreURL(sqlite) = %q", got)
@@ -396,6 +402,16 @@ func TestNodeConfigValidateForLangGraph(t *testing.T) {
 	}
 	if err := (NodeConfig{Role: harnessruntime.RuntimeNodeRoleAllInOne, SandboxBackend: harnessruntime.SandboxBackendContainer}).ValidateForLangGraph(); err == nil {
 		t.Fatal("container sandbox without image should fail")
+	}
+}
+
+func TestNodeConfigValidateForSandboxServerSupportsWSL2(t *testing.T) {
+	cfg := NodeConfig{
+		Role:           harnessruntime.RuntimeNodeRoleWorker,
+		SandboxBackend: harnessruntime.SandboxBackendWSL2,
+	}.withRoleDefaults()
+	if err := cfg.ValidateForSandboxServer(); err != nil {
+		t.Fatalf("ValidateForSandboxServer() error = %v", err)
 	}
 }
 

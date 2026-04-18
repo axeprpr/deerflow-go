@@ -55,6 +55,9 @@ func DescribeSandboxProfile(config SandboxManagerConfig) SandboxProfile {
 			HealthPath: DefaultRemoteSandboxHealthPath,
 			LeasePath:  DefaultRemoteSandboxLeasePath,
 		}
+	case SandboxBackendWSL2:
+		profile.Isolation = "wsl2"
+		profile.Capabilities = append(profile.Capabilities, "wsl-kernel-isolation")
 	case SandboxBackendWindowsRestricted:
 		profile.Isolation = "windows-restricted"
 		profile.Capabilities = append(profile.Capabilities, "restricted-host")

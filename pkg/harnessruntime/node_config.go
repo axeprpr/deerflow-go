@@ -144,7 +144,12 @@ func (c RuntimeNodeConfig) servesRemoteSandbox() bool {
 	if !c.servesRemoteWorker() {
 		return false
 	}
-	return c.Sandbox.Normalized().Backend == SandboxBackendLocalLinux
+	switch c.Sandbox.Normalized().Backend {
+	case "", SandboxBackendLocalLinux, SandboxBackendContainer, SandboxBackendWSL2, SandboxBackendWindowsRestricted:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c RuntimeNodeConfig) servesRemoteState() bool {

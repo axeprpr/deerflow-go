@@ -8,6 +8,7 @@ const (
 	SandboxBackendLocalLinux        SandboxBackend = "local-linux"
 	SandboxBackendContainer         SandboxBackend = "container"
 	SandboxBackendRemote            SandboxBackend = "remote"
+	SandboxBackendWSL2              SandboxBackend = "wsl2"
 	SandboxBackendWindowsRestricted SandboxBackend = "windows-restricted"
 )
 
@@ -43,6 +44,11 @@ func NewRemoteSandboxManager(config SandboxManagerConfig) (*SandboxResourceManag
 
 func NewWindowsRestrictedSandboxManager(config SandboxManagerConfig) (*SandboxResourceManager, error) {
 	config.Backend = SandboxBackendWindowsRestricted
+	return NewSandboxManagerFromConfig(config)
+}
+
+func NewWSL2SandboxManager(config SandboxManagerConfig) (*SandboxResourceManager, error) {
+	config.Backend = SandboxBackendWSL2
 	return NewSandboxManagerFromConfig(config)
 }
 
