@@ -377,6 +377,7 @@
 仓库已提供脚本：
 
 - `scripts/run_df_feature_regression.sh`
+- `make test-p0`（封装了同一套 P0/P1 deterministic 基线）
 
 只跑 deterministic 基线（P0/P1 核心）：
 
@@ -399,3 +400,11 @@ DEERFLOW_LIVE_STREAM_TIMEOUT=6m \
 - 脚本内已包含“复杂链路”用例：
   - 多 tool-call + 失败重试 + 配对连续性（deterministic）
   - 同线程“先澄清再执行”双阶段 follow-up（live）
+
+## CI 门禁
+
+`CI` 工作流中已将 P0 基线作为前置 job：
+
+- job: `p0-regression`
+- 执行：`./scripts/run_df_feature_regression.sh`
+- 行为：只有 `p0-regression` 通过后，才会继续全量 `go test ./...`

@@ -1,6 +1,6 @@
 GO := PATH=/usr/local/go/bin:$$PATH go
 
-.PHONY: tidy build build-release release test run docker docker-run clean
+.PHONY: tidy build build-release release test test-p0 run docker docker-run clean
 
 tidy:
 	$(GO) mod tidy
@@ -16,6 +16,9 @@ release:
 
 test:
 	$(GO) test -v -cover ./...
+
+test-p0:
+	./scripts/run_df_feature_regression.sh
 
 run: build
 	./bin/deerflow

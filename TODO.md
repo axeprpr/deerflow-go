@@ -155,3 +155,22 @@ Sandbox backend plan:
 
 6. Keep all changes gated by upstream UI contract tests
    - UI-visible route/status/body/SSE compatibility remains non-negotiable
+
+## P0 Execution Board (Current)
+
+Done:
+
+- P0 deterministic regression baseline is now CI-gated as a prerequisite job (`p0-regression`)
+- P0 coverage includes:
+  - skill discover/trigger
+  - tool-call continuity
+  - long-chain compaction no-repeat baseline
+  - model resolution diagnostics
+  - web tool surface + diagnosable errors
+
+Pending (next P0 focus):
+
+- cross-instance recovery/join/replay/cancel consistency stress under higher concurrency
+- deploy split production hardening (restart/failure-isolation/dependency-order) in host orchestration
+- memory scope productionization (`session/user/group` persistence + injection/update policy baseline)
+- sandbox backend production boundaries (`container/remote/windows-restricted`) with quota/TTL/observability baseline
