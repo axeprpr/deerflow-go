@@ -1,14 +1,58 @@
 {
   "name": "deerflow-go-electron",
   "version": "0.1.0",
+  "description": "Deerflow Go desktop shell",
   "private": true,
   "type": "module",
   "main": "main.js",
+  "author": "deerflow-go",
+  "license": "MIT",
   "scripts": {
     "dev": "electron .",
-    "start": "electron ."
+    "start": "electron .",
+    "pack": "electron-builder --dir --publish never",
+    "dist": "electron-builder --publish never",
+    "dist:linux": "electron-builder --linux AppImage tar.gz --publish never",
+    "dist:mac": "electron-builder --mac dmg zip --publish never",
+    "dist:win": "electron-builder --win nsis zip --publish never"
   },
   "devDependencies": {
-    "electron": "^37.2.0"
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.deerflow.go.desktop",
+    "productName": "DeerFlow Go",
+    "asar": true,
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "artifactName": "deerflow-go-desktop-${version}-${os}-${arch}.${ext}",
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ],
+      "category": "Development"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    }
   }
 }

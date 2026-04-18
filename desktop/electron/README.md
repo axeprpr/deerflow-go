@@ -31,6 +31,30 @@ Start desktop app:
 pnpm dev
 ```
 
+## Packaging
+
+Build local installer/archive artifacts:
+
+```bash
+pnpm dist
+```
+
+Platform-specific packaging:
+
+```bash
+pnpm dist:linux
+pnpm dist:mac
+pnpm dist:win
+```
+
+Artifacts are written to `desktop/electron/release/`.
+
+GitHub Actions workflow: `.github/workflows/electron-release.yml`
+
+- Trigger: `workflow_dispatch` or tag push (`v*`)
+- Matrix build: Linux + macOS + Windows
+- Output: uploaded artifacts and tag release assets
+
 ## Runtime Resolution Rules
 
 Backend startup command priority:
