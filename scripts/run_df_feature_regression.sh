@@ -5,9 +5,18 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATUS=0
 
 export HOME="${HOME:-/root}"
-export GOPATH="${GOPATH:-/root/go}"
-export GOMODCACHE="${GOMODCACHE:-$GOPATH/pkg/mod}"
-export GOCACHE="${GOCACHE:-$HOME/.cache/go-build}"
+if [ -z "${GOPATH:-}" ]; then
+  GOPATH="$(go env GOPATH)"
+fi
+if [ -z "${GOMODCACHE:-}" ]; then
+  GOMODCACHE="$(go env GOMODCACHE)"
+fi
+if [ -z "${GOCACHE:-}" ]; then
+  GOCACHE="$(go env GOCACHE)"
+fi
+export GOPATH
+export GOMODCACHE
+export GOCACHE
 
 run_case() {
   local name="$1"
