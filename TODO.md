@@ -167,10 +167,11 @@ Done:
   - long-chain compaction no-repeat baseline
   - model resolution diagnostics
   - web tool surface + diagnosable errors
+  - cross-instance stale cancel concurrent idempotency (`202` exactly once + single terminal `end` event)
 
 Pending (next P0 focus):
 
-- cross-instance recovery/join/replay/cancel consistency stress under higher concurrency
+- cross-instance recovery/join/replay consistency stress under higher concurrency (especially multi-gateway concurrent resume/cancel races)
 - deploy split production hardening (restart/failure-isolation/dependency-order) in host orchestration
 - memory scope productionization (`session/user/group` persistence + injection/update policy baseline)
 - sandbox backend production boundaries (`container/remote/windows-restricted`) with quota/TTL/observability baseline
